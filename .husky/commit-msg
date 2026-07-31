@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — Commit Message Hook
+# Implements BLP-001/D11 Developer Toolchain — commitlint
+# ─────────────────────────────────────────────────────────────────────────────
+
+. "$(dirname -- "$0")/_/husky.sh"
+
+npx --no -- commitlint --edit "$1"

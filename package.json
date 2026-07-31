@@ -1,0 +1,77 @@
+{
+  "name": "vedmoulya",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VedMoulya — The Execution Operating System. Empower every determined individual to build a sustainable livelihood through knowledge, execution, and intelligent technology.",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:core": "npm run build -w packages/core",
+    "clean": "npm run clean --workspaces --if-present",
+    "clean:build": "rm -rf apps/web/.next && echo 'Build cache cleared'",
+    "dev": "npm run dev -w apps/web",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --check \"**/*.{ts,tsx,json,md,yaml}\"",
+    "format:fix": "prettier --write \"**/*.{ts,tsx,json,md,yaml}\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:run": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "cd apps/web && npx playwright test",
+    "test:a11y": "bash scripts/run-a11y.sh",
+    "test:performance": "bash scripts/check-bundle-size.sh",
+    "audit": "npm audit --audit-level=critical",
+    "quality": "npm run typecheck && npm run lint && npm run test && npm run audit",
+    "quality:all": "npm run quality && npm run format",
+    "prepare": "husky",
+    "commit": "cz",
+    "pr:create": "gh pr create --fill",
+    "clean:all": "npm run clean && rm -rf node_modules",
+    "reset": "npm run clean:all && npm install && npm run build:core",
+    "bootstrap": "npm install && npm run build:core",
+    "outdated": "npm outdated",
+    "update:deps": "npm update",
+    "ci": "npm ci"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "@playwright/test": "^1.62.0",
+    "@types/node": "^22.0.0",
+    "commitizen": "^4.0.0",
+    "cz-conventional-changelog": "^3.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-security": "^4.0.1",
+    "husky": "^9.0.0",
+    "lint-staged": "^15.0.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^2.0.0"
+  },
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
+  }
+}

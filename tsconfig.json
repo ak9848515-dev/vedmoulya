@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/domain" },
+    { "path": "packages/information" },
+    { "path": "packages/services" },
+    { "path": "packages/intelligence" },
+    { "path": "packages/ui" },
+    { "path": "packages/shared" },
+    { "path": "packages/testing" },
+    { "path": "packages/config" },
+    { "path": "packages/ai" },
+    { "path": "services/knowledge" },
+    { "path": "services/memory" }
+  ]
+}

@@ -1,0 +1,153 @@
+/* ────────────────────────────────────────────────────────────────────────────
+ * VedMoulya — Global Styles
+ * Tailwind CSS v4 + Experience Bible Design Tokens (DES-010A)
+ * BLD-016-A — Application Shell & Foundation
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+@import "tailwindcss";
+
+/* ── Theme: Experience Bible Design Tokens ───────────────────────────────── */
+/* Maps DES-010A Color System, Typography, Spacing, Layout tokens to CSS vars */
+/* Source: packages/ui/src/tokens/ — @vedmoulya/ui */
+
+@theme {
+  /* ── Brand Colors (DES-010A/D09) ─────────────────────────────────────── */
+  --color-brand-900: #1A3D8F;
+  --color-brand-800: #1E4AA8;
+  --color-brand-700: #2355BF;
+  --color-brand-600: #2B5FD9;   /* ★ PRIMARY */
+  --color-brand-500: #3B6FE3;
+  --color-brand-400: #5B8AEB;
+  --color-brand-300: #7FA5F2;
+  --color-brand-200: #A8C2F7;
+  --color-brand-100: #D4E1FC;
+  --color-brand-50:  #EFF4FE;
+
+  /* ── Secondary Blue ──────────────────────────────────────────────────── */
+  --color-secondary-blue-600: #5B8DEF;
+  --color-secondary-blue-500: #7BA5F2;
+  --color-secondary-blue-400: #9BBBF5;
+  --color-secondary-blue-300: #BBD1F8;
+  --color-secondary-blue-200: #DBE7FB;
+  --color-secondary-blue-100: #EAF2FF;
+
+  /* ── Neutral Scale (Warm) ────────────────────────────────────────────── */
+  --color-neutral-900: #111827;  /* Heading text */
+  --color-neutral-800: #1F2937;  /* Body text */
+  --color-neutral-700: #374151;  /* Secondary text */
+  --color-neutral-600: #4B5563;  /* Placeholder text */
+  --color-neutral-500: #64748B;  /* ★ NEUTRAL */
+  --color-neutral-400: #94A3B8;
+  --color-neutral-300: #CBD5E1;  /* Borders */
+  --color-neutral-200: #E2E8F0;  /* Disabled backgrounds */
+  --color-neutral-100: #F1F5F9;  /* Card backgrounds */
+  --color-neutral-50:  #F5F7FA;  /* ★ PAGE BACKGROUND */
+
+  /* ── Semantic Colors ─────────────────────────────────────────────────── */
+  --color-success:       #22C55E;
+  --color-success-bg:    #F0FDF4;
+  --color-warning:       #F59E0B;
+  --color-warning-bg:    #FFFBEB;
+  --color-danger:        #EF4444;
+  --color-danger-bg:     #FEF2F2;
+  --color-info:          #3B82F6;
+  --color-info-bg:       #EFF6FF;
+
+  /* ── Premium Gold (Limited Use) ──────────────────────────────────────── */
+  --color-premium-gold:       #C89B3C;
+  --color-premium-gold-light: #E8D5A0;
+  --color-premium-gold-dark:  #9B7630;
+
+  /* ── AI Colors ───────────────────────────────────────────────────────── */
+  --color-ai-primary:  #7C3AED;
+  --color-ai-secondary:#8B5CF6;
+  --color-ai-accent:   #A78BFA;
+  --color-ai-bg:       #F5F3FF;
+  --color-ai-border:   #E9D5FF;
+
+  /* ── Surface Colors ──────────────────────────────────────────────────── */
+  --color-surface-page:       #F5F7FA;
+  --color-surface-card:       #FFFFFF;
+  --color-surface-card-border:#E8EDF5;
+  --color-surface-elevated:   #FFFFFF;
+  --color-surface-overlay:    rgba(15, 23, 42, 0.5);
+
+  /* ── Typography (DES-010A/D08) ───────────────────────────────────────── */
+  --font-heading: 'Satoshi', 'Inter', system-ui, sans-serif;
+  --font-body:    'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ── Spacing Scale (4px base) ────────────────────────────────────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;  /* BASE */
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-7:  32px;
+  --space-8:  40px;
+  --space-9:  48px;
+  --space-10: 64px;
+  --space-11: 80px;
+  --space-12: 96px;
+
+  /* ── Layout (DES-010A/D06) ───────────────────────────────────────────── */
+  --sidebar-width:        280px;
+  --sidebar-collapsed:    64px;
+  --header-height:        64px;
+  --max-content-width:    1280px;
+  --max-wide-width:       1536px;
+}
+
+/* ── Base Styles ──────────────────────────────────────────────────────────── */
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.625;
+    color: var(--color-neutral-800);
+    background-color: var(--color-surface-page);
+  }
+
+  /* Heading font family */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    font-weight: 600;
+  }
+}
+
+/* ── Utility: glass effect ────────────────────────────────────────────────── */
+
+@utility glass {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Utility: content-container ───────────────────────────────────────────── */
+
+@utility content-container {
+  width: 100%;
+  max-width: var(--max-content-width);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 16px;
+  padding-right: 16px;
+
+  @media (min-width: 768px) {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+
+  @media (min-width: 1024px) {
+    padding-left: 64px;
+    padding-right: 64px;
+  }
+}

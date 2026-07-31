@@ -1,0 +1,49 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Card > matches snapshot for elevated variant 1`] = `
+<div
+  class="rounded-[24px] transition-all duration-250 ease-out bg-white shadow-[0_10px_15px_rgba(15,23,42,0.07),0_4px_6px_rgba(15,23,42,0.04)] border-none p-6"
+>
+  Elevated
+</div>
+`;
+
+exports[`Card > matches snapshot for ghost variant 1`] = `
+<div
+  class="rounded-[24px] transition-all duration-250 ease-out bg-transparent border border-dashed border-[#E8EDF5] p-6"
+>
+  Ghost
+</div>
+`;
+
+exports[`Card > matches snapshot for interactive variant 1`] = `
+<div
+  class="rounded-[24px] transition-all duration-250 ease-out bg-white border border-[#E8EDF5] shadow-[0_8px_30px_rgba(15,23,42,0.06)] cursor-pointer hover:shadow-[0_4px_6px_rgba(15,23,42,0.06),0_2px_4px_rgba(15,23,42,0.04)] hover:-translate-y-0.5 active:shadow-[0_1px_3px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.03)] active:-translate-y-0 p-6 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9]"
+>
+  Interactive
+</div>
+`;
+
+exports[`Card > matches snapshot for standard variant 1`] = `
+<div
+  class="rounded-[24px] transition-all duration-250 ease-out bg-white border border-[#E8EDF5] shadow-[0_8px_30px_rgba(15,23,42,0.06)] p-6"
+>
+  Standard
+</div>
+`;
+
+exports[`Card > matches snapshot with lg padding 1`] = `
+<div
+  class="rounded-[24px] transition-all duration-250 ease-out bg-white border border-[#E8EDF5] shadow-[0_8px_30px_rgba(15,23,42,0.06)] p-8"
+>
+  Content
+</div>
+`;
+
+exports[`Card > matches snapshot with sm padding 1`] = `
+<div
+  class="rounded-[24px] transition-all duration-250 ease-out bg-white border border-[#E8EDF5] shadow-[0_8px_30px_rgba(15,23,42,0.06)] p-4"
+>
+  Content
+</div>
+`;

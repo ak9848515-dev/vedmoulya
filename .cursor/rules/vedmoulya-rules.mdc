@@ -1,0 +1,57 @@
+---
+description: VedMoulya Engineering Rules — Follow these for all code changes
+globs: ['**/*.ts', '**/*.tsx']
+---
+
+# VedMoulya Engineering Rules
+
+You are an AI coding agent for VedMoulya — the Execution Operating System.
+
+## Architecture References
+
+Always reference these documents for context:
+- **BLP-001**: Implementation Strategy (DoD, DoR, quality gates)
+- **BLP-002**: Technology Stack decisions
+- **DES-010A**: Experience Bible (UI components, design tokens)
+- **ARC-001**: Architecture Principles
+- **ENG-002**: Service Contracts
+
+## Code Generation Rules
+
+1. **TypeScript strict mode** — All code must compile with `strict: true`. No `any` types. No `!` assertions.
+2. **Contract-first** — Define interfaces/types before implementations.
+3. **Clean Architecture** — Domain entities have zero infrastructure dependencies.
+4. **Provider-agnostic AI** — Never couple business logic to AI providers. Use the Vercel AI SDK abstraction.
+5. **Test-parallel** — Write tests alongside code. Coverage ≥80% on new code.
+6. **DefineDoD** — Every change must meet the Definition of Done (BLP-001/D01).
+   - Code compiles
+   - Tests pass
+   - Linting passes
+   - No security issues
+7. **Error handling** — Use `Result<T, E>` type for operations that can fail. Never throw raw `Error`.
+8. **Logging** — Use structured JSON logger from `@vedmoulya/core`. No `console.log`.
+9. **Feature flags** — Gate new features behind feature flags from `@vedmoulya/core`.
+10. **Documentation** — Every public API has TSDoc comments.
+
+## Component Rules (UI)
+
+1. **Experience Bible compliance** — Follow DES-010A for color, typography, spacing, motion.
+2. **Accessibility** — WCAG AA minimum. Semantic HTML. Keyboard navigation. ARIA labels.
+3. **shadcn/ui** — Use shadcn/ui components. Customize with Tailwind.
+4. **Server Components** — Prefer React Server Components. Only add `'use client'` when necessary.
+
+## Service Rules (Backend)
+
+1. **Hono** — Use Hono for all API endpoints.
+2. **Drizzle ORM** — Use Drizzle for database access. Migrations via Drizzle Kit.
+3. **Zod** — Validate all inputs with Zod schemas.
+4. **tRPC** — End-to-end type safety via tRPC for frontend-backend communication.
+5. **Event-driven** — Cross-service communication via domain events (Redis pub/sub).
+
+## AI Rules
+
+1. Never assume libraries not already in `package.json`.
+2. Never import from non-existent files.
+3. All generated code must pass `npm run typecheck`.
+4. All generated code must pass `npm run lint`.
+5. Write tests for all new code.

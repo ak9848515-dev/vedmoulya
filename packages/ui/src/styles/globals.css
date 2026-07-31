@@ -1,0 +1,194 @@
+/* ──────────────────────────────────────────────────────────────── */
+/* VedMoulya — Global Styles & Design Tokens (Tailwind v4)         */
+/* Follows DES-001 Constitution v1.0, DES-010A Experience Bible     */
+/* Implements BLD-003 Design System Implementation                  */
+/* ──────────────────────────────────────────────────────────────── */
+
+@import 'tailwindcss';
+
+/* ── Design Token Variables ──────────────────────────────────────── */
+
+:root {
+  /* Font Family */
+  --font-heading: 'Satoshi', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Typography */
+  --text-display-size: 56px;
+  --text-display-weight: 700;
+  --text-display-line: 68px;
+  --text-display-tracking: -0.02em;
+
+  --text-hero-size: 48px;
+  --text-hero-weight: 700;
+  --text-hero-line: 58px;
+  --text-hero-tracking: -0.02em;
+
+  --text-h1-size: 40px;
+  --text-h1-weight: 600;
+  --text-h1-line: 50px;
+  --text-h1-tracking: -0.015em;
+
+  --text-h2-size: 32px;
+  --text-h2-weight: 600;
+  --text-h2-line: 42px;
+  --text-h2-tracking: -0.01em;
+
+  --text-h3-size: 28px;
+  --text-h3-weight: 600;
+  --text-h3-line: 38px;
+
+  --text-h4-size: 24px;
+  --text-h4-weight: 500;
+  --text-h4-line: 34px;
+
+  --text-body-size: 16px;
+  --text-body-weight: 400;
+  --text-body-line: 26px;
+
+  --text-caption-size: 14px;
+  --text-caption-weight: 500;
+  --text-caption-line: 20px;
+  --text-caption-tracking: 0.02em;
+
+  --text-tiny-size: 12px;
+  --text-tiny-weight: 400;
+  --text-tiny-line: 16px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 80px;
+  --space-12: 96px;
+
+  /* Radius (FROZEN) */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-xxl: 28px;
+  --radius-button: 14px;
+  --radius-input: 16px;
+  --radius-card: 24px;
+  --radius-dialog: 28px;
+  --radius-full: 9999px;
+
+  /* Motion */
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-in: cubic-bezier(0.4, 0, 0.6, 1);
+
+  /* Layout */
+  --max-content-width: 1280px;
+  --max-wide-width: 1536px;
+  --sidebar-width: 280px;
+  --sidebar-collapsed: 64px;
+  --header-height: 64px;
+
+  /* Z-Index */
+  --z-base: 0;
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-nav: 30;
+  --z-sidebar: 40;
+  --z-overlay: 50;
+  --z-dialog: 100;
+  --z-modal: 110;
+  --z-toast: 200;
+  --z-tooltip: 300;
+}
+
+/* ── Dark Mode Variables ─────────────────────────────────────────── */
+
+.dark {
+  --color-bg-page: #0f172a;
+  --color-bg-card: #1e293b;
+  --color-border-card: #334155;
+}
+
+/* ── Base Styles ──────────────────────────────────────────────────── */
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: #f5f7fa;
+    color: #1f2937;
+    font-size: 16px;
+    line-height: 26px;
+  }
+
+  .dark body {
+    background-color: #0f172a;
+    color: #f1f5f9;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+}
+
+/* ── Reduced Motion ───────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Focus Styles ─────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid #2b5fd9;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Selection ────────────────────────────────────────────────────── */
+
+::selection {
+  background-color: #d4e1fc;
+  color: #1a3d8f;
+}
+
+/* ── Tailwind v4 Theme Extension ──────────────────────────────────── */
+
+@theme {
+  --color-bg-page: #f5f7fa;
+  --color-bg-card: #ffffff;
+  --color-border-card: #e8edf5;
+  --color-primary-900: #1a3d8f;
+  --color-primary-800: #1e4aa8;
+  --color-primary-700: #2355bf;
+  --color-primary-600: #2b5fd9;
+  --color-primary-500: #3b6fe3;
+  --color-primary-400: #5b8aeb;
+  --color-primary-300: #7fa5f2;
+  --color-primary-200: #a8c2f7;
+  --color-primary-100: #d4e1fc;
+  --color-primary-50: #eff4fe;
+}

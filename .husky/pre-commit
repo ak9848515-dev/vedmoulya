@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — Pre-commit Hook
+# Implements BLP-001/D11 Developer Toolchain — lint-staged
+# ─────────────────────────────────────────────────────────────────────────────
+
+. "$(dirname -- "$0")/_/husky.sh"
+
+npx lint-staged --allow-empty

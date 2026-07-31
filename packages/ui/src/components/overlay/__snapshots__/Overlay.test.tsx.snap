@@ -1,0 +1,40 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Tooltip > matches snapshot for Snackbar default 1`] = `
+<div
+  class="flex items-center gap-3 rounded-[16px] px-4 py-3 shadow-[0_4px_6px_rgba(15,23,42,0.06),0_2px_4px_rgba(15,23,42,0.04)] animate-in slide-in-from-bottom-5 fade-in-0 duration-200 bg-[#1F2937] text-white"
+  role="alert"
+>
+  <span
+    class="text-[14px] flex-1"
+  >
+    Saved!
+  </span>
+</div>
+`;
+
+exports[`Tooltip > matches snapshot for Snackbar error 1`] = `
+<div
+  class="flex items-center gap-3 rounded-[16px] px-4 py-3 shadow-[0_4px_6px_rgba(15,23,42,0.06),0_2px_4px_rgba(15,23,42,0.04)] animate-in slide-in-from-bottom-5 fade-in-0 duration-200 bg-[#EF4444] text-white"
+  role="alert"
+>
+  <span
+    class="text-[14px] flex-1"
+  >
+    Error
+  </span>
+</div>
+`;
+
+exports[`Tooltip > matches snapshot for Snackbar success 1`] = `
+<div
+  class="flex items-center gap-3 rounded-[16px] px-4 py-3 shadow-[0_4px_6px_rgba(15,23,42,0.06),0_2px_4px_rgba(15,23,42,0.04)] animate-in slide-in-from-bottom-5 fade-in-0 duration-200 bg-[#22C55E] text-white"
+  role="alert"
+>
+  <span
+    class="text-[14px] flex-1"
+  >
+    Success
+  </span>
+</div>
+`;

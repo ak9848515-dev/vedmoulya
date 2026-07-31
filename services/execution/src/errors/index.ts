@@ -1,0 +1,15 @@
+export {
+  ExecutionError,
+  ExecutionPlanNotFoundError,
+  ExecutionValidationError,
+  ExecutionStateTransitionError,
+  ExecutionTaskNotFoundError,
+  ExecutionMissionNotFoundError,
+  ExecutionDependencyError,
+  ExecutionScheduleConflictError,
+  ExecutionRecoveryFailedError,
+  DecisionEngineUnavailableError,
+  KnowledgeGraphUnavailableError,
+  MemoryEngineUnavailableError,
+  AIOrchestratorUnavailableError,
+} from './ExecutionErrors.js';

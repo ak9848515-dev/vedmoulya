@@ -1,0 +1,127 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Button > matches snapshot for AI variant 1`] = `
+<button
+  aria-busy="false"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-[#7C3AED] text-white hover:bg-[#8B5CF6] active:bg-[#6D28D9] shadow-[0_0_20px_rgba(124,58,237,0.15)] hover:shadow-[0_0_25px_rgba(124,58,237,0.25)] h-10 px-4 text-[14px] rounded-[14px]"
+>
+  <span>
+    AI
+  </span>
+</button>
+`;
+
+exports[`Button > matches snapshot for danger variant 1`] = `
+<button
+  aria-busy="false"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-[#EF4444] text-white hover:bg-[#DC2626] active:bg-[#B91C1C] h-10 px-4 text-[14px] rounded-[14px]"
+>
+  <span>
+    Danger
+  </span>
+</button>
+`;
+
+exports[`Button > matches snapshot for disabled state 1`] = `
+<button
+  aria-busy="false"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-[#2B5FD9] text-white hover:bg-[#3B6FE3] active:bg-[#1E4AA8] shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_1px_3px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.03)] h-10 px-4 text-[14px] rounded-[14px]"
+  disabled=""
+>
+  <span>
+    Disabled
+  </span>
+</button>
+`;
+
+exports[`Button > matches snapshot for ghost variant 1`] = `
+<button
+  aria-busy="false"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-transparent text-[#374151] hover:bg-[#F1F5F9] active:bg-[#E2E8F0] h-10 px-4 text-[14px] rounded-[14px]"
+>
+  <span>
+    Ghost
+  </span>
+</button>
+`;
+
+exports[`Button > matches snapshot for loading state 1`] = `
+<button
+  aria-busy="true"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-[#2B5FD9] text-white hover:bg-[#3B6FE3] active:bg-[#1E4AA8] shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_1px_3px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.03)] h-10 px-4 text-[14px] rounded-[14px]"
+  disabled=""
+>
+  <svg
+    aria-hidden="true"
+    class="lucide lucide-loader-circle h-4 w-4 animate-spin"
+    fill="none"
+    height="24"
+    stroke="currentColor"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="2"
+    viewBox="0 0 24 24"
+    width="24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M21 12a9 9 0 1 1-6.219-8.56"
+    />
+  </svg>
+  <span>
+    Loading
+  </span>
+</button>
+`;
+
+exports[`Button > matches snapshot for primary variant 1`] = `
+<button
+  aria-busy="false"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-[#2B5FD9] text-white hover:bg-[#3B6FE3] active:bg-[#1E4AA8] shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_1px_3px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.03)] h-10 px-4 text-[14px] rounded-[14px]"
+>
+  <span>
+    Primary
+  </span>
+</button>
+`;
+
+exports[`Button > matches snapshot for secondary variant 1`] = `
+<button
+  aria-busy="false"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-white text-[#111827] border border-[#CBD5E1] hover:bg-[#F1F5F9] hover:border-[#94A3B8] active:bg-[#E2E8F0] h-10 px-4 text-[14px] rounded-[14px]"
+>
+  <span>
+    Secondary
+  </span>
+</button>
+`;
+
+exports[`Button > matches snapshot with full width 1`] = `
+<button
+  aria-busy="false"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-[#2B5FD9] text-white hover:bg-[#3B6FE3] active:bg-[#1E4AA8] shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_1px_3px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.03)] h-10 px-4 text-[14px] rounded-[14px] w-full"
+>
+  <span>
+    Full Width
+  </span>
+</button>
+`;
+
+exports[`Button > matches snapshot with icon 1`] = `
+<button
+  aria-busy="false"
+  class="inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out select-none whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none disabled:select-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5FD9] bg-[#2B5FD9] text-white hover:bg-[#3B6FE3] active:bg-[#1E4AA8] shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_1px_3px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.03)] h-10 px-4 text-[14px] rounded-[14px]"
+>
+  <span
+    aria-hidden="true"
+    class="shrink-0"
+  >
+    <span>
+      🔔
+    </span>
+  </span>
+  <span>
+    With Icon
+  </span>
+</button>
+`;

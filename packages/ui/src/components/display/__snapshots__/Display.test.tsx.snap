@@ -1,0 +1,25 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Badge > matches snapshot for danger variant 1`] = `
+<span
+  class="inline-flex items-center justify-center rounded-full font-medium whitespace-nowrap transition-colors bg-[#FEF2F2] text-[#EF4444] text-[12px] px-2 py-0.5 h-[26px]"
+>
+  Danger
+</span>
+`;
+
+exports[`Badge > matches snapshot for default variant 1`] = `
+<span
+  class="inline-flex items-center justify-center rounded-full font-medium whitespace-nowrap transition-colors bg-[#F1F5F9] text-[#64748B] text-[12px] px-2 py-0.5 h-[26px]"
+>
+  Default
+</span>
+`;
+
+exports[`Badge > matches snapshot for success variant 1`] = `
+<span
+  class="inline-flex items-center justify-center rounded-full font-medium whitespace-nowrap transition-colors bg-[#F0FDF4] text-[#22C55E] text-[12px] px-2 py-0.5 h-[26px]"
+>
+  Success
+</span>
+`;

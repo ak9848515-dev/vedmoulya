@@ -1,0 +1,17 @@
+export type {
+  ServiceResult,
+  ExplanationFormat,
+  ExplanationComponent,
+  DecisionExplanation,
+  KnowledgeQuery,
+  KnowledgeResult,
+  KnowledgeQueryResponse,
+  MemoryQuery,
+  MemoryResult,
+  MemoryQueryResponse,
+  AIReasoningRequest,
+  AIReasoningResponse,
+  ExplainabilityRequest,
+  ExplainabilityResponse,
+  HealthStatus,
+} from './DecisionTypes.js';

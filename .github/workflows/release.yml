@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — Release Pipeline
+# Implements BLP-001/D10 Release Strategy
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Release stage'
+        required: true
+        default: 'alpha'
+        type: choice
+        options:
+          - alpha
+          - internal-beta
+          - closed-beta
+          - public-beta
+          - rc
+          - ga
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  validate:
+    name: Pre-release validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+  # Future: deploy steps per stage
+  deploy:
+    name: Deploy (${{ github.event.inputs.stage }})
+    runs-on: ubuntu-latest
+    needs: [validate]
+    steps:
+      - name: Deploy placeholder
+        run: echo "Deploying ${{ github.event.inputs.stage }} release — configure in Phase 1 Sprint 1"
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate release notes
+        run: |
+          echo "# Release ${{ github.event.inputs.stage }}" > release-notes.md
+          echo "Released: $(date)" >> release-notes.md
+          echo "Commit: ${{ github.sha }}" >> release-notes.md
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md

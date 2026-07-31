@@ -1,0 +1,193 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — CI Pipeline
+# Implements BLP-001/D08 Quality Gates (10 gates) and BLP-001/D09 Testing Strategy
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  # Required by @vedmoulya/core config (fail-fast, no default — P1-8/P0-2).
+  # CI-only test values; real secrets must be provisioned via secrets.
+  AUTH_JWT_SECRET: 'ci-test-secret-0123456789abcdef0123456789abcdef0123456789abcdef'
+  # IDENTITY_DATABASE_URL / REDIS_URL are required (non-localhost) outside NODE_ENV=development.
+  IDENTITY_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
+  REDIS_URL: 'redis://redis.ci.internal:6379'
+
+jobs:
+  # ── Gate 1 & 2: Architecture + Code Quality ───────────────────────────────
+  quality:
+    name: 'G1-G2: Architecture & Code Quality'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # Gate 2: Code Quality — Linting
+      - name: Lint (ESLint)
+        run: npm run lint
+      # Gate 2: Code Quality — Formatting
+      - name: Format check (Prettier)
+        run: npm run format
+      # Gate 1: Architecture — TypeScript compilation
+      - name: Type check
+        run: npm run typecheck
+
+  # ── Gate 3: Testing + Coverage ────────────────────────────────────────────
+  test:
+    name: 'G3: Testing & Coverage'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
+  # ── Gate 6: Security ──────────────────────────────────────────────────────
+  security:
+    name: 'G6: Security Scan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Dependency audit
+        run: npm audit --audit-level=high || true # Warn-only during MVP
+      - name: SAST scan (CodeQL)
+        uses: github/codeql-action/init@v3
+        with:
+          languages: typescript
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
+  # ── Gate 4: Accessibility ─────────────────────────────────────────────────
+  a11y:
+    name: 'G4: Accessibility'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Accessibility audit
+        run: npm run test:a11y || true
+
+  # ── Gate 5: Performance ───────────────────────────────────────────────────
+  performance:
+    name: 'G5: Performance'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Lighthouse audit
+        run: npm run test:performance || true
+
+  # ── Build ─────────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [quality, test, security]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Build all packages
+        run: npm run build
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: packages/*/dist/
+
+  # ── Gate 8: End-to-End Tests (Playwright) ─────────────────────────────────
+  e2e:
+    name: 'G8: End-to-End Tests'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Build web app (production)
+        run: npm run build -w apps/web
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+      - name: Run E2E tests
+        run: npm run test:e2e
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+
+  # ── Result ────────────────────────────────────────────────────────────────
+  result:
+    name: 'CI Result'
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [quality, test, security, a11y, performance, build, e2e]
+    steps:
+      - name: Check results
+        run: |
+          echo "Quality: ${{ needs.quality.result }}"
+          echo "Test: ${{ needs.test.result }}"
+          echo "Security: ${{ needs.security.result }}"
+          echo "Accessibility: ${{ needs.a11y.result }}"
+          echo "Performance: ${{ needs.performance.result }}"
+          echo "Build: ${{ needs.build.result }}"
+          echo "E2E: ${{ needs.e2e.result }}"
+          if [ "${{ needs.quality.result }}" = "success" ] && \
+             [ "${{ needs.test.result }}" = "success" ] && \
+             [ "${{ needs.security.result }}" = "success" ] && \
+             [ "${{ needs.build.result }}" = "success" ] && \
+             [ "${{ needs.e2e.result }}" = "success" ]; then
+            echo "✅ All quality gates passed"
+          else
+            echo "❌ One or more quality gates failed"
+            exit 1
+          fi

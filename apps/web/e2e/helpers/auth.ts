@@ -1,0 +1,66 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// VedMoulya — E2E Auth Helper
+// Mints a JWT access token using the shared development secret and injects it
+// into localStorage so the app is authenticated during E2E tests.
+// BLD-016C — Real Authentication
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { SignJWT } from 'jose';
+import type { Page } from '@playwright/test';
+
+// ── Constants (must match services/api + services/identity conventions) ─────
+
+const ISSUER = 'vedmoulya';
+const AUDIENCE = 'vedmoulya-api';
+const TEST_USER = { userId: 'e2e-user', email: 'e2e@vedmoulya.com', role: 'user' };
+
+// The shared secret. AUTH_JWT_SECRET is required (no default) — the core
+// config fails fast when it's missing, so E2E must fail fast too instead of
+// silently signing with a hardcoded 'development-secret' (P1-8).
+const secret = process.env.AUTH_JWT_SECRET;
+if (!secret || secret.trim() === '') {
+  throw new Error(
+    'AUTH_JWT_SECRET must be set to run E2E tests (required, no default). ' +
+      "Generate one: node -e \"console.log(require('crypto').randomBytes(48).toString('hex'))\"",
+  );
+}
+const SECRET = new TextEncoder().encode(secret);
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Mint an access token for the E2E test user. */
+export async function mintAccessToken(): Promise<string> {
+  return new SignJWT({
+    sub: TEST_USER.userId,
+    email: TEST_USER.email,
+    role: TEST_USER.role,
+    type: 'access',
+    iat: Math.floor(Date.now() / 1000),
+  })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setExpirationTime('1h')
+    .setIssuer(ISSUER)
+    .setAudience(AUDIENCE)
+    .sign(SECRET);
+}
+
+/**
+ * Inject the session into localStorage (key must match the auth store's
+ * persist name 'vedmoulya-auth') before the app boots.
+ */
+export async function injectSession(page: Page): Promise<void> {
+  const accessToken = await mintAccessToken();
+
+  await page.addInitScript(
+    ({ token, user }) => {
+      localStorage.setItem(
+        'vedmoulya-auth',
+        JSON.stringify({
+          state: { accessToken: token, user },
+          version: 0,
+        }),
+      );
+    },
+    { token: accessToken, user: TEST_USER },
+  );
+}
