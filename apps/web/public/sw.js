@@ -2,10 +2,7 @@
 // BLD-016B — Life OS Web Application
 
 const CACHE_NAME = 'vedmoulya-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/manifest.json',
-];
+const STATIC_ASSETS = ['/', '/manifest.json'];
 
 // Install: cache static assets
 self.addEventListener('install', (event) => {
@@ -20,9 +17,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
-      return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)),
-      );
+      return Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)));
     }),
   );
 });

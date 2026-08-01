@@ -14,10 +14,11 @@ describe('AIOrchestratorClient', () => {
     vi.unstubAllEnvs();
   });
 
-  it('returns empty string when disabled for brief', () => {
+  it('returns empty string when disabled for brief', async () => {
     vi.stubEnv('EXECUTION_AI_ENABLED', 'false');
     const client = new AIOrchestratorClient();
     expect(client.isEnabled()).toBe(false);
+    await expect(client.generateDailyBrief({})).resolves.toBe('');
   });
 
   it('generates daily brief', async () => {
@@ -78,5 +79,38 @@ describe('AIOrchestratorClient', () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false });
     const client = new AIOrchestratorClient();
     expect(await client.generateRecoveryRecommendations({})).toEqual([]);
+  });
+
+  it('returns empty when the brief content is missing', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    const client = new AIOrchestratorClient();
+    expect(await client.generateDailyBrief({ planId: 'p1' })).toBe('');
+  });
+
+  it('returns empty list when recovery content is missing', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    const client = new AIOrchestratorClient();
+    expect(await client.generateRecoveryRecommendations({})).toEqual([]);
+  });
+
+  it('returns empty list when recovery content has no dash lines', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: 'plain text without dashes' }),
+    });
+    const client = new AIOrchestratorClient();
+    expect(await client.generateRecoveryRecommendations({})).toEqual([]);
+  });
+
+  it('returns empty on network error for recovery', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('down'));
+    const client = new AIOrchestratorClient();
+    expect(await client.generateRecoveryRecommendations({})).toEqual([]);
+  });
+
+  it('returns empty list when disabled for recovery', async () => {
+    vi.stubEnv('EXECUTION_AI_ENABLED', 'false');
+    const client = new AIOrchestratorClient();
+    await expect(client.generateRecoveryRecommendations({})).resolves.toEqual([]);
   });
 });

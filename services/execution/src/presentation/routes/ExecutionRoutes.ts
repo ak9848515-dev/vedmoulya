@@ -17,6 +17,12 @@ export function createExecutionRouter(executionService: ExecutionApplicationServ
   // Plan CRUD
   router.post('/plans', (c) => controller.createPlan(c));
   router.get('/plans', (c) => controller.listPlans(c));
+
+  // Search & Statistics (registered before /plans/:id so the static segments
+  // win over the parameterized route)
+  router.get('/plans/search', (c) => controller.searchPlans(c));
+  router.get('/plans/stats', (c) => controller.getStatistics(c));
+
   router.get('/plans/:id', (c) => controller.getPlan(c));
   router.patch('/plans/:id', (c) => controller.updatePlan(c));
 
@@ -39,10 +45,6 @@ export function createExecutionRouter(executionService: ExecutionApplicationServ
 
   // Analysis
   router.get('/plans/:id/bottlenecks', (c) => controller.getBottlenecks(c));
-
-  // Search & Statistics
-  router.get('/plans/search', (c) => controller.searchPlans(c));
-  router.get('/plans/stats', (c) => controller.getStatistics(c));
 
   // Health
   router.get('/health', (c) => controller.health(c));

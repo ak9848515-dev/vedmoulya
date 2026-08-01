@@ -24,6 +24,12 @@ export function createDecisionRouter(decisionService: DecisionApplicationService
   // ── Decision CRUD ─────────────────────────────────────────────────────────
   router.post('/decisions', (c) => controller.createDecision(c));
   router.get('/decisions', (c) => controller.listDecisions(c));
+
+  // Search & Statistics (registered before /decisions/:id so the static
+  // segments win over the parameterized route)
+  router.get('/decisions/search', (c) => controller.searchDecisions(c));
+  router.get('/decisions/stats', (c) => controller.getStatistics(c));
+
   router.get('/decisions/:id', (c) => controller.getDecision(c));
   router.patch('/decisions/:id', (c) => controller.updateDecision(c));
   router.delete('/decisions/:id', (c) => controller.deleteDecision(c));
@@ -44,10 +50,6 @@ export function createDecisionRouter(decisionService: DecisionApplicationService
   router.post('/decisions/:id/archive', (c) => controller.archiveDecision(c));
   router.post('/decisions/:id/cancel', (c) => controller.cancelDecision(c));
   router.get('/decisions/:id/compare/:optionA/:optionB', (c) => controller.compareOptions(c));
-
-  // ── Search & Statistics ─────────────────────────────────────────────────
-  router.get('/decisions/search', (c) => controller.searchDecisions(c));
-  router.get('/decisions/stats', (c) => controller.getStatistics(c));
 
   // ── Health ──────────────────────────────────────────────────────────────
   router.get('/health', (c) => controller.health(c));

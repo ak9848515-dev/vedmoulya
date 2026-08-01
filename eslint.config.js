@@ -84,19 +84,14 @@ export default tseslint.config(
   // ── File-specific overrides ───────────────────────────────────────────────
   // Auto-generated Next.js type file — inline eslint comments don't persist
   {
-    files: [
-      '**/next-env.d.ts',
-    ],
+    files: ['**/next-env.d.ts'],
     rules: {
       '@typescript-eslint/triple-slash-reference': 'off',
     },
   },
   // Service worker files use browser/service worker globals not available in the TS project
   {
-    files: [
-      '**/public/sw.js',
-      '**/service-worker.js',
-    ],
+    files: ['**/public/sw.js', '**/service-worker.js'],
     rules: {
       'no-undef': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
@@ -107,10 +102,7 @@ export default tseslint.config(
   },
   // Config files linted without full type info for Node built-in modules
   {
-    files: [
-      '**/vitest.config.ts',
-      'tooling/eslint-config/index.js',
-    ],
+    files: ['**/vitest.config.ts', 'tooling/eslint-config/index.js'],
     rules: {
       '@typescript-eslint/no-unnecessary-boolean-literal-compare': 'off',
       '@typescript-eslint/no-unnecessary-condition': 'off',
@@ -123,12 +115,7 @@ export default tseslint.config(
   // Plain JavaScript files (scripts, compiled output) lack TypeScript type information,
   // so @typescript-eslint rules that rely on type checking cannot apply.
   {
-    files: [
-      'packages/services/src/**/*.js',
-      'scripts/*.js',
-      'scripts/*.mjs',
-      'scripts/load/*.js',
-    ],
+    files: ['packages/services/src/**/*.js', 'scripts/*.js', 'scripts/*.mjs', 'scripts/load/*.js'],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',

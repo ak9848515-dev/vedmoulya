@@ -4,7 +4,7 @@
  * BLD-016-A — Application Shell & Foundation
  * ──────────────────────────────────────────────────────────────────────────── */
 
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* ── Theme: Experience Bible Design Tokens ───────────────────────────────── */
 /* Maps DES-010A Color System, Typography, Spacing, Layout tokens to CSS vars */
@@ -12,91 +12,91 @@
 
 @theme {
   /* ── Brand Colors (DES-010A/D09) ─────────────────────────────────────── */
-  --color-brand-900: #1A3D8F;
-  --color-brand-800: #1E4AA8;
-  --color-brand-700: #2355BF;
-  --color-brand-600: #2B5FD9;   /* ★ PRIMARY */
-  --color-brand-500: #3B6FE3;
-  --color-brand-400: #5B8AEB;
-  --color-brand-300: #7FA5F2;
-  --color-brand-200: #A8C2F7;
-  --color-brand-100: #D4E1FC;
-  --color-brand-50:  #EFF4FE;
+  --color-brand-900: #1a3d8f;
+  --color-brand-800: #1e4aa8;
+  --color-brand-700: #2355bf;
+  --color-brand-600: #2b5fd9; /* ★ PRIMARY */
+  --color-brand-500: #3b6fe3;
+  --color-brand-400: #5b8aeb;
+  --color-brand-300: #7fa5f2;
+  --color-brand-200: #a8c2f7;
+  --color-brand-100: #d4e1fc;
+  --color-brand-50: #eff4fe;
 
   /* ── Secondary Blue ──────────────────────────────────────────────────── */
-  --color-secondary-blue-600: #5B8DEF;
-  --color-secondary-blue-500: #7BA5F2;
-  --color-secondary-blue-400: #9BBBF5;
-  --color-secondary-blue-300: #BBD1F8;
-  --color-secondary-blue-200: #DBE7FB;
-  --color-secondary-blue-100: #EAF2FF;
+  --color-secondary-blue-600: #5b8def;
+  --color-secondary-blue-500: #7ba5f2;
+  --color-secondary-blue-400: #9bbbf5;
+  --color-secondary-blue-300: #bbd1f8;
+  --color-secondary-blue-200: #dbe7fb;
+  --color-secondary-blue-100: #eaf2ff;
 
   /* ── Neutral Scale (Warm) ────────────────────────────────────────────── */
-  --color-neutral-900: #111827;  /* Heading text */
-  --color-neutral-800: #1F2937;  /* Body text */
-  --color-neutral-700: #374151;  /* Secondary text */
-  --color-neutral-600: #4B5563;  /* Placeholder text */
-  --color-neutral-500: #64748B;  /* ★ NEUTRAL */
-  --color-neutral-400: #94A3B8;
-  --color-neutral-300: #CBD5E1;  /* Borders */
-  --color-neutral-200: #E2E8F0;  /* Disabled backgrounds */
-  --color-neutral-100: #F1F5F9;  /* Card backgrounds */
-  --color-neutral-50:  #F5F7FA;  /* ★ PAGE BACKGROUND */
+  --color-neutral-900: #111827; /* Heading text */
+  --color-neutral-800: #1f2937; /* Body text */
+  --color-neutral-700: #374151; /* Secondary text */
+  --color-neutral-600: #4b5563; /* Placeholder text */
+  --color-neutral-500: #64748b; /* ★ NEUTRAL */
+  --color-neutral-400: #94a3b8;
+  --color-neutral-300: #cbd5e1; /* Borders */
+  --color-neutral-200: #e2e8f0; /* Disabled backgrounds */
+  --color-neutral-100: #f1f5f9; /* Card backgrounds */
+  --color-neutral-50: #f5f7fa; /* ★ PAGE BACKGROUND */
 
   /* ── Semantic Colors ─────────────────────────────────────────────────── */
-  --color-success:       #22C55E;
-  --color-success-bg:    #F0FDF4;
-  --color-warning:       #F59E0B;
-  --color-warning-bg:    #FFFBEB;
-  --color-danger:        #EF4444;
-  --color-danger-bg:     #FEF2F2;
-  --color-info:          #3B82F6;
-  --color-info-bg:       #EFF6FF;
+  --color-success: #22c55e;
+  --color-success-bg: #f0fdf4;
+  --color-warning: #f59e0b;
+  --color-warning-bg: #fffbeb;
+  --color-danger: #ef4444;
+  --color-danger-bg: #fef2f2;
+  --color-info: #3b82f6;
+  --color-info-bg: #eff6ff;
 
   /* ── Premium Gold (Limited Use) ──────────────────────────────────────── */
-  --color-premium-gold:       #C89B3C;
-  --color-premium-gold-light: #E8D5A0;
-  --color-premium-gold-dark:  #9B7630;
+  --color-premium-gold: #c89b3c;
+  --color-premium-gold-light: #e8d5a0;
+  --color-premium-gold-dark: #9b7630;
 
   /* ── AI Colors ───────────────────────────────────────────────────────── */
-  --color-ai-primary:  #7C3AED;
-  --color-ai-secondary:#8B5CF6;
-  --color-ai-accent:   #A78BFA;
-  --color-ai-bg:       #F5F3FF;
-  --color-ai-border:   #E9D5FF;
+  --color-ai-primary: #7c3aed;
+  --color-ai-secondary: #8b5cf6;
+  --color-ai-accent: #a78bfa;
+  --color-ai-bg: #f5f3ff;
+  --color-ai-border: #e9d5ff;
 
   /* ── Surface Colors ──────────────────────────────────────────────────── */
-  --color-surface-page:       #F5F7FA;
-  --color-surface-card:       #FFFFFF;
-  --color-surface-card-border:#E8EDF5;
-  --color-surface-elevated:   #FFFFFF;
-  --color-surface-overlay:    rgba(15, 23, 42, 0.5);
+  --color-surface-page: #f5f7fa;
+  --color-surface-card: #ffffff;
+  --color-surface-card-border: #e8edf5;
+  --color-surface-elevated: #ffffff;
+  --color-surface-overlay: rgba(15, 23, 42, 0.5);
 
   /* ── Typography (DES-010A/D08) ───────────────────────────────────────── */
   --font-heading: 'Satoshi', 'Inter', system-ui, sans-serif;
-  --font-body:    'Inter', system-ui, sans-serif;
-  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   /* ── Spacing Scale (4px base) ────────────────────────────────────────── */
-  --space-1:  4px;
-  --space-2:  8px;
-  --space-3:  12px;
-  --space-4:  16px;  /* BASE */
-  --space-5:  20px;
-  --space-6:  24px;
-  --space-7:  32px;
-  --space-8:  40px;
-  --space-9:  48px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px; /* BASE */
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
   --space-10: 64px;
   --space-11: 80px;
   --space-12: 96px;
 
   /* ── Layout (DES-010A/D06) ───────────────────────────────────────────── */
-  --sidebar-width:        280px;
-  --sidebar-collapsed:    64px;
-  --header-height:        64px;
-  --max-content-width:    1280px;
-  --max-wide-width:       1536px;
+  --sidebar-width: 280px;
+  --sidebar-collapsed: 64px;
+  --header-height: 64px;
+  --max-content-width: 1280px;
+  --max-wide-width: 1536px;
 }
 
 /* ── Base Styles ──────────────────────────────────────────────────────────── */
@@ -117,7 +117,12 @@
   }
 
   /* Heading font family */
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-heading);
     font-weight: 600;
   }

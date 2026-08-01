@@ -56,6 +56,17 @@ describe('KnowledgeTracer', () => {
     expect(mockEndSpan).toHaveBeenCalledWith(expect.any(Object), 'error');
   });
 
+  it('wraps non-Error throws in an Error for recording', async () => {
+    await expect(
+      tracer.traceSpan('failing-op', async () => {
+        throw 'string-error';
+      }),
+    ).rejects.toBe('string-error');
+
+    expect(mockRecordError).toHaveBeenCalledWith(expect.any(Object), expect.any(Error));
+    expect(mockEndSpan).toHaveBeenCalledWith(expect.any(Object), 'error');
+  });
+
   it('setSpanAttributes sets attributes on the span', () => {
     const span = { name: 'test', attributes: { existing: 'value' } } as never;
     tracer.setSpanAttributes(span, { key1: 'value1', key2: 42, key3: true });

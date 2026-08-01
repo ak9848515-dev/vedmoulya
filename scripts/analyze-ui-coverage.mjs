@@ -40,8 +40,13 @@ for (const [file, data] of Object.entries(cov)) {
 
 const totalSt = rows.reduce((a, r) => a + r.stmts, 0);
 const totalUnc = rows.reduce((a, r) => a + r.uncovered, 0);
-console.log(`TOTAL statements=${totalSt} uncovered=${totalUnc} (${Math.round(((totalSt - totalUnc) / totalSt) * 1000) / 10}%)`);
+console.log(
+  `TOTAL statements=${totalSt} uncovered=${totalUnc} (${Math.round(((totalSt - totalUnc) / totalSt) * 1000) / 10}%)`,
+);
 const sub = rows
   .sort((a, b) => b.uncovered - a.uncovered)
-  .map((r) => `${String(r.uncovered).padStart(4)} unc ${String(r.fUncovered).padStart(3)} fn  ${String(r.brPct).padStart(5)}% br  ${r.rel}`);
+  .map(
+    (r) =>
+      `${String(r.uncovered).padStart(4)} unc ${String(r.fUncovered).padStart(3)} fn  ${String(r.brPct).padStart(5)}% br  ${r.rel}`,
+  );
 console.log(sub.join('\n'));

@@ -70,4 +70,22 @@ describe('DecisionEngineClient', () => {
     const result = await client.getDecisionInfo('d1');
     expect(result).toBeNull();
   });
+
+  it('defaults selectedOption to empty when absent', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 'd2',
+          title: 'No Option',
+          confidence: { score: 0.6 },
+          status: 'open',
+        },
+      }),
+    });
+    const client = new DecisionEngineClient();
+    const result = await client.getDecisionInfo('d2');
+    expect(result).not.toBeNull();
+    expect(result!.selectedOption).toBe('');
+  });
 });

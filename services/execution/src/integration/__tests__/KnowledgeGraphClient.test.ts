@@ -67,4 +67,52 @@ describe('KnowledgeGraphClient', () => {
     const client = new KnowledgeGraphClient();
     expect(await client.getProjects('u1')).toEqual([]);
   });
+
+  it('returns empty when the goals response has no data', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    const client = new KnowledgeGraphClient();
+    expect(await client.getGoals('u1')).toEqual([]);
+  });
+
+  it('defaults goal priority when properties.priority is missing', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: 'g1', label: 'Goal 1' }] }),
+    });
+    const client = new KnowledgeGraphClient();
+    const goals = await client.getGoals('u1');
+    expect(goals[0]!.priority).toBe(5);
+  });
+
+  it('defaults goal description to empty when missing', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: 'g2', label: 'Goal 2', properties: {} }] }),
+    });
+    const client = new KnowledgeGraphClient();
+    const goals = await client.getGoals('u1');
+    expect(goals[0]!.description).toBe('');
+  });
+
+  it('returns empty when the projects response has no data', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    const client = new KnowledgeGraphClient();
+    expect(await client.getProjects('u1')).toEqual([]);
+  });
+
+  it('defaults project status when properties.status is missing', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: 'p1', label: 'Project Alpha', properties: {} }] }),
+    });
+    const client = new KnowledgeGraphClient();
+    const projects = await client.getProjects('u1');
+    expect(projects[0]!.status).toBe('active');
+  });
+
+  it('returns empty on network error for projects', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Timeout'));
+    const client = new KnowledgeGraphClient();
+    expect(await client.getProjects('u1')).toEqual([]);
+  });
 });

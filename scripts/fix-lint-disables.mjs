@@ -67,4 +67,6 @@ for (const file of files) {
   fs.writeFileSync(file, bom + DISABLE + '\n' + body, 'utf8');
   changed++;
 }
-console.log(`Prepared disable comment in ${changed} file(s); skipped ${skipped} (already present).`);
+console.log(
+  `Prepared disable comment in ${changed} file(s); skipped ${skipped} (already present).`,
+);

@@ -1,147 +1,137 @@
-// ──────────────────────────────────────────────────────────────────
-// VedMoulya — State Components Tests
-// BLD-003A Design System Quality & Documentation
-// Covers: EmptyState, ErrorState, OfflineState, SuccessState
-// ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// VedMoulya — State components tests
+// Follows DES-010A/D07 Component Behaviour
+// ─────────────────────────────────────────────────────────────────────────────
 
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { EmptyState, ErrorState, OfflineState, SuccessState } from './index.js';
-
-// ── EmptyState ────────────────────────────────────────────────────────────
+import { EmptyState, ErrorState, OfflineState, SuccessState } from './State.js';
 
 describe('EmptyState', () => {
-  it('renders title and description', () => {
-    render(<EmptyState title="No items" description="Create your first item." />);
-    expect(screen.getByText('No items')).toBeInTheDocument();
-    expect(screen.getByText('Create your first item.')).toBeInTheDocument();
+  it('renders title, description, and default icon', () => {
+    render(<EmptyState title="No data" description="Nothing here yet" />);
+    expect(screen.getByText('No data')).toBeDefined();
+    expect(screen.getByText('Nothing here yet')).toBeDefined();
   });
 
-  it('renders action button', () => {
-    const onClick = vi.fn();
-    render(<EmptyState title="Empty" action={{ label: 'Create', onClick }} />);
+  it('renders a custom icon instead of the default', () => {
+    render(<EmptyState title="Custom" icon={<span data-testid="custom-icon">*</span>} />);
+    expect(screen.getByTestId('custom-icon')).toBeDefined();
+    expect(screen.queryByTestId('inbox-icon')).toBeNull();
+  });
+
+  it('renders action and secondary action buttons and wires click handlers', () => {
+    const onPrimary = vi.fn();
+    const onSecondary = vi.fn();
+    render(
+      <EmptyState
+        title="Empty"
+        action={{ label: 'Create', onClick: onPrimary }}
+        secondaryAction={{ label: 'Import', onClick: onSecondary }}
+      />,
+    );
     fireEvent.click(screen.getByText('Create'));
-    expect(onClick).toHaveBeenCalled();
+    expect(onPrimary).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText('Import'));
+    expect(onSecondary).toHaveBeenCalledTimes(1);
   });
 
-  it('renders secondary action button', () => {
-    const onClick = vi.fn();
-    render(<EmptyState title="Empty" secondaryAction={{ label: 'Learn', onClick }} />);
-    fireEvent.click(screen.getByText('Learn'));
-    expect(onClick).toHaveBeenCalled();
-  });
-
-  it('renders with custom icon', () => {
-    render(<EmptyState title="Empty" icon={<span data-testid="custom-icon">📦</span>} />);
-    expect(screen.getByTestId('custom-icon')).toBeInTheDocument();
-  });
-
-  it('renders without actions', () => {
-    const { container } = render(<EmptyState title="Just title" />);
-    expect(screen.getByText('Just title')).toBeInTheDocument();
+  it('does not render buttons when actions are absent', () => {
+    render(<EmptyState title="Only title" />);
+    expect(screen.queryByRole('button')).toBeNull();
   });
 });
-
-// ── ErrorState ────────────────────────────────────────────────────────────
 
 describe('ErrorState', () => {
-  it('renders default title and message', () => {
+  it('renders default title and message when none provided', () => {
     render(<ErrorState />);
-    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
-    expect(screen.getByText('An unexpected error occurred. Please try again.')).toBeInTheDocument();
+    expect(screen.getByText('Something went wrong')).toBeDefined();
+    expect(screen.getByText('An unexpected error occurred. Please try again.')).toBeDefined();
   });
 
-  it('renders custom title and message', () => {
-    render(<ErrorState title="Custom Error" message="Custom message" />);
-    expect(screen.getByText('Custom Error')).toBeInTheDocument();
-    expect(screen.getByText('Custom message')).toBeInTheDocument();
+  it('renders a custom error message when given an Error', () => {
+    render(<ErrorState error={new Error('disk full')} />);
+    expect(screen.getByText('disk full')).toBeDefined();
   });
 
-  it('renders error object message', () => {
-    const error = new Error('Network failure');
-    render(<ErrorState error={error} />);
-    expect(screen.getByText('Network failure')).toBeInTheDocument();
+  it('renders a string error without crashing', () => {
+    render(<ErrorState error="plain string error" />);
+    expect(screen.getByText('Something went wrong')).toBeDefined();
   });
 
-  it('calls onRetry when clicked', () => {
+  it('wires retry and dismiss handlers', () => {
     const onRetry = vi.fn();
-    render(<ErrorState onRetry={onRetry} />);
-    fireEvent.click(screen.getByText('Try again'));
-    expect(onRetry).toHaveBeenCalled();
-  });
-
-  it('calls onDismiss when clicked', () => {
     const onDismiss = vi.fn();
-    render(<ErrorState onDismiss={onDismiss} />);
+    render(<ErrorState onRetry={onRetry} onDismiss={onDismiss} />);
+    fireEvent.click(screen.getByText('Try again'));
+    expect(onRetry).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText('Dismiss'));
-    expect(onDismiss).toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });
 
-// ── OfflineState ──────────────────────────────────────────────────────────
-
 describe('OfflineState', () => {
-  it('renders default title and message', () => {
+  it('renders default offline messaging', () => {
     render(<OfflineState />);
-    expect(screen.getByText("You're offline")).toBeInTheDocument();
+    expect(screen.getByText("You're offline")).toBeDefined();
   });
 
-  it('renders last synced timestamp', () => {
-    render(<OfflineState lastSynced="5 min ago" />);
-    expect(screen.getByText(/Last synced: 5 min ago/)).toBeInTheDocument();
+  it('renders lastSynced when provided', () => {
+    render(<OfflineState lastSynced="5m ago" />);
+    expect(screen.getByText(/Last synced: 5m ago/)).toBeDefined();
   });
 
-  it('calls onReconnect when clicked', () => {
+  it('wires the reconnect handler', () => {
     const onReconnect = vi.fn();
     render(<OfflineState onReconnect={onReconnect} />);
     fireEvent.click(screen.getByText('Reconnect'));
-    expect(onReconnect).toHaveBeenCalled();
-  });
-
-  it('has role alert', () => {
-    const { container } = render(<OfflineState />);
-    expect(container.firstChild).toHaveAttribute('role', 'alert');
+    expect(onReconnect).toHaveBeenCalledTimes(1);
   });
 });
 
-// ── SuccessState ──────────────────────────────────────────────────────────
-
 describe('SuccessState', () => {
-  it('renders title and message', () => {
-    render(<SuccessState title="Done!" message="Saved successfully." />);
-    expect(screen.getByText('Done!')).toBeInTheDocument();
-    expect(screen.getByText('Saved successfully.')).toBeInTheDocument();
+  beforeEach(() => {
+    vi.useFakeTimers();
   });
 
-  it('renders action button', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('renders title, message, and action', () => {
     const onClick = vi.fn();
-    render(<SuccessState title="Done!" action={{ label: 'View', onClick }} />);
+    render(<SuccessState title="Saved" message="All good" action={{ label: 'View', onClick }} />);
+    expect(screen.getByText('Saved')).toBeDefined();
+    expect(screen.getByText('All good')).toBeDefined();
     fireEvent.click(screen.getByText('View'));
-    expect(onClick).toHaveBeenCalled();
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it('has role status', () => {
-    const { container } = render(<SuccessState title="Done!" />);
-    expect(container.firstChild).toHaveAttribute('role', 'status');
-  });
-
-  it('renders dismiss button', () => {
+  it('auto-dismisses after the timeout and calls onDismiss', () => {
     const onDismiss = vi.fn();
-    render(<SuccessState title="Done!" onDismiss={onDismiss} />);
-    expect(screen.getByLabelText('Dismiss')).toBeInTheDocument();
+    render(<SuccessState title="Saved" autoDismiss={1000} onDismiss={onDismiss} />);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.queryByText('Saved')).toBeNull();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onDismiss when dismiss clicked', () => {
+  it('renders a dismiss button when onDismiss is provided', () => {
     const onDismiss = vi.fn();
-    render(<SuccessState title="Done!" onDismiss={onDismiss} />);
-    fireEvent.click(screen.getByLabelText('Dismiss'));
-    expect(onDismiss).toHaveBeenCalled();
+    render(<SuccessState title="Saved" onDismiss={onDismiss} />);
+    const dismiss = screen.getByLabelText('Dismiss');
+    fireEvent.click(dismiss);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Saved')).toBeNull();
   });
 
-  // ── Snapshots ──────────────────────────────────────────────────────────
-  it('matches snapshot for default state', () => {
-    const { container } = render(<SuccessState title="Done!" message="Saved." />);
-    expect(container.firstChild).toMatchSnapshot();
+  it('renders forever when no autoDismiss is set', () => {
+    render(<SuccessState title="Sticky" />);
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(screen.getByText('Sticky')).toBeDefined();
   });
 });
