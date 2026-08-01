@@ -61,4 +61,28 @@ export class AIMetrics {
   recordCacheMiss(): void {
     metrics.increment('ai.cache.miss');
   }
+
+  recordProviderLatency(provider: string, latencyMs: number): void {
+    metrics.observe('ai.provider.latency', latencyMs);
+    metrics.setGauge(`ai.provider.latency.${provider}`, latencyMs);
+  }
+
+  /**
+   * Current cache hit ratio (0..1) from the global metrics registry.
+   * PH-002 — T4 performance observability: feeds the health cache metric
+   * and the Grafana AI dashboard.
+   */
+  getCacheHitRatio(): number {
+    const hits = metrics.getCounter('ai.cache.hit');
+    const misses = metrics.getCounter('ai.cache.miss');
+    const total = hits + misses;
+    return total === 0 ? 0 : hits / total;
+  }
+
+  /**
+   * Total AI requests (all outcomes).
+   */
+  getTotalRequests(): number {
+    return metrics.getCounter('ai.requests.total');
+  }
 }

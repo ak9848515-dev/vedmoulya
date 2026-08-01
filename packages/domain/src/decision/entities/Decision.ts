@@ -5,6 +5,9 @@
 // Knowledge Graph owns semantic truth. Memory Engine owns history.
 // ──────────────────────────────────────────────────────────────────
 
+/* eslint-disable security/detect-object-injection -- Array/record indexing below
+   uses indices from findIndex()/bounded loops or typed record keys, never
+   attacker-controlled input; the rule is a false positive on these patterns. */
 import type { DecisionId } from '../value-objects/DecisionId.js';
 import { DecisionStatus, type DecisionStatusValue } from '../value-objects/DecisionStatus.js';
 import { DecisionPriority } from '../value-objects/DecisionPriority.js';

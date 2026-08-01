@@ -9,6 +9,9 @@ export type ConstraintType =
 export type ConstraintCategory =
   'time' | 'cost' | 'resource' | 'quality' | 'compliance' | 'strategic' | 'technical' | 'ethical';
 
+/** Types that are always binding (hard) when no explicit flag is given. */
+const HARD_TYPES = new Set<ConstraintType>(['must', 'must_not', 'limit', 'requirement']);
+
 /**
  * DecisionConstraint value object.
  * Represents a boundary condition that options must satisfy.
@@ -29,7 +32,7 @@ export class DecisionConstraint {
     this._type = type;
     this._category = category;
     this._description = description;
-    this._isHard = isHard ?? (type === 'must' || type === 'must_not');
+    this._isHard = isHard ?? HARD_TYPES.has(type);
   }
 
   static must(category: ConstraintCategory, description: string): DecisionConstraint {

@@ -1,0 +1,16 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — Grafana Dashboard Provisioning
+# PH-002 — Enterprise Operations & Reliability (T1 Observability)
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: 1
+
+providers:
+  - name: 'vedmoulya'
+    orgId: 1
+    folder: 'VedMoulya'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

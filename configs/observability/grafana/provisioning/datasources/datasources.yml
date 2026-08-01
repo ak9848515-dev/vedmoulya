@@ -1,0 +1,14 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — Grafana Datasource Provisioning
+# PH-002 — Enterprise Operations & Reliability (T1 Observability)
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

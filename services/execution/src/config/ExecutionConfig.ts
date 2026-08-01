@@ -1,3 +1,5 @@
+import { requireProdExternalUrl } from '@vedmoulya/core';
+
 export interface DatabaseConfig {
   url: string;
   poolMax: number;
@@ -55,7 +57,11 @@ export interface ExecutionConfig {
 
 const DEFAULT_CONFIG: ExecutionConfig = {
   database: {
-    url: process.env.EXECUTION_DATABASE_URL ?? 'postgres://localhost:5432/vedmoulya_execution',
+    // Production/staging: EXECUTION_DATABASE_URL must be a real non-localhost URL (PH-001/T2).
+    url: requireProdExternalUrl(
+      'EXECUTION_DATABASE_URL',
+      'postgres://localhost:5432/vedmoulya_execution',
+    ),
     poolMax: Number(process.env.EXECUTION_DB_POOL_MAX ?? '10'),
     ssl: process.env.NODE_ENV === 'production' ? 'require' : false,
   },

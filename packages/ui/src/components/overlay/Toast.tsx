@@ -1,3 +1,7 @@
+/* eslint-disable security/detect-object-injection -- Heuristic rule
+   false-positive: dynamic member access here uses typed/closed-union keys,
+   constant environment names, or fixed internal lists — never
+   attacker-controlled property names. */
 // ──────────────────────────────────────────────────────────────────
 // VedMoulya — Toast Component
 // Radix UI Toast with custom styling
@@ -131,6 +135,7 @@ export const ToastViewport = forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitive.Viewport
     ref={ref}
+    data-testid="toast-viewport"
     className={cn(
       'fixed top-0 right-0 z-[200] flex max-h-screen w-full flex-col-reverse gap-2 p-4 sm:max-w-[420px]',
       className,

@@ -146,7 +146,12 @@ export function createAppRouter(services: ApiApplicationService) {
     health: router({
       check: healthProcedure
         .input(z.void())
-        .query(({ ctx }) => createHealthRouter(services.lifeOS).check(undefined as unknown, ctx)),
+        .query(({ ctx }) =>
+          createHealthRouter(services.lifeOS, services.infrastructureHealth).check(
+            undefined as unknown,
+            ctx,
+          ),
+        ),
       live: healthProcedure
         .input(z.void())
         .query(({ ctx }) => createHealthRouter(services.lifeOS).live(undefined as unknown, ctx)),
@@ -375,6 +380,9 @@ export function createAppRouter(services: ApiApplicationService) {
       lifecycle: standardProcedure
         .input(userId)
         .query(({ input, ctx }) => createMetricsRouter(services.dashboard).lifecycle(input, ctx)),
+      snapshot: standardProcedure
+        .input(z.void())
+        .query(() => createMetricsRouter(services.dashboard).snapshot()),
     }),
   });
 }

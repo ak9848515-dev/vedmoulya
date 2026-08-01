@@ -1,3 +1,7 @@
+/* eslint-disable security/detect-object-injection -- Heuristic rule
+   false-positive: dynamic member access here uses typed/closed-union keys,
+   constant environment names, or fixed internal lists — never
+   attacker-controlled property names. */
 // ──────────────────────────────────────────────────────────────────
 // VedMoulya — Career Resume Service
 // BLD-011 — Career Intelligence Platform
@@ -139,6 +143,8 @@ export class CareerResumeService {
       .join(' ')
       .toLowerCase();
     for (const kw of techKeywords) {
+      /* eslint-disable-next-line security/detect-non-literal-regexp -- kw comes
+         from the fixed internal techKeywords list, never user input. */
       const regex = new RegExp(kw, 'gi');
       const matches = fullText.match(regex);
       if (matches) keywords[kw] = matches.length;

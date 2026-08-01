@@ -18,6 +18,7 @@ import {
   MarketplaceApplicationService,
   MemoryApplicationService,
 } from '@vedmoulya/services';
+import { InfrastructureHealthProbe } from './InfrastructureHealthProbe.js';
 
 // ── ApiApplicationService ───────────────────────────────────────────────────
 
@@ -50,7 +51,11 @@ export class ApiApplicationService {
   // ── Integration Layer ─────────────────────────────────────────────────────
   readonly lifeOS: LifeOSApplicationService;
 
+  // ── Infrastructure Health (PH-002/T3 follow-up) ────────────────────────────
+  readonly infrastructureHealth: InfrastructureHealthProbe;
+
   constructor() {
+    this.infrastructureHealth = new InfrastructureHealthProbe();
     // ── Create infrastructure services (dev stubs — repositories injected as any)
     //     Repository injection is needed because the frozen platform services
     //     require domain repositories. In dev, we pass empty stubs that return

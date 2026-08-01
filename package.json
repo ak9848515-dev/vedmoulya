@@ -23,7 +23,7 @@
     "test": "vitest run",
     "test:run": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "node scripts/coverage-gate.mjs",
     "test:e2e": "cd apps/web && npx playwright test",
     "test:a11y": "bash scripts/run-a11y.sh",
     "test:performance": "bash scripts/check-bundle-size.sh",
@@ -67,11 +67,17 @@
     "prettier": "^3.3.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.65.0",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.10"
   },
   "config": {
     "commitizen": {
       "path": "cz-conventional-changelog"
     }
+  },
+  "overrides": {
+    "esbuild": "^0.25.0",
+    "postcss": "^8.5.25",
+    "uuid": "^11.1.1",
+    "sharp": "^0.35.0"
   }
 }

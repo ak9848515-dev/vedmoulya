@@ -14,6 +14,25 @@ export type { TRPCContext } from './router.js';
 
 export { ApiApplicationService } from './services/ApiApplicationService.js';
 
+// ── Infrastructure Health ────────────────────────────────────────────────────
+
+export { InfrastructureHealthProbe } from './services/InfrastructureHealthProbe.js';
+export type {
+  DependencyHealthResult,
+  DependencyName,
+  DependencyStatus,
+  InfrastructureHealthProbeOptions,
+} from './services/InfrastructureHealthProbe.js';
+
+// ── Observability Startup (PH-002/T1) ────────────────────────────────────────
+
+export {
+  initGatewayObservability,
+  flushGatewayObservability,
+  shutdownGatewayObservability,
+} from './observability/startup.js';
+export type { GatewayObservability, GatewayObservabilityOptions } from './observability/startup.js';
+
 // ── Router Registry ─────────────────────────────────────────────────────────
 
 export { createAppRouter, router, publicProcedure } from './services/RouterRegistry.js';

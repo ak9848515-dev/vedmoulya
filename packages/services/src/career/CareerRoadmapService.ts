@@ -3,6 +3,9 @@
 // BLD-011 — Career Intelligence Platform
 // ──────────────────────────────────────────────────────────────────
 
+/* eslint-disable security/detect-object-injection -- stageDefinitions lookups
+   use typed stage ids from a fixed in-class registry; `?? 0` guards every read,
+   so no attacker-controlled property access is possible. */
 import type {
   CareerRoadmapDTO,
   CareerStageDTO,

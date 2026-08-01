@@ -4,6 +4,8 @@
 // ARC-003/ARC-004 — Decision Intelligence Engine Bounded Context
 // ──────────────────────────────────────────────────────────────────
 
+import { requireProdExternalUrl } from '@vedmoulya/core';
+
 export interface DatabaseConfig {
   url: string;
   poolMax: number;
@@ -67,7 +69,11 @@ export interface DecisionConfig {
 function loadConfigFromEnv(): DecisionConfig {
   return {
     database: {
-      url: process.env.DECISION_DATABASE_URL ?? 'postgres://localhost:5432/vedmoulya_decision',
+      // Production/staging: DECISION_DATABASE_URL must be a real non-localhost URL (PH-001/T2).
+      url: requireProdExternalUrl(
+        'DECISION_DATABASE_URL',
+        'postgres://localhost:5432/vedmoulya_decision',
+      ),
       poolMax: Number(process.env.DECISION_DB_POOL_MAX ?? '10'),
       ssl: process.env.NODE_ENV === 'production' ? 'require' : false,
     },

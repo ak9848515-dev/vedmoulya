@@ -23,6 +23,12 @@ env:
   # IDENTITY_DATABASE_URL / REDIS_URL are required (non-localhost) outside NODE_ENV=development.
   IDENTITY_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
   REDIS_URL: 'redis://redis.ci.internal:6379'
+  # PH-001/T2: AI key is required in production when AI is enabled (default) with the
+  # default provider openai. The e2e job runs next start (NODE_ENV=production) which
+  # loads @vedmoulya/core config — provide a CI-only test value.
+  AI_OPENAI_API_KEY: 'sk-ci-test-openai-0123456789abcdef0123456789abcdef'
+  # Google OAuth + SMTP stay unset in CI (feature flags disabled); if enabled they
+  # become required in production (PH-001/T2).
 
 jobs:
   # ── Gate 1 & 2: Architecture + Code Quality ───────────────────────────────
@@ -79,8 +85,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
-      - name: Dependency audit
-        run: npm audit --audit-level=high || true # Warn-only during MVP
+      - name: Dependency audit (critical-blocking)
+        run: npm audit --audit-level=critical
       - name: SAST scan (CodeQL)
         uses: github/codeql-action/init@v3
         with:

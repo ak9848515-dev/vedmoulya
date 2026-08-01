@@ -8,12 +8,12 @@ export default defineConfig({
     include: ['__tests__/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html', 'lcov'],
+      reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
-      exclude: ['src/**/index.ts', 'src/**/*.test.ts'],
+      exclude: ['src/**/index.ts', 'src/**/*.test.ts', '**/node_modules/**'],
       thresholds: {
         statements: 80,
-        branches: 70,
+        branches: 80,
         functions: 80,
         lines: 80,
       },

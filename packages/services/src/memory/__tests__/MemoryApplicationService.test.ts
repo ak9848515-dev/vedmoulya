@@ -24,14 +24,19 @@ vi.mock('@vedmoulya/domain', async () => {
   return {
     ...(actual as Record<string, unknown>),
     MemoryRepository: vi.fn(),
-    MemoryFactory: vi.fn().mockImplementation(() => ({
-      createMemory: vi.fn(),
-    })),
-    MemoryDomainService: vi.fn().mockImplementation(() => ({
-      applyDecay: vi.fn(),
-      applyRetentionPolicies: vi.fn(),
-      suggestConsolidation: vi.fn(),
-    })),
+    // Vitest 4: `new MemoryFactory(repo)` invokes the mockImplementation as a
+    // constructor — arrow functions are not constructible, so use a regular
+    // function (TypeError: ... is not a constructor otherwise).
+    MemoryFactory: vi.fn().mockImplementation(function () {
+      return { createMemory: vi.fn() };
+    }),
+    MemoryDomainService: vi.fn().mockImplementation(function () {
+      return {
+        applyDecay: vi.fn(),
+        applyRetentionPolicies: vi.fn(),
+        suggestConsolidation: vi.fn(),
+      };
+    }),
     memoryContentRule: { validate: vi.fn() },
     importanceConstraintRule: { validate: vi.fn() },
     retentionPolicyRule: { validate: vi.fn() },

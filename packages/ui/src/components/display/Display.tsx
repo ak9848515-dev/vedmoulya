@@ -6,6 +6,9 @@
 
 'use client';
 
+/* eslint-disable security/detect-object-injection -- Record lookups below use
+   closed-union keys (sizeMap, statusColors, skeletonRadius, ...) that are typed
+   literals, not attacker-controlled input; the rule is a false positive. */
 import React from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../utilities/cn.js';

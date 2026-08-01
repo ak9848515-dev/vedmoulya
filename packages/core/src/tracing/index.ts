@@ -1,3 +1,7 @@
+/* eslint-disable security/detect-object-injection -- Heuristic rule
+   false-positive: dynamic member access here uses typed/closed-union keys,
+   constant environment names, or fixed internal lists — never
+   attacker-controlled property names. */
 // ──────────────────────────────────────────────────────────────────
 // VedMoulya — Tracing Hooks
 // Lightweight tracing hooks for OpenTelemetry integration

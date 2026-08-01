@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — Prometheus Configuration
+# Scrapes service /metrics endpoints (Prometheus text exposition format).
+# PH-002 — Enterprise Operations & Reliability (T1 Observability)
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # OTLP receiver — metrics pushed by services via the OtelExporter
+  # (present in the docker-compose observability profile)
+  - job_name: 'vedmoulya-otel'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  # Self-scrape for environments that expose a /metrics endpoint directly.
+  # Note: the local docker-compose does NOT run api/web/exporter containers,
+  # so these targets are only meaningful in a production deployment that
+  # provides them.
+  #
+  # The web app serves the Prometheus text exposition format at
+  # /api/metrics (apps/web/src/app/api/metrics/route.ts) and the gateway
+  # observability singleton (OTel exporter + runtime gauges) is initialized
+  # lazily from that route, so a production web target can scrape real
+  # runtime memory/CPU/uptime + API metrics.
+  #
+  # - job_name: 'vedmoulya-api'
+  #   metrics_path: /metrics
+  #   static_configs:
+  #     - targets: ['api:3001']
+  #
+  # - job_name: 'vedmoulya-web'
+  #   metrics_path: /api/metrics
+  #   static_configs:
+  #     - targets: ['web:3000']
+  #
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+  #
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']

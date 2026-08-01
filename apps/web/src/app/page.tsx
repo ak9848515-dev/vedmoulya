@@ -34,19 +34,53 @@ import type {
 
 // ── Section Components ───────────────────────────────────────────────────────
 
+import dynamic from 'next/dynamic';
 import { ErrorBoundary } from '../components/ErrorBoundary.js';
 import { SignedOutCard } from '../components/SignedOutCard.js';
 import { TopPriorityCard } from './sections/TopPriorityCard.js';
 import { ExecutionCenter } from './sections/ExecutionCenter.js';
 import { DecisionCenter } from './sections/DecisionCenter.js';
-import { ModuleStatusGrid } from './sections/ModuleStatusGrid.js';
-import { MemoryTimeline } from './sections/MemoryTimeline.js';
-import { RecommendationsPanel } from './sections/RecommendationsPanel.js';
-import { NotificationsPanel } from './sections/NotificationsPanel.js';
-import { AIInsights } from './sections/AIInsights.js';
-import { PrioritiesList } from './sections/PrioritiesList.js';
-import { JourneyOverview } from './sections/JourneyOverview.js';
-import { QuickActions } from './sections/QuickActions.js';
+
+// Below-the-fold sections are lazy-loaded (same convention as AppShell's
+// NotificationsDrawer/AICompanion) to keep the landing page chunk within the
+// 50 kB bundle budget (BLD-016-B). `ssr: false` + null loading means they
+// split into their own chunks and hydrate only when the route mounts.
+const ModuleStatusGrid = dynamic(
+  () => import('./sections/ModuleStatusGrid.js').then((mod) => ({ default: mod.ModuleStatusGrid })),
+  { ssr: false, loading: () => null },
+);
+const MemoryTimeline = dynamic(
+  () => import('./sections/MemoryTimeline.js').then((mod) => ({ default: mod.MemoryTimeline })),
+  { ssr: false, loading: () => null },
+);
+const JourneyOverview = dynamic(
+  () => import('./sections/JourneyOverview.js').then((mod) => ({ default: mod.JourneyOverview })),
+  { ssr: false, loading: () => null },
+);
+const PrioritiesList = dynamic(
+  () => import('./sections/PrioritiesList.js').then((mod) => ({ default: mod.PrioritiesList })),
+  { ssr: false, loading: () => null },
+);
+const RecommendationsPanel = dynamic(
+  () =>
+    import('./sections/RecommendationsPanel.js').then((mod) => ({
+      default: mod.RecommendationsPanel,
+    })),
+  { ssr: false, loading: () => null },
+);
+const NotificationsPanel = dynamic(
+  () =>
+    import('./sections/NotificationsPanel.js').then((mod) => ({ default: mod.NotificationsPanel })),
+  { ssr: false, loading: () => null },
+);
+const AIInsights = dynamic(
+  () => import('./sections/AIInsights.js').then((mod) => ({ default: mod.AIInsights })),
+  { ssr: false, loading: () => null },
+);
+const QuickActions = dynamic(
+  () => import('./sections/QuickActions.js').then((mod) => ({ default: mod.QuickActions })),
+  { ssr: false, loading: () => null },
+);
 
 // ── Session (from real auth, BLD-016C) ──────────────────────────────────────
 

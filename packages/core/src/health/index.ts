@@ -4,6 +4,8 @@
 // Implements BLP-001/D02 — Engineering Principle #9 (Observability)
 // ──────────────────────────────────────────────────────────────────
 
+import os from 'node:os';
+
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 
 export interface HealthCheckResult {
@@ -151,6 +153,41 @@ export function memoryHealthCheck(
       name,
       status: heapUsedMb < thresholdMb ? 'healthy' : 'degraded',
       message: `Heap: ${String(heapUsedMb)}MB / ${String(thresholdMb)}MB`,
+    };
+  };
+}
+
+/**
+ * Create a health check for CPU usage
+ */
+export function cpuHealthCheck(name: string = 'cpu', thresholdPercent: number = 80): HealthCheckFn {
+  return (): HealthCheck => {
+    let cpuPercent = 0;
+    try {
+      const load = os.loadavg()[0] ?? 0;
+      const cores = os.cpus().length || 1;
+      cpuPercent = Math.round((load / cores) * 100);
+    } catch {
+      cpuPercent = 0;
+    }
+    return {
+      name,
+      status: cpuPercent < thresholdPercent ? 'healthy' : 'degraded',
+      message: `CPU load: ${String(cpuPercent)}% (${String(thresholdPercent)}% threshold)`,
+    };
+  };
+}
+
+/**
+ * Create a health check for process uptime
+ */
+export function uptimeHealthCheck(name: string = 'uptime'): HealthCheckFn {
+  return (): HealthCheck => {
+    const uptimeSeconds = Math.floor(process.uptime());
+    return {
+      name,
+      status: 'healthy',
+      message: `Uptime: ${String(uptimeSeconds)}s`,
     };
   };
 }

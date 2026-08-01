@@ -1,12 +1,13 @@
-# RC-001 — Deliverable 18: Release Notes Draft
+# RC-001 — Deliverable 18: Release Notes
 
-**Version:** 1.0.0-rc1  
-**Date:** July 30, 2026  
-**Status:** DRAFT
+**Version:** 1.0.0  
+**Date:** July 31, 2026  
+**Status:** RELEASED  
+**Git:** tag `v1.0.0` (commit `2bef790`)
 
 ---
 
-## VedMoulya 1.0.0-rc1 — Release Candidate
+## VedMoulya 1.0.0 — Production Release
 
 ### Overview
 
@@ -51,13 +52,16 @@ This release marks **Feature Complete** and **Platform Freeze** status.
 | Metric                | Result                   |
 | --------------------- | ------------------------ |
 | TypeScript Errors     | 0                        |
-| Passing Tests         | 599+ (40 test files)     |
+| Passing Tests         | 2693 (206 test files)    |
 | Production Build      | ✅ Successful            |
 | Certification Reports | 18 BLD modules certified |
+| Production Readiness  | 92/100 — 🟢 (2026-07-31) |
 
 ### Known Limitations
 
 See [RC-001_D17_Known_Limitations.md](./RC-001_D17_Known_Limitations.md) for the complete list.
+
+- **DB URL credential heuristics:** fail-fast URL validation rejects loopback hosts, missing, empty, and placeholder values, but does not reject dev-style credentials (`postgres:postgres@`) on non-loopback hosts — operators must ensure production database credentials are real. (PH-001/T2)
 
 ### Installation
 
@@ -87,7 +91,13 @@ npm run dev
 
 ### Upgrade Notes
 
-This is the first release candidate — no upgrade path from previous versions.
+First production release — no upgrade path from previous versions.
+
+### Production Hardening (SPRINT PH-001)
+
+- Fail-fast configuration for all production secrets: `AUTH_JWT_SECRET`, `IDENTITY_DATABASE_URL`, `REDIS_URL`, AI provider keys (`AI_OPENAI_API_KEY`, `AI_ANTHROPIC_API_KEY`, `AI_GOOGLE_API_KEY`), SMTP credentials, and Google OAuth — startup fails with clear messages in `NODE_ENV=production`.
+- All workspaces with tests ship `vitest.config.ts`, `test` scripts, and per-workspace v8 coverage.
+- Repository foundation: MIT `LICENSE`, `.editorconfig`, enhanced root `README`.
 
 ### Support
 
@@ -96,4 +106,4 @@ This is the first release candidate — no upgrade path from previous versions.
 
 ---
 
-**Release Notes:** ✅ DRAFTED — Ready for review and publication.
+**Release Notes:** ✅ RELEASED — v1.0.0 published (tag `v1.0.0`).

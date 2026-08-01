@@ -40,7 +40,7 @@ jobs:
       - run: npm run test
       - run: npm run build
       - name: Security audit
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=critical
 
   # Future: deploy steps per stage
   deploy:

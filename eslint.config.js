@@ -37,6 +37,8 @@ export default tseslint.config(
             'apps/web/postcss.config.js',
             'apps/web/public/sw.js',
             'scripts/*.js',
+            'scripts/*.mjs',
+            'scripts/load/*.js',
           ],
           defaultProject: './tsconfig.eslint.json',
           maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 200,
@@ -124,6 +126,8 @@ export default tseslint.config(
     files: [
       'packages/services/src/**/*.js',
       'scripts/*.js',
+      'scripts/*.mjs',
+      'scripts/load/*.js',
     ],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
@@ -135,7 +139,15 @@ export default tseslint.config(
       '@typescript-eslint/restrict-plus-operands': 'off',
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-unnecessary-condition': 'off',
       'no-undef': 'off',
+      // Dev-tooling scripts parse dynamic JSON/files and print progress — the
+      // security rules are heuristic and produce false positives here; the
+      // files are not shipped to production.
+      'security/detect-object-injection': 'off',
+      'security/detect-non-literal-fs-filename': 'off',
+      'security/detect-non-literal-regexp': 'off',
+      'no-console': 'off',
     },
   },
   {

@@ -1,16 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { MemoryReflectionService } from '../MemoryReflectionService.js';
+import { MemoryMapper } from '../MemoryMapper.js';
 
 const mockFindByCategory = vi.hoisted(() => vi.fn());
 const mockSearch = vi.hoisted(() => vi.fn());
-const mockToDTO = vi.hoisted(() => vi.fn());
-
-vi.mock('../MemoryMapper.js', () => ({
-  MemoryMapper: {
-    toDTO: mockToDTO,
-  },
-}));
-
-import { MemoryReflectionService } from '../MemoryReflectionService.js';
 
 function createMockMemory(overrides: Record<string, unknown> = {}) {
   return {
@@ -30,7 +23,9 @@ function createMockMemory(overrides: Record<string, unknown> = {}) {
 
 describe('MemoryReflectionService', () => {
   let service: MemoryReflectionService;
-  let mockRepository: Record<string, vi.Mock>;
+  let mockRepository: Record<string, ReturnType<typeof vi.fn>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let toDTOSpy: ReturnType<typeof vi.spyOn<any, any>>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -41,13 +36,20 @@ describe('MemoryReflectionService', () => {
 
     service = new MemoryReflectionService(mockRepository as never);
 
-    mockToDTO.mockImplementation((m: Record<string, unknown>) => ({
-      id: m.id,
-      title: m.title,
-      content: m.content,
-      category: 'experience',
-      importance: m.importance,
-    }));
+    toDTOSpy = vi.spyOn(MemoryMapper, 'toDTO').mockImplementation(
+      (m: Record<string, unknown>) =>
+        ({
+          id: m.id,
+          title: m.title,
+          content: m.content,
+          category: 'experience',
+          importance: m.importance,
+        }) as never,
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe('reflectOnCategory', () => {
@@ -75,13 +77,16 @@ describe('MemoryReflectionService', () => {
         total: 3,
       });
 
-      mockToDTO.mockImplementation((m: Record<string, unknown>) => ({
-        id: m.id,
-        title: m.title,
-        content: m.content,
-        category: 'experience',
-        importance: m.importance,
-      }));
+      toDTOSpy.mockImplementation(
+        (m: Record<string, unknown>) =>
+          ({
+            id: m.id,
+            title: m.title,
+            content: m.content,
+            category: 'experience',
+            importance: m.importance,
+          }) as never,
+      );
 
       const result = await service.reflectOnCategory('experience' as never);
       expect(result.success).toBe(true);

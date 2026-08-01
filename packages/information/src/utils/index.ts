@@ -3,6 +3,10 @@
 // Helper functions for information lifecycle, classification, and quality
 // ──────────────────────────────────────────────────────────────────
 
+/* eslint-disable security/detect-object-injection -- Lookups use closed-union
+   keys from module constants (VALID_LIFECYCLE_TRANSITIONS,
+   CLASSIFICATION_LEVEL_ORDER) or caller-provided field names checked with
+   typeof !== 'undefined' guards; not attacker-controlled dynamic access. */
 import type {
   ClassificationLevel,
   IdentityInformationType,

@@ -14,11 +14,15 @@ vi.mock('@vedmoulya/domain', async () => {
   return {
     ...(actual as Record<string, unknown>),
     MemoryRepository: vi.fn(),
-    MemoryDomainService: vi.fn().mockImplementation(() => ({
-      applyDecay: mockApplyDecay,
-      applyRetentionPolicies: mockApplyRetentionPolicies,
-      suggestConsolidation: mockSuggestConsolidation,
-    })),
+    // Vitest 4: `new MemoryDomainService(repo)` constructs the mock — arrow
+    // functions are not constructible, so use a regular function.
+    MemoryDomainService: vi.fn().mockImplementation(function () {
+      return {
+        applyDecay: mockApplyDecay,
+        applyRetentionPolicies: mockApplyRetentionPolicies,
+        suggestConsolidation: mockSuggestConsolidation,
+      };
+    }),
   };
 });
 

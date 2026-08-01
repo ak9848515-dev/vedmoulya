@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — Dependabot Configuration
+# PH-002 — Enterprise Operations & Reliability (T7 Dependency Governance)
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 2
+updates:
+  # npm workspaces (all apps/packages/services share the root lockfile)
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '04:00'
+      timezone: 'UTC'
+    open-pull-requests-limit: 10
+    labels:
+      - 'dependencies'
+      - 'security'
+    versioning-strategy: 'auto'
+    commit-message:
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(deps-dev)'
+    groups:
+      typescript:
+        patterns: ['typescript', 'typescript-eslint', '@types/*']
+      react:
+        patterns: ['react', 'react-dom', '@types/react', '@types/react-dom']
+      test-tooling:
+        patterns: ['vitest', '@vitest/*', '@testing-library/*', 'jsdom']
+    ignore:
+      # Major framework upgrades require a dedicated migration sprint.
+      - dependency-name: 'next'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react-dom'
+        update-types: ['version-update:semver-major']
+
+  # GitHub Actions workflows
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '04:00'
+      timezone: 'UTC'
+    labels:
+      - 'dependencies'
+      - 'ci'
+    commit-message:
+      prefix: 'chore(ci)'

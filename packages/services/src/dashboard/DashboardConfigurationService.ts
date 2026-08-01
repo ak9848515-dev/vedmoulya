@@ -4,6 +4,9 @@
 // BLD-010 — Dashboard Experience Platform
 // ──────────────────────────────────────────────────────────────────
 
+/* eslint-disable security/detect-object-injection -- widgets/state lookups use
+   widget ids from a fixed DEFAULT_WIDGET_STATES registry; every unknown id is
+   rejected with an explicit error, so dynamic keys cannot reach the maps. */
 import type {
   DashboardConfigDTO,
   PersonalizationConfigDTO,
@@ -170,7 +173,14 @@ export class DashboardConfigurationService {
     state: Partial<WidgetStateDTO>,
   ): WidgetStateDTO {
     const config = this.getConfig(userId);
-    const current = config.widgets[widgetId] ?? DEFAULT_WIDGET_STATES[widgetId];
+    // Guard both the per-user map and the defaults with Object.hasOwn so a
+    // non-own key (e.g. '__proto__') falls through to undefined and throws
+    // instead of resolving to the prototype and mutating it on write.
+    const current = Object.hasOwn(config.widgets, widgetId)
+      ? config.widgets[widgetId]
+      : Object.hasOwn(DEFAULT_WIDGET_STATES, widgetId)
+        ? DEFAULT_WIDGET_STATES[widgetId]
+        : undefined;
     if (!current) throw new Error(`Unknown widget: ${widgetId}`);
     const updated: WidgetStateDTO = { ...current, ...state };
     config.widgets[widgetId] = updated;

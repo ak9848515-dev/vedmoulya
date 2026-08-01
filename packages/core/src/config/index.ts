@@ -1,6 +1,10 @@
+/* eslint-disable security/detect-object-injection -- Heuristic rule
+   false-positive: dynamic member access here uses typed/closed-union keys,
+   constant environment names, or fixed internal lists — never
+   attacker-controlled property names. */
 // ──────────────────────────────────────────────────────────────────
 // VedMoulya — Core Configuration
-// Fail-fast: required secrets have no default (P1-8).
+// Fail-fast: required secrets have no default (P1-8, P0-2, PH-001/T2).
 // ──────────────────────────────────────────────────────────────────
 
 import { EnvironmentError, isStrongSecret } from '../env/index.js';
@@ -31,6 +35,9 @@ export interface AuthConfig {
   jwtExpiresIn: string;
   refreshExpiresIn: string;
   bcryptRounds: number;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRedirectUri?: string;
 }
 
 export interface AiConfig {
@@ -39,6 +46,14 @@ export interface AiConfig {
   googleKey?: string;
   defaultProvider: string;
   routingStrategy: string;
+}
+
+export interface SmtpConfig {
+  host?: string;
+  port: number;
+  user?: string;
+  pass?: string;
+  from?: string;
 }
 
 export interface FeatureFlags {
@@ -58,11 +73,19 @@ export interface Configuration {
   redis: RedisConfig;
   auth: AuthConfig;
   ai: AiConfig;
+  smtp: SmtpConfig;
   features: FeatureFlags;
   observability: ObservabilityConfig;
 }
 
 export function loadConfiguration(): Configuration {
+  const aiEnabled = process.env.FF_AI_ASSISTANT_ENABLED !== 'false';
+  const defaultProvider = process.env.AI_DEFAULT_PROVIDER ?? 'openai';
+  const socialLoginEnabled = process.env.FF_SOCIAL_LOGIN_ENABLED === 'true';
+
+  const smtpHost = requireProdSecret('SMTP_HOST', { minLength: 4 });
+  const smtpConfigured = smtpHost !== undefined;
+
   return {
     app: {
       env: process.env.NODE_ENV ?? 'development',
@@ -87,17 +110,65 @@ export function loadConfiguration(): Configuration {
       jwtExpiresIn: process.env.AUTH_JWT_EXPIRES_IN ?? '15m',
       refreshExpiresIn: process.env.AUTH_REFRESH_EXPIRES_IN ?? '7d',
       bcryptRounds: parseInt(process.env.AUTH_BCRYPT_ROUNDS ?? '12', 10),
+      // OAuth2 credentials (PH-001/T2): required when social login is enabled.
+      googleClientId: requireProdSecret('GOOGLE_CLIENT_ID', {
+        required: socialLoginEnabled,
+        minLength: 8,
+        example: '1234567890-abc.apps.googleusercontent.com',
+        reason: 'Set GOOGLE_CLIENT_ID when FF_SOCIAL_LOGIN_ENABLED=true.',
+      }),
+      googleClientSecret: requireProdSecret('GOOGLE_CLIENT_SECRET', {
+        required: socialLoginEnabled,
+        minLength: 8,
+        example: 'GOCSPX-...',
+        reason: 'Set GOOGLE_CLIENT_SECRET when FF_SOCIAL_LOGIN_ENABLED=true.',
+      }),
+      googleRedirectUri: socialLoginEnabled
+        ? requireProdExternalUrl(
+            'GOOGLE_REDIRECT_URI',
+            'http://localhost:3000/api/v1/identity/auth/google/callback',
+          )
+        : process.env.GOOGLE_REDIRECT_URI?.trim() || undefined,
     },
     ai: {
-      openAiKey: process.env.AI_OPENAI_API_KEY,
-      anthropicKey: process.env.AI_ANTHROPIC_API_KEY,
-      googleKey: process.env.AI_GOOGLE_API_KEY,
-      defaultProvider: process.env.AI_DEFAULT_PROVIDER ?? 'openai',
+      // AI provider keys (PH-001/T2): the default provider's key is required in
+      // production/staging when the AI assistant is enabled; any key that IS set
+      // must be a real secret (no placeholders, no localhost).
+      openAiKey: requireProdSecret('AI_OPENAI_API_KEY', {
+        required: aiEnabled && defaultProvider === 'openai',
+        minLength: 32,
+        example: 'sk-...',
+        reason:
+          'Set AI_OPENAI_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
+      }),
+      anthropicKey: requireProdSecret('AI_ANTHROPIC_API_KEY', {
+        required: aiEnabled && defaultProvider === 'anthropic',
+        minLength: 32,
+        example: 'sk-ant-...',
+        reason:
+          'Set AI_ANTHROPIC_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
+      }),
+      googleKey: requireProdSecret('AI_GOOGLE_API_KEY', {
+        required: aiEnabled && defaultProvider === 'google',
+        minLength: 32,
+        example: 'AIza...',
+        reason:
+          'Set AI_GOOGLE_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
+      }),
+      defaultProvider,
       routingStrategy: process.env.AI_ROUTING_STRATEGY ?? 'capability',
     },
+    smtp: {
+      host: smtpHost,
+      port: Number(process.env.SMTP_PORT ?? '587'),
+      // If SMTP_HOST is configured, credentials are required (PH-001/T2).
+      user: requireProdSecret('SMTP_USER', { required: smtpConfigured, minLength: 4 }),
+      pass: requireProdSecret('SMTP_PASS', { required: smtpConfigured, minLength: 8 }),
+      from: process.env.SMTP_FROM?.trim() || undefined,
+    },
     features: {
-      socialLoginEnabled: process.env.FF_SOCIAL_LOGIN_ENABLED === 'true',
-      aiAssistantEnabled: process.env.FF_AI_ASSISTANT_ENABLED !== 'false',
+      socialLoginEnabled,
+      aiAssistantEnabled: aiEnabled,
       marketplaceEnabled: process.env.FF_MARKETPLACE_ENABLED === 'true',
     },
     observability: {
@@ -118,8 +189,11 @@ export function loadConfiguration(): Configuration {
  * Outside NODE_ENV=development the value is REQUIRED and must not point at a
  * loopback host — fail fast instead of silently connecting to localhost
  * infrastructure in production/staging/test (P0-2, extends P1-8).
+ *
+ * Exported so service-level configs (decision, execution) can enforce the
+ * same guarantee for their own DATABASE_URLs (PH-001/T2).
  */
-function requireExternalUrl(key: string, devDefault: string): string {
+export function requireExternalUrl(key: string, devDefault: string): string {
   const env = process.env.NODE_ENV ?? 'development';
   const raw = process.env[key];
   const value = raw?.trim();
@@ -141,6 +215,112 @@ function requireExternalUrl(key: string, devDefault: string): string {
   }
 
   return value;
+}
+
+/**
+ * Environments that must reject weak/placeholder/absent secrets.
+ * Development and test stay lenient so local dev and the unit-test suite
+ * (NODE_ENV=test) keep working without real provider credentials (PH-001/T2).
+ */
+const STRICT_ENVS = new Set(['production', 'staging']);
+
+function isStrictEnv(): boolean {
+  return STRICT_ENVS.has(process.env.NODE_ENV ?? 'development');
+}
+
+const PLACEHOLDER_PATTERN =
+  /development-secret|change[-_]?me|your[-_]?(key|secret|password)|placeholder|changeme|^secret$|^test$|^your[-_]?api[-_]?key$|localhost|127\.0\.0\.1|0\.0\.0\.0|::1/i;
+
+/**
+ * A production secret must be long enough and must not look like a
+ * placeholder, a development default, or a loopback address (PH-001/T2).
+ *
+ * Note: intentionally more lenient than `isStrongSecret` (used for JWT),
+ * because AI/SMTP/OAuth keys have provider-specific formats that an
+ * entropy heuristic cannot validate; we only reject obvious placeholders
+ * and loopback defaults here.
+ */
+function isNotPlaceholderSecret(value: string, minLength: number): boolean {
+  return value.length >= minLength && !PLACEHOLDER_PATTERN.test(value);
+}
+
+/**
+ * Fail-fast validation for production secrets (AI keys, OAuth, SMTP).
+ * In development/test the value is optional; in production/staging a required
+ * secret must be present and real, and any value that IS set must not be a
+ * placeholder / loopback default. Startup throws with a clear message.
+ * Exported for reuse by service-level configs (PH-001/T2).
+ */
+export function requireProdSecret(
+  key: string,
+  opts: { required?: boolean; minLength?: number; example?: string; reason?: string } = {},
+): string | undefined {
+  const raw = process.env[key];
+  const value = raw?.trim();
+
+  if (!isStrictEnv()) {
+    return value && value !== '' ? value : undefined;
+  }
+
+  const minLength = opts.minLength ?? 16;
+  if (opts.required) {
+    if (!value || value === '') {
+      const err = new EnvironmentError([key]);
+      err.message = `${key} is REQUIRED in NODE_ENV=${String(process.env.NODE_ENV)} (fail-fast). ${
+        opts.reason ?? ''
+      }${opts.example ? ` Example: ${opts.example}` : ''}`;
+      throw err;
+    }
+    if (!isNotPlaceholderSecret(value, minLength)) {
+      const err = new EnvironmentError([], [key]);
+      err.message =
+        `${key} must be a real secret (>= ${String(minLength)} chars, not a placeholder / ` +
+        `localhost / development default) in NODE_ENV=${String(process.env.NODE_ENV)} (fail-fast).` +
+        (opts.example ? ` Example: ${opts.example}` : '');
+      throw err;
+    }
+    return value;
+  }
+
+  // Optional secret: if set, it must still be a real secret.
+  if (value && !isNotPlaceholderSecret(value, minLength)) {
+    const err = new EnvironmentError([], [key]);
+    err.message =
+      `${key} is set but looks like a placeholder / localhost / development default in ` +
+      `NODE_ENV=${String(process.env.NODE_ENV)} (fail-fast). Provide a real value or unset it.`;
+    throw err;
+  }
+  return value || undefined;
+}
+
+/**
+ * Production-only URL guard for service-level infrastructure (DB URLs).
+ * In development/test the provided default is allowed; in production/staging
+ * the URL must be set and must not be a loopback address (PH-001/T2).
+ * The fallback chain (e.g. a generic DATABASE_URL passed as devDefault) is
+ * preserved in production — only the final resolved URL is validated, so a
+ * deployment using a single generic DATABASE_URL keeps working while a
+ * localhost/loopback value still fails fast.
+ * Exported so service configs (decision, execution, memory, knowledge) can
+ * enforce the same guarantee without breaking local dev or unit tests.
+ */
+export function requireProdExternalUrl(key: string, devDefault: string): string {
+  const raw = process.env[key];
+  const value = raw?.trim();
+
+  if (!isStrictEnv()) {
+    return value && value !== '' ? value : devDefault;
+  }
+
+  const resolved = value && value !== '' ? value : devDefault;
+  if (resolved === '' || /localhost|127\.0\.0\.1|0\.0\.0\.0|::1/i.test(resolved)) {
+    const err = new EnvironmentError([key]);
+    err.message =
+      `${key} (or its fallback) must resolve to a non-localhost URL in ` +
+      `NODE_ENV=${String(process.env.NODE_ENV)} (fail-fast). Refusing the development default.`;
+    throw err;
+  }
+  return resolved;
 }
 
 const JWT_SECRET_HINT = `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`;

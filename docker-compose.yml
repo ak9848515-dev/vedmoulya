@@ -1,6 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # VedMoulya — Local Development Infrastructure
 # Implements BLP-002/D07 DevOps Platform — Docker for local dev
+# PH-002 — Enterprise Operations & Reliability (observability profile)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -36,9 +37,36 @@ services:
       timeout: 5s
       retries: 5
 
+  # Prometheus — Metrics scraper (PH-002/T1 Observability) — optional
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: vedmoulya-prometheus
+    restart: unless-stopped
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./configs/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    profiles:
+      - observability
+
+  # OpenTelemetry Collector — OTLP ingest (PH-002/T1) — optional
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    container_name: vedmoulya-otel-collector
+    restart: unless-stopped
+    ports:
+      - '4317:4317'
+      - '4318:4318'
+      - '8889:8889'
+    volumes:
+      - ./configs/observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    profiles:
+      - observability
+
   # Grafana — Observability dashboard (BLP-002/D09) — optional
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.3.0
     container_name: vedmoulya-grafana
     restart: unless-stopped
     ports:
@@ -48,9 +76,14 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: 'Viewer'
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./configs/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
     profiles:
       - observability
 
 volumes:
   postgres-data:
   grafana-data:
+  prometheus-data:

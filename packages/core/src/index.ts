@@ -41,7 +41,13 @@ export {
 } from './errors/index.js';
 
 // Configuration
-export { config, loadConfiguration } from './config/index.js';
+export {
+  config,
+  loadConfiguration,
+  requireProdSecret,
+  requireExternalUrl,
+  requireProdExternalUrl,
+} from './config/index.js';
 export type {
   Configuration,
   AppConfig,
@@ -49,6 +55,7 @@ export type {
   RedisConfig,
   AuthConfig,
   AiConfig,
+  SmtpConfig,
   FeatureFlags,
   ObservabilityConfig,
 } from './config/index.js';
@@ -84,6 +91,8 @@ export {
   databaseHealthCheck,
   redisHealthCheck,
   memoryHealthCheck,
+  cpuHealthCheck,
+  uptimeHealthCheck,
 } from './health/index.js';
 export type {
   HealthStatus,
@@ -106,11 +115,42 @@ export type { DomainEvent, EventHandler, EventBus } from './event-bus/index.js';
 
 // Lifecycle
 export { ApplicationLifecycle, appLifecycle } from './lifecycle/index.js';
+export { GracefulShutdown } from './lifecycle/gracefulShutdown.js';
+export type {
+  GracefulShutdownOptions,
+  GracefulShutdownResult,
+  ShutdownResource,
+} from './lifecycle/gracefulShutdown.js';
 export type { LifecyclePhase, LifecycleHook } from './lifecycle/index.js';
 
 // Bootstrap
 export { bootstrap } from './bootstrap/index.js';
 export type { BootstrapOptions, BootstrapResult } from './bootstrap/index.js';
+
+// Observability (PH-002 T1/T3)
+export {
+  metricsToPrometheus,
+  prometheusMetrics,
+  metricsSnapshotJson,
+  OtelExporter,
+  createCorrelationId,
+  runWithCorrelation,
+  withNewCorrelation,
+  getCorrelationId,
+  ensureCorrelationId,
+  ConsoleErrorReporter,
+  HttpErrorReporter,
+  ErrorReporterHub,
+  errorReporter,
+  getRuntimeInfo,
+  recordRuntimeMetrics,
+} from './observability/index.js';
+export type {
+  OtelExporterOptions,
+  ErrorReporter,
+  ErrorReportContext,
+  RuntimeInfo,
+} from './observability/index.js';
 
 // Utilities
 export {

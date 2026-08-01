@@ -163,10 +163,19 @@ describe('Configuration', () => {
     const saved = process.env.NODE_ENV;
     const savedDb = process.env.IDENTITY_DATABASE_URL;
     const savedRedis = process.env.REDIS_URL;
+    const savedAiKey = process.env.AI_OPENAI_API_KEY;
+    const savedAiProvider = process.env.AI_DEFAULT_PROVIDER;
+    const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
     try {
       process.env.NODE_ENV = 'production';
       process.env.IDENTITY_DATABASE_URL = 'postgres://user:pass@db.prod.internal:5432/vedmoulya';
       process.env.REDIS_URL = 'redis://redis.prod.internal:6379';
+      // AI assistant is enabled by default and openai is the default provider,
+      // so a real key is required in production (PH-001/T2). Pin provider/flags
+      // so ambient shell env cannot change the assertion.
+      process.env.AI_DEFAULT_PROVIDER = 'openai';
+      delete process.env.FF_AI_ASSISTANT_ENABLED;
+      process.env.AI_OPENAI_API_KEY = 'sk-test-0123456789abcdef0123456789abcdef0123456789abcdef';
       const cfg = loadConfiguration();
       expect(cfg.database.url).toBe('postgres://user:pass@db.prod.internal:5432/vedmoulya');
       expect(cfg.redis.url).toBe('redis://redis.prod.internal:6379');
@@ -176,6 +185,136 @@ describe('Configuration', () => {
       else process.env.IDENTITY_DATABASE_URL = savedDb;
       if (savedRedis === undefined) delete process.env.REDIS_URL;
       else process.env.REDIS_URL = savedRedis;
+      if (savedAiKey === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = savedAiKey;
+      if (savedAiProvider === undefined) delete process.env.AI_DEFAULT_PROVIDER;
+      else process.env.AI_DEFAULT_PROVIDER = savedAiProvider;
+      if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
+      else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+    }
+  });
+
+  // ── PH-001/T2 — production secret fail-fast (AI keys, OAuth, SMTP) ────────
+
+  it('requires the default AI provider key in production (PH-001/T2)', () => {
+    const saved = process.env.NODE_ENV;
+    const savedKey = process.env.AI_OPENAI_API_KEY;
+    const savedProvider = process.env.AI_DEFAULT_PROVIDER;
+    const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.AI_DEFAULT_PROVIDER = 'openai';
+      delete process.env.FF_AI_ASSISTANT_ENABLED;
+      delete process.env.AI_OPENAI_API_KEY;
+      expect(() => loadConfiguration()).toThrow(/AI_OPENAI_API_KEY.*REQUIRED/);
+    } finally {
+      process.env.NODE_ENV = saved ?? 'test';
+      if (savedKey === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = savedKey;
+      if (savedProvider === undefined) delete process.env.AI_DEFAULT_PROVIDER;
+      else process.env.AI_DEFAULT_PROVIDER = savedProvider;
+      if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
+      else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+    }
+  });
+
+  it('rejects placeholder AI keys in production (PH-001/T2)', () => {
+    const saved = process.env.NODE_ENV;
+    const savedKey = process.env.AI_OPENAI_API_KEY;
+    const savedProvider = process.env.AI_DEFAULT_PROVIDER;
+    const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.AI_DEFAULT_PROVIDER = 'openai';
+      delete process.env.FF_AI_ASSISTANT_ENABLED;
+      process.env.AI_OPENAI_API_KEY = 'your-api-key';
+      expect(() => loadConfiguration()).toThrow(/AI_OPENAI_API_KEY/);
+    } finally {
+      process.env.NODE_ENV = saved ?? 'test';
+      if (savedKey === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = savedKey;
+      if (savedProvider === undefined) delete process.env.AI_DEFAULT_PROVIDER;
+      else process.env.AI_DEFAULT_PROVIDER = savedProvider;
+      if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
+      else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+    }
+  });
+
+  it('allows AI keys to be absent in development (PH-001/T2)', () => {
+    const saved = process.env.NODE_ENV;
+    const savedKey = process.env.AI_OPENAI_API_KEY;
+    try {
+      process.env.NODE_ENV = 'development';
+      delete process.env.AI_OPENAI_API_KEY;
+      const cfg = loadConfiguration();
+      expect(cfg.ai.openAiKey).toBeUndefined();
+    } finally {
+      process.env.NODE_ENV = saved ?? 'test';
+      if (savedKey === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = savedKey;
+    }
+  });
+
+  it('requires OAuth secrets in production when social login is enabled (PH-001/T2)', () => {
+    // Note: loadConfiguration() evaluates database → auth → ai → smtp in source
+    // order, so this throws on GOOGLE_CLIENT_ID before any AI key is required —
+    // AI_OPENAI_API_KEY need not be provisioned here. Keep this ordering in mind
+    // if the config object is ever reordered.
+    const saved = process.env.NODE_ENV;
+    const savedFlag = process.env.FF_SOCIAL_LOGIN_ENABLED;
+    const savedId = process.env.GOOGLE_CLIENT_ID;
+    const savedSecret = process.env.GOOGLE_CLIENT_SECRET;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.FF_SOCIAL_LOGIN_ENABLED = 'true';
+      delete process.env.GOOGLE_CLIENT_ID;
+      delete process.env.GOOGLE_CLIENT_SECRET;
+      expect(() => loadConfiguration()).toThrow(/GOOGLE_CLIENT_ID.*REQUIRED/);
+    } finally {
+      process.env.NODE_ENV = saved ?? 'test';
+      if (savedFlag === undefined) delete process.env.FF_SOCIAL_LOGIN_ENABLED;
+      else process.env.FF_SOCIAL_LOGIN_ENABLED = savedFlag;
+      if (savedId === undefined) delete process.env.GOOGLE_CLIENT_ID;
+      else process.env.GOOGLE_CLIENT_ID = savedId;
+      if (savedSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
+      else process.env.GOOGLE_CLIENT_SECRET = savedSecret;
+    }
+  });
+
+  it('requires SMTP user/pass in production when SMTP_HOST is set (PH-001/T2)', () => {
+    const saved = process.env.NODE_ENV;
+    const savedHost = process.env.SMTP_HOST;
+    const savedUser = process.env.SMTP_USER;
+    const savedPass = process.env.SMTP_PASS;
+    const savedAiKey = process.env.AI_OPENAI_API_KEY;
+    const savedAiProvider = process.env.AI_DEFAULT_PROVIDER;
+    const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.SMTP_HOST = 'smtp.prod.internal';
+      // AI assistant is enabled by default with openai default provider, so a
+      // real key is evaluated before the SMTP section (PH-001/T2). Pin
+      // provider/flags so ambient shell env cannot change the assertion.
+      process.env.AI_DEFAULT_PROVIDER = 'openai';
+      delete process.env.FF_AI_ASSISTANT_ENABLED;
+      process.env.AI_OPENAI_API_KEY = 'sk-test-0123456789abcdef0123456789abcdef0123456789abcdef';
+      delete process.env.SMTP_USER;
+      delete process.env.SMTP_PASS;
+      expect(() => loadConfiguration()).toThrow(/SMTP_USER.*REQUIRED/);
+    } finally {
+      process.env.NODE_ENV = saved ?? 'test';
+      if (savedHost === undefined) delete process.env.SMTP_HOST;
+      else process.env.SMTP_HOST = savedHost;
+      if (savedUser === undefined) delete process.env.SMTP_USER;
+      else process.env.SMTP_USER = savedUser;
+      if (savedPass === undefined) delete process.env.SMTP_PASS;
+      else process.env.SMTP_PASS = savedPass;
+      if (savedAiKey === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = savedAiKey;
+      if (savedAiProvider === undefined) delete process.env.AI_DEFAULT_PROVIDER;
+      else process.env.AI_DEFAULT_PROVIDER = savedAiProvider;
+      if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
+      else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
     }
   });
 

@@ -4,7 +4,7 @@
 // ARC-003 — Knowledge Graph Bounded Context
 // ──────────────────────────────────────────────────────────────────
 
-import { config, logger } from '@vedmoulya/core';
+import { logger, requireProdExternalUrl } from '@vedmoulya/core';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '../../schema/knowledge.js';
@@ -21,14 +21,15 @@ export interface DatabaseConfig {
 
 /** Get the database configuration from environment */
 export function getDatabaseConfig(): DatabaseConfig {
-  const dbConfig = (config as unknown as { database?: Record<string, unknown> }).database;
   return {
-    url:
-      (dbConfig?.url as string | undefined) ??
-      'postgres://postgres:postgres@localhost:5432/vedmoulya_knowledge',
-    poolMin: (dbConfig?.poolMin as number | undefined) ?? 2,
-    poolMax: (dbConfig?.poolMax as number | undefined) ?? 20,
-    timeout: (dbConfig?.timeout as number | undefined) ?? 30000,
+    // Production/staging: KNOWLEDGE_DATABASE_URL must be a real non-localhost URL (PH-001/T2).
+    url: requireProdExternalUrl(
+      'KNOWLEDGE_DATABASE_URL',
+      process.env.DATABASE_URL ?? 'postgres://localhost:5432/vedmoulya_knowledge',
+    ),
+    poolMin: Number(process.env.DB_POOL_MIN ?? '2'),
+    poolMax: Number(process.env.DB_POOL_MAX ?? '20'),
+    timeout: Number(process.env.DB_TIMEOUT ?? '30000'),
   };
 }
 

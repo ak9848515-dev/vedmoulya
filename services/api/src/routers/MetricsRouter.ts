@@ -4,6 +4,7 @@
 // BLD-016A — API Gateway & Platform Services
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { metrics, metricsSnapshotJson } from '@vedmoulya/core';
 import type { DashboardApplicationService } from '@vedmoulya/services';
 import type { TRPCContext } from '../router.js';
 import type { ApiResponse } from '../services/ResponseMapper.js';
@@ -11,6 +12,7 @@ import type { ApiResponse } from '../services/ResponseMapper.js';
 export function createMetricsRouter(dashboardService: DashboardApplicationService): {
   dashboard: (input: { userId: string }, _ctx: TRPCContext) => Promise<ApiResponse>;
   lifecycle: (input: { userId: string }, _ctx: TRPCContext) => Promise<ApiResponse>;
+  snapshot: () => ApiResponse;
 } {
   return {
     dashboard: async (input: { userId: string }, _ctx: TRPCContext): Promise<ApiResponse> => {
@@ -54,6 +56,19 @@ export function createMetricsRouter(dashboardService: DashboardApplicationServic
         meta: {
           timestamp: new Date().toISOString(),
           duration: dashboard.latency ?? 0,
+          version: '1.0.0',
+        },
+      };
+    },
+
+    /** Raw metrics snapshot (PH-002/T1) — JSON view of the metrics registry. */
+    snapshot: (): ApiResponse => {
+      return {
+        success: true,
+        data: metricsSnapshotJson(metrics),
+        meta: {
+          timestamp: new Date().toISOString(),
+          duration: 0,
           version: '1.0.0',
         },
       };
