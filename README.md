@@ -38,8 +38,8 @@ Help one million people create sustainable livelihoods.
 VedMoulya is a monorepo platform (Execution Operating System) composed of:
 
 - **3 application layers** — Next.js web app, API gateway (tRPC), shared UI component library
-- **13 services** — identity, knowledge, memory, decision, execution, orchestrator (AI), learning, marketplace, notifications, career, business, and more
-- **11 packages** — core, domain, services, ai, ui, config, information, intelligence, shared, testing
+- **12 services** — identity, knowledge, memory, decision, execution, orchestrator (AI), learning, marketplace, notifications, career, business, and the API gateway
+- **10 packages** — core, domain, services, ai, ui, config, information, intelligence, shared, testing
 - **TypeScript throughout** with strict mode, Vitest unit testing, ESLint, Prettier
 
 The platform is architected around five core engines: **Identity**, **Knowledge Graph**, **Memory**, **Decision Intelligence**, and **Execution Intelligence**, unified by an **AI Orchestrator** with pluggable providers (OpenAI, Anthropic, Mock) and a Life OS **Dashboard**.
