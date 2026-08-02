@@ -7,6 +7,29 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest';
+
+// PR-003A: pin the process-metrics snapshot so the HealthRouter cpu/memory
+// components are deterministic. cpuUsagePercent() measures process CPU over
+// the sub-millisecond interval since the previous getRuntimeInfo() call, so
+// in a shared/loaded vitest worker it can spuriously read >=80% (or the heap
+// can sit above the 512MB threshold after heavy imports), which flips the
+// overall health status to 'degraded' and makes this suite flaky. The router
+// logic is what is under test here — not the host OS load.
+vi.mock('@vedmoulya/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vedmoulya/core')>();
+  return {
+    ...actual,
+    getRuntimeInfo: () => {
+      const info = actual.getRuntimeInfo();
+      return {
+        ...info,
+        cpu: { ...info.cpu, cpuUsagePercent: 0, loadAvg1m: 0 },
+        memory: { ...info.memory, heapUsedBytes: 64 * 1024 * 1024 },
+      };
+    },
+  };
+});
+
 import { createAppRouter, t } from '../services/RouterRegistry.js';
 import { ApiApplicationService } from '../services/ApiApplicationService.js';
 import { createMetricsRouter } from '../routers/MetricsRouter.js';
@@ -385,6 +408,42 @@ describe('createAppRouter — real pipeline (auth + rate limit + handlers)', () 
     expect((await caller.metrics.dashboard({ userId: 'rr-t-user' })).success).toBe(true);
     expect((await caller.metrics.lifecycle({ userId: 'rr-t-user' })).success).toBe(true);
     expect((await caller.metrics.snapshot()).success).toBe(true);
+  });
+});
+
+// ── Request Metrics (PH-002/T1 — per-request observability) ─────────────────
+
+describe('createAppRouter — request metrics middleware', () => {
+  it('records api.requests.total and latency for every procedure call', async () => {
+    const before = metrics.getCounter('api.requests.total');
+    const router = createAppRouter(createMockServices() as unknown as ApiApplicationService);
+    const caller = t.createCallerFactory(router)(testCtx);
+
+    await caller.health.live();
+    await caller.health.version();
+
+    expect(metrics.getCounter('api.requests.total')).toBeGreaterThan(before);
+    const stats = metrics.histogramStats('api.requests.latency_ms');
+    expect(stats).toBeDefined();
+    expect(stats?.count).toBeGreaterThanOrEqual(2);
+  });
+
+  it('increments api.requests.error when a procedure throws', async () => {
+    const errBefore = metrics.getCounter('api.requests.error');
+    const router = createAppRouter(createMockServices() as unknown as ApiApplicationService);
+    const ctx: TRPCContext = { userId: 'rr-metrics-err', email: 'e@v.com', role: 'user' };
+    const caller = t.createCallerFactory(router)(ctx);
+
+    // Auth-tier rate limit is 10/min; exhaust it to force a thrown TRPCError.
+    for (let i = 0; i < 10; i++) {
+      await caller.identity.getProfile({ userId: 'rr-metrics-err' }).catch(() => {});
+    }
+    await expect(caller.identity.getProfile({ userId: 'rr-metrics-err' })).rejects.toMatchObject({
+      code: 'TOO_MANY_REQUESTS',
+    });
+
+    expect(metrics.getCounter('api.requests.error')).toBeGreaterThan(errBefore);
+    expect(metrics.getCounter('api.ratelimit.hit')).toBeGreaterThan(0);
   });
 });
 

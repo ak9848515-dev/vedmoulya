@@ -5,7 +5,30 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { appRouter } from '../router.js';
+
+// PR-003A: pin the process-metrics snapshot so the HealthRouter cpu/memory
+// components are deterministic. cpuUsagePercent() measures process CPU over
+// the sub-millisecond interval since the previous getRuntimeInfo() call, so
+// in a shared/loaded vitest worker it can spuriously read >=80% (or the heap
+// can sit above the 512MB threshold after heavy imports), which flips the
+// overall health status to 'degraded' and makes this suite flaky. The router
+// logic is what is under test here — not the host OS load.
+vi.mock('@vedmoulya/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vedmoulya/core')>();
+  return {
+    ...actual,
+    getRuntimeInfo: () => {
+      const info = actual.getRuntimeInfo();
+      return {
+        ...info,
+        cpu: { ...info.cpu, cpuUsagePercent: 0, loadAvg1m: 0 },
+        memory: { ...info.memory, heapUsedBytes: 64 * 1024 * 1024 },
+      };
+    },
+  };
+});
+
+import { getAppRouter } from '../router.js';
 import { t } from '../services/RouterRegistry.js';
 import { createHealthRouter } from '../routers/HealthRouter.js';
 import { createLifeOSRouter } from '../routers/LifeOSRouter.js';
@@ -813,7 +836,7 @@ describe('MetricsRouter', () => {
 // unauthenticated and cross-user calls before any service resolver runs.
 
 describe('Auth enforcement (strict, real pipeline)', () => {
-  const createCaller = t.createCallerFactory(appRouter);
+  const createCaller = t.createCallerFactory(getAppRouter());
 
   it('rejects unauthenticated calls with UNAUTHORIZED', async () => {
     const caller = createCaller({ userId: 'anonymous', email: '', role: 'guest' });

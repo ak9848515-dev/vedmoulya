@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMemoryRouter } from '../routes/MemoryRoutes.js';
 import type { MemoryApplicationService } from '@vedmoulya/services';
 
@@ -406,5 +406,58 @@ describe('memoryRouteConfig', () => {
     const { memoryRouteConfig } = await import('../routes/MemoryRoutes.js');
     expect(memoryRouteConfig.basePath).toBe('/api/v1/memory');
     expect(memoryRouteConfig.tags).toContain('Memory Engine');
+  });
+});
+
+// PR-003B — cover the CORS configuration branches in createMemoryRouter
+// (API_CORS_ORIGIN parse paths added by the CORS hardening sprint).
+// Hono's cors() reflects a matching request Origin into the
+// access-control-allow-origin header; a non-matching origin gets no header.
+describe('MemoryRoutes CORS configuration', () => {
+  const original = process.env.API_CORS_ORIGIN;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.API_CORS_ORIGIN;
+    } else {
+      process.env.API_CORS_ORIGIN = original;
+    }
+  });
+
+  it('parses a single configured origin into the CORS allow-list', async () => {
+    process.env.API_CORS_ORIGIN = 'https://app.vedmoulya.dev';
+    const router = createMemoryRouter(createMockService().service);
+    const res = await router.request('/health', {
+      headers: { origin: 'https://app.vedmoulya.dev' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://app.vedmoulya.dev');
+  });
+
+  it('parses multiple comma-separated origins and allows each', async () => {
+    process.env.API_CORS_ORIGIN = 'https://a.dev, https://b.dev';
+    const router = createMemoryRouter(createMockService().service);
+    for (const origin of ['https://a.dev', 'https://b.dev']) {
+      const res = await router.request('/health', { headers: { origin } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBe(origin);
+    }
+  });
+
+  it('does not reflect a non-allow-listed origin', async () => {
+    process.env.API_CORS_ORIGIN = 'https://app.vedmoulya.dev';
+    const router = createMemoryRouter(createMockService().service);
+    const res = await router.request('/health', {
+      headers: { origin: 'https://evil.example.com' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('falls back to the permissive wildcard when the configured list is empty', async () => {
+    process.env.API_CORS_ORIGIN = ', ,';
+    const router = createMemoryRouter(createMockService().service);
+    const res = await router.request('/health');
+    expect(res.status).toBe(200);
   });
 });
