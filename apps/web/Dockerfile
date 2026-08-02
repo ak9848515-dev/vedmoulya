@@ -18,8 +18,9 @@ RUN npm ci --ignore-scripts
 
 # Build core foundation then the web app
 RUN npm run build:core
-RUN npm run build -w packages/domain -w packages/ai -w packages/services -w packages/ui -w services/api
-RUN npm run build -w apps/web
+# Build all workspaces in dependency order (explicit -w lists omitted deps
+# such as packages/information, breaking tsc with TS6305 in CI).
+RUN npm run build --workspaces --if-present
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime

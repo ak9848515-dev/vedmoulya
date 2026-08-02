@@ -18,7 +18,9 @@ RUN npm ci --ignore-scripts
 
 # Build the core foundation first, then the api service
 RUN npm run build:core
-RUN npm run build -w packages/domain -w packages/ai -w packages/services
+# Build all workspaces in dependency order (explicit -w lists omitted deps
+# such as packages/information, breaking tsc with TS6305 in CI).
+RUN npm run build --workspaces --if-present
 RUN npm run build -w services/api
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
