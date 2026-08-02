@@ -10,9 +10,13 @@
     "lint": "next lint",
     "clean": "rm -rf .next",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "build:mobile": "node scripts/build-mobile.mjs",
+    "mobile:add": "npx cap add android",
+    "mobile:sync": "npx cap sync android"
   },
   "dependencies": {
+    "@capacitor/core": "^8.5.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@tanstack/react-query": "^5.101.4",
     "@trpc/client": "^11.18.0",
@@ -31,6 +35,8 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
     "@storybook/addon-a11y": "^8.6.18",
     "@storybook/addon-essentials": "^8.6.14",
     "@storybook/addon-interactions": "^8.6.14",

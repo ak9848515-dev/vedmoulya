@@ -38,11 +38,15 @@ export function Providers({ children }: ProvidersProps): React.JSX.Element {
       }),
   );
 
+  // The gateway endpoint is same-origin in the web app but must point at a
+  // remote gateway from the Capacitor WebView / static export (RD-001).
+  const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL ?? '/api/trpc';
+
   const [trpcClient] = useState(() =>
     createTRPCClient<AppRouter>({
       links: [
         httpBatchLink({
-          url: '/api/trpc',
+          url: gatewayUrl,
           // Attach the JWT access token from the auth store (BLD-016C)
           headers: () => {
             const accessToken = getAccessToken();

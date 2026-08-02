@@ -56,3 +56,8 @@ service-account.json
 .tmp/
 temp/
 tmp/
+
+# Mobile (RD-001) — build output & signing material
+apps/web/out/
+apps/web/android/keystore.properties
+apps/web/android/*.jks
