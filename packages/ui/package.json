@@ -39,7 +39,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^11.0.0",
-    "lucide-react": "^0.460.0",
+    "lucide-react": "^1.28.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "storybook": "^8.6.14",
