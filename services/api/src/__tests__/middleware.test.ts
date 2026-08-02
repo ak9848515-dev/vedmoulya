@@ -4,7 +4,7 @@
 // BLD-016A — API Gateway & Platform Services
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { TRPCError } from '@trpc/server';
 import { SignJWT } from 'jose';
 import { config } from '@vedmoulya/core';
@@ -135,6 +135,12 @@ describe('validateOrThrow', () => {
 // ── Rate Limiter ─────────────────────────────────────────────────────────────
 
 describe('checkRateLimit', () => {
+  // Env stubs used by the tier-override tests must never leak to sibling
+  // tests even if an assertion fails (vitest does not auto-unstub).
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('allows first request within limit', () => {
     const result = checkRateLimit('user-1', { maxRequests: 3, windowMs: 60_000 });
     expect(result).toBe(true);
@@ -171,6 +177,27 @@ describe('checkRateLimit', () => {
   it('uses health tier with higher limits', () => {
     const config = RateLimitTiers.health;
     expect(config.maxRequests).toBe(200);
+  });
+
+  it('honors env overrides for tier limits', async () => {
+    vi.stubEnv('RATE_LIMIT_HEALTH_MAX', '5000');
+    vi.stubEnv('RATE_LIMIT_HEALTH_WINDOW_MS', '120000');
+    // vi.resetModules() forces the next dynamic import to re-evaluate the
+    // module top-level, so tier resolution re-reads the stubbed env. (A
+    // cache-busted query-string import is rejected by Vitest 4.)
+    vi.resetModules();
+    const fresh = await import('../middleware/rate-limit.js');
+    expect(fresh.RateLimitTiers.health.maxRequests).toBe(5000);
+    expect(fresh.RateLimitTiers.health.windowMs).toBe(120000);
+    // Untouched tiers keep defaults.
+    expect(fresh.RateLimitTiers.standard.maxRequests).toBe(100);
+  });
+
+  it('falls back to defaults for invalid env values', async () => {
+    vi.stubEnv('RATE_LIMIT_AUTH_MAX', 'not-a-number');
+    vi.resetModules();
+    const fresh = await import('../middleware/rate-limit.js');
+    expect(fresh.RateLimitTiers.auth.maxRequests).toBe(10);
   });
 });
 

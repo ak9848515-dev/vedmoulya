@@ -43,8 +43,12 @@ function cleanupExpiredEntries(): void {
 }
 
 // ── Predefined Rate Limit Tiers ─────────────────────────────────────────────
+// Tiers are env-configurable so operators can tune limits per environment
+// without code changes (load tests can raise them to measure raw capacity).
+// Env vars: RATE_LIMIT_<TIER>_MAX (requests per window) and
+// RATE_LIMIT_<TIER>_WINDOW_MS (window duration). Defaults apply when unset.
 
-export const RateLimitTiers = {
+const DEFAULT_TIERS = {
   /** Standard API access — 100 req/min */
   standard: { maxRequests: 100, windowMs: 60_000 },
   /** Heavy operations (snapshot generation) — 20 req/min */
@@ -55,6 +59,25 @@ export const RateLimitTiers = {
   health: { maxRequests: 200, windowMs: 60_000 },
   /** Authentication operations — 10 req/min */
   auth: { maxRequests: 10, windowMs: 60_000 },
+} as const satisfies Record<string, RateLimitConfig>;
+
+function resolveTier(name: string, fallback: RateLimitConfig): RateLimitConfig {
+  const prefix = `RATE_LIMIT_${name.toUpperCase()}_`;
+  const maxRequests = Number(process.env[`${prefix}MAX`] ?? fallback.maxRequests);
+  const windowMs = Number(process.env[`${prefix}WINDOW_MS`] ?? fallback.windowMs);
+  return {
+    maxRequests:
+      Number.isFinite(maxRequests) && maxRequests > 0 ? maxRequests : fallback.maxRequests,
+    windowMs: Number.isFinite(windowMs) && windowMs > 0 ? windowMs : fallback.windowMs,
+  };
+}
+
+export const RateLimitTiers = {
+  standard: resolveTier('standard', DEFAULT_TIERS.standard),
+  heavy: resolveTier('heavy', DEFAULT_TIERS.heavy),
+  search: resolveTier('search', DEFAULT_TIERS.search),
+  health: resolveTier('health', DEFAULT_TIERS.health),
+  auth: resolveTier('auth', DEFAULT_TIERS.auth),
 } as const satisfies Record<string, RateLimitConfig>;
 
 // ── Internal Check (exported for use with t.middleware() in RouterRegistry) ─

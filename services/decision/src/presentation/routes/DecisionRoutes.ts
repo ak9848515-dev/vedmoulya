@@ -17,7 +17,17 @@ export function createDecisionRouter(decisionService: DecisionApplicationService
   const router = new Hono();
 
   // ── Global Middleware ────────────────────────────────────────────────────
-  router.use('*', cors());
+  // CORS restricted to API_CORS_ORIGIN (comma-separated) when set; permissive
+  // '*' default preserves backward compatibility for local development.
+  const corsRaw = process.env.API_CORS_ORIGIN?.trim();
+  const parsedOrigins = corsRaw
+    ? corsRaw
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : ['*'];
+  const corsOrigins = parsedOrigins.length > 0 ? parsedOrigins : ['*'];
+  router.use('*', cors({ origin: corsOrigins }));
   router.use('*', logger());
   router.use('*', errorMiddleware);
 

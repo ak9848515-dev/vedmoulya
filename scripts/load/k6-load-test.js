@@ -9,8 +9,8 @@
 // Scenarios: health | auth | dashboard | search | lifeos | ai | all
 // Authenticated scenarios require a valid session JWT via TOKEN, and the input
 // userId must match the token's subject (the gateway enforces an IDOR guard).
-// Query inputs use the tRPC v11 batched HTTP GET encoding; for non-batched
-// deployments adjust trpcPath() to ?input={"json":{...}}.
+// Query inputs are encoded as the raw JSON input object (?input={...}) per the
+// gateway's tRPC v11.18 fetchRequestHandler (batched form rejected with 400).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import http from 'k6/http';
@@ -21,10 +21,13 @@ const SCENARIO = __ENV.SCENARIO || 'health';
 const TOKEN = __ENV.TOKEN || '';
 const USER_ID = __ENV.USER_ID || 'load-test-user';
 
-// tRPC v11 HTTP GET input encoding for a single batched query input.
+// tRPC v11.18 HTTP GET input encoding: the gateway's fetchRequestHandler parses
+// the `input` query param as the raw JSON input object for a single (non-batched)
+// query. The `{"0":{"json":{...}}}` batched wrapper form is NOT accepted here
+// (verified empirically — it returns 400 validation errors).
 function trpcPath(procedure, input) {
   if (input === undefined) return `/api/trpc/${procedure}`;
-  const encoded = encodeURIComponent(JSON.stringify({ 0: { json: input } }));
+  const encoded = encodeURIComponent(JSON.stringify(input));
   return `/api/trpc/${procedure}?input=${encoded}`;
 }
 

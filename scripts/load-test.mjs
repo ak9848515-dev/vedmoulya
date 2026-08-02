@@ -22,9 +22,9 @@
 // must match the session user of the token. Pass --user-id matching the token's
 // subject, otherwise those requests are rejected (expected 403/401).
 //
-// NOTE: query inputs are encoded in the tRPC v11 *batched* HTTP GET form
-// (?input={"0":{"json":{...}}}). If the deployment runs non-batched tRPC, use
-// --paths with the equivalent ?input={"json":{...}} URLs instead.
+// NOTE: query inputs are encoded as the raw JSON input object for tRPC v11.18
+// (?input={...}) — the gateway's fetchRequestHandler parses `input` directly.
+// The batched wrapper form (?input={"0":{"json":{...}}}) is rejected with 400.
 //
 // Reports latency percentiles, throughput (req/s), error rate, and process
 // memory/CPU.
@@ -33,14 +33,15 @@
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// tRPC v11 HTTP GET input encoding for a single batched query input.
+// tRPC v11.18 HTTP GET input encoding for a single query input: the gateway
+// parses `input` as the raw JSON object (verified empirically against v11.18).
 function trpcPath(procedure, input) {
   if (input === undefined) return `/api/trpc/${procedure}`;
-  const encoded = encodeURIComponent(JSON.stringify({ 0: { json: input } }));
+  const encoded = encodeURIComponent(JSON.stringify(input));
   return `/api/trpc/${procedure}?input=${encoded}`;
 }
 
@@ -236,7 +237,11 @@ async function main() {
   console.log(JSON.stringify(report, null, 2));
 
   if (args.output) {
-    const outputPath = join(__dirname, '..', args.output);
+    // Support absolute and repo-relative output paths. `resolve` treats an
+    // absolute path as absolute (PR-002: fixed a Windows bug where /tmp/...
+    // was joined onto the repo root, producing `D:\VedMoulya\C:\Users\...`
+    // and ENOENT).
+    const outputPath = resolve(__dirname, '..', args.output);
     writeFileSync(outputPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
     console.log(`Report written to ${outputPath}`);
   }
