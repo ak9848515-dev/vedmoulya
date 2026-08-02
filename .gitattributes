@@ -1,0 +1,37 @@
+# Normalize line endings to LF (matches .prettierrc endOfLine: "lf")
+* text=auto eol=lf
+
+# Source and config files
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.css text eol=lf
+*.sh text eol=lf
+*.html text eol=lf
+
+# Lockfiles (avoid noisy merge conflicts)
+package-lock.json -merge
+
+# Shell scripts must keep LF even on Windows checkouts
+*.sh eol=lf
+
+# Binary files — never text-normalized
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.gz binary
