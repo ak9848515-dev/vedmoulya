@@ -3,6 +3,7 @@
 // Additional branch coverage for observability, lifecycle, and health
 // ──────────────────────────────────────────────────────────────────
 
+import os from 'node:os';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   ConsoleErrorReporter,
@@ -200,15 +201,23 @@ describe('Health checks', () => {
   });
 
   it('cpuHealthCheck reports healthy at low load and degraded at threshold 0', async () => {
-    const checker = new HealthChecker();
-    checker.register('cpu', cpuHealthCheck('cpu', 80));
-    const healthy = await checker.check();
-    expect(healthy.checks.find((c) => c.name === 'cpu')?.status).toBe('healthy');
+    // Pin the system load average so this check is hermetic: the real metric
+    // reflects the shared runner's load and spuriously crosses the 80%
+    // threshold during parallel test execution (see PR-003A).
+    const loadavgSpy = vi.spyOn(os, 'loadavg').mockReturnValue([0.1, 0.1, 0.1]);
+    try {
+      const checker = new HealthChecker();
+      checker.register('cpu', cpuHealthCheck('cpu', 80));
+      const healthy = await checker.check();
+      expect(healthy.checks.find((c) => c.name === 'cpu')?.status).toBe('healthy');
 
-    const degraded = new HealthChecker();
-    degraded.register('cpu', cpuHealthCheck('cpu', 0));
-    const dResult = await degraded.check();
-    expect(dResult.checks.find((c) => c.name === 'cpu')?.status).toBe('degraded');
+      const degraded = new HealthChecker();
+      degraded.register('cpu', cpuHealthCheck('cpu', 0));
+      const dResult = await degraded.check();
+      expect(dResult.checks.find((c) => c.name === 'cpu')?.status).toBe('degraded');
+    } finally {
+      loadavgSpy.mockRestore();
+    }
   });
 
   it('uptimeHealthCheck always reports healthy', async () => {
