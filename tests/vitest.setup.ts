@@ -11,6 +11,12 @@ process.env.NODE_ENV = process.env.NODE_ENV ?? 'test';
 process.env.AUTH_JWT_SECRET =
   process.env.AUTH_JWT_SECRET ?? 'test-secret-0123456789abcdef0123456789abcdef0123456789abcdef';
 // Required (no localhost default) outside NODE_ENV=development (P0-2).
+// Note: only IDENTITY_DATABASE_URL is pinned here. The other engine
+// `*_DATABASE_URL`s deliberately stay unset so each service's own config
+// tests keep asserting their localhost development defaults; the gateway's
+// production repository wiring (SPRINT PR-002A/B) is safe under NODE_ENV=test
+// because requireProdExternalUrl is lenient in test and postgres.js connects
+// lazily.
 process.env.IDENTITY_DATABASE_URL =
   process.env.IDENTITY_DATABASE_URL ?? 'postgres://test:test@db.vedmoulya.test:5432/vedmoulya';
 process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://redis.vedmoulya.test:6379';

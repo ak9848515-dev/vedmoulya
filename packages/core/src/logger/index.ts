@@ -6,7 +6,7 @@
 // VedMoulya — Logging Foundation
 // ──────────────────────────────────────────────────────────────────
 
-import { config } from '../config/index.js';
+import { getConfig } from '../config/index.js';
 
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace';
 
@@ -103,4 +103,36 @@ class ConsoleLogger implements Logger {
   }
 }
 
-export const logger: Logger = new ConsoleLogger(config.app.logLevel as LogLevel, config.app.name);
+let instance: ConsoleLogger | null = null;
+
+function getLogger(): ConsoleLogger {
+  if (instance === null) {
+    instance = new ConsoleLogger(getConfig().app.logLevel as LogLevel, getConfig().app.name);
+  }
+  return instance;
+}
+
+/**
+ * Lazy logger: defers reading `config.app.*` and constructing the
+ * ConsoleLogger until the first log call, so importing @vedmoulya/core
+ * stays inert at module scope (next build / bundlers). Behaviour is
+ * identical to the previous eager singleton.
+ */
+export const logger: Logger = {
+  error: (message, data) => {
+    getLogger().error(message, data);
+  },
+  warn: (message, data) => {
+    getLogger().warn(message, data);
+  },
+  info: (message, data) => {
+    getLogger().info(message, data);
+  },
+  debug: (message, data) => {
+    getLogger().debug(message, data);
+  },
+  trace: (message, data) => {
+    getLogger().trace(message, data);
+  },
+  child: (service) => getLogger().child(service),
+};

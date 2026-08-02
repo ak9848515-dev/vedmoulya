@@ -2,6 +2,7 @@
   "name": "vedmoulya",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "VedMoulya — The Execution Operating System. Empower every determined individual to build a sustainable livelihood through knowledge, execution, and intelligent technology.",
   "workspaces": [

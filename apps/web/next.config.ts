@@ -8,8 +8,11 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   // ── Server Configuration ────────────────────────────────────────────────
-  // Only server-side native packages go here — not UI/shared packages
-  serverExternalPackages: ['@vedmoulya/core'],
+  // Only server-side native packages go here — not UI/shared packages.
+  // bcrypt is a native module pulled in transitively by @vedmoulya/identity
+  // (PasswordService) through the gateway's production identity wiring
+  // (SPRINT PR-002A); it must stay external for the Next.js server bundle.
+  serverExternalPackages: ['@vedmoulya/core', 'bcrypt'],
 
   // ── Transpile monorepo packages ─────────────────────────────────────────
   transpilePackages: [
@@ -17,6 +20,15 @@ const nextConfig: NextConfig = {
     '@vedmoulya/api',
     '@vedmoulya/shared',
     '@vedmoulya/services',
+    // Production gateway persistence wiring (SPRINT PR-002A/B) — the API
+    // gateway resolves each engine's production repository through the
+    // service module's DI registration, so all five services must be
+    // transpiled into the Next.js server bundle.
+    '@vedmoulya/identity',
+    '@vedmoulya/memory',
+    '@vedmoulya/decision',
+    '@vedmoulya/execution',
+    '@vedmoulya/knowledge',
   ],
 
   // ── Webpack Configuration ───────────────────────────────────────────────

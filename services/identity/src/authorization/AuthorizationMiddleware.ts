@@ -16,7 +16,20 @@ declare module 'hono' {
   }
 }
 
-const authorizationService = new AuthorizationService();
+let authorizationServiceInstance: AuthorizationService | null = null;
+
+/**
+ * Lazily construct (and cache) the AuthorizationService on first use.
+ * Its BaseService constructor reads @vedmoulya/core config via the logger,
+ * so module-scope construction would evaluate configuration at import time
+ * (breaking `next build` page-data collection without env vars).
+ */
+function getAuthorizationService(): AuthorizationService {
+  if (authorizationServiceInstance === null) {
+    authorizationServiceInstance = new AuthorizationService();
+  }
+  return authorizationServiceInstance;
+}
 
 /** Middleware that checks if the authenticated user can perform an action on a subject */
 export function requireAbility(
@@ -41,7 +54,7 @@ export function requireAbility(
     c.set('ability', ability);
 
     // Check authorization
-    const result = authorizationService.authorize({
+    const result = getAuthorizationService().authorize({
       userId,
       role,
       action,
@@ -93,7 +106,7 @@ export function requireOwnership(
     }
 
     // Check ownership
-    const isOwner = authorizationService.checkOwnership(session.sub, resourceOwnerId);
+    const isOwner = getAuthorizationService().checkOwnership(session.sub, resourceOwnerId);
     if (!isOwner) {
       return c.json(
         { success: false, error: { code: 'FORBIDDEN', message: 'You do not own this resource' } },

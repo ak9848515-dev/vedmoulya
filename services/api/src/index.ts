@@ -5,8 +5,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Main Router ─────────────────────────────────────────────────────────────
+// The router is built lazily on first use (getAppRouter) so importing
+// @vedmoulya/api never evaluates configuration at module scope — `next
+// build` (NODE_ENV=production without env vars) bundles the route handlers
+// safely. Request-time fail-fast semantics are unchanged.
 
-export { appRouter } from './router.js';
+export { getAppRouter, getServices } from './router.js';
 export type { AppRouter } from './router.js';
 export type { TRPCContext } from './router.js';
 
@@ -17,6 +21,16 @@ export { ApiApplicationService } from './services/ApiApplicationService.js';
 // ── Infrastructure Health ────────────────────────────────────────────────────
 
 export { InfrastructureHealthProbe } from './services/InfrastructureHealthProbe.js';
+
+// ── Production Persistence (SPRINT PR-002A / PR-002B) ────────────────────────
+
+export {
+  createProductionIdentityRepository,
+  createProductionMemoryRepository,
+  createProductionDecisionRepository,
+  createProductionExecutionRepository,
+  createProductionKnowledgeRepository,
+} from './infrastructure/ProductionRepositories.js';
 export type {
   DependencyHealthResult,
   DependencyName,

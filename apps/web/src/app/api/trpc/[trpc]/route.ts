@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
-import { appRouter, createAuthContext, initGatewayObservability } from '@vedmoulya/api';
+import { createAuthContext, getAppRouter, initGatewayObservability } from '@vedmoulya/api';
 import type { NextRequest } from 'next/server';
 
 // ── Route Handler: GET + POST ───────────────────────────────────────────────
@@ -32,7 +32,9 @@ const handler = (request: NextRequest): Promise<Response> => {
   return fetchRequestHandler({
     endpoint: '/api/trpc',
     req: request,
-    router: appRouter,
+    // Built lazily on the first request (module scope stays inert during
+    // `next build`, which runs under NODE_ENV=production without env vars).
+    router: getAppRouter(),
     createContext: () => createAuthContext(request.headers),
   });
 };

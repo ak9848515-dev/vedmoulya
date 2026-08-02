@@ -18,9 +18,60 @@ import {
   MarketplaceApplicationService,
   MemoryApplicationService,
 } from '@vedmoulya/services';
+import type {
+  IdentityRepository,
+  MemoryRepository,
+  DecisionRepository,
+  ExecutionRepository,
+  KnowledgeRepository,
+} from '@vedmoulya/domain';
 import { InfrastructureHealthProbe } from './InfrastructureHealthProbe.js';
+import {
+  createProductionIdentityRepository,
+  createProductionMemoryRepository,
+  createProductionDecisionRepository,
+  createProductionExecutionRepository,
+  createProductionKnowledgeRepository,
+} from '../infrastructure/ProductionRepositories.js';
 
 // ── ApiApplicationService ───────────────────────────────────────────────────
+
+/**
+ * Options for constructing the API Gateway application service.
+ */
+export interface ApiApplicationServiceOptions {
+  /**
+   * Identity repository override. Defaults to the production
+   * `PostgresIdentityRepository` resolved through the identity module's
+   * existing DI registration (SPRINT PR-002A). Inject a custom repository
+   * (e.g. an in-memory one) for tests or alternate persistence.
+   */
+  identityRepository?: IdentityRepository;
+  /**
+   * Memory repository override. Defaults to the production
+   * `PostgresMemoryRepository` resolved through the memory module's existing
+   * DI registration (SPRINT PR-002B).
+   */
+  memoryRepository?: MemoryRepository;
+  /**
+   * Decision repository override. Defaults to the production
+   * `PostgresDecisionRepository` resolved through the decision module's
+   * existing DI registration (SPRINT PR-002B).
+   */
+  decisionRepository?: DecisionRepository;
+  /**
+   * Execution repository override. Defaults to the production
+   * `PostgresExecutionRepository` resolved through the execution module's
+   * existing DI registration (SPRINT PR-002B).
+   */
+  executionRepository?: ExecutionRepository;
+  /**
+   * Knowledge repository override. Defaults to the production
+   * `PostgresKnowledgeRepository` resolved through the knowledge module's
+   * existing DI registration (SPRINT PR-002B).
+   */
+  knowledgeRepository?: KnowledgeRepository;
+}
 
 /**
  * Top-level application service that creates and manages all certified
@@ -31,6 +82,11 @@ import { InfrastructureHealthProbe } from './InfrastructureHealthProbe.js';
  *   ├── Infrastructure Services (Identity, Memory, Decision, Execution, Knowledge, AI)
  *   ├── Domain Module Services (Dashboard, Career, Learning, Business, Marketplace)
  *   └── Integration Layer (LifeOS)
+ *
+ * SPRINT PR-002A: the Identity application service is now wired to the real
+ * production `PostgresIdentityRepository` (reusing the identity module's DI
+ * registration) instead of the in-memory development repository, so the
+ * complete authenticated request path resolves against real persistence.
  */
 export class ApiApplicationService {
   // ── Infrastructure Services ───────────────────────────────────────────────
@@ -54,18 +110,31 @@ export class ApiApplicationService {
   // ── Infrastructure Health (PH-002/T3 follow-up) ────────────────────────────
   readonly infrastructureHealth: InfrastructureHealthProbe;
 
-  constructor() {
+  constructor(options: ApiApplicationServiceOptions = {}) {
     this.infrastructureHealth = new InfrastructureHealthProbe();
-    // ── Create infrastructure services (dev stubs — repositories injected as any)
-    //     Repository injection is needed because the frozen platform services
-    //     require domain repositories. In dev, we pass empty stubs that return
-    //     default/empty results. The production API Gateway will use real repos.
-    const stubRepo = {} as never;
-    this.identity = new IdentityApplicationService(stubRepo);
-    this.memory = new MemoryApplicationService(stubRepo);
-    this.decision = new DecisionApplicationService(stubRepo);
-    this.execution = new ExecutionApplicationService(stubRepo);
-    this.knowledge = new KnowledgeApplicationService(stubRepo);
+    // ── Create infrastructure services ────────────────────────────────
+    //     All five engines use their production Postgres repositories,
+    //     resolved through each service module's existing DI registration
+    //     (SPRINT PR-002A identity + PR-002B memory/decision/execution/
+    //     knowledge — no duplicate wiring, lazy-connect clients). Inject
+    //     overrides (e.g. the Map-backed in-memory repositories from
+    //     services/api/src/infrastructure/InMemoryRepositories.ts) for
+    //     tests or alternate persistence.
+    this.identity = new IdentityApplicationService(
+      options.identityRepository ?? createProductionIdentityRepository(),
+    );
+    this.memory = new MemoryApplicationService(
+      options.memoryRepository ?? createProductionMemoryRepository(),
+    );
+    this.decision = new DecisionApplicationService(
+      options.decisionRepository ?? createProductionDecisionRepository(),
+    );
+    this.execution = new ExecutionApplicationService(
+      options.executionRepository ?? createProductionExecutionRepository(),
+    );
+    this.knowledge = new KnowledgeApplicationService(
+      options.knowledgeRepository ?? createProductionKnowledgeRepository(),
+    );
     this.ai = new AIOrchestrationService();
 
     // ── Create domain module services ──────────────────────────────────

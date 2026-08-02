@@ -7,6 +7,7 @@
 
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { metrics } from '@vedmoulya/core';
 import type { ApiApplicationService } from './ApiApplicationService.js';
 import { createLifeOSRouter } from '../routers/LifeOSRouter.js';
 import { createDashboardRouter } from '../routers/DashboardRouter.js';
@@ -34,12 +35,38 @@ export interface TRPCContext {
 
 export const t = initTRPC.context<TRPCContext>().create();
 
+// ── Request Metrics Middleware (PH-002/T1 Observability) ─────────────────────
+// Records per-request API latency, throughput, and error-rate metrics for the
+// Prometheus exporter. Applied to every procedure via the variants below.
+
+function createRequestMetricsMiddleware(): ReturnType<typeof t.middleware> {
+  return t.middleware(async ({ next }) => {
+    const start = performance.now();
+    metrics.increment('api.requests.total');
+    try {
+      const result = await next();
+      metrics.observe('api.requests.latency_ms', performance.now() - start);
+      // In tRPC v11, downstream middleware/resolver errors surface as
+      // `{ ok: false }` results (not thrown exceptions), so check the flag.
+      if (!result.ok) {
+        metrics.increment('api.requests.error');
+      }
+      return result;
+    } catch (err) {
+      metrics.increment('api.requests.error');
+      metrics.observe('api.requests.latency_ms', performance.now() - start);
+      throw err;
+    }
+  });
+}
+
 // ── Rate Limit Middleware Factory (uses t.middleware() for proper types) ─────
 
 function createRateLimitMiddleware(tier: RateLimitConfig): ReturnType<typeof t.middleware> {
   return t.middleware(async ({ ctx, next }) => {
     const userId = ctx.userId;
     if (!checkRateLimitInternal(userId, tier)) {
+      metrics.increment('api.ratelimit.hit');
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
         message: 'Rate limit exceeded. Please try again later.',
@@ -67,21 +94,26 @@ function createAuthMiddleware(): ReturnType<typeof t.middleware> {
 }
 
 const authMiddleware = createAuthMiddleware();
+const requestMetricsMiddleware = createRequestMetricsMiddleware();
 
-// ── Procedure Variants (auth + rate limit middleware) ───────────────────────
+// ── Procedure Variants (metrics + auth + rate limit middleware) ─────────────
+// Every variant is built on the metrics-wrapped base so all gateway traffic
+// contributes to api.requests.total / latency / error metrics (PH-002/T1).
 
-export const publicProcedure = t.procedure;
-export const standardProcedure = t.procedure
+const baseProcedure = t.procedure.use(requestMetricsMiddleware);
+
+export const publicProcedure = baseProcedure;
+export const standardProcedure = baseProcedure
   .use(authMiddleware)
   .use(createRateLimitMiddleware(RateLimitTiers.standard));
-export const heavyProcedure = t.procedure
+export const heavyProcedure = baseProcedure
   .use(authMiddleware)
   .use(createRateLimitMiddleware(RateLimitTiers.heavy));
-export const searchProcedure = t.procedure
+export const searchProcedure = baseProcedure
   .use(authMiddleware)
   .use(createRateLimitMiddleware(RateLimitTiers.search));
-export const healthProcedure = t.procedure.use(createRateLimitMiddleware(RateLimitTiers.health));
-export const authProcedure = t.procedure
+export const healthProcedure = baseProcedure.use(createRateLimitMiddleware(RateLimitTiers.health));
+export const authProcedure = baseProcedure
   .use(authMiddleware)
   .use(createRateLimitMiddleware(RateLimitTiers.auth));
 

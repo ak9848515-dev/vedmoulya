@@ -115,23 +115,34 @@ function loadConfigFromEnv(): DecisionConfig {
   };
 }
 
-let currentConfig: DecisionConfig = loadConfigFromEnv();
+// Deferred until first access so importing the module never evaluates
+// configuration at module scope (keeps `next build` page-data collection
+// inert without env vars; fail-fast still runs at first real use).
+let currentConfig: DecisionConfig | null = null;
+
+function getCurrentConfig(): DecisionConfig {
+  if (currentConfig === null) {
+    currentConfig = loadConfigFromEnv();
+  }
+  return currentConfig;
+}
 
 export function getDecisionConfig(): DecisionConfig {
-  return { ...currentConfig };
+  return { ...getCurrentConfig() };
 }
 
 export function updateDecisionConfig(overrides: Partial<DecisionConfig>): DecisionConfig {
+  const base = getCurrentConfig();
   currentConfig = {
-    ...currentConfig,
+    ...base,
     ...overrides,
-    database: { ...currentConfig.database, ...overrides.database },
-    cache: { ...currentConfig.cache, ...overrides.cache },
-    scoring: { ...currentConfig.scoring, ...overrides.scoring },
-    explainability: { ...currentConfig.explainability, ...overrides.explainability },
-    knowledge: { ...currentConfig.knowledge, ...overrides.knowledge },
-    memory: { ...currentConfig.memory, ...overrides.memory },
-    aiOrchestrator: { ...currentConfig.aiOrchestrator, ...overrides.aiOrchestrator },
+    database: { ...base.database, ...overrides.database },
+    cache: { ...base.cache, ...overrides.cache },
+    scoring: { ...base.scoring, ...overrides.scoring },
+    explainability: { ...base.explainability, ...overrides.explainability },
+    knowledge: { ...base.knowledge, ...overrides.knowledge },
+    memory: { ...base.memory, ...overrides.memory },
+    aiOrchestrator: { ...base.aiOrchestrator, ...overrides.aiOrchestrator },
   };
   return getDecisionConfig();
 }

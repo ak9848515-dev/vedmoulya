@@ -344,4 +344,54 @@ function requireJwtSecret(): string {
   return secret;
 }
 
-export const config = loadConfiguration();
+let cached: Configuration | null = null;
+
+/**
+ * Lazily materialize and cache the application configuration.
+ *
+ * Importing @vedmoulya/core never evaluates `loadConfiguration()` — the
+ * fail-fast environment validation runs on the first real access (request
+ * time), so bundlers and build pipelines (e.g. `next build` running under
+ * NODE_ENV=production without env vars) can import the package safely.
+ * Production fail-fast semantics are unchanged: the first access still
+ * throws when required secrets are missing or invalid.
+ */
+export function getConfig(): Configuration {
+  if (cached === null) {
+    cached = loadConfiguration();
+  }
+  return cached;
+}
+
+/**
+ * Backward-compatible `config` singleton. A lazy Proxy defers
+ * `loadConfiguration()` until the first property access, keeping module
+ * scope inert for bundlers, `next build`, and tests that only import the
+ * package without touching configuration.
+ *
+ * Note: `Object.freeze(config)` is intentionally not supported (the proxy
+ * has no preventExtensions/isExtensible traps, so it would silently act on
+ * the inert target). Configuration is treated as read-only by convention.
+ */
+const configProxyHandler: ProxyHandler<Configuration> = {
+  get(_target, prop, receiver): unknown {
+    return Reflect.get(getConfig(), prop, receiver) as unknown;
+  },
+  set(_target, prop, value): boolean {
+    return Reflect.set(getConfig(), prop, value);
+  },
+  has(_target, prop): boolean {
+    return prop in getConfig();
+  },
+  deleteProperty(_target, prop): boolean {
+    return Reflect.deleteProperty(getConfig(), prop);
+  },
+  ownKeys(): ArrayLike<string | symbol> {
+    return Reflect.ownKeys(getConfig());
+  },
+  getOwnPropertyDescriptor(_target, prop): PropertyDescriptor | undefined {
+    return Reflect.getOwnPropertyDescriptor(getConfig(), prop);
+  },
+};
+
+export const config: Configuration = new Proxy({} as Configuration, configProxyHandler);

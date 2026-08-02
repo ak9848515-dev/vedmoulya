@@ -9,7 +9,7 @@
 import net from 'node:net';
 import tls from 'node:tls';
 import postgres from 'postgres';
-import { config, logger, metrics } from '@vedmoulya/core';
+import { getConfig, logger, metrics } from '@vedmoulya/core';
 
 export type DependencyName = 'database' | 'redis';
 export type DependencyStatus = 'healthy' | 'degraded' | 'unhealthy' | 'not_configured';
@@ -143,19 +143,33 @@ function pingRedis(url: string, timeoutMs: number, rejectUnauthorized: boolean):
  * without attempting network I/O.
  */
 export class InfrastructureHealthProbe {
-  private readonly databaseUrl: string | undefined;
-  private readonly redisUrl: string | undefined;
+  private readonly databaseUrlOverride: string | undefined;
+  private readonly redisUrlOverride: string | undefined;
   private readonly timeoutMs: number;
   private readonly env: string;
   private readonly tlsRejectUnauthorized: boolean;
   private dbClient: ReturnType<typeof postgres> | null = null;
 
   constructor(options: InfrastructureHealthProbeOptions = {}) {
-    this.databaseUrl = options.databaseUrl ?? config.database.url;
-    this.redisUrl = options.redisUrl ?? config.redis.url;
+    // Only the explicit overrides are captured at construction time; the
+    // @vedmoulya/core config URLs are resolved lazily at check time (see the
+    // getters below) so constructing a probe never evaluates configuration
+    // at module scope (keeps `next build` inert without env vars).
+    this.databaseUrlOverride = options.databaseUrl;
+    this.redisUrlOverride = options.redisUrl;
     this.timeoutMs = options.timeoutMs ?? 3000;
     this.env = options.env ?? process.env.NODE_ENV ?? 'development';
     this.tlsRejectUnauthorized = options.tlsRejectUnauthorized ?? true;
+  }
+
+  /** Database URL resolved lazily on first use (request time). */
+  private get databaseUrl(): string {
+    return this.databaseUrlOverride ?? getConfig().database.url;
+  }
+
+  /** Redis URL resolved lazily on first use (request time). */
+  private get redisUrl(): string {
+    return this.redisUrlOverride ?? getConfig().redis.url;
   }
 
   private get isConfigured(): boolean {

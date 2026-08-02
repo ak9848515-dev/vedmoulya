@@ -115,23 +115,34 @@ function loadConfigFromEnv(): ExecutionConfig {
   };
 }
 
-let currentConfig: ExecutionConfig = loadConfigFromEnv();
+// Deferred until first access so importing the module never evaluates
+// configuration at module scope (keeps `next build` page-data collection
+// inert without env vars; fail-fast still runs at first real use).
+let currentConfig: ExecutionConfig | null = null;
+
+function getCurrentConfig(): ExecutionConfig {
+  if (currentConfig === null) {
+    currentConfig = loadConfigFromEnv();
+  }
+  return currentConfig;
+}
 
 export function getExecutionConfig(): ExecutionConfig {
-  return { ...currentConfig };
+  return { ...getCurrentConfig() };
 }
 
 export function updateExecutionConfig(overrides: Partial<ExecutionConfig>): ExecutionConfig {
+  const base = getCurrentConfig();
   currentConfig = {
-    ...currentConfig,
+    ...base,
     ...overrides,
-    database: { ...currentConfig.database, ...overrides.database },
-    scheduling: { ...currentConfig.scheduling, ...overrides.scheduling },
-    planning: { ...currentConfig.planning, ...overrides.planning },
-    recovery: { ...currentConfig.recovery, ...overrides.recovery },
-    knowledge: { ...currentConfig.knowledge, ...overrides.knowledge },
-    memory: { ...currentConfig.memory, ...overrides.memory },
-    aiOrchestrator: { ...currentConfig.aiOrchestrator, ...overrides.aiOrchestrator },
+    database: { ...base.database, ...overrides.database },
+    scheduling: { ...base.scheduling, ...overrides.scheduling },
+    planning: { ...base.planning, ...overrides.planning },
+    recovery: { ...base.recovery, ...overrides.recovery },
+    knowledge: { ...base.knowledge, ...overrides.knowledge },
+    memory: { ...base.memory, ...overrides.memory },
+    aiOrchestrator: { ...base.aiOrchestrator, ...overrides.aiOrchestrator },
   };
   return getExecutionConfig();
 }

@@ -43,6 +43,7 @@ export {
 // Configuration
 export {
   config,
+  getConfig,
   loadConfiguration,
   requireProdSecret,
   requireExternalUrl,
