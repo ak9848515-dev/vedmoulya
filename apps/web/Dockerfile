@@ -12,7 +12,7 @@ COPY package.json package-lock.json ./
 COPY apps apps
 COPY packages packages
 COPY services services
-COPY tsconfig.base.json tsconfig.json vitest.workspace.ts ./
+COPY tsconfig.base.json tsconfig.json ./
 
 RUN npm ci --ignore-scripts
 
