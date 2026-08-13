@@ -28,6 +28,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import {
+  useBrainCorrectLearning,
   useBrainDashboard,
   useBrainDailyPriorities,
   useBrainDiscoverIntelligence,
@@ -356,33 +357,197 @@ export function BrainIntelligenceEventsPanel({ userId }: { userId: string }): Re
   );
 }
 
-// ── Learning feed (mission §10) ──────────────────────────────────────────────
+// ── Learning feed (mission §10 + SPRINT-025) ──────────────────────────────────
+// SPRINT-025: every learning row now distinguishes WHO stated it:
+//   • YOU TOLD ME   → EXPLICIT (user correction / acceptance) — highest authority
+//   • I OBSERVED    → verified FACT (execution + independent verification)
+//   • I INFERRED    → weak pattern, low confidence, never a belief
+//   • UNKNOWN       → cannot learn from this yet (honest)
+// Confidence and evidence are surfaced per signal; a compact "Correct"
+// affordance lets the user override any inference directly.
+
+function SourceBadge({
+  source,
+  kind,
+}: {
+  source: 'EXPLICIT' | 'INFERRED';
+  kind: 'FACT' | 'INFERENCE' | 'UNKNOWN';
+}): React.JSX.Element {
+  const meta =
+    source === 'EXPLICIT'
+      ? {
+          label: 'You told me',
+          cls: 'bg-[#EFF4FE] text-[#2B5FD9] dark:bg-[#1E3A8A]/40 dark:text-[#6B8FEF]',
+        }
+      : kind === 'FACT'
+        ? {
+            label: 'I observed',
+            cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+          }
+        : kind === 'UNKNOWN'
+          ? {
+              label: 'Cannot learn yet',
+              cls: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+            }
+          : {
+              label: 'I inferred',
+              cls: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+            };
+  return (
+    <span
+      className={`px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wide ${meta.cls}`}
+    >
+      {meta.label}
+    </span>
+  );
+}
 
 export function BrainLearningPanel({
   view,
+  userId,
 }: {
   view: NonNullable<ReturnType<typeof useBrainDashboard>['data']>;
+  userId?: string;
 }): React.JSX.Element {
+  const correct = useBrainCorrectLearning();
+  const [open, setOpen] = React.useState(false);
+  const [statement, setStatement] = React.useState('');
+  const [target, setTarget] = React.useState<'approach' | 'provider' | 'result' | 'preference'>(
+    'approach',
+  );
+
+  const submitCorrection = (): void => {
+    if (!userId || statement.trim().length < 3) return;
+    void correct
+      .mutateAsync({ userId, statement: statement.trim(), target })
+      .then(() => {
+        setStatement('');
+        setOpen(false);
+      })
+      .catch(() => undefined);
+  };
+
   return (
     <Card variant="standard" padding="md" className="dark:bg-[#1E293B]">
-      <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-[#111827] dark:text-[#F8FAFC]">
-        <TrendingUp className="h-4 w-4 text-[#22C55E]" />
-        What the Brain learned
-      </h3>
-      {view.learning.length === 0 ? (
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-[#111827] dark:text-[#F8FAFC]">
+          <TrendingUp className="h-4 w-4 text-[#22C55E]" />
+          What VedMoulya learned
+        </h3>
+        <button
+          onClick={() => {
+            setOpen((v) => !v);
+          }}
+          className="px-2.5 py-1 rounded-lg bg-[#2B5FD9] text-white text-[11px] font-semibold hover:bg-[#1E4BB8] transition-colors"
+        >
+          Correct
+        </button>
+      </div>
+      <p className="mt-1 text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+        Learning is evidence-based — every signal shows who stated it, and you can correct
+        anything. Corrections always outrank inferred patterns.
+      </p>
+
+      {open && (
+        <div className="mt-2 rounded-lg border border-[#2B5FD9]/30 dark:border-[#1E3A8A]/60 bg-[#F5F8FF] dark:bg-[#0F172A]/60 p-2.5 space-y-2">
+          <div className="flex flex-wrap gap-1.5">
+            {(['approach', 'provider', 'result', 'preference'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  setTarget(t);
+                }}
+                className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors ${
+                  target === t
+                    ? 'bg-[#2B5FD9] text-white'
+                    : 'bg-slate-100 text-[#64748B] dark:bg-slate-800 dark:text-[#94A3B8] hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={statement}
+              onChange={(e) => {
+                setStatement(e.target.value);
+              }}
+              placeholder={`e.g. don't use this ${target} again`}
+              className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F172A] text-[12px] text-[#111827] dark:text-[#F8FAFC] placeholder:text-[#94A3B8] outline-none focus:ring-1 focus:ring-[#2B5FD9]"
+            />
+            <button
+              onClick={submitCorrection}
+              disabled={statement.trim().length < 3 || correct.isPending}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            >
+              {correct.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+          <p className="text-[10px] text-[#94A3B8]">
+            Saved as an explicit fact — it outranks any inferred pattern about this.
+          </p>
+        </div>
+      )}
+
+      {view.learning.length === 0 && view.corrections.length === 0 ? (
         <p className="mt-1.5 text-[11px] text-[#64748B] dark:text-[#94A3B8]">
           No outcomes recorded yet — accept or reject a Brain result to build the evidence ledger.
         </p>
       ) : (
-        <ul className="mt-2 space-y-1.5">
+        <ul className="mt-2 space-y-2">
+          {view.corrections.slice(0, 3).map((c) => (
+            <li
+              key={c.id}
+              className="rounded-lg border border-[#2B5FD9]/20 dark:border-[#1E3A8A]/40 bg-[#F5F8FF] dark:bg-[#0F172A]/50 p-2"
+            >
+              <div className="flex items-center gap-1.5">
+                <SourceBadge source="EXPLICIT" kind="FACT" />
+                <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                  {c.target}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] font-medium text-[#111827] dark:text-[#F8FAFC]">
+                “{c.statement}”
+              </p>
+            </li>
+          ))}
           {view.learning.slice(0, 5).map((l) => (
-            <li key={l.taskId} className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
-              <span
-                className={`font-semibold ${l.outcome === 'SUCCESS' ? 'text-emerald-600 dark:text-emerald-400' : l.outcome === 'PARTIAL' ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}
-              >
-                {l.outcome}
-              </span>{' '}
-              · {l.taskType} · {l.userAccepted ? 'accepted' : 'rejected'}
+            <li
+              key={l.taskId}
+              className="rounded-lg border border-slate-100 dark:border-slate-800 p-2"
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span
+                  className={`font-semibold text-[11px] ${
+                    l.verdict === 'SUCCESS'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : l.verdict === 'FAILED'
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : l.verdict === 'UNKNOWN'
+                          ? 'text-slate-500 dark:text-slate-400'
+                          : l.outcome === 'SUCCESS'
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : l.outcome === 'PARTIAL'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {l.verdict ?? l.outcome}
+                </span>
+                <span className="text-[10px] text-[#94A3B8]">· {l.taskType}</span>
+              </div>
+              {l.signals.slice(0, 2).map((s, i) => (
+                <div key={i} className="mt-1 flex items-start gap-1.5">
+                  <SourceBadge source={s.source} kind={s.kind} />
+                  <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8] leading-snug">
+                    {s.fact}{' '}
+                    <span className="text-[#94A3B8]">
+                      · confidence {Math.round(s.confidence * 100)}%
+                    </span>
+                  </p>
+                </div>
+              ))}
             </li>
           ))}
         </ul>
@@ -512,5 +677,5 @@ export function BrainOperationsSection({ userId }: { userId: string }): React.JS
 function BrainLearningFeed({ userId }: { userId: string }): React.JSX.Element {
   const dashboard = useBrainDashboard(userId);
   if (!dashboard.data) return <React.Fragment />;
-  return <BrainLearningPanel view={dashboard.data} />;
+  return <BrainLearningPanel view={dashboard.data} userId={userId} />;
 }

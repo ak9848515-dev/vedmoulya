@@ -169,6 +169,60 @@ export interface IntelligenceEvent {
 }
 
 // ── Brain memory / learning feedback (mission §10) ─────────────────
+
+// ── SPRINT-025 · Learning signal vocabulary (evidence-driven) ──────
+// What kind of claim a stored learning signal makes. FACT = a verified
+// observation (execution + verification evidence). INFERENCE = a pattern
+// drawn from one or more observations, never a permanent belief.
+// UNKNOWN = insufficient/contradictory evidence — recorded so the feed
+// can honestly show "cannot learn from this yet".
+export type LearningSignalKind = 'FACT' | 'INFERENCE' | 'UNKNOWN';
+
+/** One structured learning signal captured from a REAL verified outcome. */
+export interface LearningSignal {
+  /** The claim, in plain language. */
+  fact: string;
+  kind: LearningSignalKind;
+  /** Who stated it: EXPLICIT user feedback vs INFERRED by the system. */
+  source: 'EXPLICIT' | 'INFERRED';
+  /** 0..1 evidence-weighted confidence (never fabricated). */
+  confidence: number;
+  /** Why the signal is believed — traceable evidence references. */
+  evidence: string[];
+  /** Task/outcome provenance. */
+  provenance: string;
+  capturedAt: string;
+}
+
+/**
+ * SPRINT-025 · User correction (the ONLY new write surface).
+ * Corrections are EXPLICIT user input with strong authority — they
+ * outrank weak system inference (EXPLICIT > INFERRED in the frozen
+ * ledger). They never carry sensitive data (text facts only).
+ */
+export interface LearningCorrection {
+  id: string;
+  userId: string;
+  /** What the user corrected, verbatim (bounded length). */
+  statement: string;
+  /** Who it corrects: a strategy/approach, a provider, a result, or a preference. */
+  target: 'approach' | 'provider' | 'result' | 'preference';
+  /** Optional scope — provider id when the correction targets a provider. */
+  providerId?: string;
+  /** Optional scope — capability id when the correction targets one. */
+  capability?: CapabilityId;
+  /** The task whose outcome the user is correcting (optional). */
+  taskId?: string;
+  confidence: number;
+  capturedAt: string;
+}
+
+// ── SPRINT-025 · enriched outcome memory ───────────────────────────
+// The frozen BrainOutcomeMemory contract is EXTENDED (not replaced) so
+// verified outcomes become structured learning evidence: the honest
+// verification state, the SPRINT-024 verdict, derived signals, and any
+// user corrections attached to the task. Every new field is optional —
+// existing writers/readers keep working unchanged.
 export interface BrainOutcomeMemory {
   userId: string;
   taskId: string;
@@ -190,4 +244,15 @@ export interface BrainOutcomeMemory {
   capturedAt: string;
   /** EPIC-020 (Outcome & Revenue layer) — 3-value satisfaction §10. */
   satisfaction?: 'YES' | 'PARTIALLY' | 'NO' | 'UNKNOWN';
+  // ── SPRINT-025 — structured learning evidence (all optional) ──
+  /** The honest SPRINT-024 verdict the outcome memory was derived from. */
+  verdict?: import('./outcome-types.js').OutcomeVerdict;
+  /** Whether the SPRINT-024 independent verification passed. */
+  verificationPassed?: boolean;
+  /** Whether verification produced a definitive FAIL (artifact contradicted). */
+  verificationFailed?: boolean;
+  /** Derived learning signals (FACT/INFERENCE/UNKNOWN separation). */
+  signals?: LearningSignal[];
+  /** User corrections attached to this task/outcome (explicit authority). */
+  corrections?: LearningCorrection[];
 }

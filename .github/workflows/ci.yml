@@ -121,6 +121,8 @@ jobs:
         run: npm run outcome:journey:benchmark
       - name: Runtime Verification benchmark (SPRINT-024 — 12 real-artifact journeys)
         run: npm run runtime:verification:benchmark
+      - name: Learning benchmark (SPRINT-025 — 15 learning journeys)
+        run: npm run learning:benchmark
       - name: Production benchmark (8 real apps)
         run: npm run production:benchmark
       - name: Quality gates verify (16/16 hard blockers)

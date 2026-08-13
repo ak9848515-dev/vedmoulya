@@ -265,6 +265,29 @@ describe('brain.* — real tRPC pipeline (auth + rate limit + handlers)', () => 
     expect(evaluated.data!.outcome).toBeDefined();
   });
 
+  it('correctLearning records an EXPLICIT user correction (auth + rate limit)', async () => {
+    const caller = router.createCaller(testCtx);
+    const corrected = await caller.brain.correctLearning({
+      userId: 'brain-owner',
+      statement: 'Do not use this approach again',
+      target: 'approach',
+    });
+    expect(corrected.success).toBe(true);
+    expect(corrected.data!.confidence).toBe(0.98);
+    expect(corrected.data!.target).toBe('approach');
+  });
+
+  it('correctLearning refuses a too-short statement through the zod boundary', async () => {
+    const caller = router.createCaller(testCtx);
+    await expect(
+      caller.brain.correctLearning({
+        userId: 'brain-owner',
+        statement: 'x',
+        target: 'approach',
+      }),
+    ).rejects.toThrow();
+  });
+
   it('IDOR: a foreign userId is refused by the gateway guard on every procedure', async () => {
     const caller = router.createCaller(testCtx);
     const created = await caller.brain.createTask({

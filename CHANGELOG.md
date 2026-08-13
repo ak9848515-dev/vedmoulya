@@ -10,6 +10,60 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **SPRINT-025 — CONTINUOUS LEARNING, OUTCOME MEMORY & ADAPTIVE IMPROVEMENT** (2026-08-12,
+  🟢 GREEN — IMPLEMENTATION VERIFIED): makes VedMoulya learn from completed REAL
+  problem-solving journeys — PROBLEM → UNDERSTAND → PLAN → EXECUTE → VERIFY → OUTCOME →
+  CAPTURE EVIDENCE → LEARN → UPDATE USER/DOMAIN/PROVIDER/STRATEGY SIGNALS → IMPROVE NEXT
+  DECISION — with **zero new engines** (no new brain/memory/recommendation/decision/
+  budget/scheduler/notification/provider-selection/execution engine). All learning flows
+  through the EXISTING `@vedmoulya/brain` outcome memory + `AdaptiveScoreLedger`
+  (recency-weighted decay) + `PreferenceLedger` (EXPLICIT > INFERRED).
+  - **Phase 1 — outcome learning model:** `LearningSignal` (FACT / INFERENCE / UNKNOWN —
+    separated, never promoted) + deterministic `deriveLearningSignals`
+    (evidence-supported signals only: domain · task type · outcome + verification status ·
+    provider used/failed · failover · budget · artifact verification · approval · strategy ·
+    confidence) — FACT vs INFERENCE vs UNKNOWN separated; **one observation is never
+    promoted into a permanent user belief**.
+  - **Phase 2 — memory integration:** `BrainOutcomeMemory` enriched with
+    `verdict`/`verification`/`signals`/`corrections`; `recordLearning` now derives the
+    honest verdict via `deriveOutcomeVerdict` — **UNKNOWN/FAILED never become SUCCESS**;
+    inconclusive evidence stores UNKNOWN, never success (memory-pollution prevented).
+  - **Phase 6 — user correction loop:** new `correctLearning` (EXPLICIT user correction →
+    `PreferenceLedger` EXPLICIT fact with source/confidence/evidence/timestamp — **stronger
+    authority than any inferred preference; an inferred preference can never override an
+    explicit current user instruction**); additive `explicit_user_correction`
+    `PreferenceEventSource`; gateway `brain.correctLearning` (auth + rate tier + IDOR) +
+    `useBrainCorrectLearning` hook.
+  - **Phase 4 — adaptive decision signals:** `ProviderRoleAssigner` gains an optional
+    advisory experience input — **quality-first selection preserved**; verified historical
+    signals only inform tie-breaks + the selection `experienceSignal` reason, never
+    hardcoded rules, never override security/approval/budget/quality.
+  - **Phase 9 — transparency UI:** `/brain` learning feed (`BrainLearningPanel`) shows
+    plain-language source labels — **"You told me" (user-confirmed) / "I observed"
+    (evidence) / "I inferred" (system)** — with confidence, evidence count, freshness and
+    a **Correct / Forget** affordance (per-correction entry + corrections list).
+  - **Phase 8 — deterministic learning benchmark:** `scripts/learning-benchmark.ts`
+    (`npm run learning:benchmark`, wired into `benchmarks` + CI + release) — **15
+    real-architecture journeys / 25/25 PASS** through the REAL `BrainApplicationService` +
+    real `InMemoryBrainStores` + real `AdaptiveScoreLedger` + real `deriveOutcomeVerdict`:
+    verified success → learning signal · verified failure → failure signal · UNKNOWN → no
+    false learning · one failure → weak signal · repeated failure → stronger signal ·
+    repeated strategy → positive signal · user correction → overrides inference · stale
+    learning → reduced influence (real decay math) · provider + capability performance
+    signals · cross-user isolation (owner-keyed ledger) · untrusted output never becomes
+    user fact · new decision uses verified historical signal (advisory tie-break) ·
+    security/policy overrides learned signal · budget limit overrides learned optimization
+    (frozen `BrainBudgetGuard`).
+  - **Validation (current tree):** brain **152/152** (LearningSignals 17 + correctLearning/
+    verdict-memory additions) · gateway **716 passed + 1 skipped / 35 files** (BrainRouter
+    `correctLearning` router test) · web **167/167** · scheduler benchmark **13/13** ·
+    SPRINT-023 journeys **30/30** · SPRINT-024 runtime benchmark **36/36** (both untouched) ·
+    learning benchmark **25/25** · root `tsc -b` + api + web typecheck **0** · full-repo
+    lint **0**. Honest: live-provider execution + Postgres persistence for learning stores
+    remain operator steps (the benchmark is a deterministic hermetic composition over the
+    real stores). Docs: `09_Documents/SPRINT-025_{BASELINE_AUDIT,EVIDENCE,COMPLETION_REPORT}.md`;
+    MASTER_ROADMAP / PROJECT_STATUS / CHANGELOG / README / task_progress synchronized.
+
 - **SPRINT-024 — LIVE OUTCOME VERIFICATION & REAL-RUNTIME EXECUTION** (2026-08-12,
   🟢 GREEN — IMPLEMENTATION VERIFIED): moves outcome verification from primarily
   hermetic/scripted proof toward **REAL RUNTIME ARTIFACT VERIFICATION** — the core

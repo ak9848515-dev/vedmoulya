@@ -226,6 +226,18 @@ export interface BrainHandlers {
     },
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;
+  // SPRINT-025 — user correction loop (the only new learning write surface)
+  correctLearning: (
+    input: {
+      userId: string;
+      statement: string;
+      target: 'approach' | 'provider' | 'result' | 'preference';
+      providerId?: string;
+      capability?: string;
+      taskId?: string;
+    },
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
   // EPIC-020 (Outcome & Revenue layer) — Today's Top 5
   dailyPriorities: (input: { userId: string; limit?: number }, ctx: TRPCContext) => ApiResponse;
   // EPIC-020 — continuous intelligence surface
@@ -326,6 +338,20 @@ export function createBrainRouter(
           input.outputAccepted,
           input.satisfaction ?? 'UNKNOWN',
         ),
+      );
+    },
+
+    // SPRINT-025 — user correction loop (auth + rate limit + IDOR at boundary).
+    correctLearning: async (input, _ctx): Promise<ApiResponse> => {
+      assertRateLimit(input.userId, RateLimitTiers.standard);
+      return fromServiceResult(
+        await service.correctLearning(input.userId, {
+          statement: input.statement,
+          target: input.target,
+          providerId: input.providerId,
+          capability: input.capability,
+          taskId: input.taskId,
+        }),
       );
     },
 

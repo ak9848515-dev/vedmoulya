@@ -172,6 +172,10 @@ export type PreferenceEventSource =
   | 'explicit_user_selection' // user chose a provider/model
   | 'explicit_user_approval' // user approved an irreversible/paid step
   | 'explicit_user_rejection' // user rejected an approval
+  // SPRINT-025 — additive: the user corrected the system explicitly
+  // ("don't use this approach again" / "that result was wrong"). Same
+  // explicit authority as the other explicit sources — never inferred.
+  | 'explicit_user_correction'
   | 'inferred_observation'; // observed behavior — NEVER auto-promoted
 
 export interface ExecutionPreferenceEvent {

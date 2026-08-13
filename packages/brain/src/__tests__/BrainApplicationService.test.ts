@@ -23,6 +23,9 @@ import { BrainBudgetGuard } from '../domain/BrainBudgetGuard.js';
 import { BrainPolicyEngine, SENSITIVE_ACTIONS } from '../domain/BrainPolicyEngine.js';
 import { BrainDecisionRecorder } from '../domain/BrainDecisionRecorder.js';
 import { OutcomeEvaluator } from '../domain/OutcomeEvaluator.js';
+import { InMemoryOutcomeMemory } from '../infrastructure/InMemoryContinuousStores.js';
+import { AdaptiveScoreLedger } from '../domain/AdaptiveScoreLedger.js';
+import type { BrainMemoryPort, BrainExperiencePort } from '../contracts/brain-ports.js';
 import type { FactoryCapabilityPlan } from '@vedmoulya/capability-marketplace';
 import type {
   BrainPlanPort,
@@ -957,6 +960,192 @@ describe('BrainApplicationService', () => {
     const task = service.createTask('u1', 'Create a video').data!;
     expect(service.getDecisionRecords('u2', task.id).data).toHaveLength(0);
     expect(service.getDecisionRecords('u1', task.id).data!.length).toBeGreaterThan(0);
+  });
+
+  // ── SPRINT-025 — continuous learning & adaptive improvement ──────
+  it('records honest verdict + learning signals into outcome memory (UNKNOWN never SUCCESS)', async () => {
+    const memory = new InMemoryOutcomeMemory();
+    const { service } = makeHarness({
+      service: { memory } as Partial<ReturnType<typeof makeHarness>['service']>,
+    });
+    const task = service.createTask('u1', 'Create a video about AI').data!;
+    await service.plan('u1', task.id);
+    await service.selectResources('u1', task.id);
+    await service.execute('u1', task.id);
+    // Do NOT verify → verdict stays UNKNOWN (SPRINT-024 honesty).
+    await service.evaluateOutcome('u1', task.id, true);
+    const records = memory.list('u1');
+    expect(records.length).toBe(1);
+    const record = records[0];
+    if (!record) throw new Error('no memory record');
+    expect(record.verdict).toBe('UNKNOWN');
+    expect(record.outcome).not.toBe('SUCCESS'); // never fabricated
+    expect((record.signals ?? []).some((s) => s.kind === 'FACT')).toBe(false);
+  });
+
+  it('verified SUCCESS records FACT signals + SUCCESS verdict', async () => {
+    const memory = new InMemoryOutcomeMemory();
+    const { service } = makeHarness({
+      service: { memory } as Partial<ReturnType<typeof makeHarness>['service']>,
+    });
+    const task = service.createTask('u1', 'Create a video about AI').data!;
+    await service.plan('u1', task.id);
+    await service.selectResources('u1', task.id);
+    await service.execute('u1', task.id);
+    service.verify('u1', task.id); // verification passes → SUCCESS
+    await service.evaluateOutcome('u1', task.id, true);
+    const record = memory.list('u1')[0];
+    if (!record) throw new Error('no memory record');
+    expect(record.verdict).toBe('SUCCESS');
+    expect(record.outcome).toBe('SUCCESS');
+    expect((record.signals ?? []).some((s) => s.kind === 'FACT')).toBe(true);
+  });
+
+  it('correctLearning records an EXPLICIT correction outranking inference', async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const memory = new InMemoryOutcomeMemory();
+    const preference: BrainPreferencePort = {
+      record: async (e) => {
+        events.push({ ...e });
+      },
+    };
+    const { service } = makeHarness({
+      service: {
+        memory,
+        preference,
+      } as Partial<ReturnType<typeof makeHarness>['service']>,
+    });
+    const result = await service.correctLearning('u1', {
+      statement: 'Do not use this approach again',
+      target: 'approach',
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.confidence).toBe(0.98);
+    const explicit = events.find((e) => e.source === 'explicit_user_correction');
+    expect(explicit).toBeDefined();
+    expect(explicit?.confidence).toBe(0.98);
+    // Correction is stored on the outcome memory as the user's fact.
+    const correctionRecord = memory
+      .list('u1')
+      .find((m) => (m.corrections?.length ?? 0) > 0);
+    expect(correctionRecord?.corrections?.[0]?.statement).toBe('Do not use this approach again');
+    expect(correctionRecord?.corrections?.[0]?.confidence).toBe(0.98);
+  });
+
+  it('correctLearning rejects empty/short statements and provider targets without id', async () => {
+    const { service } = makeHarness();
+    expect((await service.correctLearning('u1', { statement: 'x', target: 'approach' })).success).toBe(
+      false,
+    );
+    expect(
+      (
+        await service.correctLearning('u1', {
+          statement: 'This provider is bad',
+          target: 'provider',
+        })
+      ).success,
+    ).toBe(false);
+    const ok = await service.correctLearning('u1', {
+      statement: 'This provider is bad',
+      target: 'provider',
+      providerId: 'prov-a',
+      capability: 'CODING',
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it('correctLearning on a task attaches the correction to that task memory', async () => {
+    const memory = new InMemoryOutcomeMemory();
+    const { service } = makeHarness({
+      service: { memory } as Partial<ReturnType<typeof makeHarness>['service']>,
+    });
+    const task = service.createTask('u1', 'Create a video about AI').data!;
+    await service.correctLearning('u1', {
+      statement: 'That result was wrong',
+      target: 'result',
+      taskId: task.id,
+    });
+    const record = memory
+      .list('u1')
+      .find((m) => m.taskId === task.id && (m.corrections?.length ?? 0) > 0);
+    expect(record?.corrections?.[0]?.statement).toBe('That result was wrong');
+  });
+
+  it('provider corrections record the EXPLICIT preference fact (no invented quality score)', async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const memory = new InMemoryOutcomeMemory();
+    const preference: BrainPreferencePort = {
+      record: async (e) => {
+        events.push({ ...e });
+      },
+    };
+    const { service } = makeHarness({
+      service: {
+        memory,
+        preference,
+      } as Partial<ReturnType<typeof makeHarness>['service']>,
+    });
+    await service.correctLearning('u1', {
+      statement: 'That provider is unreliable for coding',
+      target: 'provider',
+      providerId: 'prov-a',
+      capability: 'CODING',
+    });
+    const correction = events.find((e) => e.source === 'explicit_user_correction');
+    expect(correction).toBeDefined();
+    expect(correction?.confidence).toBe(0.98);
+    expect(String(correction?.fact)).toContain('prov-a');
+    // Corrections are facts, not quality measurements — the experience ledger
+    // is NOT polluted with an invented success/failure sample.
+    const ledger = new AdaptiveScoreLedger(() => new Date().toISOString());
+    expect(ledger.scoresFor('CODING').length).toBe(0);
+  });
+
+  it('selectResources consults verified experience as an advisory tie-break (quality-first kept)', async () => {
+    const ledger = new AdaptiveScoreLedger(() => new Date().toISOString());
+    await ledger.recordPerformance({
+      providerId: 'prov-b',
+      capability: 'CODING',
+      succeeded: true,
+      explicit: true,
+      quality: 0.99,
+      at: '2026-08-13T09:00:00Z',
+    });
+    await ledger.recordPerformance({
+      providerId: 'prov-a',
+      capability: 'CODING',
+      succeeded: false,
+      explicit: true,
+      quality: 0,
+      at: '2026-08-13T09:00:00Z',
+    });
+    // prov-a and prov-b have equal registry quality (0.92 vs 0.9) but the
+    // EXPERIENCE ledger strongly favors prov-b → tie-break must pick prov-b.
+    const { service } = makeHarness({
+      planCaps: ['CODING'],
+      service: {
+        experience: ledger,
+        candidates: {
+          providerCandidates: async (cap) =>
+            cap === 'CODING'
+              ? [
+                  providerFact({ providerId: 'prov-a', quality: 0.92, costTier: 'medium' }),
+                  providerFact({ providerId: 'prov-b', quality: 0.92, costTier: 'medium' }),
+                ]
+              : [],
+          discoveryCandidates: async () => [],
+          localModelCandidates: async () => [],
+        },
+      } as Partial<ReturnType<typeof makeHarness>['service']>,
+    });
+    const task = service.createTask('u1', 'Fix a coding problem').data!;
+    await service.plan('u1', task.id);
+    const selected = await service.selectResources('u1', task.id);
+    const codingAssignments = selected.data!.roleAssignments.filter(
+      (a) => a.capability === 'CODING',
+    );
+    expect(codingAssignments.length).toBeGreaterThan(0);
+    expect(codingAssignments[0]?.providerId).toBe('prov-b');
   });
 
   it('abstention is honored and recorded', async () => {

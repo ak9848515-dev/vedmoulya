@@ -962,6 +962,18 @@ const brainOutcomeInput = z.object({
   satisfaction: z.enum(['YES', 'PARTIALLY', 'NO', 'UNKNOWN']).optional(),
 });
 
+// SPRINT-025 — user correction loop. Bounded text (no sensitive data),
+// explicit target, optional provider/capability/task scope. The correction
+// enters the EXISTING preference + experience ledgers as EXPLICIT evidence.
+const brainCorrectionInput = z.object({
+  userId: z.string().min(1),
+  statement: z.string().min(3).max(500),
+  target: z.enum(['approach', 'provider', 'result', 'preference']),
+  providerId: z.string().min(1).max(120).optional(),
+  capability: z.string().min(1).max(80).optional(),
+  taskId: z.string().min(1).max(120).optional(),
+});
+
 // ── EPIC-020 (Outcome & Revenue layer) — Daily Outcome Engine §8 ──
 const brainDailyPrioritiesInput = z.object({
   userId: z.string().min(1),
@@ -4255,6 +4267,12 @@ export function createAppRouter(services: ApiApplicationService) {
         .input(brainOutcomeInput)
         .mutation(({ input, ctx }) =>
           createBrainRouter(services.brain, services.brainDashboard).evaluateOutcome(input, ctx),
+        ),
+      // SPRINT-025 — user correction loop (EXPLICIT > INFERRED)
+      correctLearning: standardProcedure
+        .input(brainCorrectionInput)
+        .mutation(({ input, ctx }) =>
+          createBrainRouter(services.brain, services.brainDashboard).correctLearning(input, ctx),
         ),
       // ── EPIC-020 (Outcome & Revenue layer) — Today's Top 5 (§8) ──
       dailyPriorities: standardProcedure

@@ -143,6 +143,10 @@ export default tseslint.config(
       // candidates / usage / discovery doubles stay synchronous behind the
       // async Brain*Port contracts — identical interface-conformance rationale.
       'scripts/runtime-verification-benchmark.ts',
+      // SPRINT-025 learning benchmark — the scripted execution / candidates /
+      // usage / discovery doubles implement the async Brain*Port contracts with
+      // synchronous bodies — identical interface-conformance rationale.
+      'scripts/learning-benchmark.ts',
     ],
     rules: {
       '@typescript-eslint/require-await': 'off',

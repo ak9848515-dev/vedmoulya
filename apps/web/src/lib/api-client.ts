@@ -1017,6 +1017,34 @@ export function useBrainEvaluateOutcome() {
   };
 }
 
+// ── SPRINT-025 — user correction loop ───────────────────────────────
+// The ONLY learning write surface the user owns directly: "don't use this
+// approach again" / "that result was wrong" / "that is not my preference".
+// Corrections enter the EXISTING preference + experience ledgers as
+// EXPLICIT evidence (EXPLICIT > INFERRED) and appear in the learning feed
+// as "you told me" facts.
+
+export interface LearningCorrectionDTO {
+  id: string;
+  userId: string;
+  statement: string;
+  target: 'approach' | 'provider' | 'result' | 'preference';
+  providerId?: string;
+  capability?: string;
+  taskId?: string;
+  confidence: number;
+  capturedAt: string;
+}
+
+export function useBrainCorrectLearning() {
+  const mutation = api.brain.correctLearning.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<LearningCorrectionDTO>(mutation.data),
+    mutateAsync: guardMutation(mutation.mutateAsync),
+  };
+}
+
 // ── EPIC-020 (Outcome & Revenue layer) — Today's Top 5 (§8) ────────
 /** Daily priority action — mirrors the brain OutcomePriorityEngine view. */
 export interface DailyActionDTO {
@@ -1103,6 +1131,24 @@ export interface BrainDashboardViewDTO {
     taskType: string;
     outcome: string;
     userAccepted: boolean;
+    capturedAt: string;
+    verdict?: string;
+    verificationPassed?: boolean;
+    signals: Array<{
+      fact: string;
+      kind: 'FACT' | 'INFERENCE' | 'UNKNOWN';
+      source: 'EXPLICIT' | 'INFERRED';
+      confidence: number;
+      capturedAt: string;
+    }>;
+  }>;
+  corrections: Array<{
+    id: string;
+    statement: string;
+    target: string;
+    providerId?: string;
+    taskId?: string;
+    confidence: number;
     capturedAt: string;
   }>;
   scheduler: { nextDiscoveryAt?: string; meaningfulUpdates: number; enabledJobs: number };

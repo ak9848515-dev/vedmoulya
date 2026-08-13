@@ -87,6 +87,26 @@ export interface BrainDashboardView {
     outcome: string;
     userAccepted: boolean;
     capturedAt: string;
+    // ── SPRINT-025 — honest verdict + source/confidence transparency ──
+    verdict?: string;
+    verificationPassed?: boolean;
+    signals: Array<{
+      fact: string;
+      kind: 'FACT' | 'INFERENCE' | 'UNKNOWN';
+      source: 'EXPLICIT' | 'INFERRED';
+      confidence: number;
+      capturedAt: string;
+    }>;
+  }>;
+  /** SPRINT-025 — user corrections ("you told me"), highest authority. */
+  corrections: Array<{
+    id: string;
+    statement: string;
+    target: string;
+    providerId?: string;
+    taskId?: string;
+    confidence: number;
+    capturedAt: string;
   }>;
   scheduler: {
     nextDiscoveryAt?: string;
@@ -176,8 +196,9 @@ export class BrainDashboardService {
       }
     }
 
-    const learning = outcomeMemory
-      .list(userId)
+    const allOutcomeMemory = outcomeMemory.list(userId);
+    const learning = allOutcomeMemory
+      .filter((m) => (m.corrections?.length ?? 0) === 0)
       .slice(-8)
       .map((m) => ({
         taskId: m.taskId,
@@ -185,6 +206,29 @@ export class BrainDashboardService {
         outcome: m.outcome,
         userAccepted: m.userAccepted,
         capturedAt: m.capturedAt,
+        verdict: m.verdict,
+        verificationPassed: m.verificationPassed,
+        signals: (m.signals ?? []).map((s) => ({
+          fact: s.fact,
+          kind: s.kind,
+          source: s.source,
+          confidence: s.confidence,
+          capturedAt: s.capturedAt,
+        })),
+      }));
+    // Corrections are EXCLUSIVELY user-authored — rendered separately as
+    // "you told me" facts with the highest authority.
+    const corrections = allOutcomeMemory
+      .flatMap((m) => m.corrections ?? [])
+      .slice(-10)
+      .map((c) => ({
+        id: c.id,
+        statement: c.statement,
+        target: c.target,
+        providerId: c.providerId,
+        taskId: c.taskId,
+        confidence: c.confidence,
+        capturedAt: c.capturedAt,
       }));
 
     let scheduler: BrainDashboardView['scheduler'] = { meaningfulUpdates: 0, enabledJobs: 0 };
@@ -218,6 +262,7 @@ export class BrainDashboardService {
       usage,
       adaptiveScores: adaptiveScores.sort((a, b) => b.qualityScore - a.qualityScore).slice(0, 8),
       learning: [...learning].reverse(),
+      corrections: [...corrections].reverse(),
       scheduler,
     };
   }

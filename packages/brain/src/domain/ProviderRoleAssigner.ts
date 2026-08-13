@@ -12,6 +12,7 @@
 import type { CapabilityId } from '@vedmoulya/capability-marketplace';
 import type { ProviderCandidateFact } from '@vedmoulya/capability-marketplace';
 import type { ProviderRole, ProviderRoleAssignment, BrainMode } from '../types/brain-types.js';
+import type { ProviderPerformanceScore } from '../types/continuous-types.js';
 
 /** Default role per capability (evidence-backed, capability-first). */
 export const CAPABILITY_DEFAULT_ROLE: Record<string, ProviderRole> = {
@@ -44,6 +45,14 @@ export interface RoleAssignmentOptions {
   qualityTarget: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
   /** User-selected provider/model override (respected, never silently replaced). */
   userPreferredProviderId?: string;
+  /**
+   * SPRINT-025 — ADVISORY verified-experience signals (provider × capability
+   * quality from the existing AdaptiveScoreLedger). These NEVER override
+   * quality-first selection or user preference: they only break quality ties
+   * and inform the reason string. Learning can never override security,
+   * approval, budget, quality requirements or user constraints.
+   */
+  experienceScores?: ProviderPerformanceScore[];
 }
 
 export interface LocalModelFact {
@@ -51,6 +60,17 @@ export interface LocalModelFact {
   name: string;
   capabilities: CapabilityId[];
   available: boolean;
+}
+
+/** Verified-experience quality for a candidate (0 when none exists). */
+function experienceQuality(
+  candidate: ProviderCandidateFact,
+  scores: ProviderPerformanceScore[] | undefined,
+): number {
+  if (!scores || scores.length === 0) return 0;
+  const found = scores.find((s) => s.providerId === candidate.providerId);
+  if (!found) return 0;
+  return found.sampleCount > 0 ? found.qualityScore : 0;
 }
 
 /**
@@ -248,6 +268,27 @@ export class ProviderRoleAssigner {
         (c) => c.costTier === 'free' || LOCAL_FAMILIES.has(c.family.toLowerCase()),
       );
       if (freeLocal) return freeLocal;
+    }
+
+    // SPRINT-025 — ADVISORY tie-break: when two candidates share the SAME
+    // measured quality (within epsilon), prefer the one with the stronger
+    // VERIFIED experience signal (provider × capability). This never
+    // outranks quality-first — it only resolves ties. No evidence = no effect.
+    const scores = opts.experienceScores;
+    if (scores && scores.length > 0) {
+      const top = ranked[0];
+      if (top) {
+        const topQuality = top.quality ?? 0;
+        const tied = ranked.filter((c) => Math.abs((c.quality ?? 0) - topQuality) < 1e-9);
+        if (tied.length > 1) {
+          const bestTied = [...tied].sort(
+            (a, b) =>
+              experienceQuality(b, scores) - experienceQuality(a, scores) ||
+              b.availability - a.availability,
+          )[0];
+          if (bestTied) return bestTied;
+        }
+      }
     }
     return best;
   }

@@ -53,6 +53,9 @@ export type {
   SecurityClassification,
   IntelligenceEvent,
   BrainOutcomeMemory,
+  LearningSignal,
+  LearningSignalKind,
+  LearningCorrection,
 } from './types/continuous-types.js';
 
 // ── EPIC-020 (Outcome & Revenue layer) types ──────────────────────
@@ -121,6 +124,12 @@ export type { PolicyVerdict, PolicyContext, SensitiveAction } from './domain/Bra
 export { BrainDecisionRecorder } from './domain/BrainDecisionRecorder.js';
 export type { DecisionInput } from './domain/BrainDecisionRecorder.js';
 export { OutcomeEvaluator } from './domain/OutcomeEvaluator.js';
+export {
+  deriveLearningSignals,
+  correctionSignal,
+  MAX_SIGNALS_PER_OUTCOME,
+} from './domain/LearningSignals.js';
+export type { DeriveSignalsInput } from './domain/LearningSignals.js';
 export { deriveOutcomeVerdict } from './domain/OutcomeVerdict.js';
 export type { OutcomeVerdictInput } from './domain/OutcomeVerdict.js';
 export { OUTCOME_VERDICT_LABELS } from './domain/OutcomeVerdict.js';
