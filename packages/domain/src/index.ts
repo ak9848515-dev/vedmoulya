@@ -14,3 +14,6 @@ export * from './decision/index.js';
 
 // ── Execution Intelligence Engine Bounded Context ─────────────────────────
 export * from './execution/index.js';
+
+// ── Content Agency Bounded Context (EPIC-003/AC-001) ──────────────────────
+export * from './content-agency/index.js';

@@ -33,9 +33,7 @@ export interface SafeCallResult<T> {
   success: boolean;
   data?: T;
   error?: string;
-}
-
-/* eslint-disable @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/restrict-plus-operands, security/detect-object-injection */
+} /* eslint-disable @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/restrict-plus-operands, security/detect-object-injection */
 // LifeOSAssembler merges data from many sources — dynamic property access and
 // as-casts are inherent to the data-assembly pattern and cannot be statically typed.
 export class LifeOSAssembler {

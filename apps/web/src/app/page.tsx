@@ -1,12 +1,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VedMoulya — Dashboard Landing Page
-// Composes all 9 Dashboard sections from real Life OS API data
+// Composes all Life OS sections from real API data
 // BLD-016-B — Dashboard Landing Experience
+// MOB-002 — Production Mobile Experience:
+//   • premium welcome screen (hero) + user profile card
+//   • today's mission + AI summary cards
+//   • quick actions wired to module routes
+//   • loading skeletons, graceful empty states, error states
+//   • pull-to-refresh, offline cache fallback, auto retry on reconnect
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Loading, Card, Button } from '@vedmoulya/ui';
 import {
   RefreshCw,
@@ -16,6 +23,12 @@ import {
   Target,
   TrendingUp,
   ArrowRight,
+  Users,
+  BookOpen,
+  Brain,
+  BarChart3,
+  Store,
+  CloudOff,
 } from 'lucide-react';
 import { useLifeOSSnapshot } from '../lib/api-client.js';
 import { useAuthStore, useAuthHydrated } from '../stores/auth-store.js';
@@ -36,15 +49,23 @@ import type {
 
 import dynamic from 'next/dynamic';
 import { ErrorBoundary } from '../components/ErrorBoundary.js';
-import { SignedOutCard } from '../components/SignedOutCard.js';
+import { SignInRedirect } from '../components/SignInRedirect.js';
 import { TopPriorityCard } from './sections/TopPriorityCard.js';
 import { ExecutionCenter } from './sections/ExecutionCenter.js';
 import { DecisionCenter } from './sections/DecisionCenter.js';
+import { ProfileCard } from './sections/ProfileCard.js';
+import { TodayMissionCard } from './sections/TodayMissionCard.js';
+import { AISummaryCard } from './sections/AISummaryCard.js';
+import { DashboardSkeleton } from './sections/DashboardSkeleton.js';
+import { usePullToRefresh } from '../lib/use-pull-to-refresh.js';
+import { markStartup, STARTUP_MARKS } from '../lib/startup.js';
+import {
+  cacheDashboardSnapshot,
+  readCachedDashboard,
+  type CachedDashboardEntry,
+} from '../lib/dashboard-cache.js';
 
-// Below-the-fold sections are lazy-loaded (same convention as AppShell's
-// NotificationsDrawer/AICompanion) to keep the landing page chunk within the
-// 50 kB bundle budget (BLD-016-B). `ssr: false` + null loading means they
-// split into their own chunks and hydrate only when the route mounts.
+// Below-the-fold sections are lazy-loaded to keep the landing chunk small.
 const ModuleStatusGrid = dynamic(
   () => import('./sections/ModuleStatusGrid.js').then((mod) => ({ default: mod.ModuleStatusGrid })),
   { ssr: false, loading: () => null },
@@ -81,8 +102,7 @@ const QuickActions = dynamic(
   () => import('./sections/QuickActions.js').then((mod) => ({ default: mod.QuickActions })),
   { ssr: false, loading: () => null },
 );
-
-// ── Session (from real auth, BLD-016C) ──────────────────────────────────────
+import type { QuickAction } from './sections/QuickActions.js';
 
 // ── Default Values for Missing Data ──────────────────────────────────────────
 
@@ -164,13 +184,48 @@ function safeArr<TVal>(val: unknown): TVal[] {
 // ── Home Page ───────────────────────────────────────────────────────────────
 
 export default function Home(): React.JSX.Element {
+  const router = useRouter();
   const hydrated = useAuthHydrated();
-  const { user } = useAuthStore();
+  const { user, sessionReady, offline } = useAuthStore();
   const userId = user?.userId ?? '';
-  const { data, isLoading, isError, error, refetch } = useLifeOSSnapshot(userId);
+  const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useLifeOSSnapshot(userId);
 
-  // ── Hydration guard (prevents SSR/client mismatch from zustand persist) ──
-  if (!hydrated) {
+  // ── Offline cache (MOB-002) ─────────────────────────────────────────────
+  const [cachedEntry, setCachedEntry] = useState<CachedDashboardEntry | null>(null);
+  const usingCache = !data && cachedEntry !== null;
+
+  // Write the last successful snapshot to the offline cache.
+  useEffect(() => {
+    if (data?.success && data.data) {
+      cacheDashboardSnapshot(data.data);
+      setCachedEntry(null);
+      markStartup(STARTUP_MARKS.firstData);
+    }
+  }, [data]);
+
+  // When the live query fails or the device is offline, fall back to cache.
+  useEffect(() => {
+    if ((isError || offline) && !data) {
+      setCachedEntry(readCachedDashboard());
+    }
+  }, [isError, offline, data]);
+
+  // Re-sync on explicit retry (offline banner button).
+  useEffect(() => {
+    const onRetry = (): void => {
+      void refetch();
+    };
+    window.addEventListener('vedmoulya:retry-sync', onRetry);
+    return (): void => {
+      window.removeEventListener('vedmoulya:retry-sync', onRetry);
+    };
+  }, [refetch]);
+
+  // ── Pull-to-refresh (MOB-002) ───────────────────────────────────────────
+  const pullToRefresh = usePullToRefresh({ onRefresh: refetch });
+
+  // ── Hydration guard (prevents SSR/client mismatch) ──────────────────────
+  if (!hydrated || !sessionReady) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
         <Loading label="Loading your Life OS..." size="lg" />
@@ -178,34 +233,32 @@ export default function Home(): React.JSX.Element {
     );
   }
 
-  // ── Signed-Out State (real auth enforced — no token, no dashboard) ─────
+  // ── Signed-Out State (real auth enforced — no token, no dashboard) ──────
   if (!user) {
-    return <SignedOutCard />;
+    return <SignInRedirect />;
   }
 
-  // ── Loading State ─────────────────────────────────────────────────────
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
-        <Loading label="Loading your Life OS..." size="lg" />
-      </div>
-    );
+  // ── Loading State → skeleton placeholders ───────────────────────────────
+  if (isLoading && !usingCache) {
+    return <DashboardSkeleton />;
   }
 
-  // ── Error State ───────────────────────────────────────────────────────
-  if (isError || !data?.success) {
+  // ── Error State (with cached fallback when available) ───────────────────
+  // When the query failed AND no fresh-enough cache exists, show the error UI.
+  // (If a cache exists, `usingCache` is true and we render from it below.)
+  if ((isError || !data?.success) && cachedEntry === null) {
     const errorMessage = error?.message ?? 'Could not load your dashboard.';
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
         <Card variant="standard" padding="lg" className="max-w-md text-center">
           <div className="flex flex-col items-center gap-3">
-            <div className="p-3 rounded-full bg-[#FEF2F2]">
+            <div className="p-3 rounded-full bg-[#FEF2F2] dark:bg-[#450A0A]">
               <AlertTriangle className="h-6 w-6 text-[#EF4444]" />
             </div>
-            <h2 className="text-[18px] font-heading font-semibold text-[#111827]">
+            <h2 className="text-[18px] font-heading font-semibold text-[#111827] dark:text-[#F8FAFC]">
               Unable to Load Dashboard
             </h2>
-            <p className="text-[14px] text-[#64748B]">{errorMessage}</p>
+            <p className="text-[14px] text-[#64748B] dark:text-[#94A3B8]">{errorMessage}</p>
             <Button
               variant="primary"
               size="md"
@@ -221,13 +274,16 @@ export default function Home(): React.JSX.Element {
     );
   }
 
-  // ── Extract typed data from snapshot ──────────────────────────────────
-  const raw = data.data as Record<string, unknown> | undefined;
+  // ── Extract typed data from live or cached snapshot ────────────────────
+  const raw = (data?.success ? (data.data as Record<string, unknown>) : cachedEntry?.data) as
+    Record<string, unknown> | undefined;
   if (!raw || typeof raw !== 'object') {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
         <Card variant="standard" padding="lg" className="max-w-md text-center">
-          <p className="text-[14px] text-[#64748B]">No dashboard data available.</p>
+          <p className="text-[14px] text-[#64748B] dark:text-[#94A3B8]">
+            No dashboard data available yet.
+          </p>
           <Button
             variant="primary"
             size="md"
@@ -269,14 +325,123 @@ export default function Home(): React.JSX.Element {
     momentum: rawMetrics?.momentum as number | undefined,
   };
 
+  // ── Quick actions wired to real routes (MOB-002) ───────────────────────
+  const scrollToId = (id: string): void => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const quickActions: QuickAction[] = [
+    {
+      label: 'Continue Mission',
+      icon: <Target className="h-4 w-4" />,
+      variant: 'primary',
+      onClick: (): void => {
+        scrollToId('todays-mission');
+      },
+    },
+    {
+      label: 'Review Career',
+      icon: <Users className="h-4 w-4" />,
+      variant: 'secondary',
+      onClick: (): void => {
+        router.push('/career');
+      },
+    },
+    {
+      label: 'Start Learning',
+      icon: <BookOpen className="h-4 w-4" />,
+      variant: 'secondary',
+      onClick: (): void => {
+        router.push('/learning');
+      },
+    },
+    {
+      label: 'Review Decisions',
+      icon: <Brain className="h-4 w-4" />,
+      variant: 'secondary',
+      onClick: (): void => {
+        scrollToId('decisions');
+      },
+    },
+    {
+      label: 'View Business',
+      icon: <BarChart3 className="h-4 w-4" />,
+      variant: 'ghost',
+      onClick: (): void => {
+        router.push('/business');
+      },
+    },
+    {
+      label: 'Browse Marketplace',
+      icon: <Store className="h-4 w-4" />,
+      variant: 'ghost',
+      onClick: (): void => {
+        router.push('/marketplace');
+      },
+    },
+  ];
+
+  const cacheAgeMinutes = cachedEntry
+    ? Math.max(1, Math.round((Date.now() - cachedEntry.fetchedAt) / 60000))
+    : 0;
+
   // ── Render Sections ───────────────────────────────────────────────────
   return (
-    <div className="space-y-8 pb-8">
+    <div ref={pullToRefresh.pageRef} className="relative space-y-5 md:space-y-8 pb-4 md:pb-8">
+      {/* ── Pull-to-refresh indicator (MOB-002) ───────────────────────── */}
+      <div
+        className="flex items-center justify-center overflow-hidden transition-[height] duration-200"
+        style={{ height: pullToRefresh.refreshing ? 44 : Math.min(pullToRefresh.pullDistance, 72) }}
+        aria-hidden="true"
+      >
+        {pullToRefresh.refreshing ? (
+          <RefreshCw className="h-5 w-5 text-[#2B5FD9] dark:text-[#6B8FEF] animate-spin" />
+        ) : (
+          pullToRefresh.pullDistance > 0 && (
+            <RefreshCw
+              className="h-4 w-4 text-[#2B5FD9] dark:text-[#6B8FEF]"
+              style={{
+                transform: `rotate(${String(Math.min(pullToRefresh.pullDistance * 2, 180))}deg)`,
+              }}
+            />
+          )
+        )}
+      </div>
+
+      {/* ── Cached-data notice (MOB-002) ──────────────────────────────── */}
+      {usingCache && (
+        <div
+          role="status"
+          className="animate-banner-in flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FFFBEB] dark:bg-[#451A03] border border-[#FDE68A] dark:border-[#78350F] text-[#92400E] dark:text-[#FDE68A] text-[12px] font-medium"
+        >
+          <CloudOff className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">
+            {offline
+              ? `You're offline — showing data cached ${String(cacheAgeMinutes)} min ago.`
+              : `Showing cached data from ${String(cacheAgeMinutes)} min ago — pull to refresh or retry.`}
+          </span>
+          <button
+            onClick={() => {
+              void refetch();
+            }}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#F59E0B]/15 hover:bg-[#F59E0B]/25 transition-colors text-[#B45309] dark:text-[#FBBF24] font-semibold"
+          >
+            <RefreshCw className="h-3 w-3" /> Retry
+          </button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          USER PROFILE CARD (MOB-002)
+          ═══════════════════════════════════════════════════════════════════ */}
+      <ErrorBoundary section="profile">
+        <ProfileCard identity={identity} fallbackEmail={user.email} />
+      </ErrorBoundary>
+
       {/* ═══════════════════════════════════════════════════════════════════
           PREMIUM HERO: Greeting + Life Score + Daily Focus + Quote
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="hero">
-        <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#1E4AA8] via-[#2B5FD9] to-[#5B8AEB] p-8 md:p-10">
+        <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#1E4AA8] via-[#2B5FD9] to-[#5B8AEB] p-6 md:p-10 animate-slide-up">
           <div
             className="absolute inset-0 opacity-10"
             style={{
@@ -288,7 +453,7 @@ export default function Home(): React.JSX.Element {
             <div className="flex items-start justify-between">
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <h1 className="text-[32px] md:text-[42px] font-heading font-bold text-white tracking-tight">
+                  <h1 className="text-[26px] md:text-[42px] font-heading font-bold text-white tracking-tight">
                     Good{' '}
                     {new Date().getHours() < 12
                       ? 'Morning'
@@ -299,27 +464,27 @@ export default function Home(): React.JSX.Element {
                   </h1>
                   <Sparkles className="h-6 w-6 text-[#F59E0B]" />
                 </div>
-                <p className="text-[18px] text-[#D4E1FC] max-w-2xl leading-relaxed">
+                <p className="text-[15px] md:text-[18px] text-[#D4E1FC] max-w-2xl leading-relaxed">
                   {identity.purpose ||
                     'Building a sustainable livelihood through knowledge, execution, and intelligent technology.'}
                 </p>
 
                 {/* Stats Row */}
-                <div className="flex flex-wrap items-center gap-4 pt-2">
-                  <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-4 py-2">
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-3.5 py-1.5">
                     <TrendingUp className="h-4 w-4 text-[#A8C2F7]" />
-                    <span className="text-white text-[14px] font-medium">
+                    <span className="text-white text-[13px] md:text-[14px] font-medium">
                       Life Score:{' '}
                       <span className="text-[#A8C2F7] font-bold">{metrics.lifeScore}</span>/100
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-4 py-2">
+                  <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-3.5 py-1.5">
                     <Target className="h-4 w-4 text-[#A8C2F7]" />
-                    <span className="text-white text-[14px] font-medium">
+                    <span className="text-white text-[13px] md:text-[14px] font-medium">
                       {execution.completedToday} tasks done today
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-4 py-2">
+                  <div className="hidden sm:flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-3.5 py-1.5">
                     <Quote className="h-4 w-4 text-[#A8C2F7]" />
                     <span className="text-white/80 text-[13px] italic">
                       Small steps lead to great achievements
@@ -330,33 +495,48 @@ export default function Home(): React.JSX.Element {
             </div>
 
             {/* Continue Journey Button */}
-            <div className="mt-8 flex items-center gap-4">
-              <button className="inline-flex items-center gap-2 bg-white text-[#2B5FD9] px-6 py-3 rounded-full text-[15px] font-semibold hover:bg-[#F1F5F9] transition-all shadow-lg hover:shadow-xl">
+            <div className="mt-6 md:mt-8 flex items-center gap-3">
+              <button
+                onClick={() => {
+                  scrollToId('todays-mission');
+                }}
+                className="inline-flex items-center gap-2 bg-white text-[#2B5FD9] px-5 py-2.5 md:px-6 md:py-3 rounded-full text-[14px] md:text-[15px] font-semibold hover:bg-[#F1F5F9] transition-all shadow-lg hover:shadow-xl active:scale-95"
+              >
                 Continue Your Journey <ArrowRight className="h-4 w-4" />
               </button>
-              <button className="inline-flex items-center gap-2 bg-white/15 text-white px-6 py-3 rounded-full text-[15px] font-medium hover:bg-white/25 transition-all">
+              <button
+                onClick={() => {
+                  scrollToId('ai-summary');
+                }}
+                className="inline-flex items-center gap-2 bg-white/15 text-white px-5 py-2.5 md:px-6 md:py-3 rounded-full text-[14px] md:text-[15px] font-medium hover:bg-white/25 transition-all active:scale-95"
+              >
                 <Sparkles className="h-4 w-4" /> AI Summary
               </button>
             </div>
-
-            {/* AI Context Summary */}
-            {aiContext.contextSummary && (
-              <div className="mt-6 p-4 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20">
-                <div className="flex items-center gap-2 mb-1">
-                  <Sparkles className="h-4 w-4 text-[#F59E0B]" />
-                  <span className="text-[13px] font-medium text-[#D4E1FC]">AI Context</span>
-                </div>
-                <p className="text-[14px] text-white/90 leading-relaxed">
-                  {aiContext.contextSummary}
-                </p>
-              </div>
-            )}
           </div>
         </section>
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 2: Today's Top Priority
+          TODAY'S MISSION (MOB-002)
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div id="todays-mission">
+        <ErrorBoundary section="mission">
+          <TodayMissionCard priority={topPriority} execution={execution} />
+        </ErrorBoundary>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          AI SUMMARY (MOB-002)
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div id="ai-summary">
+        <ErrorBoundary section="ai-summary">
+          <AISummaryCard aiContext={aiContext} />
+        </ErrorBoundary>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          TOP PRIORITY (when a mission card isn't enough)
           ═══════════════════════════════════════════════════════════════════ */}
       {topPriority && (
         <ErrorBoundary section="top-priority">
@@ -365,19 +545,21 @@ export default function Home(): React.JSX.Element {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 3: Execution + Decision Center (two-column)
+          Execution + Decision Center (two-column)
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ErrorBoundary section="execution">
           <ExecutionCenter execution={execution} />
         </ErrorBoundary>
-        <ErrorBoundary section="decisions">
-          <DecisionCenter decisions={decisions} />
-        </ErrorBoundary>
+        <div id="decisions">
+          <ErrorBoundary section="decisions">
+            <DecisionCenter decisions={decisions} />
+          </ErrorBoundary>
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 4: Module Status Grid
+          Module Status Grid
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="module-status">
         <ModuleStatusGrid
@@ -389,14 +571,14 @@ export default function Home(): React.JSX.Element {
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 5: Memory Timeline
+          Memory Timeline
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="memory-timeline">
         <MemoryTimeline memory={memory} />
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 6: Journey Overview (daily/weekly/monthly + momentum)
+          Journey Overview
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="journey">
         <JourneyOverview
@@ -410,14 +592,14 @@ export default function Home(): React.JSX.Element {
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 7: Priorities List
+          Priorities List
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="priorities">
         <PrioritiesList priorities={priorities} />
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 8: AI Recommendations + Notifications (two-column)
+          AI Recommendations + Notifications (two-column)
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <ErrorBoundary section="recommendations">
@@ -432,7 +614,7 @@ export default function Home(): React.JSX.Element {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 9: AI Insights + Stats
+          AI Insights + Stats
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="ai-insights">
         <AIInsights
@@ -448,11 +630,18 @@ export default function Home(): React.JSX.Element {
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 10: Quick Actions
+          Quick Actions (wired to module routes)
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="quick-actions">
-        <QuickActions />
+        <QuickActions actions={quickActions} />
       </ErrorBoundary>
+
+      {/* Data freshness footer */}
+      <p className="text-center text-[11px] text-[#94A3B8] dark:text-[#64748B] pt-2">
+        {dataUpdatedAt
+          ? `Last synced ${new Date(dataUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+          : 'VedMoulya Life OS'}
+      </p>
     </div>
   );
 }

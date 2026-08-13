@@ -413,4 +413,24 @@ describe('logAuditEvent', () => {
     const log = getAuditLog(userId, 3);
     expect(log.length).toBeLessThanOrEqual(3);
   });
+
+  it('caps the in-memory log at MAX_LOG_SIZE (bounded memory growth)', () => {
+    // Overflow the 10 000-entry cap so the shift branch runs; the log stays
+    // bounded and the newest events remain queryable.
+    const userId = `audit-overflow-${Date.now()}`;
+    for (let i = 0; i < 10_001; i++) {
+      logAuditEvent({
+        timestamp: new Date().toISOString(),
+        type: 'api.request',
+        userId,
+        path: 'test',
+        duration: 0,
+        success: true,
+      });
+    }
+
+    const log = getAuditLog(userId, 10_100);
+    expect(log.length).toBeLessThanOrEqual(10_000);
+    expect(log[0]!.userId).toBe(userId);
+  });
 });

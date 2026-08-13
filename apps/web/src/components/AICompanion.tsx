@@ -2,15 +2,22 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Drawer, DrawerOverlay, DrawerContent, VisuallyHidden } from '@vedmoulya/ui';
-import { Sparkles, X, Send, Mic, Brain } from 'lucide-react';
+import { Sparkles, X, Send, Mic, Brain, Loader2 } from 'lucide-react';
 import { useUIStore } from '../stores/ui-store.js';
+import { useAuthStore } from '../stores/auth-store.js';
+import { api } from '../lib/trpc.js';
 import { Badge, Avatar } from '@vedmoulya/ui';
 
 interface Message {
   role: 'ai' | 'user';
   content: string;
   timestamp: string;
+  /** Provider/model of the run that produced this message (runtime telemetry). */
+  runtime?: { provider: string; model: string };
 }
+
+type RuntimeStage =
+  'idle' | 'thinking' | 'preparing_context' | 'selecting_model' | 'streaming' | 'validating';
 
 const SUGGESTED_QUESTIONS = [
   'What should I focus on today?',
@@ -19,8 +26,49 @@ const SUGGESTED_QUESTIONS = [
   'Summarize my recent activity',
 ];
 
+/** Map a runtime status event stage to the UI stage vocabulary (unknown
+ * stages are ignored so forward-compatible runtime events never crash).
+ * Exported for the Phase 13 UI test suite (deterministic unit coverage). */
+export function runtimeStageFromEvent(stage: string): Exclude<RuntimeStage, 'idle'> | undefined {
+  switch (stage) {
+    case 'thinking':
+    case 'preparing_context':
+    case 'selecting_model':
+    case 'streaming':
+    case 'validating':
+      return stage;
+    default:
+      return undefined;
+  }
+}
+
+/** Human-readable label for a non-idle runtime stage.
+ * Exported for the Phase 13 UI test suite (deterministic unit coverage). */
+export function stageLabel(stage: RuntimeStage): string {
+  switch (stage) {
+    case 'thinking':
+      return 'Understanding your request…';
+    case 'preparing_context':
+      return 'Preparing relevant context…';
+    case 'selecting_model':
+      return 'Selecting the best model…';
+    case 'streaming':
+      return 'Generating response…';
+    case 'validating':
+      return 'Validating response…';
+    default:
+      return '';
+  }
+}
+
 export function AICompanion(): React.JSX.Element {
   const { aiPanelOpen, setAiPanelOpen } = useUIStore();
+  // AI-RUNTIME-002: the companion routes through the real ai.stream runtime
+  // (capability → context optimization → EI-002/EI-004 model selection →
+  // SDK streaming → validation). The stage label reflects the actual events
+  // emitted by the runtime; the provider/model chip shows the run telemetry.
+  const userId = useAuthStore((s) => s.user?.userId ?? '');
+  const streamMutation = api.ai.stream.useMutation();
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'ai',
@@ -30,13 +78,14 @@ export function AICompanion(): React.JSX.Element {
     },
   ]);
   const [input, setInput] = useState('');
-  const [isThinking, setIsThinking] = useState(false);
+  const [stage, setStage] = useState<RuntimeStage>('idle');
+  const [streamingText, setStreamingText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, streamingText, stage]);
 
   useEffect(() => {
     if (aiPanelOpen) {
@@ -46,42 +95,89 @@ export function AICompanion(): React.JSX.Element {
     }
   }, [aiPanelOpen]);
 
-  const handleSend = (): void => {
-    if (!input.trim()) return;
+  const handleSend = async (): Promise<void> => {
+    const prompt = input.trim();
+    if (!prompt || stage !== 'idle' || !userId) return;
     const userMsg: Message = {
       role: 'user',
-      content: input.trim(),
+      content: prompt,
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
-    setIsThinking(true);
+    setStreamingText('');
+    setStage('thinking');
 
-    setTimeout(() => {
-      const responses: Record<string, string> = {
-        today:
-          'Based on your current data, your top priority today is completing the Q3 Strategy project. You have 3 pending decisions and 2 learning goals due.',
-        career:
-          "Your career progress is on track. You've completed 65% of your senior role roadmap. Consider focusing on cloud architecture skills next.",
-        skills:
-          'Based on your career goals and market trends, I recommend focusing on: 1) Cloud Architecture (critical gap), 2) System Design (moderate gap), 3) AI/ML fundamentals.',
-      };
-      let response =
-        "I understand your question. Let me analyze your data and provide personalized insights. Is there a specific area you'd like to explore: Career, Learning, Business, or something else?";
-      for (const [key, val] of Object.entries(responses)) {
-        if (input.toLowerCase().includes(key)) {
-          response = val;
-          break;
+    try {
+      const result = await streamMutation.mutateAsync({
+        userId,
+        capability: 'reasoning',
+        userInput: prompt,
+        qualityTier: 'standard',
+        constraints: { outputFormat: 'markdown', maxOutputTokens: 1200 },
+        enableOptimization: true,
+      });
+
+      if (!result.success || !result.data) {
+        throw new Error('No stream result');
+      }
+
+      // Replay the real runtime stage events so the UI communicates
+      // "VedMoulya is thinking/executing" rather than appearing frozen.
+      const contentEvents = result.data.events.filter(
+        (e) => e.type === 'content' && typeof e.content === 'string' && e.content.length > 0,
+      );
+      const chunks = contentEvents.map((e) => e.content ?? '');
+
+      for (const event of result.data.events) {
+        if (event.type === 'status' && event.stage) {
+          const nextStage = runtimeStageFromEvent(event.stage);
+          if (nextStage) {
+            setStage(nextStage);
+            await new Promise((resolve) => setTimeout(resolve, 120));
+          }
         }
       }
-      const aiMsg: Message = { role: 'ai', content: response, timestamp: new Date().toISOString() };
-      setMessages((prev) => [...prev, aiMsg]);
-      setIsThinking(false);
-    }, 1200);
+
+      // Progressive reveal of the real streamed chunks.
+      setStage('streaming');
+      let revealed = '';
+      for (const chunk of chunks) {
+        revealed += chunk;
+        setStreamingText(revealed);
+        await new Promise((resolve) => setTimeout(resolve, 16));
+      }
+      setStage('validating');
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      const final = result.data.final;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          content: final.content || 'I could not generate a response for that request.',
+          timestamp: new Date().toISOString(),
+          runtime: { provider: final.provider, model: final.model },
+        },
+      ]);
+      setStreamingText('');
+    } catch {
+      setStreamingText('');
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          content: 'I could not complete that request right now. Please try again in a moment.',
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    } finally {
+      setStage('idle');
+    }
   };
 
   function handleInputKeyDown(e: React.KeyboardEvent): void {
-    if (e.key === 'Enter') handleSend();
+    if (e.key === 'Enter') void handleSend();
   }
 
   return (
@@ -140,38 +236,41 @@ export function AICompanion(): React.JSX.Element {
               <div
                 className={`max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === 'ai' ? 'bg-[#F8FAFC] text-[#374151]' : 'bg-[#2B5FD9] text-white'}`}
               >
-                <p className="text-[14px] leading-relaxed">{msg.content}</p>
-                <p
-                  className={`text-[11px] mt-1 ${msg.role === 'ai' ? 'text-[#94A3B8]' : 'text-[#93B4F5]'}`}
-                >
-                  {new Date(msg.timestamp).toLocaleTimeString('en-US', {
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </p>
+                <p className="text-[14px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                <div className="flex items-center justify-between mt-1">
+                  <p
+                    className={`text-[11px] ${msg.role === 'ai' ? 'text-[#94A3B8]' : 'text-[#93B4F5]'}`}
+                  >
+                    {new Date(msg.timestamp).toLocaleTimeString('en-US', {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                  {msg.role === 'ai' && msg.runtime && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#F1F5F9] text-[#64748B]">
+                      {msg.runtime.provider} · {msg.runtime.model}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           ))}
-          {isThinking && (
+          {stage !== 'idle' && (
             <div className="flex gap-3">
               <div className="p-2 rounded-lg bg-[#F5F3FF] shrink-0">
                 <Sparkles className="h-4 w-4 text-[#7C3AED]" />
               </div>
-              <div className="bg-[#F8FAFC] rounded-2xl px-4 py-3">
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className="w-2 h-2 rounded-full bg-[#7C3AED] animate-bounce"
-                    style={{ animationDelay: '0ms' }}
-                  />
-                  <div
-                    className="w-2 h-2 rounded-full bg-[#7C3AED] animate-bounce"
-                    style={{ animationDelay: '150ms' }}
-                  />
-                  <div
-                    className="w-2 h-2 rounded-full bg-[#7C3AED] animate-bounce"
-                    style={{ animationDelay: '300ms' }}
-                  />
+              <div className="bg-[#F8FAFC] rounded-2xl px-4 py-3 max-w-[80%]">
+                <div className="flex items-center gap-2 text-[12px] text-[#64748B]">
+                  <Loader2 className="h-3.5 w-3.5 text-[#7C3AED] animate-spin" />
+                  <span>{stageLabel(stage)}</span>
                 </div>
+                {stage === 'streaming' && streamingText && (
+                  <p className="text-[14px] leading-relaxed text-[#374151] mt-2 whitespace-pre-wrap">
+                    {streamingText}
+                    <span className="inline-block w-1.5 h-4 bg-[#7C3AED] align-text-bottom animate-pulse ml-0.5" />
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -219,8 +318,10 @@ export function AICompanion(): React.JSX.Element {
               <Mic className="h-4 w-4 text-[#94A3B8]" />
             </button>
             <button
-              onClick={handleSend}
-              disabled={!input.trim() || isThinking}
+              onClick={() => {
+                void handleSend();
+              }}
+              disabled={!input.trim() || stage !== 'idle'}
               className="p-1.5 rounded-lg bg-[#2B5FD9] text-white hover:bg-[#1E4AA8] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               aria-label="Send message"
             >

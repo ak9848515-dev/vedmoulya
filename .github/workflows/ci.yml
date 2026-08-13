@@ -73,6 +73,59 @@ jobs:
           name: coverage
           path: coverage/
 
+  # ── G7: Quality Benchmarks (hermetic, deterministic — no secrets/network) ──
+  # EPIC-010 final gates: the experience benchmark drives the 7 domain apps
+  # through the full quality pipeline (design system → visual critic →
+  # multi-dimensional quality → targeted refinement → isolation). Factory,
+  # loop and requirements benchmarks protect the frozen upstream epics.
+  # EPIC-011 final gates: the 8-app production benchmark (requirements →
+  # plan → 10-dimension quality → critic → targeted refinement → security
+  # gate) and the 16/16 hard quality gates (CRITICAL/HIGH security, data
+  # leak, authz failure, functional-test failure, grounding failure,
+  # structured-output failure all BLOCK; aggregate-score masking forbidden;
+  # refinement loop bounded) are hermetic and deterministic — they run here.
+  benchmarks:
+    name: 'G7: Quality Benchmarks'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Experience benchmark (7 domain apps)
+        run: npm run experience:benchmark
+      - name: Factory benchmark
+        run: npm run factory:benchmark
+      - name: Loop benchmark
+        run: npm run loop:benchmark
+      - name: Requirements benchmark
+        run: npm run requirements:benchmark
+      - name: Intelligence benchmark (EPIC-015)
+        run: npm run intelligence:benchmark
+      - name: Execution benchmark
+        run: npm run execution:benchmark
+      - name: Brain benchmark (single vs routed vs N-provider)
+        run: npm run brain:benchmark
+      - name: Live Intelligence Bridge benchmark (EPIC-017 full loop)
+        run: npm run bridge:benchmark
+      - name: AI World Scheduler benchmark (EPIC-018 full chain)
+        run: npm run ai-world:scheduler:benchmark
+      - name: Continuous Intelligence benchmark (EPIC-020 — 22 scenarios)
+        run: npm run continuous:intelligence:benchmark
+      - name: Outcome & Revenue Intelligence benchmark (EPIC-020 — 23 scenarios)
+        run: npm run outcome:intelligence:benchmark
+      - name: Outcome Journey benchmark (SPRINT-023 — 12 real-problem journeys)
+        run: npm run outcome:journey:benchmark
+      - name: Runtime Verification benchmark (SPRINT-024 — 12 real-artifact journeys)
+        run: npm run runtime:verification:benchmark
+      - name: Production benchmark (8 real apps)
+        run: npm run production:benchmark
+      - name: Quality gates verify (16/16 hard blockers)
+        run: npm run quality:gates:verify
+
   # ── Gate 6: Security ──────────────────────────────────────────────────────
   security:
     name: 'G6: Security Scan'
@@ -85,7 +138,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
-      - name: Dependency audit (critical-blocking)
+      - name: Dependency audit (production; high-blocking)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Dependency audit (full; critical-blocking)
         run: npm audit --audit-level=critical
       - name: SAST scan (CodeQL)
         uses: github/codeql-action/init@v3
@@ -151,6 +206,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [build]
+    env:
+      # The factory journey + visual specs build deterministic applications
+      # through the gateway. The e2e job runs `next start` (NODE_ENV=
+      # production), where registerPlatformProviders registers the deterministic
+      # MockProvider ONLY when AI_ENABLE_MOCK=true — with the CI-only fake
+      # AI_OPENAI_API_KEY above and no mock, every specialist call would hit
+      # the real API and the builds could never reach READY. CI is exactly the
+      # documented "non-production-like environment" for the explicit mock.
+      AI_ENABLE_MOCK: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -176,7 +240,7 @@ jobs:
     name: 'CI Result'
     runs-on: ubuntu-latest
     if: always()
-    needs: [quality, test, security, a11y, performance, build, e2e]
+    needs: [quality, test, security, a11y, performance, benchmarks, build, e2e]
     steps:
       - name: Check results
         run: |
@@ -185,11 +249,13 @@ jobs:
           echo "Security: ${{ needs.security.result }}"
           echo "Accessibility: ${{ needs.a11y.result }}"
           echo "Performance: ${{ needs.performance.result }}"
+          echo "Benchmarks: ${{ needs.benchmarks.result }}"
           echo "Build: ${{ needs.build.result }}"
           echo "E2E: ${{ needs.e2e.result }}"
           if [ "${{ needs.quality.result }}" = "success" ] && \
              [ "${{ needs.test.result }}" = "success" ] && \
              [ "${{ needs.security.result }}" = "success" ] && \
+             [ "${{ needs.benchmarks.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
              [ "${{ needs.e2e.result }}" = "success" ]; then
             echo "✅ All quality gates passed"

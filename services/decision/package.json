@@ -15,12 +15,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@trpc/server": "^11.18.0",
     "@vedmoulya/core": "*",
     "@vedmoulya/domain": "*",
     "@vedmoulya/services": "*",
-    "@trpc/server": "^11.18.0",
     "drizzle-orm": "^0.45.0",
-    "hono": "^4.6.0",
+    "hono": "^4.13.0",
     "postgres": "^3.4.0",
     "zod": "^3.24.0"
   },

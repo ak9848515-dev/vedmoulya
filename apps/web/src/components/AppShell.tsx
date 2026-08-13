@@ -7,8 +7,9 @@
 
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, NavBar, Breadcrumb, useTheme } from '@vedmoulya/ui';
 import {
   LayoutDashboard,
@@ -24,20 +25,56 @@ import {
   Moon,
   ChevronLeft,
   ChevronRight,
+  LogOut,
+  Settings,
+  PenSquare,
+  Boxes,
+  Cpu,
+  Layers,
+  Workflow,
+  GitBranch,
+  Target,
+  BrainCircuit,
+  Brain,
+  GraduationCap,
+  Library,
+  Database,
+  MonitorCog,
+  Fingerprint,
+  RefreshCw,
+  Radar,
+  Zap,
 } from 'lucide-react';
+import { logout } from '../auth/session-manager.js';
+import { useAuthStore } from '../stores/auth-store.js';
+import { isNativePlatform } from '../auth/platform.js';
 import {
   useNavigationStore,
   buildSidebarGroups,
   type NavSectionId,
 } from '../stores/navigation-store.js';
 import { useUIStore } from '../stores/ui-store.js';
+import { AIWorldBell } from './AIWorldBell.js';
 import { CommandPalette } from './CommandPalette.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
+import { MobileTabBar } from './MobileTabBar.js';
+import { OfflineBanner } from './OfflineBanner.js';
+import { resolveLaunchTab, persistLastTab, tabForPathname } from '../lib/mobile-nav.js';
+import { useNetworkStatus } from '../lib/use-network-status.js';
+import { configureNativeChrome, installBackButtonHandler, exitNativeApp } from '../lib/native.js';
 
 // ── Lazy Loaded Components ─────────────────────────────────────────────────
 
 const NotificationsDrawer = dynamic(
   () => import('./NotificationsDrawer.js').then((mod) => ({ default: mod.NotificationsDrawer })),
+  {
+    ssr: false,
+    loading: () => null,
+  },
+);
+
+const AIWorldDrawer = dynamic(
+  () => import('./ai-world/AIWorldDrawer.js').then((mod) => ({ default: mod.AIWorldDrawer })),
   {
     ssr: false,
     loading: () => null,
@@ -62,7 +99,88 @@ const moduleIcons: Record<string, React.ReactNode> = {
   learning: <BookOpen className="h-5 w-5" />,
   business: <BarChart3 className="h-5 w-5" />,
   marketplace: <Store className="h-5 w-5" />,
+  capabilities: <Boxes className="h-5 w-5" />,
+  'capability-marketplace': <Radar className="h-5 w-5" />,
+  providers: <Cpu className="h-5 w-5" />,
+  context: <Layers className="h-5 w-5" />,
+  'execution-strategy': <Workflow className="h-5 w-5" />,
+  execution: <GitBranch className="h-5 w-5" />,
+  goals: <Target className="h-5 w-5" />,
+  intelligence: <BrainCircuit className="h-5 w-5" />,
+  'learning-intelligence': <GraduationCap className="h-5 w-5" />,
+  'enterprise-brain': <BrainCircuit className="h-5 w-5" />,
+  brain: <Brain className="h-5 w-5" />,
+  'live-intelligence': <Zap className="h-5 w-5" />,
+  knowledge: <Library className="h-5 w-5" />,
+  memory: <Database className="h-5 w-5" />,
+  os: <MonitorCog className="h-5 w-5" />,
+  'context-fabric': <Fingerprint className="h-5 w-5" />,
+  loop: <RefreshCw className="h-5 w-5" />,
+  applications: <Boxes className="h-5 w-5" />,
+  'content-agency': <PenSquare className="h-5 w-5" />,
+  settings: <Settings className="h-5 w-5" />,
 };
+
+// Sections with real client-side routes — sidebar clicks navigate to them
+// (insights/search are state-only, MOB-002).
+function routeForSection(section: NavSectionId): string | undefined {
+  switch (section) {
+    case 'dashboard':
+      return '/';
+    case 'settings':
+      return '/settings';
+    case 'career':
+      return '/career';
+    case 'learning':
+      return '/learning';
+    case 'business':
+      return '/business';
+    case 'marketplace':
+      return '/marketplace';
+    case 'capabilities':
+      return '/capabilities';
+    case 'capability-marketplace':
+      return '/capability-marketplace';
+    case 'providers':
+      return '/providers';
+    case 'context':
+      return '/context';
+    case 'execution-strategy':
+      return '/execution-strategy';
+    case 'execution':
+      return '/execution';
+    case 'goals':
+      return '/goals';
+    case 'intelligence':
+      return '/intelligence';
+    case 'ecosystem-intelligence':
+      return '/ecosystem-intelligence';
+    case 'learning-intelligence':
+      return '/learning-intelligence';
+    case 'enterprise-brain':
+      return '/enterprise-brain';
+    case 'brain':
+      return '/brain';
+    case 'live-intelligence':
+      return '/live-intelligence';
+    case 'knowledge':
+      return '/knowledge';
+    case 'memory':
+      return '/memory';
+    case 'os':
+      return '/os';
+    case 'context-fabric':
+      return '/context-fabric';
+    case 'loop':
+      return '/loop';
+    case 'applications':
+      return '/applications';
+    case 'content-agency':
+      return '/content-agency';
+    default:
+      return undefined;
+  }
+}
 
 // ── AppShell Props ──────────────────────────────────────────────────────────
 
@@ -73,7 +191,10 @@ export interface AppShellProps {
 // ── AppShell Component ──────────────────────────────────────────────────────
 
 export function AppShell({ children }: AppShellProps): React.JSX.Element {
-  const { theme, toggleTheme } = useTheme();
+  const pathname = usePathname();
+  const router = useRouter();
+  const { theme, resolvedTheme, toggleTheme } = useTheme();
+  const { user } = useAuthStore();
   const {
     activeSection,
     sidebarCollapsed,
@@ -84,12 +205,65 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
     setMobileSidebarOpen,
   } = useNavigationStore();
 
+  // MOB-002: mirror device connectivity into the auth store's offline flag
+  // (also flips it back to online on reconnect → auto-recovery).
+  useNetworkStatus();
+
   const { toggleAiPanel, setGlobalSearchOpen, setNotificationsPanelOpen } = useUIStore();
+
+  // MOB-002 — native chrome + back policy + launch-tab restore (native only,
+  // so the web app keeps classic refresh behavior).
+  useEffect(() => {
+    configureNativeChrome({ statusBarStyle: resolvedTheme });
+  }, [resolvedTheme]);
+
+  useEffect(() => {
+    if (!isNativePlatform()) return;
+
+    installBackButtonHandler({
+      onBack: () => {
+        if (window.history.length > 1) {
+          router.back();
+        }
+      },
+      onExit: () => {
+        exitNativeApp();
+      },
+      isRoot: () => tabForPathname(window.location.pathname).id === 'dashboard',
+    });
+
+    // State preservation: a bare "/" launch resumes the last visited tab.
+    const { tab, restore } = resolveLaunchTab(window.location.pathname);
+    if (restore && tab.route !== '/') {
+      router.replace(tab.route);
+    }
+  }, [router]);
+
+  // Persist the current tab so app restarts restore the previous page.
+  useEffect(() => {
+    const tab = tabForPathname(pathname);
+    persistLastTab(tab.id);
+  }, [pathname]);
+
+  // Auth screens (login / OAuth callback) and the client portal (AC-002,
+  // Module 7 — a standalone experience with its own shell) render full-screen
+  // without the app chrome (MOB-001).
+  if (
+    pathname === '/login' ||
+    pathname.startsWith('/oauth2redirect') ||
+    pathname.startsWith('/portal')
+  ) {
+    return <>{children}</>;
+  }
 
   // ── Navigation Handler ─────────────────────────────────────────────────
   const handleNavigate = (section: NavSectionId): void => {
     setActiveSection(section);
     setMobileSidebarOpen(false);
+    const route = routeForSection(section);
+    if (route && window.location.pathname !== route) {
+      router.push(route);
+    }
   };
 
   // ── Sidebar Groups ────────────────────────────────────────────────────
@@ -117,7 +291,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F5F7FA]">
+    <div className="flex h-screen overflow-hidden bg-[#F5F7FA] dark:bg-[#0F172A]">
       {/* ── Sidebar ──────────────────────────────────────────────────── */}
       <div
         className={`
@@ -131,7 +305,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
           groups={enrichedGroups}
           collapsed={sidebarCollapsed}
           onToggleCollapse={handleToggleCollapse}
-          className="h-full"
+          className="h-full dark:bg-[#0F172A] dark:border-[#334155]"
         />
       </div>
 
@@ -147,67 +321,104 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
       {/* ── Main Content Area ────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col min-w-0">
         {/* ── Topbar ──────────────────────────────────────────────────── */}
-        <NavBar
-          logo={logo}
-          leftItems={
-            <button
-              onClick={handleToggleCollapse}
-              className="p-2 rounded-lg hover:bg-[#F1F5F9] transition-colors"
-              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              aria-expanded={!sidebarCollapsed}
-            >
-              {sidebarCollapsed ? (
-                <ChevronRight className="h-4 w-4 text-[#64748B]" />
-              ) : (
-                <ChevronLeft className="h-4 w-4 text-[#64748B]" />
-              )}
-            </button>
-          }
-          rightItems={
-            <>
+        {/* pt-safe keeps the topbar below the status bar on edge-to-edge
+            Android 15+; background matches the NavBar (MOB-002). */}
+        <div className="pt-safe bg-white dark:bg-[#0F172A]">
+          <NavBar
+            className="dark:bg-[#0F172A] dark:border-[#334155]"
+            logo={logo}
+            leftItems={
               <button
-                onClick={handleSearchClick}
-                className="p-2 rounded-lg hover:bg-[#F1F5F9] transition-colors"
-                aria-label="Search"
+                onClick={handleToggleCollapse}
+                className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] transition-colors"
+                aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                aria-expanded={!sidebarCollapsed}
               >
-                <Search className="h-5 w-5 text-[#64748B]" />
-              </button>
-
-              <button
-                onClick={handleNotificationsClick}
-                className="p-2 rounded-lg hover:bg-[#F1F5F9] transition-colors relative"
-                aria-label="Notifications"
-              >
-                <Bell className="h-5 w-5 text-[#64748B]" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#EF4444] rounded-full" />
-              </button>
-
-              <button
-                onClick={handleThemeToggle}
-                className="p-2 rounded-lg hover:bg-[#F1F5F9] transition-colors"
-                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                {theme === 'dark' ? (
-                  <Sun className="h-5 w-5 text-[#64748B]" />
+                {sidebarCollapsed ? (
+                  <ChevronRight className="h-4 w-4 text-[#64748B] dark:text-[#94A3B8]" />
                 ) : (
-                  <Moon className="h-5 w-5 text-[#64748B]" />
+                  <ChevronLeft className="h-4 w-4 text-[#64748B] dark:text-[#94A3B8]" />
                 )}
               </button>
+            }
+            rightItems={
+              <>
+                <button
+                  onClick={handleSearchClick}
+                  className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] transition-colors"
+                  aria-label="Search"
+                >
+                  <Search className="h-5 w-5 text-[#64748B] dark:text-[#94A3B8]" />
+                </button>
 
-              <button
-                onClick={handleAiPanelClick}
-                className="p-2 rounded-lg hover:bg-[#F5F3FF] transition-colors"
-                aria-label="Open AI Companion"
-              >
-                <PanelRightOpen className="h-5 w-5 text-[#7C3AED]" />
-              </button>
-            </>
-          }
-        />
+                {/* EPIC-012C — the dedicated AI World discovery bell (opens the
+                  AI WORLD panel; the existing notifications bell below is
+                  untouched). */}
+                <AIWorldBell />
+
+                <button
+                  onClick={handleNotificationsClick}
+                  className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] transition-colors relative"
+                  aria-label="Notifications"
+                >
+                  <Bell className="h-5 w-5 text-[#64748B] dark:text-[#94A3B8]" />
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#EF4444] rounded-full" />
+                </button>
+
+                <button
+                  onClick={handleThemeToggle}
+                  className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] transition-colors"
+                  aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="h-5 w-5 text-[#94A3B8]" />
+                  ) : (
+                    <Moon className="h-5 w-5 text-[#64748B]" />
+                  )}
+                </button>
+
+                <button
+                  onClick={handleAiPanelClick}
+                  className="hidden md:inline-flex p-2 rounded-lg hover:bg-[#F5F3FF] transition-colors"
+                  aria-label="Open AI Companion"
+                >
+                  <PanelRightOpen className="h-5 w-5 text-[#7C3AED]" />
+                </button>
+
+                {/* Signed-in user chip + sign-out (MOB-001) */}
+                {user && (
+                  <div className="flex items-center gap-1 pl-2 ml-1 border-l border-[#E2E8F0] dark:border-[#334155]">
+                    <div className="flex items-center gap-2 mr-0.5" title={user.email}>
+                      <div className="h-8 w-8 rounded-full bg-gradient-to-br from-[#2B5FD9] to-[#5B8AEB] text-white flex items-center justify-center text-[13px] font-semibold">
+                        {user.email.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="hidden sm:inline text-[13px] text-[#374151] dark:text-[#E2E8F0] max-w-[140px] truncate">
+                        {user.email}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        void handleLogout();
+                      }}
+                      className="p-2 rounded-lg hover:bg-[#FEF2F2] hover:text-[#EF4444] transition-colors"
+                      aria-label="Sign out"
+                      title="Sign out"
+                    >
+                      <LogOut className="h-5 w-5 text-[#64748B] dark:text-[#94A3B8]" />
+                    </button>
+                  </div>
+                )}
+              </>
+            }
+          />
+        </div>
 
         {/* ── Breadcrumb + Page Content ───────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="content-container py-6">
+        {/* pb-28 on mobile keeps content clear of the bottom tab bar (MOB-002).
+            data-scroll-container lets the dashboard's pull-to-refresh bind to
+            this scroller. */}
+        <div className="flex-1 overflow-y-auto" data-scroll-container>
+          <div className="content-container py-6 pb-28 md:pb-6">
             {/* Breadcrumb */}
             <div className="mb-6">
               <Breadcrumb items={breadcrumbs} />
@@ -227,8 +438,22 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
       {/* ── Command Palette ──────────────────────────────────────────── */}
       <CommandPalette />
 
+      {/* ── AI World (EPIC-012C — the discovery bell panel) ─────────── */}
+      <AIWorldDrawer />
+
       {/* ── Notification Center ──────────────────────────────────────── */}
       <NotificationsDrawer />
+
+      {/* ── Mobile bottom navigation + offline banner (MOB-002) ──────── */}
+      <MobileTabBar />
+      <OfflineBanner
+        cachedNote="viewing cached data"
+        onRetry={() => {
+          // Broadcast a retry request; screens with live queries listen for it
+          // (dashboard refetches + revalidates its cache).
+          window.dispatchEvent(new CustomEvent('vedmoulya:retry-sync'));
+        }}
+      />
     </div>
   );
 
@@ -251,5 +476,11 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
 
   function handleCloseMobileOverlay(): void {
     setMobileSidebarOpen(false);
+  }
+
+  // Logout: clear the JWT + cached user state, then return to the login screen.
+  async function handleLogout(): Promise<void> {
+    await logout();
+    window.location.assign('/login');
   }
 }

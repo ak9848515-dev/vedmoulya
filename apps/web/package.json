@@ -13,16 +13,38 @@
     "build-storybook": "storybook build",
     "build:mobile": "node scripts/build-mobile.mjs",
     "mobile:add": "npx cap add android",
-    "mobile:sync": "npx cap sync android"
+    "mobile:sync": "npx cap sync android",
+    "mobile:build:debug": "bash scripts/build-android.sh debug",
+    "mobile:build:release": "bash scripts/build-android.sh release",
+    "mobile:bundle:release": "bash scripts/build-android.sh bundle"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/keyboard": "^8.0.5",
+    "@capacitor/status-bar": "^8.0.3",
     "@tailwindcss/postcss": "^4.3.3",
     "@tanstack/react-query": "^5.101.4",
     "@trpc/client": "^11.18.0",
     "@trpc/react-query": "^11.18.0",
     "@trpc/server": "^11.18.0",
     "@vedmoulya/api": "^1.0.0",
+    "@vedmoulya/brain": "*",
+    "@vedmoulya/context": "*",
+    "@vedmoulya/execution-bridge": "*",
+    "@vedmoulya/execution-orchestrator": "*",
+    "@vedmoulya/execution-strategy": "*",
+    "@vedmoulya/goals": "*",
+    "@vedmoulya/intelligence": "*",
+    "@vedmoulya/learning-intelligence": "*",
+    "@vedmoulya/enterprise-brain": "*",
+    "@vedmoulya/knowledge-intelligence": "*",
+    "@vedmoulya/memory-intelligence": "*",
+    "@vedmoulya/os-intelligence": "*",
+    "@vedmoulya/requirements": "*",
+    "@vedmoulya/experience": "*",
     "@vedmoulya/services": "^1.0.0",
     "@vedmoulya/shared": "^1.0.0",
     "@vedmoulya/ui": "^1.0.0",
@@ -48,6 +70,7 @@
     "@types/react-dom": "^19.0.0",
     "jose": "^5.9.0",
     "storybook": "^8.6.18",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "@vitejs/plugin-react": "^4.3.0"
   }
 }

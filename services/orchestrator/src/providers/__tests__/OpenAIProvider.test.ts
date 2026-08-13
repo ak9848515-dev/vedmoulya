@@ -28,9 +28,10 @@ describe('OpenAIProvider', () => {
   it('isHealthy returns true when the models endpoint responds ok', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
     await expect(new OpenAIProvider('sk-test').isHealthy()).resolves.toBe(true);
-    expect(fetch).toHaveBeenCalledWith('https://api.openai.com/v1/models', {
-      headers: { Authorization: 'Bearer sk-test' },
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/models',
+      expect.objectContaining({ headers: { Authorization: 'Bearer sk-test' } }),
+    );
   });
 
   it('isHealthy returns false when the response is not ok', async () => {
@@ -104,6 +105,26 @@ describe('OpenAIProvider', () => {
     );
   });
 
+  it('execute maps an empty choices array to empty content', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          model: 'gpt-4o',
+        }),
+      }),
+    );
+    const response = await new OpenAIProvider('sk-test').execute({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'gpt-4o',
+    });
+    expect(response.content).toBe('');
+    expect(response.model).toBe('gpt-4o');
+  });
+
   it('execute throws a descriptive error on non-ok response', async () => {
     vi.stubGlobal(
       'fetch',
@@ -115,5 +136,22 @@ describe('OpenAIProvider', () => {
         model: 'gpt-4o',
       }),
     ).rejects.toThrow('OpenAI API error: 429 Too Many Requests');
+  });
+
+  it('execute aborts a hung request and reports a retryable timeout', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init: { signal?: AbortSignal }) => {
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+          });
+        });
+      }),
+    );
+    const provider = new OpenAIProvider('sk-test', { timeoutMs: 15 });
+    await expect(
+      provider.execute({ messages: [{ role: 'user', content: 'hi' }], model: 'gpt-4o' }),
+    ).rejects.toThrow('OpenAI request timed out after 15ms');
   });
 });

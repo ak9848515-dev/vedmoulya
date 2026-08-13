@@ -18,7 +18,29 @@
 //     in the gateway (shared secret / issuer / audience contract).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// CERT-002: silence the observability logger for this suite — constructing the
+// production ApiApplicationService resolves real Postgres repositories whose
+// DatabaseConnection singletons emit "…database connection established" INFO
+// logs. Vitest intercepts console output asynchronously via the worker RPC;
+// under full-suite load the pending writes race with worker teardown and
+// surface as `Closing rpc while "onUserConsoleLog" was pending` teardown errors
+// even though every test passes. The wiring under test here is repository
+// resolution — not the logger — so the logger is a no-op.
+vi.mock('@vedmoulya/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vedmoulya/core')>();
+  const silentLogger = {
+    error: () => {},
+    warn: () => {},
+    info: () => {},
+    debug: () => {},
+    trace: () => {},
+    child: () => silentLogger,
+  };
+  return { ...actual, logger: silentLogger };
+});
+
 import { container } from '@vedmoulya/core';
 import { PostgresIdentityRepository, TokenService } from '@vedmoulya/identity';
 import { ApiApplicationService } from '../services/ApiApplicationService.js';

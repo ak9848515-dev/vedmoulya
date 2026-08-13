@@ -27,6 +27,59 @@ export type {
   StreamingResponseDTO,
   ProviderListDTO,
   CapabilityListDTO,
+  ProviderSelectionDTO,
+  TokenOptimizationDTO,
+  StreamEventDTO,
+  StreamRunDTO,
+} from './ai/index.js';
+
+// ── AI Runtime Module (AI-RUNTIME-002) ─────────────────────────────────────
+export {
+  ModelSelectionIntelligence,
+  ProviderRoutingAdvisor,
+  ContextOptimizer,
+  PromptCacheManager,
+  StructuredOutputValidator,
+  EvidenceEvaluator,
+  AIObservability,
+  NoopAIObservabilityExporter,
+  TestAIObservabilityExporter,
+  OtelAIObservabilityExporter,
+  LangfuseAIObservabilityExporter,
+  redactSecrets,
+  truncatePayload,
+} from './ai/index.js';
+export type {
+  ProviderIntelligencePort,
+  ProviderCandidateIntelligence,
+  ProviderModelIntelligence,
+  ExecutionStrategyPort,
+  ProviderSelectionExplanation,
+  ContextSection,
+  ContextOptimizationInput,
+  TokenOptimizationResult,
+  OptimizationStage,
+  OptimizationStageTokens,
+  PromptCacheEntry,
+  PromptCacheOptions,
+  StructuredOutputSchema,
+  StructuredFieldDescriptor,
+  StructuredFieldType,
+  StructuredOutputResult,
+  RagRetrievalPort,
+  EvidenceState,
+  EvidenceItem,
+  EvidenceAssessment,
+  ModelSelectionInput,
+  ModelSelectionResult,
+  EvidenceEvaluationOptions,
+  ContextSelectionExplanation,
+  AISpan,
+  AIObservabilityExporter,
+  AIObservabilityOptions,
+  PayloadCapturePolicy,
+  OtelBridge,
+  LangfuseExporterOptions,
 } from './ai/index.js';
 
 // ── Knowledge Graph Application Layer ─────────────────────────────────────
@@ -166,3 +219,95 @@ export { MarketplaceApplicationService } from './marketplace/MarketplaceApplicat
 // ── LifeOS Application Layer ───────────────────────────────────────────────
 export { LifeOSApplicationService } from './lifeos/LifeOSApplicationService.js';
 export type { LifeOSConfigDTO, LifeOSModule, LifeOSSearchCategory } from './lifeos/LifeOSDTO.js';
+
+// ── Content Agency Application Layer (EPIC-003 / AC-001) ──────────────────
+export { ContentAgencyApplicationService } from './content-agency/ContentAgencyApplicationService.js';
+export { ContentAgencyAIService } from './content-agency/ContentAgencyAIService.js';
+export { InMemoryContentAgencyRepository } from './content-agency/InMemoryContentAgencyRepository.js';
+export type { ContentAgencyResult } from './content-agency/ContentAgencyApplicationService.js';
+export type {
+  GenerationContext,
+  GenerationResult,
+  GenerationPass,
+} from './content-agency/ContentAgencyAIService.js';
+export type {
+  ClientDTO,
+  BrandDTO,
+  ProjectDTO,
+  ContentItemDTO,
+  InvoiceDTO,
+  CreateClientInput,
+  UpdateClientInput,
+  UpsertBrandInput,
+  CreateProjectInput,
+  UpdateProjectInput,
+  GenerateContentInput,
+  CreateDraftInput,
+  ReviewInput,
+  RegenerateInput,
+  CreateInvoiceInput,
+  CalendarEntryDTO,
+  ContentAgencyDashboardDTO,
+  ContentAgencyAnalyticsDTO,
+  DeliveryExportDTO,
+  DeliveryFormat,
+} from './content-agency/ContentAgencyDTO.js';
+export type {
+  ContentType,
+  ContentStatus,
+  WorkflowStage,
+} from './content-agency/ContentAgencyDTO.js';
+
+// ── Client Operations Application Layer (EPIC-003 / AC-002) ────────────────
+export { ClientOperationsApplicationService } from './content-agency/ClientOperationsApplicationService.js';
+export { ClientOpsAIService } from './content-agency/ClientOpsAIService.js';
+export { InMemoryClientOpsRepository } from './content-agency/InMemoryClientOpsRepository.js';
+export type { ClientOpsResult } from './content-agency/ClientOperationsApplicationService.js';
+export type {
+  ProposalGenerationContext,
+  ProposalGenerationResult,
+} from './content-agency/ClientOpsAIService.js';
+export type {
+  LeadDTO,
+  LeadDetailDTO,
+  LeadInteractionDTO,
+  LeadTaskDTO,
+  LeadContactDTO,
+  CreateLeadInput,
+  UpdateLeadInput,
+  AddInteractionInput,
+  AddTaskInput,
+  AddContactInput,
+  ProposalDTO,
+  ProposalDetailDTO,
+  ProposalVersionDTO,
+  CreateProposalInput,
+  UpdateProposalInput,
+  GenerateProposalInput,
+  ProposalExportDTO,
+  ContractDTO,
+  ContractDetailDTO,
+  ContractVersionDTO,
+  CreateContractInput,
+  UpdateContractInput,
+  ContractApprovalInput,
+  RenewContractInput,
+  QuotationDTO,
+  CreateQuotationInput,
+  UpdateQuotationInput,
+  PaymentDTO,
+  AddPaymentInput,
+  RevenueOverviewDTO,
+  DocumentDTO,
+  DocumentDetailDTO,
+  UploadDocumentInput,
+  UpdateDocumentInput,
+  PortalAccessDTO,
+  CreatePortalAccessInput,
+  CreatePortalAccessResult,
+  PortalSessionDTO,
+  PortalDashboardDTO,
+  PortalContentPayload,
+  OpsNotificationDTO,
+  BusinessAnalyticsDTO,
+} from './content-agency/ClientOpsDTO.js';

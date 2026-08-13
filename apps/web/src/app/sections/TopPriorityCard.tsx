@@ -26,7 +26,7 @@ export function TopPriorityCard({ priority }: TopPriorityCardProps): React.JSX.E
   const bgClass = priority.isBlocked ? 'bg-[#FEF2F2]' : 'bg-[#EFF4FE]';
 
   return (
-    <Card variant="standard" padding="lg">
+    <Card variant="standard" padding="lg" className="dark:bg-[#1E293B] dark:border-[#334155]">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="flex items-start gap-4">
           <div className={`p-3 rounded-xl ${bgClass}`}>{icon}</div>
@@ -49,10 +49,12 @@ export function TopPriorityCard({ priority }: TopPriorityCardProps): React.JSX.E
                 {priority.source}
               </Badge>
             </div>
-            <h2 className="text-[20px] font-heading font-semibold text-[#111827] mt-1">
+            <h2 className="text-[20px] font-heading font-semibold text-[#111827] dark:text-[#F8FAFC] mt-1">
               {priority.title}
             </h2>
-            <p className="text-[14px] text-[#64748B] mt-1">{priority.description}</p>
+            <p className="text-[14px] text-[#64748B] dark:text-[#94A3B8] mt-1">
+              {priority.description}
+            </p>
             {priority.deadline && (
               <p className="text-[12px] text-[#94A3B8] mt-1">
                 Due:{' '}

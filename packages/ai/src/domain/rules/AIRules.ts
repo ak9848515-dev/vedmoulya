@@ -26,6 +26,10 @@ export function supportedCapabilityRule(capability: CapabilityType): RuleResult 
     'speech',
     'image_understanding',
     'general_conversation',
+    // EPIC-003/AC-001 — content generation is a platform capability; the
+    // Content Agency pipeline routes through the AI Orchestrator on this
+    // capability (provider selection is the orchestrator's job).
+    'content_generation',
   ];
   const passed = supported.includes(capability);
   return {

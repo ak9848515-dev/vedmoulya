@@ -3,7 +3,7 @@
 // BLD-016-A — Application Shell & Foundation
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Providers } from '../components/Providers.js';
 import { AppShell } from '../components/AppShell.js';
 import './globals.css';
@@ -12,6 +12,21 @@ export const metadata: Metadata = {
   title: 'VedMoulya — Life Operating System',
   description:
     'Empower every determined individual to build a sustainable livelihood through knowledge, execution, and intelligent technology.',
+  // Icons are intentionally omitted: the app ships its own mobile icons via
+  // the Capacitor Android project (adaptive icon) and PWA manifest.
+};
+
+// MOB-002 — viewport-fit=cover lets the Capacitor WebView render edge-to-edge
+// so `env(safe-area-inset-*)` insets (see globals.css) are populated.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#2B5FD9' },
+    { media: '(prefers-color-scheme: dark)', color: '#0F172A' },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }): React.ReactNode {

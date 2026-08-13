@@ -59,6 +59,7 @@ export {
   Prompt,
   CostEstimate,
   AIDomainService,
+  TokenEstimationService,
   AIRequestFactory,
   AI_DOMAIN_EVENTS,
   AIRequestCreatedEvent,

@@ -49,8 +49,27 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test
+      - name: Quality benchmarks (hermetic)
+        run: |
+          npm run experience:benchmark
+          npm run factory:benchmark
+          npm run loop:benchmark
+          npm run requirements:benchmark
+          npm run execution:benchmark
+          npm run brain:benchmark
+          npm run intelligence:benchmark
+          npm run bridge:benchmark
+          npm run ai-world:scheduler:benchmark
+          npm run continuous:intelligence:benchmark
+          npm run outcome:intelligence:benchmark
+          npm run outcome:journey:benchmark
+          npm run runtime:verification:benchmark
+          npm run production:benchmark
+          npm run quality:gates:verify
       - run: npm run build
-      - name: Security audit
+      - name: Security audit (production; high-blocking)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Security audit (full; critical-blocking)
         run: npm audit --audit-level=critical
 
   deploy:

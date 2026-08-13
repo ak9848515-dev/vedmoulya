@@ -6,6 +6,12 @@
 
 @import 'tailwindcss';
 
+/* ── Class-based dark mode (MOB-002) ────────────────────────────────────── */
+/* The @vedmoulya/ui ThemeProvider toggles `dark` on <html>; this custom
+   variant makes Tailwind's `dark:` utilities respond to that class instead
+   of the OS media query, so the Settings theme picker controls dark mode. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ── Theme: Experience Bible Design Tokens ───────────────────────────────── */
 /* Maps DES-010A Color System, Typography, Spacing, Layout tokens to CSS vars */
 /* Source: packages/ui/src/tokens/ — @vedmoulya/ui */
@@ -134,6 +140,109 @@
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Utility: safe-area insets (MOB-002) ─────────────────────────────────── */
+/* Capacitor WebView renders edge-to-edge on Android 15+ (targetSdk 36); the
+   native viewport is inset via these env() values so the bottom tab bar and
+   top chrome never collide with the navigation bar / status bar / notches. */
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@utility pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+@utility pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+@utility mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@utility h-safe-bottom {
+  height: env(safe-area-inset-bottom, 0px);
+}
+
+/* ── Animation: skeleton shimmer (MOB-002) ───────────────────────────────── */
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+@utility skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.14) 25%,
+    rgba(148, 163, 184, 0.28) 37%,
+    rgba(148, 163, 184, 0.14) 63%
+  );
+  background-size: 400px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Animation: slide-up entry for mobile content (MOB-002) ──────────────── */
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-slide-up {
+  animation: slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-banner-in {
+  animation: banner-in 0.25s ease-out both;
+}
+
+/* ── Utility: tap highlight removal for mobile (MOB-002) ─────────────────── */
+
+@utility no-tap-highlight {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Base: overscroll + touch behavior (MOB-002) ─────────────────────────── */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Allow pull-to-refresh gesture to scroll the page naturally, and let the
+     WebView own the overscroll (matches native pull-to-refresh feel). */
+  body {
+    overscroll-behavior-y: contain;
+  }
 }
 
 /* ── Utility: content-container ───────────────────────────────────────────── */

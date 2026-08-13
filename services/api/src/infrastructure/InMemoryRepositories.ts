@@ -57,6 +57,9 @@ import type {
   TimelineOrder,
 } from '@vedmoulya/domain';
 import type { PaginationParams, PaginatedResult } from '@vedmoulya/core';
+import { InMemoryMemoryRepository as InMemoryMemoryIntelligenceRepository } from '@vedmoulya/memory-intelligence';
+import { InMemoryOSRepository } from '@vedmoulya/os-intelligence';
+import { InMemoryGraphRepository as InMemoryContextFabricRepository } from '@vedmoulya/context-fabric';
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -720,6 +723,9 @@ export class InMemoryKnowledgeRepository implements KnowledgeRepository {
 export interface InMemoryRepositories {
   identity: InMemoryIdentityRepository;
   memory: InMemoryMemoryRepository;
+  memoryIntelligence: InMemoryMemoryIntelligenceRepository;
+  osIntelligence: InMemoryOSRepository;
+  contextFabric: InMemoryContextFabricRepository;
   decision: InMemoryDecisionRepository;
   execution: InMemoryExecutionRepository;
   knowledge: InMemoryKnowledgeRepository;
@@ -729,6 +735,9 @@ export function createInMemoryRepositories(): InMemoryRepositories {
   return {
     identity: new InMemoryIdentityRepository(),
     memory: new InMemoryMemoryRepository(),
+    memoryIntelligence: new InMemoryMemoryIntelligenceRepository(),
+    osIntelligence: new InMemoryOSRepository(),
+    contextFabric: new InMemoryContextFabricRepository(),
     decision: new InMemoryDecisionRepository(),
     execution: new InMemoryExecutionRepository(),
     knowledge: new InMemoryKnowledgeRepository(),

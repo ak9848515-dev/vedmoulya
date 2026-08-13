@@ -21,6 +21,9 @@ export class MockProvider implements ProviderAdapter {
     'speech',
     'image_understanding',
     'general_conversation',
+    // EPIC-003/AC-001 — mock supports content generation so the full Content
+    // Agency pipeline is exercisable in dev/test without API keys.
+    'content_generation',
   ];
 
   isHealthy(): Promise<boolean> {

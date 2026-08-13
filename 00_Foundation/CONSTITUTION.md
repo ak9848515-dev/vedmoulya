@@ -1,5 +1,7 @@
 # VedMoulya Constitution
 
+> **Note (DOC-001):** The canonical, extended enterprise constitution — including binding engineering principles and AI governance rules — is [`03_Architecture/VEDMOULYA_CONSTITUTION.md`](../03_Architecture/VEDMOULYA_CONSTITUTION.md). This founding statement remains the historical mission, vision, and values.
+
 ## Why We Exist
 
 Most people do not fail because they lack intelligence.

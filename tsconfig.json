@@ -11,6 +11,18 @@
     { "path": "packages/testing" },
     { "path": "packages/config" },
     { "path": "packages/ai" },
+    { "path": "packages/capabilities" },
+    { "path": "packages/context" },
+    { "path": "packages/execution-orchestrator" },
+    { "path": "packages/execution-strategy" },
+    { "path": "packages/providers" },
+    { "path": "packages/rag" },
+    { "path": "packages/loop-engine" },
+    { "path": "packages/app-factory" },
+    { "path": "packages/requirements" },
+    { "path": "packages/ai-world" },
+    { "path": "packages/capability-marketplace" },
+    { "path": "packages/live-intelligence-bridge" },
     { "path": "services/knowledge" },
     { "path": "services/memory" }
   ]

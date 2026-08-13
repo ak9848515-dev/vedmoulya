@@ -1,5 +1,7 @@
 # VedMoulya Master Roadmap
 
+> **Note (DOC-001):** The forward-looking planning spine (epics, sprints, backlog, risks, current progress) now lives in [`04_Sprints/MASTER_ROADMAP.md`](../04_Sprints/MASTER_ROADMAP.md). This file remains the historical mission list (MISSION-001…020).
+
 MISSION-001
 Company Constitution
 

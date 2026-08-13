@@ -21,6 +21,8 @@ interface UIState {
   globalSearchOpen: boolean;
   /** Notification panel open */
   notificationsPanelOpen: boolean;
+  /** EPIC-012C — AI World drawer open (the discovery bell panel). */
+  aiWorldPanelOpen: boolean;
 
   // Actions
   setContentDensity: (density: ContentDensity) => void;
@@ -28,6 +30,7 @@ interface UIState {
   setAiPanelOpen: (open: boolean) => void;
   setGlobalSearchOpen: (open: boolean) => void;
   setNotificationsPanelOpen: (open: boolean) => void;
+  setAIWorldPanelOpen: (open: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -36,6 +39,7 @@ export const useUIStore = create<UIState>((set) => ({
   aiPanelOpen: false,
   globalSearchOpen: false,
   notificationsPanelOpen: false,
+  aiWorldPanelOpen: false,
 
   // ── Actions (braces required for ESLint: no-confusing-void-expression) ──
   setContentDensity: (density: ContentDensity): void => {
@@ -52,5 +56,8 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setNotificationsPanelOpen: (open: boolean): void => {
     set({ notificationsPanelOpen: open });
+  },
+  setAIWorldPanelOpen: (open: boolean): void => {
+    set({ aiWorldPanelOpen: open });
   },
 }));

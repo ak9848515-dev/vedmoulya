@@ -6,8 +6,11 @@
 
 services:
   # PostgreSQL — Primary database (BLP-002/D04)
+  # pgvector-enabled image (AI-RUNTIME-002 C-01): the RAG pipeline requires
+  # the `vector` extension for cosine-similarity search. `pgvector/pgvector`
+  # is the canonical image with the extension pre-installed.
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: vedmoulya-postgres
     restart: unless-stopped
     ports:

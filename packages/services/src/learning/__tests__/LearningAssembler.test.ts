@@ -204,4 +204,151 @@ describe('LearningAssembler', () => {
     const snapshot = await assembler.assemble('u16', 'Test');
     expect(snapshot.aiContext.currentFocus).toBe('Learn TypeScript');
   });
+
+  it('builds timeline entries from completed topics and active missions', async () => {
+    const { assembler } = createAssembler();
+    const pathService = assembler.getPathService();
+    pathService.addPath('u17', {
+      id: 'p1',
+      title: 'TypeScript',
+      description: '',
+      topics: [
+        {
+          id: 't1',
+          name: 'Generics',
+          description: '',
+          estimatedMinutes: 60,
+          completedMinutes: 60,
+          status: 'completed',
+          prerequisites: [],
+          resources: [],
+          masteryLevel: 3,
+        },
+      ],
+      estimatedHours: 10,
+      completedHours: 10,
+      difficulty: 'intermediate',
+      status: 'completed',
+      source: 'manual',
+      relevanceScore: 90,
+      certifications: [],
+    });
+    const missionService = assembler.getMissionService();
+    missionService.addMission('u17', {
+      id: 'm1',
+      title: 'Ship a project',
+      description: '',
+      type: 'project',
+      topics: [],
+      milestones: [],
+      progress: 50,
+      status: 'active',
+      rewards: [],
+      startDate: new Date().toISOString(),
+      timeEstimateHours: 10,
+      difficulty: 'intermediate',
+      createdAt: new Date().toISOString(),
+    });
+    const snapshot = await assembler.assemble('u17', 'Test');
+    expect(snapshot.timeline.totalEntries).toBe(2); // 1 topic + 1 milestone
+    expect(snapshot.metrics.topicsCompleted).toBe(1);
+  });
+
+  it('unlocks streak, topic, assessment, and project achievements when thresholds are met', async () => {
+    const { assembler } = createAssembler();
+    const progressService = assembler.getProgressService();
+    // Seed a 7-day streak directly (recordActivity only increments on
+    // consecutive calendar days, which is awkward to simulate in a unit test).
+    const streak = progressService.getStreak('u18');
+    streak.current = 7;
+    streak.longest = 7;
+    streak.lastActiveDate = new Date().toISOString();
+
+    const pathService = assembler.getPathService();
+    const topics = Array.from({ length: 10 }, (_, i) => ({
+      id: `t${i}`,
+      name: `Topic ${i}`,
+      description: '',
+      estimatedMinutes: 60,
+      completedMinutes: 60,
+      status: 'completed' as const,
+      prerequisites: [],
+      resources: [],
+      masteryLevel: 3,
+    }));
+    pathService.addPath('u18', {
+      id: 'p1',
+      title: 'Path',
+      description: '',
+      topics,
+      estimatedHours: 20,
+      completedHours: 20,
+      difficulty: 'intermediate',
+      status: 'completed',
+      source: 'manual',
+      relevanceScore: 90,
+      certifications: [],
+    });
+
+    const assessmentService = assembler.getAssessmentService();
+    for (let i = 0; i < 5; i++) {
+      assessmentService.addAssessment('u18', {
+        id: `a${i}`,
+        title: `Assessment ${i}`,
+        topic: 'x',
+        type: 'quiz',
+        score: 9,
+        maxScore: 10,
+        questionsAnswered: 10,
+        totalQuestions: 10,
+        status: 'completed',
+        takenAt: new Date().toISOString(),
+      });
+    }
+
+    const projectService = assembler.getProjectService();
+    for (let i = 0; i < 3; i++) {
+      projectService.addProject('u18', {
+        id: `pj${i}`,
+        title: `Project ${i}`,
+        description: '',
+        technologies: [],
+        learningGoals: [],
+        difficulty: 'intermediate',
+        estimatedHours: 10,
+        completedHours: 10,
+        status: 'completed',
+        outcomes: [],
+      });
+    }
+
+    const snapshot = await assembler.assemble('u18', 'Test');
+    const ids = snapshot.achievements.map((a) => a.id);
+    expect(ids).toContain('ach_streak_7');
+    expect(ids).toContain('ach_topics_10');
+    expect(ids).toContain('ach_assess_5');
+    expect(ids).toContain('ach_projects_3');
+    expect(snapshot.metrics.assessmentsPassed).toBe(5);
+    expect(snapshot.metrics.projectsCompleted).toBe(3);
+  });
+
+  it('enables assessment and revision quick actions when work is pending', async () => {
+    const { assembler } = createAssembler();
+    const assessmentService = assembler.getAssessmentService();
+    assessmentService.addAssessment('u19', {
+      id: 'a1',
+      title: 'Pending Quiz',
+      topic: 'x',
+      type: 'quiz',
+      maxScore: 10,
+      questionsAnswered: 0,
+      totalQuestions: 10,
+      status: 'pending',
+    });
+    const snapshot = await assembler.assemble('u19', 'Test');
+    const assessmentAction = snapshot.quickActions.find((q) => q.id === 'take_assessment');
+    expect(assessmentAction?.isAvailable).toBe(true);
+    const revisionAction = snapshot.quickActions.find((q) => q.id === 'review_revision');
+    expect(revisionAction).toBeDefined();
+  });
 });

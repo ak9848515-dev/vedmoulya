@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- VedMoulya — Android colors (MOB-002 Production Mobile Experience)
+     Matches the DES-010A brand tokens used by the web UI:
+     brand-600 #2B5FD9 (primary), brand-900 #1A3D8F, neutral-50 #F5F7FA. -->
+<resources>
+    <color name="colorPrimary">#2B5FD9</color>
+    <color name="colorPrimaryDark">#1A3D8F</color>
+    <color name="colorAccent">#5B8AEB</color>
+    <color name="splashBackground">#1E4AA8</color>
+    <color name="statusBarColor">#F5F7FA</color>
+    <color name="navigationBarColor">#F5F7FA</color>
+    <color name="navigationBarDivider">#00000000</color>
+</resources>

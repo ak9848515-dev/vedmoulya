@@ -1,0 +1,933 @@
+// ──────────────────────────────────────────────────────────────────
+// VedMoulya — Provider Catalog (Seed Data)
+// EI-002 — Enterprise Provider Registry & Intelligence Platform
+// The initial registry content: the provider families the AI platform
+// already speaks (see @vedmoulya/ai ProviderFamily), their models,
+// profiles, health, and capability matrices. Providers are enterprise
+// assets — no routing or selection decisions live here.
+//
+// All cost/latency/quality figures are REGISTRY ESTIMATES derived from
+// public provider documentation and the AI platform's own adapter
+// telemetry; they are the intelligence the registry exposes, not a
+// recommendation. The Provider Benchmark Engine (EI-003) will refresh
+// them nightly.
+// ──────────────────────────────────────────────────────────────────
+
+import type { CapabilityType, ModalityType, ProviderFamily, QualityTier } from '@vedmoulya/ai';
+import {
+  Provider,
+  type ProviderCapabilityMatrixEntry,
+  type ProviderHealth,
+} from '../domain/entities/Provider.js';
+import { createProviderId } from '../domain/value-objects/ProviderId.js';
+import { ProviderLifecycleStatus } from '../domain/value-objects/ProviderLifecycleStatus.js';
+import type {
+  ProviderCostProfile,
+  ProviderLatencyProfile,
+  ProviderModel,
+  ProviderRateLimits,
+} from '../types/provider-types.js';
+
+// ── Compact builders ────────────────────────────────────────────────────────
+
+function m(
+  capability: CapabilityType,
+  quality: number,
+  expectedCostUsd: number,
+  expectedLatencyMs: number,
+  expectedInputTokens: number,
+  expectedOutputTokens: number,
+  confidence: number,
+  historicalSuccess: number,
+  qualityTier: QualityTier,
+): ProviderCapabilityMatrixEntry {
+  return {
+    capability,
+    quality,
+    expectedCostUsd,
+    expectedLatencyMs,
+    expectedInputTokens,
+    expectedOutputTokens,
+    confidence,
+    historicalSuccess,
+    qualityTier,
+  };
+}
+
+function health(params: {
+  status: ProviderHealth['status'];
+  score: number;
+  latencyMs: number;
+  success: number;
+  failure: number;
+  quota?: number;
+  remaining?: number;
+  checkedAt?: string;
+}): ProviderHealth {
+  return {
+    status: params.status,
+    healthScore: params.score,
+    latencyMs: params.latencyMs,
+    successCount: params.success,
+    failureCount: params.failure,
+    quotaUsedPercent: params.quota ?? 0,
+    rateLimitRemaining: params.remaining ?? 0,
+    rateLimitResetAt: null,
+    lastSuccessAt: params.checkedAt ?? null,
+    lastFailureAt: null,
+    lastCheckedAt: params.checkedAt ?? new Date().toISOString(),
+  };
+}
+
+const TXT = ['text-in', 'text-out'] as const satisfies readonly ModalityType[];
+
+// ── Catalog entries ─────────────────────────────────────────────────────────
+
+interface CatalogEntry {
+  id: string;
+  family: ProviderFamily;
+  name: string;
+  description: string;
+  owner: string;
+  models: ProviderModel[];
+  /** Full-spectrum providers cover all 11 AI capabilities (e.g. flagship
+      frontier APIs and aggregators); otherwise capabilities derive from
+      the models' own capability lists. */
+  fullSpectrum?: boolean;
+  cost: ProviderCostProfile;
+  latency: ProviderLatencyProfile;
+  rateLimits: ProviderRateLimits;
+  availability: number;
+  health: ProviderHealth;
+  lifecycleStatus: Provider['lifecycleStatus']['value'];
+  tags: string[];
+  documentationUrl?: string;
+  matrix: ProviderCapabilityMatrixEntry[];
+}
+
+const CATALOG: readonly CatalogEntry[] = [
+  // ── OpenAI ───────────────────────────────────────────────────────────────
+  {
+    id: 'openai',
+    family: 'openai',
+    name: 'OpenAI',
+    description:
+      'Frontier GPT-4o family with industry-leading generation quality, vision, embeddings, and speech. The flagship general provider.',
+    owner: 'AI Platform Team',
+    fullSpectrum: true,
+    models: [
+      {
+        id: 'gpt-4o',
+        name: 'GPT-4o',
+        contextLength: 128000,
+        maxOutputTokens: 16384,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: true,
+        video: false,
+        modalities: [...TXT, 'image-in', 'audio-in', 'audio-out'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'speech',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'gpt-4o-mini',
+        name: 'GPT-4o mini',
+        contextLength: 128000,
+        maxOutputTokens: 16384,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: true,
+        video: false,
+        modalities: [...TXT, 'image-in', 'audio-in', 'audio-out'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'speech',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'text-embedding-3-small',
+        name: 'text-embedding-3-small',
+        contextLength: 8191,
+        maxOutputTokens: 0,
+        streaming: false,
+        vision: false,
+        functionCalling: false,
+        embeddings: true,
+        reasoning: false,
+        coding: false,
+        creativeWriting: false,
+        translation: false,
+        image: false,
+        audio: false,
+        video: false,
+        modalities: [...TXT],
+        capabilities: ['embeddings'],
+      },
+    ],
+    cost: { inputPerMillionTokens: 2.5, outputPerMillionTokens: 10, currency: 'USD', tier: 'high' },
+    latency: { p50Ms: 900, p95Ms: 2600 },
+    rateLimits: {
+      requestsPerMinute: 1000,
+      tokensPerMinute: 200000,
+      requestsPerDay: 100000,
+      maxConcurrentRequests: 250,
+    },
+    availability: 0.999,
+    health: health({
+      status: 'healthy',
+      score: 0.97,
+      latencyMs: 920,
+      success: 48210,
+      failure: 322,
+      quota: 45,
+      remaining: 980,
+    }),
+    lifecycleStatus: 'active',
+    tags: ['frontier', 'general', 'vision', 'embeddings', 'speech'],
+    documentationUrl: 'https://platform.openai.com/docs',
+    matrix: [
+      m('content_generation', 0.94, 0.035, 900, 6000, 4000, 0.95, 0.98, 'premium'),
+      m('reasoning', 0.92, 0.02, 1500, 3000, 1500, 0.94, 0.97, 'premium'),
+      m('coding', 0.9, 0.02, 1200, 2500, 1200, 0.93, 0.96, 'premium'),
+      m('vision', 0.93, 0.01, 800, 1200, 300, 0.95, 0.98, 'premium'),
+      m('embeddings', 0.9, 0.0001, 100, 800, 0, 0.97, 0.99, 'standard'),
+      m('summarization', 0.92, 0.005, 700, 2000, 800, 0.94, 0.97, 'premium'),
+      m('classification', 0.9, 0.004, 600, 1500, 200, 0.95, 0.98, 'premium'),
+      m('translation', 0.88, 0.01, 1000, 3000, 3000, 0.9, 0.94, 'standard'),
+      m('speech', 0.85, 0.015, 900, 500, 200, 0.88, 0.92, 'standard'),
+      m('image_understanding', 0.9, 0.008, 750, 1000, 250, 0.92, 0.95, 'standard'),
+      m('general_conversation', 0.95, 0.005, 700, 1500, 500, 0.96, 0.99, 'premium'),
+    ],
+  },
+
+  // ── Anthropic ────────────────────────────────────────────────────────────
+  {
+    id: 'anthropic',
+    family: 'anthropic',
+    name: 'Anthropic',
+    description:
+      'Claude Sonnet & Haiku: strong reasoning, long context, and the highest-rated creative writing quality in the registry.',
+    owner: 'AI Platform Team',
+    models: [
+      {
+        id: 'claude-sonnet-4',
+        name: 'Claude Sonnet 4',
+        contextLength: 200000,
+        maxOutputTokens: 64000,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: false,
+        video: false,
+        modalities: [...TXT, 'image-in'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'claude-3-5-haiku',
+        name: 'Claude 3.5 Haiku',
+        contextLength: 200000,
+        maxOutputTokens: 8192,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: false,
+        video: false,
+        modalities: [...TXT, 'image-in'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+    ],
+    cost: { inputPerMillionTokens: 3, outputPerMillionTokens: 15, currency: 'USD', tier: 'high' },
+    latency: { p50Ms: 1300, p95Ms: 3500 },
+    rateLimits: {
+      requestsPerMinute: 600,
+      tokensPerMinute: 150000,
+      requestsPerDay: 50000,
+      maxConcurrentRequests: 180,
+    },
+    availability: 0.999,
+    health: health({
+      status: 'healthy',
+      score: 0.96,
+      latencyMs: 1310,
+      success: 39120,
+      failure: 401,
+      quota: 38,
+      remaining: 580,
+    }),
+    lifecycleStatus: 'active',
+    tags: ['frontier', 'writing', 'reasoning', 'long-context'],
+    documentationUrl: 'https://docs.anthropic.com',
+    matrix: [
+      m('content_generation', 0.96, 0.04, 1300, 6500, 4200, 0.96, 0.98, 'premium'),
+      m('reasoning', 0.95, 0.025, 1900, 3500, 1600, 0.95, 0.97, 'premium'),
+      m('coding', 0.93, 0.025, 1500, 2800, 1300, 0.94, 0.96, 'premium'),
+      m('vision', 0.9, 0.012, 1100, 1300, 300, 0.92, 0.95, 'premium'),
+      m('summarization', 0.93, 0.006, 900, 2200, 900, 0.94, 0.97, 'premium'),
+      m('classification', 0.91, 0.005, 800, 1600, 200, 0.93, 0.96, 'premium'),
+      m('translation', 0.89, 0.012, 1200, 3200, 3200, 0.91, 0.94, 'standard'),
+      m('image_understanding', 0.88, 0.01, 950, 1100, 250, 0.9, 0.93, 'standard'),
+      m('general_conversation', 0.95, 0.006, 850, 1600, 500, 0.96, 0.99, 'premium'),
+    ],
+  },
+
+  // ── Google ───────────────────────────────────────────────────────────────
+  {
+    id: 'google',
+    family: 'google',
+    name: 'Google (Gemini)',
+    description:
+      'Gemini 2.5 Pro & Flash with a 1M-token context window, multimodal vision, and its own embeddings. Best long-document capability.',
+    owner: 'AI Platform Team',
+    fullSpectrum: true,
+    models: [
+      {
+        id: 'gemini-2.5-pro',
+        name: 'Gemini 2.5 Pro',
+        contextLength: 1048576,
+        maxOutputTokens: 65536,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: true,
+        video: true,
+        modalities: [...TXT, 'image-in', 'audio-in'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'speech',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'gemini-2.5-flash',
+        name: 'Gemini 2.5 Flash',
+        contextLength: 1048576,
+        maxOutputTokens: 65536,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: true,
+        video: true,
+        modalities: [...TXT, 'image-in', 'audio-in'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'speech',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'text-embedding-004',
+        name: 'text-embedding-004',
+        contextLength: 2048,
+        maxOutputTokens: 0,
+        streaming: false,
+        vision: false,
+        functionCalling: false,
+        embeddings: true,
+        reasoning: false,
+        coding: false,
+        creativeWriting: false,
+        translation: false,
+        image: false,
+        audio: false,
+        video: false,
+        modalities: [...TXT],
+        capabilities: ['embeddings'],
+      },
+    ],
+    cost: {
+      inputPerMillionTokens: 1.25,
+      outputPerMillionTokens: 10,
+      currency: 'USD',
+      tier: 'medium',
+    },
+    latency: { p50Ms: 1100, p95Ms: 3200 },
+    rateLimits: {
+      requestsPerMinute: 1500,
+      tokensPerMinute: 250000,
+      requestsPerDay: 120000,
+      maxConcurrentRequests: 300,
+    },
+    availability: 0.9995,
+    health: health({
+      status: 'healthy',
+      score: 0.96,
+      latencyMs: 1120,
+      success: 56210,
+      failure: 245,
+      quota: 30,
+      remaining: 1480,
+    }),
+    lifecycleStatus: 'active',
+    tags: ['frontier', 'long-context', 'vision', 'embeddings', 'multimodal'],
+    documentationUrl: 'https://ai.google.dev',
+    matrix: [
+      m('content_generation', 0.93, 0.028, 1100, 6200, 4100, 0.93, 0.96, 'standard'),
+      m('reasoning', 0.94, 0.018, 1700, 3200, 1500, 0.94, 0.96, 'premium'),
+      m('coding', 0.92, 0.018, 1400, 2600, 1200, 0.93, 0.95, 'premium'),
+      m('vision', 0.95, 0.011, 1000, 1200, 300, 0.96, 0.98, 'premium'),
+      m('embeddings', 0.91, 0.00008, 90, 700, 0, 0.96, 0.99, 'standard'),
+      m('summarization', 0.9, 0.0045, 850, 2100, 850, 0.92, 0.95, 'standard'),
+      m('classification', 0.88, 0.0035, 750, 1400, 200, 0.91, 0.94, 'standard'),
+      m('translation', 0.9, 0.009, 1150, 3100, 3100, 0.92, 0.95, 'standard'),
+      m('speech', 0.87, 0.012, 950, 500, 200, 0.89, 0.92, 'standard'),
+      m('image_understanding', 0.93, 0.007, 900, 1000, 250, 0.94, 0.97, 'premium'),
+      m('general_conversation', 0.92, 0.004, 800, 1400, 500, 0.94, 0.97, 'standard'),
+    ],
+  },
+
+  // ── DeepSeek ──────────────────────────────────────────────────────────────
+  {
+    id: 'deepseek',
+    family: 'deepseek',
+    name: 'DeepSeek',
+    description:
+      'DeepSeek V3 & R1: near-frontier reasoning and coding at a fraction of the cost. The economy engine favorite.',
+    owner: 'AI Platform Team',
+    models: [
+      {
+        id: 'deepseek-chat',
+        name: 'DeepSeek V3',
+        contextLength: 65536,
+        maxOutputTokens: 8192,
+        streaming: true,
+        vision: false,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: false,
+        audio: false,
+        video: false,
+        modalities: [...TXT],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'summarization',
+          'classification',
+          'translation',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'deepseek-reasoner',
+        name: 'DeepSeek R1',
+        contextLength: 65536,
+        maxOutputTokens: 8192,
+        streaming: true,
+        vision: false,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: false,
+        audio: false,
+        video: false,
+        modalities: [...TXT],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'summarization',
+          'classification',
+          'translation',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+    ],
+    cost: {
+      inputPerMillionTokens: 0.27,
+      outputPerMillionTokens: 1.1,
+      currency: 'USD',
+      tier: 'low',
+    },
+    latency: { p50Ms: 1600, p95Ms: 4500 },
+    rateLimits: {
+      requestsPerMinute: 300,
+      tokensPerMinute: 100000,
+      requestsPerDay: 30000,
+      maxConcurrentRequests: 120,
+    },
+    availability: 0.995,
+    health: health({
+      status: 'healthy',
+      score: 0.92,
+      latencyMs: 1620,
+      success: 28110,
+      failure: 512,
+      quota: 55,
+      remaining: 280,
+    }),
+    lifecycleStatus: 'active',
+    tags: ['economy', 'reasoning', 'coding', 'open-weights'],
+    documentationUrl: 'https://api-docs.deepseek.com',
+    matrix: [
+      m('reasoning', 0.9, 0.004, 1600, 3000, 1500, 0.9, 0.94, 'economy'),
+      m('coding', 0.91, 0.004, 1400, 2500, 1200, 0.91, 0.95, 'economy'),
+      m('content_generation', 0.85, 0.006, 1500, 5800, 3800, 0.86, 0.9, 'economy'),
+      m('summarization', 0.86, 0.0012, 950, 2000, 800, 0.88, 0.92, 'economy'),
+      m('classification', 0.85, 0.001, 850, 1400, 200, 0.87, 0.91, 'economy'),
+      m('translation', 0.87, 0.002, 1300, 3000, 3000, 0.88, 0.92, 'economy'),
+      m('general_conversation', 0.88, 0.0012, 900, 1400, 500, 0.9, 0.94, 'economy'),
+    ],
+  },
+
+  // ── OpenRouter ────────────────────────────────────────────────────────────
+  {
+    id: 'openrouter',
+    family: 'openrouter',
+    name: 'OpenRouter',
+    description:
+      'Multi-provider gateway exposing hundreds of models through one API — pass-through pricing, per-request provider choice.',
+    owner: 'AI Platform Team',
+    fullSpectrum: true,
+    models: [
+      {
+        id: 'openai/gpt-4o',
+        name: 'GPT-4o (via OpenRouter)',
+        contextLength: 128000,
+        maxOutputTokens: 16384,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: false,
+        video: false,
+        modalities: [...TXT, 'image-in'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'anthropic/claude-sonnet-4',
+        name: 'Claude Sonnet 4 (via OpenRouter)',
+        contextLength: 200000,
+        maxOutputTokens: 64000,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: false,
+        video: false,
+        modalities: [...TXT, 'image-in'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'meta-llama/llama-3.3-70b-instruct',
+        name: 'Llama 3.3 70B (via OpenRouter)',
+        contextLength: 128000,
+        maxOutputTokens: 8192,
+        streaming: true,
+        vision: false,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: false,
+        audio: false,
+        video: false,
+        modalities: [...TXT],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'summarization',
+          'classification',
+          'translation',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+    ],
+    cost: {
+      inputPerMillionTokens: 1.5,
+      outputPerMillionTokens: 6,
+      currency: 'USD',
+      tier: 'medium',
+    },
+    latency: { p50Ms: 1100, p95Ms: 3300 },
+    rateLimits: {
+      requestsPerMinute: 2000,
+      tokensPerMinute: 300000,
+      requestsPerDay: 200000,
+      maxConcurrentRequests: 400,
+    },
+    availability: 0.998,
+    health: health({
+      status: 'healthy',
+      score: 0.94,
+      latencyMs: 1150,
+      success: 44810,
+      failure: 512,
+      quota: 40,
+      remaining: 1950,
+    }),
+    lifecycleStatus: 'active',
+    tags: ['aggregator', 'multi-provider', 'flexible'],
+    documentationUrl: 'https://openrouter.ai/docs',
+    matrix: [
+      m('content_generation', 0.91, 0.03, 1100, 6000, 4000, 0.91, 0.94, 'standard'),
+      m('reasoning', 0.9, 0.018, 1600, 3000, 1500, 0.9, 0.93, 'standard'),
+      m('coding', 0.89, 0.018, 1400, 2500, 1200, 0.9, 0.93, 'standard'),
+      m('vision', 0.88, 0.011, 1050, 1200, 300, 0.89, 0.92, 'standard'),
+      m('embeddings', 0.85, 0.00009, 100, 800, 0, 0.86, 0.9, 'standard'),
+      m('summarization', 0.9, 0.005, 900, 2100, 850, 0.91, 0.94, 'standard'),
+      m('classification', 0.88, 0.004, 800, 1500, 200, 0.9, 0.93, 'standard'),
+      m('translation', 0.87, 0.01, 1200, 3100, 3100, 0.89, 0.92, 'standard'),
+      m('speech', 0.8, 0.013, 1000, 500, 200, 0.82, 0.85, 'standard'),
+      m('image_understanding', 0.85, 0.008, 950, 1000, 250, 0.87, 0.9, 'standard'),
+      m('general_conversation', 0.92, 0.005, 850, 1500, 500, 0.93, 0.96, 'standard'),
+    ],
+  },
+
+  // ── Ollama ────────────────────────────────────────────────────────────────
+  {
+    id: 'ollama',
+    family: 'ollama',
+    name: 'Ollama (Local)',
+    description:
+      'Fully local open-weight models (Llama, Mistral) — zero per-token cost, zero data egress. The privacy-first provider.',
+    owner: 'AI Platform Team',
+    models: [
+      {
+        id: 'llama3.3:70b',
+        name: 'Llama 3.3 70B',
+        contextLength: 131072,
+        maxOutputTokens: 8192,
+        streaming: true,
+        vision: false,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: false,
+        audio: false,
+        video: false,
+        modalities: [...TXT],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'summarization',
+          'classification',
+          'translation',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
+        id: 'mistral:7b',
+        name: 'Mistral 7B',
+        contextLength: 32768,
+        maxOutputTokens: 8192,
+        streaming: true,
+        vision: false,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: false,
+        audio: false,
+        video: false,
+        modalities: [...TXT],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'summarization',
+          'classification',
+          'translation',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+    ],
+    cost: { inputPerMillionTokens: 0, outputPerMillionTokens: 0, currency: 'USD', tier: 'free' },
+    latency: { p50Ms: 2500, p95Ms: 7000 },
+    rateLimits: {
+      requestsPerMinute: 120,
+      tokensPerMinute: 50000,
+      requestsPerDay: 0,
+      maxConcurrentRequests: 8,
+    },
+    availability: 0.999,
+    health: health({
+      status: 'healthy',
+      score: 0.95,
+      latencyMs: 2480,
+      success: 15210,
+      failure: 180,
+      quota: 0,
+      remaining: 120,
+    }),
+    lifecycleStatus: 'active',
+    tags: ['local', 'open-weights', 'privacy', 'self-hosted'],
+    documentationUrl: 'https://ollama.com/docs',
+    matrix: [
+      m('content_generation', 0.78, 0, 2500, 5800, 3800, 0.82, 0.88, 'economy'),
+      m('reasoning', 0.74, 0, 2600, 3000, 1500, 0.78, 0.85, 'economy'),
+      m('coding', 0.75, 0, 2400, 2500, 1200, 0.79, 0.86, 'economy'),
+      m('summarization', 0.8, 0, 1900, 2000, 800, 0.84, 0.9, 'economy'),
+      m('classification', 0.82, 0, 1700, 1400, 200, 0.85, 0.91, 'economy'),
+      m('translation', 0.75, 0, 2100, 3000, 3000, 0.78, 0.84, 'economy'),
+      m('general_conversation', 0.84, 0, 1800, 1400, 500, 0.87, 0.92, 'economy'),
+    ],
+  },
+
+  // ── Mock ──────────────────────────────────────────────────────────────────
+  {
+    id: 'mock',
+    family: 'mock',
+    name: 'Mock (Test)',
+    description:
+      'Deterministic in-memory provider used by the development, test, and CI environments. Instant, free, fully healthy.',
+    owner: 'Platform Engineering',
+    fullSpectrum: true,
+    models: [
+      {
+        id: 'mock-1',
+        name: 'Mock Model 1',
+        contextLength: 131072,
+        maxOutputTokens: 8192,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: true,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: true,
+        video: true,
+        modalities: [...TXT, 'image-in', 'image-out', 'audio-in', 'audio-out'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'embeddings',
+          'summarization',
+          'classification',
+          'translation',
+          'speech',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+    ],
+    cost: { inputPerMillionTokens: 0, outputPerMillionTokens: 0, currency: 'USD', tier: 'free' },
+    latency: { p50Ms: 50, p95Ms: 150 },
+    rateLimits: {
+      requestsPerMinute: 10000,
+      tokensPerMinute: 1000000,
+      requestsPerDay: 0,
+      maxConcurrentRequests: 1000,
+    },
+    availability: 1,
+    health: health({
+      status: 'healthy',
+      score: 1,
+      latencyMs: 48,
+      success: 99950,
+      failure: 4,
+      quota: 0,
+      remaining: 10000,
+    }),
+    lifecycleStatus: 'testing',
+    tags: ['test', 'deterministic', 'ci'],
+    matrix: [
+      m('content_generation', 0.85, 0, 50, 6000, 4000, 0.95, 0.99, 'economy'),
+      m('reasoning', 0.82, 0, 50, 3000, 1500, 0.95, 0.99, 'economy'),
+      m('coding', 0.82, 0, 50, 2500, 1200, 0.95, 0.99, 'economy'),
+      m('vision', 0.8, 0, 50, 1200, 300, 0.95, 0.99, 'economy'),
+      m('embeddings', 0.85, 0, 50, 800, 0, 0.95, 0.99, 'economy'),
+      m('summarization', 0.85, 0, 50, 2000, 800, 0.95, 0.99, 'economy'),
+      m('classification', 0.85, 0, 50, 1500, 200, 0.95, 0.99, 'economy'),
+      m('translation', 0.8, 0, 50, 3000, 3000, 0.95, 0.99, 'economy'),
+      m('speech', 0.8, 0, 50, 500, 200, 0.95, 0.99, 'economy'),
+      m('image_understanding', 0.8, 0, 50, 1000, 250, 0.95, 0.99, 'economy'),
+      m('general_conversation', 0.88, 0, 50, 1500, 500, 0.95, 0.99, 'economy'),
+    ],
+  },
+];
+
+const CATALOG_EPOCH = new Date('2026-08-03T00:00:00.000Z');
+const EPOCH_ISO = CATALOG_EPOCH.toISOString();
+
+/** All 11 AI capabilities — used by providers that cover the full spectrum. */
+const ALL_CAPABILITIES: readonly CapabilityType[] = [
+  'reasoning',
+  'coding',
+  'vision',
+  'embeddings',
+  'summarization',
+  'classification',
+  'translation',
+  'speech',
+  'image_understanding',
+  'general_conversation',
+  'content_generation',
+];
+
+/**
+ * Build the seed catalog as domain Provider entities.
+ * Deterministic creation timestamps keep tests and docs stable.
+ */
+export function createCatalogProviders(): Provider[] {
+  return CATALOG.map((entry) => {
+    const capabilities = entry.fullSpectrum
+      ? [...ALL_CAPABILITIES]
+      : [...new Set(entry.models.flatMap((model) => model.capabilities))];
+    const modalities = [...new Set(entry.models.flatMap((model) => model.modalities))];
+    return Provider.create({
+      id: createProviderId(entry.id),
+      family: entry.family,
+      name: entry.name,
+      description: entry.description,
+      owner: entry.owner,
+      models: entry.models.map((model) => ({ ...model })),
+      capabilities,
+      supportedModalities: modalities,
+      cost: { ...entry.cost },
+      latency: { ...entry.latency },
+      rateLimits: { ...entry.rateLimits },
+      availability: entry.availability,
+      health: { ...entry.health, lastCheckedAt: EPOCH_ISO },
+      lifecycleStatus: ProviderLifecycleStatus.fromStatus(entry.lifecycleStatus),
+      tags: [...entry.tags],
+      documentationUrl: entry.documentationUrl,
+      matrix: entry.matrix.map((e) => ({ ...e })),
+      createdAt: CATALOG_EPOCH,
+      updatedAt: CATALOG_EPOCH,
+    });
+  });
+}
+
+/** Total seed catalog size (used by docs/tests). */
+export const CATALOG_SIZE = CATALOG.length;

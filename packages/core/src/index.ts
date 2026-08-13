@@ -102,13 +102,77 @@ export type {
   HealthCheckFn,
 } from './health/index.js';
 
+// Startup Preflight (EPIC-018 — deterministic startup diagnostics)
+export { PreflightEngine, loadEnvFileSafe, loadEnvFilesSafe } from './startup/preflight.js';
+export type {
+  PreflightMode,
+  PreflightStatus,
+  PreflightCheck,
+  PreflightReport,
+  PreflightEnvironment,
+  PreflightEngineOptions,
+} from './startup/preflight.js';
+
+// Provider Runtime Truth (EPIC-019 — configuration agrees with the runtime
+// registry: catalog ≠ adapter ≠ execution)
+export {
+  PROVIDER_RUNTIME_DESCRIPTORS,
+  readProviderRuntimeState,
+  runtimeExecutionReady,
+  validateDefaultProvider,
+  isValueSet,
+  isStrictRuntimeMode,
+  toRuntimeMode,
+} from './startup/provider-runtime.js';
+export type {
+  ProviderRuntimeMode,
+  ProviderRuntimeStatus,
+  ProviderRuntimeState,
+  ProviderRuntimeDescriptor,
+  ProviderRuntimeOptions,
+  RuntimeExecutionReadyResult,
+  DefaultProviderValidation,
+} from './startup/provider-runtime.js';
+
+// Deterministic Port Diagnostics (EPIC-019 — no silent port juggling)
+export { isPortAvailable, probePort, findPortOwner, formatPortConflict } from './startup/port.js';
+export type { PortProbeResult } from './startup/port.js';
+
+// Startup Doctor (EPIC-019 — npm run doctor)
+export { buildDoctorReport } from './startup/doctor.js';
+export type { DoctorRow, DoctorStatus, DoctorToolInputs } from './startup/doctor.js';
+
 // Metrics
 export { MetricsRegistry, metrics, Timer } from './metrics/index.js';
 export type { Metric, MetricType, MetricListener } from './metrics/index.js';
 
 // Tracing
-export { TraceProvider, traceProvider } from './tracing/index.js';
-export type { Span, Tracer } from './tracing/index.js';
+export {
+  TraceProvider,
+  traceProvider,
+  ExecutionTraceProvider,
+  InMemoryTraceStore,
+  NoopTelemetryPort,
+  NOOP_TELEMETRY,
+  createTraceId,
+  createSpanId,
+  normalizeTraceStatus,
+} from './tracing/index.js';
+export type {
+  Span,
+  Tracer,
+  ExecutionTrace,
+  TraceSpan,
+  TraceEvent,
+  TraceSpanError,
+  TraceStatus,
+  TraceStore,
+  TraceQuery,
+  TelemetryPort,
+  TelemetrySpanHandle,
+  TelemetrySpanInput,
+  TelemetryAttribute,
+} from './tracing/index.js';
 
 // Event Bus
 export { InMemoryEventBus, createEvent, createEventId } from './event-bus/index.js';
@@ -178,3 +242,9 @@ export {
   processInBatches,
 } from './base/index.js';
 export type { BatchResult } from './base/index.js';
+
+// Persistence (SPRINT-022 — Persistent Intelligence Foundation)
+// Write-through Postgres base for the synchronous owner-scoped store ports
+// (in-memory mirror + async idempotent upserts + boot hydration + shutdown
+// flush) — the persistence seam for every EPIC-016/017/018/020 store.
+export { WriteThroughDocumentStore } from './persistence/WriteThroughDocumentStore.js';

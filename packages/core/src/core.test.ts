@@ -255,6 +255,74 @@ describe('Configuration', () => {
     }
   });
 
+  it('requires AI_DEEPSEEK_API_KEY in production when AI_DEFAULT_PROVIDER=deepseek (PH-001/T2)', () => {
+    const saved = process.env.NODE_ENV;
+    const savedKey = process.env.AI_DEEPSEEK_API_KEY;
+    const savedProvider = process.env.AI_DEFAULT_PROVIDER;
+    const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.AI_DEFAULT_PROVIDER = 'deepseek';
+      delete process.env.FF_AI_ASSISTANT_ENABLED;
+      delete process.env.AI_DEEPSEEK_API_KEY;
+      expect(() => loadConfiguration()).toThrow(/AI_DEEPSEEK_API_KEY.*REQUIRED/);
+    } finally {
+      process.env.NODE_ENV = saved ?? 'test';
+      if (savedKey === undefined) delete process.env.AI_DEEPSEEK_API_KEY;
+      else process.env.AI_DEEPSEEK_API_KEY = savedKey;
+      if (savedProvider === undefined) delete process.env.AI_DEFAULT_PROVIDER;
+      else process.env.AI_DEFAULT_PROVIDER = savedProvider;
+      if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
+      else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+    }
+  });
+
+  it('rejects placeholder AI_DEEPSEEK_API_KEY in production (PH-001/T2)', () => {
+    const saved = process.env.NODE_ENV;
+    const savedKey = process.env.AI_DEEPSEEK_API_KEY;
+    const savedProvider = process.env.AI_DEFAULT_PROVIDER;
+    const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.AI_DEFAULT_PROVIDER = 'deepseek';
+      delete process.env.FF_AI_ASSISTANT_ENABLED;
+      process.env.AI_DEEPSEEK_API_KEY = 'your-api-key';
+      expect(() => loadConfiguration()).toThrow(/AI_DEEPSEEK_API_KEY/);
+    } finally {
+      process.env.NODE_ENV = saved ?? 'test';
+      if (savedKey === undefined) delete process.env.AI_DEEPSEEK_API_KEY;
+      else process.env.AI_DEEPSEEK_API_KEY = savedKey;
+      if (savedProvider === undefined) delete process.env.AI_DEFAULT_PROVIDER;
+      else process.env.AI_DEFAULT_PROVIDER = savedProvider;
+      if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
+      else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+    }
+  });
+
+  it('loads AI_DEEPSEEK_API_KEY into config.ai.deepseekKey when configured', () => {
+    const saved = process.env.NODE_ENV;
+    const savedKey = process.env.AI_DEEPSEEK_API_KEY;
+    const savedProvider = process.env.AI_DEFAULT_PROVIDER;
+    const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.AI_DEFAULT_PROVIDER = 'deepseek';
+      delete process.env.FF_AI_ASSISTANT_ENABLED;
+      process.env.AI_DEEPSEEK_API_KEY = 'sk-test-0123456789abcdef0123456789abcdef0123456789abcdef';
+      const cfg = loadConfiguration();
+      expect(cfg.ai.deepseekKey).toBe('sk-test-0123456789abcdef0123456789abcdef0123456789abcdef');
+      expect(cfg.ai.defaultProvider).toBe('deepseek');
+    } finally {
+      process.env.NODE_ENV = saved ?? 'test';
+      if (savedKey === undefined) delete process.env.AI_DEEPSEEK_API_KEY;
+      else process.env.AI_DEEPSEEK_API_KEY = savedKey;
+      if (savedProvider === undefined) delete process.env.AI_DEFAULT_PROVIDER;
+      else process.env.AI_DEFAULT_PROVIDER = savedProvider;
+      if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
+      else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+    }
+  });
+
   it('requires OAuth secrets in production when social login is enabled (PH-001/T2)', () => {
     // Note: loadConfiguration() evaluates database → auth → ai → smtp in source
     // order, so this throws on GOOGLE_CLIENT_ID before any AI key is required —

@@ -34,6 +34,9 @@ npm run typecheck
 echo "==> G3: Tests + coverage gate"
 npm run test:coverage
 
+echo "==> G7: Quality benchmarks (hermetic — no secrets/network)"
+npm run benchmarks
+
 if [[ -z "$SKIP_AUDIT" ]]; then
   echo "==> G6: Security audit (critical-blocking)"
   npm audit --audit-level=critical

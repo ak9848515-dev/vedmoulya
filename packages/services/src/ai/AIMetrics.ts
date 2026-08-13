@@ -34,6 +34,11 @@ export class AIMetrics {
     metrics.observe('ai.tokens.output', outputTokens);
   }
 
+  /** Pre-provider deterministic input-token estimate (AI-RUNTIME-001). */
+  recordTokenEstimate(tokens: number): void {
+    metrics.observe('ai.tokens.estimated', tokens);
+  }
+
   recordCost(cost: number): void {
     metrics.observe('ai.cost.total', cost);
   }
@@ -60,6 +65,39 @@ export class AIMetrics {
 
   recordCacheMiss(): void {
     metrics.increment('ai.cache.miss');
+  }
+
+  /** Provider-aware prompt cache telemetry (AI-RUNTIME-002). */
+  recordPromptCacheHit(): void {
+    metrics.increment('ai.promptcache.hit');
+  }
+
+  recordPromptCacheMiss(): void {
+    metrics.increment('ai.promptcache.miss');
+  }
+
+  getPromptCacheHitRatio(): number {
+    const hits = metrics.getCounter('ai.promptcache.hit');
+    const misses = metrics.getCounter('ai.promptcache.miss');
+    const total = hits + misses;
+    return total === 0 ? 0 : hits / total;
+  }
+
+  /** Context optimization economics (AI-RUNTIME-002). */
+  recordContextOptimization(originalTokens: number, finalTokens: number, ratio: number): void {
+    metrics.observe('ai.context.original_tokens', originalTokens);
+    metrics.observe('ai.context.final_tokens', finalTokens);
+    metrics.observe('ai.context.compression_ratio', ratio);
+  }
+
+  /** Provider selection telemetry (AI-RUNTIME-002). */
+  recordProviderSelection(providerId: string): void {
+    metrics.increment(`ai.selection.${providerId}`);
+  }
+
+  /** Evidence-First abstention telemetry (AI-RUNTIME-002 Phase 8). */
+  recordAbstention(): void {
+    metrics.increment('ai.abstention.count');
   }
 
   recordProviderLatency(provider: string, latencyMs: number): void {

@@ -28,11 +28,11 @@ import {
 import { useBusiness } from '../../lib/api-client.js';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
-import { SignedOutCard } from '../../components/SignedOutCard.js';
+import { SignInRedirect } from '../../components/SignInRedirect.js';
 
 export default function BusinessPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
-  const { user } = useAuthStore();
+  const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
   const { isLoading } = useBusiness(userId);
   const { setActiveSection, setBreadcrumbs } = useNavigationStore();
@@ -44,7 +44,7 @@ export default function BusinessPage(): React.JSX.Element {
   }, [setActiveSection, setBreadcrumbs]);
 
   // Hydration guard: prevent SSR/client mismatch from zustand persist
-  if (!hydrated) {
+  if (!hydrated || !sessionReady) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <Loading label="Loading Business Intelligence..." size="lg" />
@@ -53,7 +53,7 @@ export default function BusinessPage(): React.JSX.Element {
   }
 
   if (!user) {
-    return <SignedOutCard />;
+    return <SignInRedirect />;
   }
 
   if (isLoading) {

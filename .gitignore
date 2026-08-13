@@ -41,6 +41,15 @@ test-results/
 *.log
 npm-debug.log*
 
+# Generated audit/lint report artifacts at the repo root
+.eslint-detail.txt
+.eslint-report.json
+
+# Root-level command-output / pid scratch artifacts (SPRINT-024 hygiene)
+*.out.txt
+*.err.txt
+*.pid.txt
+
 # Secrets
 *.pem
 *.key

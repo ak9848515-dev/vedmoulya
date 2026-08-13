@@ -34,7 +34,9 @@ export interface QuickActionsProps {
 export function QuickActions({ actions = defaultActions }: QuickActionsProps): React.JSX.Element {
   return (
     <section>
-      <h2 className="text-[20px] font-heading font-semibold text-[#111827] mb-4">Quick Actions</h2>
+      <h2 className="text-[20px] font-heading font-semibold text-[#111827] dark:text-[#F8FAFC] mb-4">
+        Quick Actions
+      </h2>
       <div className="flex flex-wrap gap-2">
         {actions.map((action) => (
           <Button

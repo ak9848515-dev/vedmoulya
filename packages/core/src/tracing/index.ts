@@ -125,3 +125,25 @@ class DefaultTracer implements Tracer {
  * Default trace provider
  */
 export const traceProvider = new TraceProvider();
+
+// ── EPIC-012 — Execution Trace spine (correlated, owner-scoped) ─────────────
+
+export { ExecutionTraceProvider, normalizeTraceStatus } from './execution-trace-provider.js';
+export type { ExecutionTraceProviderOptions } from './execution-trace-provider.js';
+export { InMemoryTraceStore } from './trace-store.js';
+export type { TraceStore, TraceQuery, InMemoryTraceStoreOptions } from './trace-store.js';
+export { NoopTelemetryPort, NOOP_TELEMETRY } from './telemetry-port.js';
+export type {
+  TelemetryPort,
+  TelemetrySpanHandle,
+  TelemetrySpanInput,
+  TelemetryAttribute,
+} from './telemetry-port.js';
+export { createTraceId, createSpanId } from './execution-trace.js';
+export type {
+  ExecutionTrace,
+  TraceSpan,
+  TraceEvent,
+  TraceSpanError,
+  TraceStatus,
+} from './execution-trace.js';

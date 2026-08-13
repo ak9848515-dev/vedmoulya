@@ -24,16 +24,47 @@ export class OpenAIProvider implements ProviderAdapter {
 
   private readonly apiKey: string;
   private readonly baseUrl: string = 'https://api.openai.com/v1';
+  private readonly timeoutMs: number;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, options: { timeoutMs?: number } = {}) {
     this.apiKey = apiKey;
+    this.timeoutMs = options.timeoutMs ?? 60_000;
+  }
+
+  /**
+   * fetch with a hard timeout (AI-RUNTIME-001) — a hung provider must never
+   * hang the caller. AbortError is rethrown as a descriptive "timed out"
+   * error so AIOrchestrationService.classifyFailure maps it to `timeout`
+   * (a retryable failure reason) rather than an internal error.
+   */
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit = {},
+    timeoutMs: number = this.timeoutMs,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`OpenAI request timed out after ${timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async isHealthy(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/models`, {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-      });
+      const response = await this.fetchWithTimeout(
+        `${this.baseUrl}/models`,
+        { headers: { Authorization: `Bearer ${this.apiKey}` } },
+        10_000,
+      );
       return response.ok;
     } catch {
       return false;
@@ -61,7 +92,7 @@ export class OpenAIProvider implements ProviderAdapter {
     maxTokens?: number;
   }): Promise<AIResponse> {
     const start = Date.now();
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

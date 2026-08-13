@@ -21,6 +21,7 @@
     "@vedmoulya/core": "*",
     "@vedmoulya/domain": "*",
     "@vedmoulya/ai": "*",
+    "@vedmoulya/context": "*",
     "@vedmoulya/information": "*",
     "@vedmoulya/shared": "*"
   },

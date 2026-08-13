@@ -34,6 +34,7 @@ export type { AIRequestRepository } from './repository/AIRequestRepository.js';
 
 // Services
 export { AIDomainService } from './services/AIDomainService.js';
+export { TokenEstimationService } from './services/TokenEstimationService.js';
 
 // Factory
 export { AIRequestFactory } from './factory/AIRequestFactory.js';

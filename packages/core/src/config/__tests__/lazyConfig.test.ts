@@ -23,6 +23,7 @@ function stubProductionWithoutSecrets(): void {
   vi.stubEnv('AI_OPENAI_API_KEY', '');
   vi.stubEnv('AI_ANTHROPIC_API_KEY', '');
   vi.stubEnv('AI_GOOGLE_API_KEY', '');
+  vi.stubEnv('AI_DEEPSEEK_API_KEY', '');
   vi.stubEnv('SMTP_HOST', '');
   vi.stubEnv('FF_AI_ASSISTANT_ENABLED', 'false');
   vi.stubEnv('FF_SOCIAL_LOGIN_ENABLED', 'false');

@@ -18,7 +18,8 @@ export type CapabilityType =
   | 'translation'
   | 'speech'
   | 'image_understanding'
-  | 'general_conversation';
+  | 'general_conversation'
+  | 'content_generation';
 
 export const CAPABILITY_TYPES: readonly CapabilityType[] = [
   'reasoning',
@@ -31,6 +32,9 @@ export const CAPABILITY_TYPES: readonly CapabilityType[] = [
   'speech',
   'image_understanding',
   'general_conversation',
+  // EPIC-003/AC-001 — first-class content generation capability so every
+  // business module's content pipeline routes through the shared AI platform.
+  'content_generation',
 ] as const;
 
 // ── Provider Types ─────────────────────────────────────────────────────────

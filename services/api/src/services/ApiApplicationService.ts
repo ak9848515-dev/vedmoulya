@@ -4,10 +4,19 @@
 // BLD-016A — API Gateway & Platform Services
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { ExecutionTraceProvider } from '@vedmoulya/core';
+import type { TelemetryPort } from '@vedmoulya/core';
 import {
   AIOrchestrationService,
+  AIObservability,
+  OtelAIObservabilityExporter,
   BusinessApplicationService,
   CareerApplicationService,
+  ClientOpsAIService,
+  ClientOperationsApplicationService,
+  ContentAgencyAIService,
+  ContentAgencyApplicationService,
+  ContextOptimizer,
   DashboardApplicationService,
   DecisionApplicationService,
   ExecutionApplicationService,
@@ -17,21 +26,196 @@ import {
   LifeOSApplicationService,
   MarketplaceApplicationService,
   MemoryApplicationService,
+  PromptCacheManager,
+  redactSecrets,
 } from '@vedmoulya/services';
+import { RagApplicationService, MockEmbeddingProvider } from '@vedmoulya/rag';
+import type { RagRepository, EmbeddingProvider } from '@vedmoulya/rag';
+import { CapabilityApplicationService } from '@vedmoulya/capabilities';
+import type { CapabilityRepository } from '@vedmoulya/capabilities';
+import {
+  ProviderApplicationService,
+  InMemoryProviderPreferencesStore,
+  InMemoryProviderIntelligenceStore,
+  InMemoryLocalModelDiscovery,
+  ProviderPreferencesService,
+} from '@vedmoulya/providers';
+import type { ProviderRepository } from '@vedmoulya/providers';
+import { ContextApplicationService } from '@vedmoulya/context';
+import type { ContextRepository } from '@vedmoulya/context';
+import { ExecutionStrategyApplicationService } from '@vedmoulya/execution-strategy';
+import type { ExecutionStrategyRepository } from '@vedmoulya/execution-strategy';
+import {
+  InMemoryExecutionGraphRepository,
+  InMemoryExecutionHistoryRepository,
+  InMemoryExecutionQueueRepository,
+  InMemoryExecutionSessionRepository,
+  InMemoryWorkerRegistry,
+  OrchestratorApplicationService,
+} from '@vedmoulya/execution-orchestrator';
+import type {
+  ExecutionGraphRepository,
+  ExecutionSessionRepository,
+  ExecutionQueueRepository,
+  WorkerRegistry,
+  ExecutionHistoryRepository,
+} from '@vedmoulya/execution-orchestrator';
+import { GoalsApplicationService } from '@vedmoulya/goals';
+import type { GoalRepository, TaskRepository } from '@vedmoulya/goals';
+import { IntelligenceApplicationService } from '@vedmoulya/intelligence';
+import { LearningIntelligenceApplicationService } from '@vedmoulya/learning-intelligence';
+import type { LearningRepository } from '@vedmoulya/learning-intelligence';
+import { BrainApplicationService } from '@vedmoulya/enterprise-brain';
+import type { BrainRepository } from '@vedmoulya/enterprise-brain';
+import {
+  KnowledgeApplicationService as KnowledgeIntelligenceApplicationService,
+  PostgresKnowledgeGraph,
+} from '@vedmoulya/knowledge-intelligence';
+import type { KnowledgeRepository as KnowledgeIntelligenceRepository } from '@vedmoulya/knowledge-intelligence';
+import {
+  MemoryApplicationService as MemoryIntelligenceApplicationService,
+  PostgresMemoryGraph,
+} from '@vedmoulya/memory-intelligence';
+import { OSApplicationService } from '@vedmoulya/os-intelligence';
+import type { OSRepository as OSIntelligenceRepository } from '@vedmoulya/os-intelligence';
+import { ContextFabricApplicationService } from '@vedmoulya/context-fabric';
+import type { GraphRepository as ContextFabricGraphRepository } from '@vedmoulya/context-fabric';
+import {
+  AIOrchestratorSpecialistPort,
+  LoopApplicationService,
+  SystemClock,
+  ToolRegistryToolPort,
+} from '@vedmoulya/loop-engine';
+import type { LoopEnginePorts } from '@vedmoulya/loop-engine';
+import {
+  DEFAULT_EXECUTION_POLICY,
+  FactoryApplicationService,
+  InMemoryVersionControl,
+  InMemoryWorkspace,
+  LocalDeploymentAdapter,
+  VercelDeploymentAdapter,
+} from '@vedmoulya/app-factory';
+import type { ApplicationProjectRepository } from '@vedmoulya/app-factory';
+import { RequirementsApplicationService } from '@vedmoulya/requirements';
+import { ExperienceApplicationService } from '@vedmoulya/experience';
+import { DiscoveryApplicationService, StaticCatalogDiscoverySource } from '@vedmoulya/ai-world';
+import {
+  CapabilityMarketplaceApplicationService,
+  InMemoryCapabilityPlanStore,
+} from '@vedmoulya/capability-marketplace';
+import { BrainApplicationService as VedMoulyaBrainService } from '@vedmoulya/brain';
+import {
+  createBrainPlanPort,
+  createBrainCandidatePort,
+  createBrainExecutionPort,
+  createBrainContextPort,
+  createBrainPreferencePort,
+  createBrainUsagePort,
+  createBrainDiscoveryBridgePort,
+  createBrainMemoryPort,
+} from '../infrastructure/BrainPorts.js';
+import { BrainDashboardService } from './BrainDashboardService.js';
+import { EcosystemIntelligenceApplicationService } from '@vedmoulya/ecosystem-intelligence';
+import { LiveIntelligenceBridgeService } from '@vedmoulya/live-intelligence-bridge';
+import { SchedulerApplicationService, DiscoveryScheduler } from '@vedmoulya/ai-world-scheduler';
+import {
+  createGitHubAuthPort,
+  createGitHubRepoSourcePort,
+} from '../infrastructure/EcosystemIntelligencePorts.js';
+import {
+  createBridgeAiWorldPort,
+  createBridgeBrainPort,
+  createBridgeClockPort,
+  createBridgeExecutionPort,
+  createBridgeIntelligencePort,
+  createBridgeMarketplacePort,
+} from '../infrastructure/LiveIntelligenceBridgePorts.js';
+import {
+  createSchedulerClockPort,
+  createSchedulerDiscoveryPort,
+  createSchedulerBrainPort,
+  createSchedulerNotifyPort,
+} from '../infrastructure/SchedulerPorts.js';
+import {
+  ExecutionRunService,
+  InMemoryExecutionRunStore,
+  InMemoryPreferenceLedger,
+} from '@vedmoulya/execution-bridge';
+import type {
+  ExecutionBudgetConfig,
+  ExecutionRunStore,
+  PreferenceLedgerPort,
+  StepExecutionPort,
+} from '@vedmoulya/execution-bridge';
+import { createCapabilitySourcePort } from '../infrastructure/CapabilitySourcePorts.js';
+import { createCapabilityEnrichmentPort } from '../infrastructure/CapabilityEnrichmentPort.js';
+import {
+  createExecutionBudgetConfig,
+  createExecutionPlanSource,
+  createStepExecutionPort,
+} from '../infrastructure/ExecutionBridgePorts.js';
+import type { RequirementEnrichmentPort, RequirementSessionStore } from '@vedmoulya/requirements';
+import { createExperienceAICritiquePort } from '../infrastructure/ExperienceAICritiquePort.js';
+import { TraceProviderOtelBridge } from '../observability/TraceProviderOtelBridge.js';
+import type { SchedulerRuntimeStatus } from '../observability/scheduler-cadence.js';
+import { OpsApplicationService } from './OpsApplicationService.js';
+import { CostLedger } from '../observability/CostLedger.js';
+import { AlertEngine } from '../observability/AlertEngine.js';
+import { OperatorGate, AuditTrail } from '../observability/OpsAudit.js';
+// Deep-import path: the frozen ToolRuntime exports the secure tool registry
+// (tool boundary). The top-level services barrel re-exports only a subset of
+// the runtime — the loop tool port consumes the registry directly.
+import { ToolRegistry, registerSafeTools } from '@vedmoulya/services/ai/runtime/ToolRuntime';
+import type { MemoryRepository as MemoryIntelligenceRepository } from '@vedmoulya/memory-intelligence';
 import type {
   IdentityRepository,
   MemoryRepository,
   DecisionRepository,
   ExecutionRepository,
   KnowledgeRepository,
+  ContentAgencyRepository,
+  ClientOpsRepository,
 } from '@vedmoulya/domain';
 import { InfrastructureHealthProbe } from './InfrastructureHealthProbe.js';
+import { registerPlatformProviders, createOpenAIEmbeddingProvider } from '@vedmoulya/orchestrator';
 import {
+  createProviderIntelligencePort,
+  createExecutionStrategyPort,
+  createRagRetrievalPort,
+} from '../infrastructure/RuntimePorts.js';
+import { ProviderExperienceService } from './ProviderExperienceService.js';
+import { ModelSelectionIntelligence } from '@vedmoulya/services';
+import { validateProductionAIConfig } from '../infrastructure/ProductionAIConfig.js';
+import { resolvePersistenceBundle } from '../infrastructure/PersistenceStores.js';
+import type {
+  OutcomeMemoryLike,
+  PersistenceBundle,
+  PersistenceStoreOverrides,
+} from '../infrastructure/PersistenceStores.js';
+import {
+  createProductionApplicationRepository,
+  createProductionRequirementSessionStore,
   createProductionIdentityRepository,
   createProductionMemoryRepository,
   createProductionDecisionRepository,
   createProductionExecutionRepository,
   createProductionKnowledgeRepository,
+  createProductionContentAgencyRepository,
+  createProductionClientOpsRepository,
+  createProductionCapabilityRepository,
+  createProductionContextRepository,
+  createProductionExecutionStrategyRepository,
+  createProductionGoalRepository,
+  createProductionTaskRepository,
+  createProductionPipelineRepository,
+  createProductionLearningRepository,
+  createProductionBrainRepository,
+  createProductionKnowledgeIntelligenceRepository,
+  createProductionMemoryIntelligenceRepository,
+  createProductionOSIntelligenceRepository,
+  createProductionContextFabricRepository,
+  createProductionProviderRepository,
+  createProductionRagRepository,
 } from '../infrastructure/ProductionRepositories.js';
 
 // ── ApiApplicationService ───────────────────────────────────────────────────
@@ -71,6 +255,166 @@ export interface ApiApplicationServiceOptions {
    * existing DI registration (SPRINT PR-002B).
    */
   knowledgeRepository?: KnowledgeRepository;
+  /**
+   * Content Agency repository override. Defaults to the production
+   * `PostgresContentAgencyRepository` resolved through the content-agency
+   * module's existing DI registration (EPIC-003 / AC-001).
+   */
+  contentAgencyRepository?: ContentAgencyRepository;
+  /**
+   * Client Operations repository override. Defaults to the production
+   * `PostgresClientOpsRepository` resolved through the content-agency
+   * module's DI registration (EPIC-003 / AC-002).
+   */
+  clientOpsRepository?: ClientOpsRepository;
+  /**
+   * Capability repository override. Production default: Postgres-backed
+   * Enterprise Capability Registry (EI-001, CERT-002 C-04). The registry
+   * is a platform catalog (not user-scoped), shared across all users.
+   * Tests inject the seeded in-memory registry via options.
+   */
+  capabilitiesRepository?: CapabilityRepository;
+  /**
+   * Provider repository override. Production default: Postgres-backed
+   * Enterprise Provider Registry (EI-002, CERT-002 C-04). The registry is
+   * a platform catalog (not user-scoped), shared across all users. Tests
+   * inject the seeded in-memory registry via options.
+   */
+  providersRepository?: ProviderRepository;
+  /**
+   * Context repository override. Production default: Postgres-backed
+   * Enterprise Context Registry (EI-003, CERT-002 C-04). The registry is
+   * a platform catalog (not user-scoped), shared across all users. Tests
+   * inject the seeded in-memory registry via options.
+   */
+  contextRepository?: ContextRepository;
+  /**
+   * Execution Strategy repository override. Production default:
+   * Postgres-backed Enterprise Execution Strategy Engine (EI-004,
+   * CERT-002 C-04). The engine is a platform catalog (not user-scoped),
+   * shared across all users. Tests inject the seeded in-memory registry
+   * via options.
+   */
+  executionStrategyRepository?: ExecutionStrategyRepository;
+  /**
+   * Execution Orchestrator repository/registry overrides (EPIC-004 / EI-005).
+   * Defaults to the seeded in-memory graph/session/queue/worker/history
+   * stores. Inject overrides for tests or alternate persistence.
+   */
+  orchestratorRepositories?: {
+    graphs?: ExecutionGraphRepository;
+    sessions?: ExecutionSessionRepository;
+    queues?: ExecutionQueueRepository;
+    workers?: WorkerRegistry;
+    history?: ExecutionHistoryRepository;
+  };
+  /**
+   * Goal & Task Intelligence repository overrides (EPIC-004 / EI-006).
+   * Defaults to the seeded in-memory goal + task stores. Inject overrides
+   * for tests or alternate persistence.
+   */
+  goalRepositories?: {
+    goals?: GoalRepository;
+    tasks?: TaskRepository;
+  };
+  /**
+   * Enterprise Learning Intelligence repository override (EPIC-004 / EI-007).
+   * Production default: Postgres-backed `learning_registry` (events +
+   * safety decisions). Tests inject the seeded in-memory store via options.
+   */
+  learningRepository?: LearningRepository;
+  /**
+   * Enterprise Brain repository override (EPIC-004 / EI-008). Production
+   * default: Postgres-backed `brain_registry` (decision plans + decisions).
+   * Tests inject the seeded in-memory store via options.
+   */
+  brainRepository?: BrainRepository;
+  /**
+   * Enterprise Knowledge Intelligence repository override (EPIC-004 / EI-009).
+   * Production default: Postgres-backed `knowledge_registry` (items +
+   * relationship edges). Tests inject the seeded in-memory store via options.
+   */
+  knowledgeIntelligenceRepository?: KnowledgeIntelligenceRepository;
+  /**
+   * Enterprise Memory Intelligence repository override (EPIC-004 / EI-010).
+   * Production default: Postgres-backed `memory_registry` (memory items +
+   * relationship edges). Tests inject the seeded in-memory store via options.
+   */
+  memoryIntelligenceRepository?: MemoryIntelligenceRepository;
+  /**
+   * Enterprise Operating System snapshot repository override (EPIC-005 / OS-001).
+   * Production default: Postgres-backed `os_health_registry` (health snapshots
+   * for the OS dashboard history). Tests inject the in-memory store via options.
+   */
+  osIntelligenceRepository?: OSIntelligenceRepository;
+  /**
+   * Context Fabric graph repository override (APP-001). Production default:
+   * Postgres-backed `context_fabric_registry` (entities + relationships as
+   * JSONB documents). Tests inject the in-memory graph store via options.
+   */
+  contextFabricRepository?: ContextFabricGraphRepository;
+  /**
+   * RAG repository override (AI-RUNTIME-002). Production default: Postgres
+   * + pgvector `rag_chunks`. Tests inject the in-memory store via options.
+   */
+  ragRepository?: RagRepository;
+  /**
+   * RAG embedding provider override (AI-RUNTIME-002). Production default:
+   * SDK-backed OpenAI embeddings when OPENAI_API_KEY is present, otherwise
+   * the deterministic mock. Tests inject a stub via options.
+   */
+  ragEmbeddingProvider?: EmbeddingProvider;
+  /**
+   * Application Factory project repository override (EPIC-008 Phase 1).
+   * Production default: Postgres-backed `application_projects` registry
+   * (projects survive server restart). Tests inject the in-memory store
+   * via options.
+   */
+  factoryRegistry?: ApplicationProjectRepository;
+  /**
+   * Requirement session store override (EPIC-009). Production default:
+   * Postgres-backed `requirement_sessions` registry (sessions survive
+   * server restart). Tests inject the in-memory store via options.
+   */
+  requirementSessionStore?: RequirementSessionStore;
+  /**
+   * Optional AI enrichment port override (EPIC-009). Default: a narrow
+   * adapter over the frozen AIOrchestratorSpecialistPort (single economy
+   * classification call, non-fatal). Tests inject a stub or omit it.
+   */
+  requirementEnrichment?: RequirementEnrichmentPort;
+  /**
+   * Execution run store override (EPIC-014). Production default: Postgres
+   * store (in-memory in dev/test — same convention as the capability plan
+   * store). Inject for tests or alternate persistence.
+   */
+  executionRunStore?: ExecutionRunStore;
+  /**
+   * Preference ledger override (EPIC-014 Phase 5). Default: bounded
+   * in-memory ledger (append-only, provenance preserved).
+   */
+  executionLedger?: PreferenceLedgerPort;
+  /**
+   * Step execution port override (EPIC-014). Default: a narrow adapter
+   * over the frozen AIOrchestratorSpecialistPort (the same runtime the
+   * loop/factory reuse). Tests inject a deterministic fake port.
+   */
+  executionPort?: StepExecutionPort;
+  /**
+   * Execution budget override (EPIC-014). Default: env-tunable hard limits
+   * (AI_EXECUTION_MAX_*) consumed by the LoopBudget-backed guard.
+   */
+  executionBudget?: ExecutionBudgetConfig;
+  /**
+   * SPRINT-022 — Persistent Intelligence Foundation store overrides.
+   * Production default: Postgres write-through stores (in-memory mirror +
+   * async idempotent upserts + boot hydration + shutdown flush) — scheduler,
+   * Brain, Intelligence, Bridge and AI World state survive process restart
+   * with owner isolation. Development/test default: the deterministic
+   * in-memory stores (hermetic convention). Inject individual store
+   * overrides for tests or alternate persistence.
+   */
+  persistence?: PersistenceStoreOverrides;
 }
 
 /**
@@ -103,6 +447,103 @@ export class ApiApplicationService {
   readonly learning: LearningApplicationService;
   readonly business: BusinessApplicationService;
   readonly marketplace: MarketplaceApplicationService;
+  readonly contentAgency: ContentAgencyApplicationService;
+  readonly clientOps: ClientOperationsApplicationService;
+
+  // ── Enterprise Capability Registry (EPIC-004 / EI-001) ────────────────────
+  readonly capabilities: CapabilityApplicationService;
+
+  // ── Enterprise Provider Registry (EPIC-004 / EI-002) ──────────────────────
+  readonly providers: ProviderApplicationService;
+
+  // ── Enterprise Context Registry (EPIC-004 / EI-003) ───────────────────────
+  readonly context: ContextApplicationService;
+
+  // ── Enterprise Execution Strategy Engine (EPIC-004 / EI-004) ──────────────
+  readonly executionStrategy: ExecutionStrategyApplicationService;
+
+  // ── Enterprise Execution Orchestrator (EPIC-004 / EI-005) ─────────────────
+  readonly executionOrchestrator: OrchestratorApplicationService;
+
+  // ── Enterprise Goal & Task Intelligence Engine (EPIC-004 / EI-006) ────────
+  readonly goals: GoalsApplicationService;
+
+  // ── Enterprise Intelligence Integration Platform (EPIC-004 / EI-006 / INT-001) ──
+  readonly intelligence: IntelligenceApplicationService;
+
+  // ── Enterprise Learning Intelligence Platform (EPIC-004 / EI-007) ────────
+  readonly learningIntelligence: LearningIntelligenceApplicationService;
+
+  // ── Enterprise Brain (EPIC-004 / EI-008) ──────────────────────────────────
+  readonly enterpriseBrain: BrainApplicationService;
+
+  // ── Enterprise Knowledge Intelligence Platform (EPIC-004 / EI-009) ────────
+  readonly knowledgeIntelligence: KnowledgeIntelligenceApplicationService;
+
+  // ── Enterprise Memory Intelligence Platform (EPIC-004 / EI-010) ───────────
+  readonly memoryIntelligence: MemoryIntelligenceApplicationService;
+
+  // ── Enterprise Operating System Integration Layer (EPIC-005 / OS-001) ─────
+  readonly osIntelligence: OSApplicationService;
+
+  // ── Context & Personal Intelligence Fabric (APP-001) ──────────────────────
+  readonly contextFabric: ContextFabricApplicationService;
+
+  // ── Enterprise RAG Platform (EPIC-005 / AI-RUNTIME-002) ───────────────────
+  readonly rag: RagApplicationService;
+
+  // ── Orchestrated AI Loop Engine (EPIC-006) ────────────────────────────────
+  readonly loop: LoopApplicationService;
+
+  // ── AI Application Factory (EPIC-007) ─────────────────────────────────────
+  readonly factory: FactoryApplicationService;
+
+  // ── Product Intelligence & Requirements Engine (EPIC-009) ─────────────────
+  readonly requirements: RequirementsApplicationService;
+
+  // ── Adaptive Application Experience & Visual Intelligence (EPIC-010) ───────
+  readonly experience: ExperienceApplicationService;
+
+  // ── AI World Discovery (EPIC-012C) ───────────────────────────────────────
+  readonly aiWorld: DiscoveryApplicationService;
+
+  // ── AI Capability Marketplace & Factory Intelligence (EPIC-013) ─────────
+  readonly capability: CapabilityMarketplaceApplicationService;
+
+  // ── Capability Execution Engine (EPIC-014) ───────────────────────────────
+  readonly executionRun: ExecutionRunService;
+
+  // ── The VedMoulya Brain (EPIC-016) ──────────────────────────────────────
+  readonly brain: VedMoulyaBrainService;
+
+  // ── VedMoulya Intelligence (EPIC-015) ──────────────────────────────────
+  readonly ecosystemIntelligence: EcosystemIntelligenceApplicationService;
+
+  // ── Live Intelligence Bridge (EPIC-017) ────────────────────────────────
+  readonly liveIntelligence: LiveIntelligenceBridgeService;
+
+  // ── AI World Scheduler & Discovery Engine (EPIC-018) ──────────────────
+  readonly aiWorldScheduler: SchedulerApplicationService;
+
+  // ── EPIC-020 — Continuous Intelligence (dashboard composition) ────────
+  readonly brainDashboard: BrainDashboardService;
+  /** Brain's durable outcome memory (shared with the dashboard). */
+  readonly brainOutcomeMemory: OutcomeMemoryLike;
+
+  // ── SPRINT-022 — Persistent Intelligence Foundation ───────────────────
+  /** The resolved persistence bundle shared across every engine's store ports. */
+  readonly persistence: PersistenceBundle;
+
+  // ── EPIC-012A — Provider Experience & Preferences ────────────────────────
+  readonly preferencesService: ProviderPreferencesService;
+  readonly modelSelection: ModelSelectionIntelligence;
+  readonly providerExperience: ProviderExperienceService;
+
+  // ── EPIC-012 — Production Observability & Control Plane ───────────────────
+  /** The correlated execution-trace spine (also the engine TelemetryPort). */
+  readonly traceProvider: ExecutionTraceProvider;
+  /** The operational control surface (ops.* namespace). */
+  readonly ops: OpsApplicationService;
 
   // ── Integration Layer ─────────────────────────────────────────────────────
   readonly lifeOS: LifeOSApplicationService;
@@ -110,7 +551,72 @@ export class ApiApplicationService {
   // ── Infrastructure Health (PH-002/T3 follow-up) ────────────────────────────
   readonly infrastructureHealth: InfrastructureHealthProbe;
 
+  // ── EPIC-018 closure — AI World cadence driver status ────────────────────
+  // Bound once at the route layer when the cadence driver starts (the driver
+  // lives in observability, not in this service). Before/without the driver
+  // the source reports the honest inactive state — the UI never shows
+  // "scheduled" when no runtime caller exists.
+  private schedulerRuntimeSource: () => SchedulerRuntimeStatus = () => ({
+    active: false,
+    reason: 'not_started',
+    maxUsersPerTick: 0,
+    refreshIntelligenceEnabled: false,
+  });
+
+  /** The aiWorldScheduler.* runtime-status source (never undefined). */
+  readonly schedulerRuntimeStatus = (): SchedulerRuntimeStatus => this.schedulerRuntimeSource();
+
+  /** Bind the cadence driver status (called once at gateway startup). */
+  setSchedulerRuntimeStatusSource(source: () => SchedulerRuntimeStatus): void {
+    this.schedulerRuntimeSource = source;
+  }
+
+  // ── SPRINT-022 — persistence lifecycle ────────────────────────────────
+
+  /**
+   * Hydrate the persistence bundle (load persisted state into the sync
+   * mirrors). Bounded — never blocks boot forever when the database is
+   * unreachable; a timeout degrades to empty mirrors with loud logging
+   * (the write-through stores keep working from that point forward).
+   */
+  async hydratePersistence(): Promise<void> {
+    const bounded = Promise.race([
+      this.persistence.hydrate(),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 15_000);
+      }),
+    ]);
+    await bounded;
+  }
+
+  /**
+   * Flush pending persistence writes (shutdown). Bounded + error-isolated:
+   * a database outage at shutdown is logged loudly — restart durability is
+   * exactly what is lost — and never blocks the process exit.
+   */
+  async flushPersistence(): Promise<void> {
+    const bounded = Promise.race([
+      this.persistence.flush(),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 10_000);
+      }),
+    ]);
+    await bounded;
+  }
+
   constructor(options: ApiApplicationServiceOptions = {}) {
+    // AI-RUNTIME-002 C-07: production must explicitly configure the AI
+    // runtime — provider, RAG database, token budgets, timeout, tool policy.
+    // Fail fast here (lazy construction happens on the first real request)
+    // instead of silently serving dev mocks in production.
+    validateProductionAIConfig();
+    // SPRINT-022 — Persistent Intelligence Foundation: ONE persistence
+    // bundle (in-memory for dev/test/CI; Postgres write-through in
+    // production/staging) injected into every engine's frozen store ports.
+    // The engines keep their synchronous contracts — the backend is
+    // invisible to them.
+    const persistence = resolvePersistenceBundle(options.persistence);
+    this.persistence = persistence;
     this.infrastructureHealth = new InfrastructureHealthProbe();
     // ── Create infrastructure services ────────────────────────────────
     //     All five engines use their production Postgres repositories,
@@ -135,7 +641,41 @@ export class ApiApplicationService {
     this.knowledge = new KnowledgeApplicationService(
       options.knowledgeRepository ?? createProductionKnowledgeRepository(),
     );
-    this.ai = new AIOrchestrationService();
+    // EPIC-012: the correlated trace spine. It doubles as the engine
+    // TelemetryPort, so every engine span lands in one reconstructable trace
+    // (USER → REQUIREMENTS → FACTORY → LOOP → AI → RAG → PROVIDER → QUALITY →
+    // REFINEMENT → DEPLOYMENT). The AI runtime's observability seam is bridged
+    // onto it, so ai.* spans parent under the active engine span.
+    // EPIC-012 security: every string attribute/event value is redacted via the
+    // AI runtime's redactSecrets before it can land in a trace — user-derived
+    // data (e.g. the factory goal attribute) can never leak secrets.
+    this.traceProvider = new ExecutionTraceProvider({ redact: redactSecrets });
+    const telemetry: TelemetryPort = this.traceProvider;
+
+    // AI-RUNTIME-002: the orchestrator is constructed with the EI-003
+    // context-optimization pipeline and the prompt cache; the EI-002/EI-004
+    // intelligence ports and the RAG retrieval port are wired below once the
+    // registry application services exist. EPIC-012: the AIObservability seam
+    // is now ACTIVE in production — bridged onto the trace spine (no OTLP
+    // credentials required; works with the in-process store, and operators
+    // can additionally point OTEL_EXPORTER_OTLP_ENDPOINT at a collector).
+    this.ai = new AIOrchestrationService({
+      contextOptimizer: new ContextOptimizer(),
+      promptCache: new PromptCacheManager(),
+      observability: new AIObservability({
+        exporter: new OtelAIObservabilityExporter(new TraceProviderOtelBridge(this.traceProvider)),
+      }),
+    });
+    // AI-RUNTIME-001 (EPIC-005): the gateway AI orchestrator was previously
+    // constructed with no provider adapters registered — every real AI call
+    // (Content Agency generation, ClientOps proposal drafting, Career/
+    // Business/Learning/Marketplace insight assemblies) threw
+    // NotFoundError('Provider', …) in production. Register the platform
+    // providers through the single @vedmoulya/orchestrator registration
+    // point: MockProvider in non-production environments, OpenAIProvider
+    // when OPENAI_API_KEY is present. Production never silently serves
+    // synthetic responses (mock requires AI_ENABLE_MOCK=true).
+    registerPlatformProviders(this.ai);
 
     // ── Create domain module services ──────────────────────────────────
     this.dashboard = new DashboardApplicationService(
@@ -179,6 +719,596 @@ export class ApiApplicationService {
       this.ai,
     );
 
+    // ── Create the Content Agency module (EPIC-003 / AC-001) ────────────
+    //    Reuses the shared AI Orchestrator + Memory/Knowledge engines.
+    this.contentAgency = new ContentAgencyApplicationService(
+      options.contentAgencyRepository ?? createProductionContentAgencyRepository(),
+      new ContentAgencyAIService(this.ai, {
+        memory: this.memory,
+        knowledge: this.knowledge,
+      }),
+    );
+
+    // ── Create the Client Operations module (EPIC-003 / AC-002) ─────────
+    //    Reuses the AC-001 application service (clients, projects, content,
+    //    invoices) and the shared AI Orchestrator — no duplicated logic.
+    this.clientOps = new ClientOperationsApplicationService(
+      options.clientOpsRepository ?? createProductionClientOpsRepository(),
+      this.contentAgency,
+      new ClientOpsAIService(this.ai),
+    );
+
+    // ── Create the Enterprise Capability Registry (EPIC-004 / EI-001) ────
+    //    A reusable platform catalog consumed by every business module.
+    //    Production default: Postgres-backed repository (CERT-002 C-04).
+    //    Tests inject the seeded in-memory registry via options.
+    this.capabilities = new CapabilityApplicationService(
+      options.capabilitiesRepository ?? createProductionCapabilityRepository(),
+    );
+
+    // ── Create the Enterprise Provider Registry (EPIC-004 / EI-002) ──────
+    //    Providers are enterprise assets: discoverable, health-monitored,
+    //    capability-mapped, costed. Production default: Postgres-backed
+    //    repository (CERT-002 C-04, same factory pattern as the other EI
+    //    stores); tests inject the seeded in-memory registry via options.
+    this.providers = new ProviderApplicationService(
+      options.providersRepository ?? createProductionProviderRepository(),
+    );
+
+    // ── EPIC-012A — Owner-Scoped Provider Preferences ────────────────
+    //    Per-user preferences (enabled set, preferred model, budget policy)
+    //    layered over the global registry. Gateway's authMiddleware sets
+    //    the request context so routing discovery immediately respects the
+    //    user's enabled providers. In-memory store is the hermetic default;
+    //    production can inject a Postgres-backed store via options.
+    const preferencesStore = new InMemoryProviderPreferencesStore();
+    this.preferencesService = new ProviderPreferencesService(preferencesStore);
+
+    // ── EPIC-012B — Provider Intelligence cache ─────────────────────
+    //    Bounded in-memory cache of refresh results (profiles + staleness).
+    //    The UI never re-derives intelligence on every render, and routing
+    //    candidates exclude models the intelligence layer marked
+    //    unavailable/deprecated. Production can inject a Postgres-backed
+    //    store via the intelligence infrastructure options.
+    const intelligenceStore = new InMemoryProviderIntelligenceStore();
+
+    // Give the registry service access to the preferences store for
+    // routing-candidate filtering (listByCapability/listByFamily) and to
+    // the intelligence store for cache-first reads + safe refresh.
+    this.providers = new ProviderApplicationService(
+      options.providersRepository ?? createProductionProviderRepository(),
+      preferencesStore,
+      { store: intelligenceStore },
+    );
+
+    // ── Create the Enterprise Context Registry (EPIC-004 / EI-003) ────────
+    //    Context is the intelligence layer that decides WHAT information,
+    //    HOW MUCH, WHICH, and IN WHAT ORDER is sent to AI. Ranking,
+    //    filtering, compression, and assembly are pure intelligence —
+    //    no execution decisions. Production default: Postgres-backed
+    //    repository (CERT-002 C-04); tests inject in-memory via options.
+    this.context = new ContextApplicationService(
+      options.contextRepository ?? createProductionContextRepository(),
+    );
+
+    // ── Create the Enterprise Execution Strategy Engine (EPIC-004 / EI-004) ──
+    //    Given a Goal, the EES determines WHAT to execute, WHICH capabilities
+    //    are required, WHICH providers are eligible, HOW work should be divided,
+    //    HOW MUCH context/tokens/budget to use, whether execution is sequential
+    //    or parallel, WHAT quality must be achieved, and WHAT fallback strategy
+    //    to use. The engine creates the strategy — it does NOT execute work.
+    //    Production default: Postgres-backed repository (CERT-002 C-04);
+    //    tests inject the seeded in-memory registry via options.
+    this.executionStrategy = new ExecutionStrategyApplicationService(
+      options.executionStrategyRepository ?? createProductionExecutionStrategyRepository(),
+    );
+
+    // ── Create the Enterprise RAG Platform (EPIC-005 / AI-RUNTIME-002) ────
+    //    Real production RAG: Postgres + pgvector repository, SDK-backed
+    //    OpenAI embeddings in production (deterministic mock otherwise).
+    //    The runtime consumes it through the narrow retrieval port below.
+    this.rag = new RagApplicationService({
+      repository: options.ragRepository ?? createProductionRagRepository(),
+      embeddingProvider:
+        options.ragEmbeddingProvider ??
+        createOpenAIEmbeddingProvider() ??
+        new MockEmbeddingProvider(),
+      telemetry,
+    });
+
+    // ── EPIC-012A — Model Selection Intelligence ───────────────────────
+    //    A thin layer over the frozen ProviderRoutingAdvisor (Phase 12–16).
+    //    Constructed with the same provider + execution strategy ports the
+    //    AI runtime uses — never duplicates routing.
+    this.modelSelection = new ModelSelectionIntelligence(
+      createProviderIntelligencePort(this.providers, intelligenceStore),
+      createExecutionStrategyPort(this.executionStrategy),
+    );
+
+    // ── Wire the AI runtime intelligence (AI-RUNTIME-002) ─────────────────
+    //    The orchestrator now genuinely routes on EI-002 provider
+    //    intelligence + EI-004 execution strategy and retrieves enterprise
+    //    knowledge through the RAG port — consuming the real application
+    //    services, never duplicating them.
+    this.ai.configureIntelligence({
+      providerIntelligence: createProviderIntelligencePort(this.providers, intelligenceStore),
+      executionStrategy: createExecutionStrategyPort(this.executionStrategy),
+      rag: createRagRetrievalPort(this.rag),
+    });
+
+    // ── Create the Enterprise Execution Orchestrator (EPIC-004 / EI-005) ────
+    //    Converts an Execution Strategy into an executable workflow: graph,
+    //    planner, scheduler, workers, queue, sessions, state machine, monitor,
+    //    events, recovery, validation, history. Orchestrates execution — never
+    //    runs AI. Runtime engines (Hatchet, LangGraph) are adapters.
+    //    Defaults to in-memory stores; overrides can be injected for tests.
+    this.executionOrchestrator = new OrchestratorApplicationService(
+      options.orchestratorRepositories?.graphs ?? new InMemoryExecutionGraphRepository(),
+      options.orchestratorRepositories?.sessions ?? new InMemoryExecutionSessionRepository(),
+      options.orchestratorRepositories?.workers ?? new InMemoryWorkerRegistry(),
+      options.orchestratorRepositories?.queues ?? new InMemoryExecutionQueueRepository(),
+      options.orchestratorRepositories?.history ?? new InMemoryExecutionHistoryRepository(),
+    );
+
+    // ── Create the Enterprise Goal & Task Intelligence Engine (EPIC-004 / EI-006) ──
+    //    Transforms any user objective into a structured execution plan: goal
+    //    registry, understanding, classification, hierarchy, lifecycle, task
+    //    decomposition, prioritization, dependency DAG with critical path,
+    //    milestones, success criteria, and validation. Understands goals — it
+    //    never executes them. Defaults to the seeded in-memory stores; overrides
+    //    can be injected for tests.
+    this.goals = new GoalsApplicationService(
+      options.goalRepositories?.goals ?? createProductionGoalRepository(),
+      options.goalRepositories?.tasks ?? createProductionTaskRepository(),
+    );
+
+    // ── Create the Enterprise Intelligence Integration Platform (EI-006 / INT-001) ──
+    //    Composes every Enterprise Intelligence engine into one validated pipeline:
+    //    Goal → Capabilities → Providers → Context → Strategy → Graph → Session.
+    //    No AI calls; sessions are created but never run.
+    this.intelligence = new IntelligenceApplicationService(createProductionPipelineRepository(), {
+      goals: this.goals,
+      capabilities: this.capabilities,
+      providers: this.providers,
+      context: this.context,
+      strategies: this.executionStrategy,
+      orchestrator: this.executionOrchestrator,
+    });
+
+    // ── Create the Enterprise Learning Intelligence Platform (EPIC-004 / EI-007) ──
+    //    Observes every execution across the six engines through narrow ports
+    //    and turns outcomes into models, insights, recommendations, and
+    //    reports. Learning never bypasses human approval: recommendations
+    //    are born pending and only become actionable after an explicit,
+    //    versioned, audited approval. Production default: Postgres-backed
+    //    repository (learning_registry); tests inject in-memory via options.
+    this.learningIntelligence = new LearningIntelligenceApplicationService(
+      options.learningRepository ?? createProductionLearningRepository(),
+      {
+        goals: this.goals,
+        capabilities: this.capabilities,
+        providers: this.providers,
+        context: this.context,
+        strategies: this.executionStrategy,
+        orchestrator: this.executionOrchestrator,
+      },
+    );
+
+    // ── Create the Enterprise Brain (EPIC-004 / EI-008) ─────────────────
+    //    The highest decision layer: consumes every Enterprise Intelligence
+    //    engine through narrow ports (goals, learning, capabilities,
+    //    providers, context, strategies, orchestrator) and produces fully
+    //    explained decision plans. It DECIDES — it never executes. Production
+    //    default: Postgres-backed repository (brain_registry); tests inject
+    //    in-memory via options.
+    this.enterpriseBrain = new BrainApplicationService(
+      options.brainRepository ?? createProductionBrainRepository(),
+      {
+        goals: this.goals,
+        learning: this.learningIntelligence,
+        capabilities: this.capabilities,
+        providers: this.providers,
+        context: this.context,
+        strategies: this.executionStrategy,
+        orchestrator: this.executionOrchestrator,
+      },
+    );
+
+    // ── Create the Enterprise Knowledge Intelligence Platform (EPIC-004 / EI-009) ──
+    //    The Enterprise Knowledge Layer — the authoritative knowledge source
+    //    used by every engine. Consumes every engine through narrow ports
+    //    (goals, capabilities, providers, context, strategies, orchestrator,
+    //    learning, brain) to cross-link knowledge items and register who
+    //    consumes what — no duplicated logic. Production default: Postgres-
+    //    backed repository (knowledge_registry); tests inject in-memory via
+    //    options. The graph travels the same repository seam.
+    this.knowledgeIntelligence = new KnowledgeIntelligenceApplicationService(
+      options.knowledgeIntelligenceRepository ?? createProductionKnowledgeIntelligenceRepository(),
+      new PostgresKnowledgeGraph(
+        options.knowledgeIntelligenceRepository ??
+          createProductionKnowledgeIntelligenceRepository(),
+      ),
+      {
+        goals: this.goals,
+        capabilities: this.capabilities,
+        providers: this.providers,
+        context: this.context,
+        strategies: this.executionStrategy,
+        orchestrator: this.executionOrchestrator,
+        learning: this.learningIntelligence,
+        brain: this.enterpriseBrain,
+      },
+    );
+
+    // ── Create the Enterprise Memory Intelligence Platform (EPIC-004 / EI-010) ──
+    //    The Enterprise Memory Layer — records, retrieves, ranks, compresses,
+    //    consolidates, and expires evolving experience across the operating
+    //    system. Consumes every engine through narrow ports (goals,
+    //    capabilities, providers, context, strategies, orchestrator, learning,
+    //    brain, knowledge) to link memories to live engine entities and
+    //    register who retrieves what — no duplicated logic. Knowledge
+    //    represents authoritative facts; memory represents evolving
+    //    experience. The two systems stay architecturally separate but
+    //    tightly integrated. Production default: Postgres-backed repository
+    //    (memory_registry); tests inject in-memory via options.
+    this.memoryIntelligence = new MemoryIntelligenceApplicationService(
+      options.memoryIntelligenceRepository ?? createProductionMemoryIntelligenceRepository(),
+      new PostgresMemoryGraph(
+        options.memoryIntelligenceRepository ?? createProductionMemoryIntelligenceRepository(),
+      ),
+      {
+        goals: this.goals,
+        capabilities: this.capabilities,
+        providers: this.providers,
+        context: this.context,
+        strategies: this.executionStrategy,
+        orchestrator: this.executionOrchestrator,
+        learning: this.learningIntelligence,
+        brain: this.enterpriseBrain,
+        knowledge: this.knowledgeIntelligence,
+      },
+    );
+
+    // ── Create the Enterprise Operating System Integration Layer (EPIC-005 / OS-001) ──
+    //    The integration layer that turns every Enterprise Intelligence Engine
+    //    into one Enterprise Operating System — it integrates, validates,
+    //    optimizes and certifies the complete platform. It consumes every
+    //    engine through narrow OSEngines port contracts (goals, capabilities,
+    //    providers, context, strategies, orchestrator, intelligence, learning,
+    //    brain, knowledge, memory) and owns none — no duplicated logic, no
+    //    engine modification. Production default: Postgres-backed snapshot
+    //    repository (os_health_registry); tests inject in-memory via options.
+    this.osIntelligence = new OSApplicationService(
+      options.osIntelligenceRepository ?? createProductionOSIntelligenceRepository(),
+      {
+        goals: this.goals,
+        capabilities: this.capabilities,
+        providers: this.providers,
+        context: this.context,
+        strategies: this.executionStrategy,
+        orchestrator: this.executionOrchestrator,
+        intelligence: this.intelligence,
+        learning: this.learningIntelligence,
+        brain: this.enterpriseBrain,
+        knowledge: this.knowledgeIntelligence,
+        memory: this.memoryIntelligence,
+      },
+    );
+
+    // ── Create the Context & Personal Intelligence Fabric (APP-001) ─────
+    //    Post-V1 application-platform layer. Consumes the frozen EI engines
+    //    (context, memory, knowledge, goals, capabilities) through narrow
+    //    FabricEngines port contracts and owns none. Production default:
+    //    Postgres-backed graph repository (context_fabric_registry); tests
+    //    inject the in-memory graph store via options.
+    this.contextFabric = new ContextFabricApplicationService(
+      options.contextFabricRepository ?? createProductionContextFabricRepository(),
+      {
+        context: this.context,
+        memory: this.memoryIntelligence,
+        knowledge: this.knowledgeIntelligence,
+        goals: this.goals,
+        capabilities: this.capabilities,
+      },
+    );
+
+    // ── Create the Orchestrated AI Loop Engine (EPIC-006) ────────────────
+    //    Controlled, measurable, evidence-first orchestration. The loop
+    //    engine executes NO AI directly: every specialist call flows through
+    //    the frozen AIOrchestrationService via the AIOrchestratorSpecialistPort
+    //    (AI-SELECT / EI-002 / EI-004 / EI-003 / Evidence-First inherited),
+    //    evidence through the existing RAG retrieval port, and tools through
+    //    the frozen ToolRuntime security chain (allowlist + capability +
+    //    schema validation + rate limit + audit). No provider SDKs are
+    //    imported here — the runtime is the single provider boundary.
+    this.loop = new LoopApplicationService({
+      specialist: new AIOrchestratorSpecialistPort(this.ai),
+      rag: createLoopRagPort(this.rag),
+      tools: createLoopToolPort(),
+      telemetry,
+    });
+
+    // ── Create the AI Application Factory (EPIC-007) ────────────────────
+    //    The APPLICATION FACTORY layer above the frozen platform. It reuses
+    //    (never rebuilds): the same AIOrchestratorSpecialistPort over the AI
+    //    runtime (AI-SELECT / EI-002 / EI-004 / EI-003 / Evidence-First), the
+    //    frozen ToolRuntime secure tool chain, the EPIC-006 LoopEngine (the
+    //    bounded generation loop over an application task graph), and the
+    //    gateway clock. The factory adds ONLY the application layer: each
+    //    generated application gets its OWN isolated workspace (Phase 14 —
+    //    cross-application contamination prevented by construction), the
+    //    deterministic project generator, validation/security/UI-quality
+    //    gates, economics tracking, a safe local deployment adapter and an
+    //    in-memory VCS journal (Phase 15 — never auto-pushes).
+    this.factory = new FactoryApplicationService({
+      specialist: new AIOrchestratorSpecialistPort(this.ai),
+      tools: createLoopToolPort(),
+      clock: new SystemClock(),
+      workspace: new InMemoryWorkspace('factory-root', DEFAULT_EXECUTION_POLICY),
+      policy: DEFAULT_EXECUTION_POLICY,
+      deployments: {
+        local: new LocalDeploymentAdapter(),
+        vercel: new VercelDeploymentAdapter(),
+      },
+      versionControl: new InMemoryVersionControl(),
+      workspaceFactory: (applicationId, policy): InMemoryWorkspace =>
+        new InMemoryWorkspace(applicationId, policy),
+      // EPIC-008 Phase 1: persistent application projects (Postgres in
+      // production; in-memory injected by tests via options.factoryRegistry).
+      registry: options.factoryRegistry ?? createProductionApplicationRepository(),
+      telemetry,
+    });
+
+    // ── Create the Product Intelligence & Requirements Engine (EPIC-009) ─
+    //    The INTELLIGENCE LAYER ABOVE the factory: understands the problem,
+    //    extracts requirements with provenance, asks high-value questions,
+    //    proposes safe defaults and produces the full product plan for user
+    //    approval. The engines are deterministic; optional intent enrichment
+    //    flows through the SAME frozen AI runtime the loop/factory reuse (a
+    //    narrow, non-fatal adapter — never provider SDKs in product code).
+    //    Sessions persist owner-scoped (Postgres in production; in-memory
+    //    injected by tests via options.requirementSessionStore). The router
+    //    composes `requirements.handoffToFactory` with this.factory so an
+    //    approved product plan flows straight into factory.create.
+    this.requirements = new RequirementsApplicationService({
+      store: options.requirementSessionStore ?? createProductionRequirementSessionStore(),
+      enrichment: options.requirementEnrichment ?? createRequirementEnrichmentPort(this.ai),
+      telemetry,
+    });
+
+    // ── Create the Experience Intelligence layer (EPIC-010) ─────────────
+    //    The ADAPTIVE APPLICATION EXPERIENCE & VISUAL INTELLIGENCE layer
+    //    above the Application Factory: evaluates persisted generated
+    //    applications against the design system, UI blueprint, visual
+    //    critic, multi-dimensional quality model and traceability — and
+    //    plans TARGETED refinement (never regenerate-all). Fully
+    //    deterministic and provider-neutral; the OPTIONAL AI critique
+    //    seam flows through the SAME frozen AI runtime the loop/factory
+    //    reuse (a narrow, non-fatal adapter — never provider SDKs in
+    //    product code; abstains when no provider is configured). The
+    //    router resolves applications through this.factory.getDetail,
+    //    so owner isolation (IDOR) is enforced at the factory engine.
+    this.experience = new ExperienceApplicationService({
+      aiCritique: createExperienceAICritiquePort(this.ai),
+      telemetry,
+    });
+
+    // ── Create the AI World Discovery service (EPIC-012C) ───────────────
+    //    Continuous, bounded, evidence-first discovery of the AI ecosystem.
+    //    The default source is the static curated catalog (deterministic,
+    //    evidence-honest — nothing fabricated). Live-source adapters are
+    //    operator-extensible via the AIDiscoverySource port.
+    this.aiWorld = new DiscoveryApplicationService({
+      sources: [new StaticCatalogDiscoverySource()],
+      store: persistence.discoveryStore,
+      autoSeed: true,
+    });
+
+    // ── Create the AI Capability Marketplace (EPIC-013) ──────────────────
+    //    Connects AI World intelligence with the factory ecosystem through
+    //    narrow ports (no duplicate provider intelligence / AI World
+    //    discovery / local-model discovery). The optional AI enrichment seam
+    //    flows through the SAME frozen AI runtime the loop/factory reuse and
+    //    is non-fatal: without a provider it abstains and the deterministic
+    //    planner stands. Plans are owner-scoped + bounded in memory.
+    this.capability = new CapabilityMarketplaceApplicationService({
+      source: createCapabilitySourcePort({
+        providers: this.providers,
+        aiWorld: this.aiWorld,
+        localModelDiscovery: new InMemoryLocalModelDiscovery(),
+      }),
+      store: new InMemoryCapabilityPlanStore(),
+      enrichment: createCapabilityEnrichmentPort(this.ai),
+    });
+
+    // ── Create the Capability Execution Engine (EPIC-014) ────────────────
+    //    PLAN → EXECUTE → VERIFY. Consumes the REAL EPIC-013 plan through
+    //    the capability service (owner-scoped there), executes EXECUTABLE
+    //    steps through the SAME frozen AI runtime (AIOrchestratorSpecialistPort
+    //    — no new provider SDKs, routing/evidence/validation inherited),
+    //    gates irreversible actions behind the run's approval runtime, records
+    //    provenance-preserving preference facts (Phase 5) and persists
+    //    checkpoints after every completed step. Hard limits come from the
+    //    LoopBudget-backed RunBudgetGuard (fail-closed — never silently
+    //    exceeded). Runs are owner-scoped; IDOR is refused at the service.
+    this.executionRun = new ExecutionRunService({
+      planSource: createExecutionPlanSource(this.capability),
+      port: options.executionPort ?? createStepExecutionPort(this.ai),
+      store: options.executionRunStore ?? new InMemoryExecutionRunStore(),
+      ledger: options.executionLedger ?? new InMemoryPreferenceLedger(),
+      budget: options.executionBudget ?? createExecutionBudgetConfig(),
+      clock: new SystemClock(),
+      maxRetries: 1,
+    });
+
+    // ── EPIC-012A — Provider Experience Service ────────────────────────
+    //    Composes registry + preferences + cost ledger + trace store into
+    //    the AI Providers view model, usage summary, and model selection
+    //    explanation. Constructed BEFORE the Brain so the EPIC-020 usage
+    //    port (mission §3) can consume real health/usage evidence.
+    this.providerExperience = new ProviderExperienceService(
+      this.providers,
+      this.preferencesService,
+      this.modelSelection,
+      new CostLedger(),
+      this.traceProvider.getStore(),
+    );
+
+    // ── Create The VedMoulya Brain (EPIC-016) ────────────────────────────
+    //    The central intelligence & orchestration coordinator. Consumes the
+    //    frozen estate through NARROW ports only: the EPIC-013 capability
+    //    plan (the SAME plan the execution bridge consumes), the EPIC-012A/B
+    //    provider + EPIC-012C AI World + local-model candidate sources (the
+    //    SAME capability-source seam the planner/execution bridge reuse), the
+    //    frozen AI orchestration specialist port for execution (EPIC-006
+    //    reuse — no new provider SDKs), a minimal context assembler (never
+    //    dumps the user profile), and the EPIC-014 preference ledger for
+    //    provenance-preserving learning facts. The Brain orchestrates — it
+    //    never rebuilds routing/execution/planner/security.
+    const brainPortDeps = {
+      capability: this.capability,
+      capabilitySource: createCapabilitySourcePort({
+        providers: this.providers,
+        aiWorld: this.aiWorld,
+        localModelDiscovery: new InMemoryLocalModelDiscovery(),
+      }),
+      ai: this.ai,
+      preferenceLedger: new InMemoryPreferenceLedger(),
+    };
+    const brainPortDepsExtended = {
+      ...brainPortDeps,
+      providerExperience: this.providerExperience,
+      aiWorld: this.aiWorld,
+      memoryIntelligence: this.memoryIntelligence,
+    };
+    const brainOutcomeMemory = persistence.brain.outcomeMemory;
+    this.brainOutcomeMemory = brainOutcomeMemory;
+    this.brain = new VedMoulyaBrainService({
+      plan: createBrainPlanPort(brainPortDeps),
+      candidates: createBrainCandidatePort(brainPortDeps),
+      execution: createBrainExecutionPort(brainPortDeps),
+      context: createBrainContextPort(),
+      preference: createBrainPreferencePort(brainPortDeps.preferenceLedger),
+      // EPIC-020 — continuous intelligence seams (mission §3/§4/§8/§10/§12):
+      usage: createBrainUsagePort(brainPortDepsExtended),
+      experience: persistence.brain.adaptiveScores,
+      memory: createBrainMemoryPort(brainPortDepsExtended),
+      discovery: createBrainDiscoveryBridgePort(brainPortDepsExtended),
+      opportunities: persistence.brain.opportunities,
+      events: persistence.brain.events,
+      tasks: persistence.brain.tasks,
+      decisions: persistence.brain.decisions,
+      clock: new SystemClock(),
+      budget: {
+        maxTokens: 10000,
+        maxCostUsd: 0.5,
+        maxIterations: 20,
+        maxLatencyMs: 60000,
+      },
+      traceId: (): string => `trace-${Math.random().toString(36).slice(2, 10)}`,
+    });
+
+    // ── Create the VedMoulya Intelligence layer (EPIC-015) ──────────────
+    //    The Intelligence layer continuously understands the external AI
+    //    ecosystem and answers "For THIS task, is something significantly
+    //    better available?" — across configured providers, free providers,
+    //    local models, GitHub projects and external applications. It REUSES
+    //    the SAME candidate seam (createBrainCandidatePort) and the SAME
+    //    preference ledger (createBrainPreferencePort) as the Brain — one
+    //    source seam, zero duplication. Google auth stays untouched; GitHub
+    //    connects through a separate least-privilege flow (deterministic
+    //    adapter; a live GitHub App adapter is an operator step).
+    this.ecosystemIntelligence = new EcosystemIntelligenceApplicationService({
+      clock: new SystemClock(),
+      candidatePort: createBrainCandidatePort(brainPortDeps),
+      preferencePort: createBrainPreferencePort(brainPortDeps.preferenceLedger),
+      githubAuth: createGitHubAuthPort(),
+      githubRepos: createGitHubRepoSourcePort(this.aiWorld),
+      connectionStore: persistence.ecosystem.connectionStore,
+      lifecycleStore: persistence.ecosystem.lifecycleStore,
+      recommendationStore: persistence.ecosystem.recommendationStore,
+      notificationStore: persistence.ecosystem.notificationStore,
+      acquisitionStore: persistence.ecosystem.acquisitionStore,
+    });
+
+    // ── Create the Live Intelligence Bridge (EPIC-017) ──────────────────
+    //    The bridge orchestrates the full loop — USER TASK → BRAIN UNDERSTAND
+    //    → DISCOVER → COMPARE → RECOMMEND → USER APPROVAL → CONFIGURATION /
+    //    HAND-OFF → EPIC-014 EXECUTION → VERIFY → EVALUATE → PREFERENCE
+    //    FEEDBACK → AI World NOTIFY. It composes the EXISTING Brain, Intelligence,
+    //    Marketplace and Execution services through narrow ports (no duplicate
+    //    engines) and reuses the SAME candidate + preference seams.
+    this.liveIntelligence = new LiveIntelligenceBridgeService({
+      clock: createBridgeClockPort(),
+      brain: createBridgeBrainPort(this.brain),
+      intelligence: createBridgeIntelligencePort(this.ecosystemIntelligence),
+      marketplace: createBridgeMarketplacePort(this.capability),
+      execution: createBridgeExecutionPort(this.executionRun),
+      candidates: createBrainCandidatePort(brainPortDeps),
+      preference: createBrainPreferencePort(brainPortDeps.preferenceLedger),
+      aiWorld: createBridgeAiWorldPort(this.ecosystemIntelligence),
+      loops: persistence.bridge.loops,
+      traceId: (): string => `bridge-${Math.random().toString(36).slice(2, 10)}`,
+    });
+
+    // ── Create the AI World Scheduler (EPIC-018) ─────────────────────────
+    //    The controlled, bounded, security-first scheduling layer that drives
+    //    the EXISTING AI World discovery pipeline. The scheduler decides WHEN
+    //    (per-category schedules, budgets, cooldowns, rate limits, retries,
+    //    backoff, change detection); discovery (WHAT) stays in this.aiWorld,
+    //    intelligence/relevance stays on the existing evidence engines, and
+    //    notifications reuse the EXISTING relevance-gated surface. Manual
+    //    runs (Run now) take the exact same bounded path — no shortcut.
+    //    The scheduler + application service SHARE one set of owner-scoped
+    //    stores (never two states).
+    const schedulerStores = {
+      schedules: persistence.scheduler.schedules,
+      jobs: persistence.scheduler.jobs,
+      runs: persistence.scheduler.runs,
+    };
+    this.aiWorldScheduler = new SchedulerApplicationService({
+      scheduler: new DiscoveryScheduler({
+        clock: createSchedulerClockPort(),
+        discovery: createSchedulerDiscoveryPort(this.aiWorld),
+        brain: createSchedulerBrainPort(),
+        notify: createSchedulerNotifyPort(this.ecosystemIntelligence),
+        ...schedulerStores,
+        sourcePolicies: persistence.scheduler.sourcePolicies,
+        cooldowns: persistence.scheduler.cooldowns,
+      }),
+      ...schedulerStores,
+      clock: createSchedulerClockPort(),
+    });
+
+    // ── EPIC-020 — Brain Operating Dashboard ────────────────────────
+    //    Composes existing services only (brain stores + provider experience
+    //    + scheduler status) — no duplicate engines, no new persistence.
+    this.brainDashboard = new BrainDashboardService({
+      brain: this.brain,
+      outcomeMemory: brainOutcomeMemory,
+      providerExperience: this.providerExperience,
+      aiWorldScheduler: this.aiWorldScheduler,
+    });
+
+    // ── Create the EPIC-012 control plane ───────────────────────────────
+    //    The ops.* surface inspects the correlated traces, ledger, health and
+    //    alerts, and exposes audited owner-scoped + operator-gated controls
+    //    (retry/cancel/revalidate/requality/disable-provider). The operator
+    //    allowlist comes from OPS_OPERATOR_IDS (empty = deny-all).
+    this.ops = new OpsApplicationService({
+      traceProvider: this.traceProvider,
+      telemetry,
+      factory: this.factory,
+      loop: this.loop,
+      ai: this.ai,
+      experience: this.experience,
+      providers: this.providers,
+      costLedger: new CostLedger(),
+      alertEngine: new AlertEngine(),
+      operatorGate: new OperatorGate(),
+      auditTrail: new AuditTrail(),
+    });
+
     // ── Create the Life OS integration layer ────────────────────────────
     this.lifeOS = new LifeOSApplicationService(
       this.dashboard,
@@ -203,4 +1333,132 @@ export class ApiApplicationService {
   isHealthy(): boolean {
     return true;
   }
+}
+
+// ── Loop Engine Port Factories (EPIC-006) ────────────────────────────────────
+// The loop engine executes NO AI directly — these factories adapt the frozen
+// gateway services into the loop's narrow ports:
+//   • specialist — AIOrchestratorSpecialistPort over the AI runtime
+//   • rag        — the existing RAG retrieval port (retrieve → search)
+//   • tools      — the frozen ToolRuntime secure registry (allowlist +
+//                  capability + schema validation + rate limit + audit)
+
+/** Adapt the runtime's RAG retrieval port to the loop's RagSearchPort shape. */
+function createLoopRagPort(rag: RagApplicationService): LoopEnginePorts['rag'] {
+  const retrieval = createRagRetrievalPort(rag);
+  return {
+    search: (input) => retrieval.retrieve(input),
+  };
+}
+
+/**
+ * Build the secure loop tool port from the frozen ToolRuntime. Only the safe
+ * built-in tools (echo, current_time, calculator) are registered; the
+ * platform allowlist honours AI_TOOL_ALLOWLIST when configured (empty =
+ * tools disabled by default). No shell/fs/network/db surface exists.
+ */
+function createLoopToolPort(): LoopEnginePorts['tools'] {
+  const registry = new ToolRegistry({
+    allowlist: parseToolAllowlist(),
+    grantedCapabilities: ['reasoning', 'calculation', 'productivity'],
+  });
+  registerSafeTools(registry);
+  return new ToolRegistryToolPort(registry);
+}
+
+/** Parse AI_TOOL_ALLOWLIST ("echo,calculator") — empty/absent = deny-all. */
+function parseToolAllowlist(): string[] {
+  const raw = process.env.AI_TOOL_ALLOWLIST?.trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Build the optional EPIC-009 intent-enrichment port over the frozen AI
+ * runtime (the same AIOrchestratorSpecialistPort the loop and factory use).
+ * A single economy classification call extracts additional features /
+ * integrations / constraints. Non-fatal: parse failures or missing providers
+ * return confident:false and the pipeline stays deterministic (recorded in
+ * the session's enrichment ledger).
+ */
+function createRequirementEnrichmentPort(ai: AIOrchestrationService): RequirementEnrichmentPort {
+  const specialist = new AIOrchestratorSpecialistPort(ai);
+  return {
+    async enrich(input): Promise<Awaited<ReturnType<RequirementEnrichmentPort['enrich']>>> {
+      try {
+        const result = await specialist.execute({
+          taskId: 'requirements-intent-enrichment',
+          capability: 'classification',
+          qualityTier: 'economy',
+          userInput:
+            'Analyze this application idea and return ONLY a compact JSON object with keys ' +
+            'additionalFeatures (string array), additionalIntegrations (string array), ' +
+            'additionalConstraints (string array) and confident (boolean). ' +
+            `Idea: ${input.idea}`,
+          userId: input.userId,
+          constraints: { maxOutputTokens: 400, maxInputTokens: 2_000 },
+        });
+        const parsed = parseEnrichmentJson(result.content);
+        return {
+          additionalFeatures: parsed?.additionalFeatures ?? [],
+          additionalIntegrations: parsed?.additionalIntegrations ?? [],
+          additionalConstraints: parsed?.additionalConstraints ?? [],
+          confident: parsed?.confident === true,
+          provider: result.provider,
+          model: result.model,
+          tokens: result.tokens.total,
+          costUsd: result.costUsd,
+        };
+      } catch {
+        // Non-fatal: the pipeline stays deterministic; the session records
+        // that enrichment was attempted (session.enrichment.attempted).
+        return {
+          additionalFeatures: [],
+          additionalIntegrations: [],
+          additionalConstraints: [],
+          confident: false,
+          provider: 'none',
+          model: 'none',
+          tokens: 0,
+          costUsd: 0,
+        };
+      }
+    },
+  };
+}
+
+/** Parse the enrichment JSON defensively (tolerant of markdown fences). */
+function parseEnrichmentJson(content: string):
+  | {
+      additionalFeatures?: string[];
+      additionalIntegrations?: string[];
+      additionalConstraints?: string[];
+      confident?: boolean;
+    }
+  | undefined {
+  const stripped = content
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  try {
+    const parsed: unknown = JSON.parse(stripped);
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    const obj = parsed as Record<string, unknown>;
+    return {
+      additionalFeatures: toStringArray(obj.additionalFeatures),
+      additionalIntegrations: toStringArray(obj.additionalIntegrations),
+      additionalConstraints: toStringArray(obj.additionalConstraints),
+      confident: typeof obj.confident === 'boolean' ? obj.confident : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function toStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((v): v is string => typeof v === 'string');
 }

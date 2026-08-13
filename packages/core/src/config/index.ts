@@ -8,6 +8,12 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { EnvironmentError, isStrongSecret } from '../env/index.js';
+import {
+  readProviderRuntimeState,
+  toRuntimeMode,
+  validateDefaultProvider,
+} from '../startup/provider-runtime.js';
+import type { ProviderRuntimeState } from '../startup/provider-runtime.js';
 
 export interface AppConfig {
   env: string;
@@ -44,7 +50,12 @@ export interface AiConfig {
   openAiKey?: string;
   anthropicKey?: string;
   googleKey?: string;
+  deepseekKey?: string;
   defaultProvider: string;
+  /** True when AI_DEFAULT_PROVIDER names a runtime-supported adapter (EPIC-019). */
+  defaultProviderSupported: boolean;
+  /** Per-family runtime truth: CONFIGURED / NOT_CONFIGURED / UNSUPPORTED_RUNTIME / MOCK / DISABLED / ERROR. */
+  providerStates: ProviderRuntimeState[];
   routingStrategy: string;
 }
 
@@ -80,8 +91,23 @@ export interface Configuration {
 
 export function loadConfiguration(): Configuration {
   const aiEnabled = process.env.FF_AI_ASSISTANT_ENABLED !== 'false';
+  const envName = process.env.NODE_ENV ?? 'development';
   const defaultProvider = process.env.AI_DEFAULT_PROVIDER ?? 'openai';
   const socialLoginEnabled = process.env.FF_SOCIAL_LOGIN_ENABLED === 'true';
+
+  // EPIC-019 — the configuration layer must AGREE with the runtime provider
+  // registry. AI_DEFAULT_PROVIDER may only name a family that actually has a
+  // runtime adapter; catalog-only families (anthropic/google/openrouter/ollama)
+  // fail fast in production instead of passing validation and then failing at
+  // runtime with "no provider registered".
+  const runtimeMode = toRuntimeMode(envName);
+  const providerStates = readProviderRuntimeState(process.env, runtimeMode, { aiEnabled });
+  const defaultProviderCheck = validateDefaultProvider(process.env, runtimeMode);
+  if (aiEnabled && isStrictEnv() && !defaultProviderCheck.ok) {
+    const err = new EnvironmentError(['AI_DEFAULT_PROVIDER']);
+    err.message = `Fail-fast: ${defaultProviderCheck.reason} (NODE_ENV=${envName}).`;
+    throw err;
+  }
 
   const smtpHost = requireProdSecret('SMTP_HOST', { minLength: 4 });
   const smtpConfigured = smtpHost !== undefined;
@@ -134,6 +160,9 @@ export function loadConfiguration(): Configuration {
       // AI provider keys (PH-001/T2): the default provider's key is required in
       // production/staging when the AI assistant is enabled; any key that IS set
       // must be a real secret (no placeholders, no localhost).
+      // EPIC-019: anthropic/google keys remain OPTIONAL because those families
+      // have no runtime adapter (catalog-only); a set key is still validated as
+      // a real secret, but it never satisfies the production AI gate.
       openAiKey: requireProdSecret('AI_OPENAI_API_KEY', {
         required: aiEnabled && defaultProvider === 'openai',
         minLength: 32,
@@ -142,20 +171,29 @@ export function loadConfiguration(): Configuration {
           'Set AI_OPENAI_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
       }),
       anthropicKey: requireProdSecret('AI_ANTHROPIC_API_KEY', {
-        required: aiEnabled && defaultProvider === 'anthropic',
+        required: false,
         minLength: 32,
         example: 'sk-ant-...',
         reason:
-          'Set AI_ANTHROPIC_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
+          'Anthropic is catalog-only (no runtime adapter) — the key is never consumed; keep it unset.',
       }),
       googleKey: requireProdSecret('AI_GOOGLE_API_KEY', {
-        required: aiEnabled && defaultProvider === 'google',
+        required: false,
         minLength: 32,
         example: 'AIza...',
         reason:
-          'Set AI_GOOGLE_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
+          'Google is catalog-only (no runtime adapter) — the key is never consumed; keep it unset.',
+      }),
+      deepseekKey: requireProdSecret('AI_DEEPSEEK_API_KEY', {
+        required: aiEnabled && defaultProvider === 'deepseek',
+        minLength: 32,
+        example: 'sk-...',
+        reason:
+          'Set AI_DEEPSEEK_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
       }),
       defaultProvider,
+      defaultProviderSupported: defaultProviderCheck.ok,
+      providerStates,
       routingStrategy: process.env.AI_ROUTING_STRATEGY ?? 'capability',
     },
     smtp: {

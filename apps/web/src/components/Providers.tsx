@@ -6,14 +6,22 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import type { AppRouter } from '@vedmoulya/api';
 import { api } from '../lib/trpc.js';
 import { ThemeProvider } from '@vedmoulya/ui';
 import { PWAProvider } from './PWAProvider.js';
-import { getAccessToken } from '../stores/auth-store.js';
+import { AuthBootstrap } from './AuthBootstrap.js';
+import { authRefreshLink } from '../auth/auth-link.js';
+import { getAccessToken, useAuthStore } from '../stores/auth-store.js';
+import { markStartup, STARTUP_MARKS } from '../lib/startup.js';
+
+// Earliest measurable point — module evaluation of the client entry.
+if (typeof window !== 'undefined') {
+  markStartup(STARTUP_MARKS.moduleLoad);
+}
 
 // ── Props ───────────────────────────────────────────────────────────────────
 
@@ -29,10 +37,15 @@ export function Providers({ children }: ProvidersProps): React.JSX.Element {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 60 * 1000, // 1 minute
-            gcTime: 5 * 60 * 1000, // 5 minutes (formerly cacheTime)
+            // MOB-002: dashboard/module data is long-lived — dedupe concurrent
+            // requests and avoid refetch storms on tab switches. 5 min stale
+            // makes revisits instant; refetchOnReconnect auto-recovers after
+            // connectivity returns (offline → online, Task 5).
+            staleTime: 5 * 60 * 1000,
+            gcTime: 30 * 60 * 1000,
             retry: 1,
             refetchOnWindowFocus: false,
+            refetchOnReconnect: true,
           },
         },
       }),
@@ -45,6 +58,9 @@ export function Providers({ children }: ProvidersProps): React.JSX.Element {
   const [trpcClient] = useState(() =>
     createTRPCClient<AppRouter>({
       links: [
+        // MOB-001: on 401, refresh the access token once and retry with the
+        // fresh JWT; every request still carries `Authorization: Bearer <jwt>`.
+        authRefreshLink<AppRouter>(),
         httpBatchLink({
           url: gatewayUrl,
           // Attach the JWT access token from the auth store (BLD-016C)
@@ -59,11 +75,29 @@ export function Providers({ children }: ProvidersProps): React.JSX.Element {
     }),
   );
 
+  // MOB-002 startup instrumentation: providers mounted + session restore done.
+  useEffect(() => {
+    markStartup(STARTUP_MARKS.providersMounted);
+    // Guard against a fast restore finishing before this effect subscribes
+    // (subscribe only fires on changes, not the current value).
+    if (useAuthStore.getState().sessionReady) {
+      markStartup(STARTUP_MARKS.sessionReady);
+    }
+    const unsub = useAuthStore.subscribe((state) => {
+      if (state.sessionReady) {
+        markStartup(STARTUP_MARKS.sessionReady);
+      }
+    });
+    return unsub;
+  }, []);
+
   return (
     <api.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider defaultTheme="system">
-          <PWAProvider>{children}</PWAProvider>
+          <PWAProvider>
+            <AuthBootstrap>{children}</AuthBootstrap>
+          </PWAProvider>
         </ThemeProvider>
       </QueryClientProvider>
     </api.Provider>

@@ -1,0 +1,33 @@
+{
+  "name": "@vedmoulya/live-intelligence-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@vedmoulya/ai-world": "*",
+    "@vedmoulya/brain": "*",
+    "@vedmoulya/capability-marketplace": "*",
+    "@vedmoulya/core": "*",
+    "@vedmoulya/ecosystem-intelligence": "*",
+    "@vedmoulya/execution-bridge": "*"
+  },
+  "devDependencies": {
+    "typescript": "*",
+    "vitest": "*"
+  }
+}

@@ -15,11 +15,11 @@ import { Store, Package, Cpu, RefreshCw, GitCompare, Shield, Sparkles } from 'lu
 import { useMarketplace } from '../../lib/api-client.js';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
-import { SignedOutCard } from '../../components/SignedOutCard.js';
+import { SignInRedirect } from '../../components/SignInRedirect.js';
 
 export default function MarketplacePage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
-  const { user } = useAuthStore();
+  const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
   const { isLoading } = useMarketplace(userId);
   const { setActiveSection, setBreadcrumbs } = useNavigationStore();
@@ -31,7 +31,7 @@ export default function MarketplacePage(): React.JSX.Element {
   }, [setActiveSection, setBreadcrumbs]);
 
   // Hydration guard: prevent SSR/client mismatch from zustand persist
-  if (!hydrated) {
+  if (!hydrated || !sessionReady) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <Loading label="Loading Marketplace..." size="lg" />
@@ -40,7 +40,7 @@ export default function MarketplacePage(): React.JSX.Element {
   }
 
   if (!user) {
-    return <SignedOutCard />;
+    return <SignInRedirect />;
   }
 
   if (isLoading) {
