@@ -75,6 +75,12 @@ const nextConfig: NextConfig = {
     // enterprise OS dashboard screen consumes OS DTO types + pipeline/health
     // data through the tRPC client.
     '@vedmoulya/os-intelligence',
+    // AI World Scheduler (EPIC-018) — cadence-driven discovery scheduling
+    // consumed by the scheduler router and persistence wiring.
+    '@vedmoulya/ai-world-scheduler',
+    // Live Intelligence Bridge (EPIC-017) — real-time intelligence loop
+    // consumed by the bridge ports and persistence wiring.
+    '@vedmoulya/live-intelligence-bridge',
     // Context & Personal Intelligence Fabric (APP-001) — the context fabric
     // explorer screen consumes fabric DTO types + graph/package data through
     // the tRPC client.
