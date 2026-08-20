@@ -37,7 +37,7 @@
     "audit": "npm audit --audit-level=critical",
     "quality": "npm run typecheck && npm run lint && npm run test && npm run benchmarks && npm run audit",
     "quality:all": "npm run quality && npm run format",
-    "prepare": "husky",
+    "prepare": "husky || true",
     "commit": "cz",
     "pr:create": "gh pr create --fill",
     "clean:all": "npm run clean && rm -rf node_modules",
