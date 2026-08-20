@@ -42,6 +42,7 @@ import { createExperienceRouter } from '../routers/ExperienceRouter.js';
 import { createOpsRouter } from '../routers/OpsRouter.js';
 import { PreviewService } from '../services/PreviewService.js';
 import { createEcosystemIntelligenceRouter } from '../routers/EcosystemIntelligenceRouter.js';
+
 import { createLiveIntelligenceBridgeRouter } from '../routers/LiveIntelligenceBridgeRouter.js';
 import { createSchedulerRouter } from '../routers/SchedulerRouter.js';
 import { createContextFabricRouter } from '../routers/ContextFabricRouter.js';
@@ -52,6 +53,23 @@ import { createSearchRouter } from '../routers/SearchRouter.js';
 import { createNotificationRouter } from '../routers/NotificationRouter.js';
 import { createConfigurationRouter } from '../routers/ConfigurationRouter.js';
 import { createMetricsRouter } from '../routers/MetricsRouter.js';
+import {
+  createVoiceRouter,
+  voiceAppendTurnInput,
+  voiceAssessInput,
+  voiceClearConversationInput,
+  voiceCreateConversationInput,
+  voiceHandleUtteranceInput,
+  voiceListConversationsInput,
+  voiceSensitiveDecisionInput,
+  voiceStatusInput,
+  voiceSynthesizeInput,
+  voiceTranscribeInput,
+} from '../routers/VoiceRouter.js';
+import { createProactiveRouter, proactiveInputs } from '../routers/ProactiveRouter.js';
+import { createFabricRouter, fabricInputs } from '../routers/FabricRouter.js';
+import { createControlRouter, controlInputs } from '../routers/ControlRouter.js';
+import { createWorldRouter, worldInputs } from '../routers/WorldRouter.js';
 import { checkRateLimitInternal, RateLimitTiers } from '../middleware/rate-limit.js';
 import type { RateLimitConfig } from '../middleware/rate-limit.js';
 import { isAuthenticated, assertUserIdMatchesSession } from '../middleware/auth.js';
@@ -96,7 +114,7 @@ function createRequestMetricsMiddleware(): ReturnType<typeof t.middleware> {
 function createRateLimitMiddleware(tier: RateLimitConfig): ReturnType<typeof t.middleware> {
   return t.middleware(async ({ ctx, next }) => {
     const userId = ctx.userId;
-    if (!checkRateLimitInternal(userId, tier)) {
+    if (!(await checkRateLimitInternal(userId, tier))) {
       metrics.increment('api.ratelimit.hit');
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
@@ -244,6 +262,7 @@ const providerFamilyEnum = z.enum([
   'openrouter',
   'ollama',
   'mock',
+  'custom',
 ]);
 
 const providerLifecycleEnum = z.enum([
@@ -3457,6 +3476,20 @@ export function createAppRouter(services: ApiApplicationService) {
           createProvidersRouter(services.providers).getRuntimeStatus(input, ctx),
         ),
 
+      // SPRINT-049 — test connection for custom providers.
+      testConnection: standardProcedure
+        .input(
+          z.object({
+            userId: z.string().min(1),
+            endpointUrl: z.string().min(1),
+            apiKey: z.string().min(1),
+            protocol: z.string().default('openai-compatible'),
+          }),
+        )
+        .mutation(({ input, ctx }) =>
+          createProvidersRouter(services.providers).testConnection(input, ctx),
+        ),
+
       // EPIC-012A — Provider Experience (Phases 4–6 / 12–17): owner-scoped
       // AI Providers view model, preferences, usage & economics, and the
       // "Why this model?" selection explanation.
@@ -4539,6 +4572,206 @@ export function createAppRouter(services: ApiApplicationService) {
         ),
     }),
 
+    // ── Ecosystem Workflow Execution (SPRINT-052) ─────────────────────────
+    //    Controlled multi-step workflow execution with human approval.
+    //    Owner-scoped, auth-enforced, rate-limited.
+    ecosystemWorkflow: router({
+      start: standardProcedure
+        .input(z.object({ userId: z.string().min(1), workflowId: z.string().min(1) }))
+        .mutation(({ input, ctx }) => {
+          const svc = services.ecosystemWorkflow;
+          return svc.start({ workflowId: input.workflowId, ownerId: ctx.userId });
+        }),
+      get: standardProcedure
+        .input(z.object({ userId: z.string().min(1), executionId: z.string().min(1) }))
+        .query(({ input, ctx }) => {
+          const svc = services.ecosystemWorkflow;
+          return svc.get(input.executionId, ctx.userId);
+        }),
+      list: standardProcedure.input(z.object({ userId: z.string().min(1) })).query(({ ctx }) => {
+        const svc = services.ecosystemWorkflow;
+        return svc.list(ctx.userId);
+      }),
+      approve: standardProcedure
+        .input(
+          z.object({
+            userId: z.string().min(1),
+            executionId: z.string().min(1),
+            stepId: z.string().min(1),
+            note: z.string().max(500).optional(),
+          }),
+        )
+        .mutation(({ input, ctx }) => {
+          const svc = services.ecosystemWorkflow;
+          return svc.approve(input.executionId, ctx.userId, input.stepId, input.note);
+        }),
+      reject: standardProcedure
+        .input(
+          z.object({
+            userId: z.string().min(1),
+            executionId: z.string().min(1),
+            stepId: z.string().min(1),
+            note: z.string().max(500).optional(),
+          }),
+        )
+        .mutation(({ input, ctx }) => {
+          const svc = services.ecosystemWorkflow;
+          return svc.reject(input.executionId, ctx.userId, input.stepId, input.note);
+        }),
+      pause: standardProcedure
+        .input(z.object({ userId: z.string().min(1), executionId: z.string().min(1) }))
+        .mutation(({ input, ctx }) => {
+          const svc = services.ecosystemWorkflow;
+          return svc.pause(input.executionId, ctx.userId);
+        }),
+      resume: standardProcedure
+        .input(z.object({ userId: z.string().min(1), executionId: z.string().min(1) }))
+        .mutation(({ input, ctx }) => {
+          const svc = services.ecosystemWorkflow;
+          return svc.resume(input.executionId, ctx.userId);
+        }),
+      cancel: standardProcedure
+        .input(z.object({ userId: z.string().min(1), executionId: z.string().min(1) }))
+        .mutation(({ input, ctx }) => {
+          const svc = services.ecosystemWorkflow;
+          return svc.cancel(input.executionId, ctx.userId);
+        }),
+      listWorkflows: standardProcedure.input(z.object({ userId: z.string().min(1) })).query(() => {
+        return {
+          success: true,
+          data: [
+            {
+              id: 'certification-knowledge-summary',
+              name: 'Personal Knowledge Summary',
+              outcome: 'Produce a grounded summary from user-supplied text',
+              steps: 4,
+              approvalGates: 1,
+              riskLevel: 'MEDIUM',
+              status: 'ACTIVE',
+              agents: ['certification-agent'],
+              type: 'single-agent',
+            },
+            {
+              id: 'multi-agent-research-summary',
+              name: 'Opportunity Research & Summary',
+              outcome: 'Multi-agent research, analysis, and summary of a topic',
+              steps: 5,
+              approvalGates: 1,
+              riskLevel: 'MEDIUM',
+              status: 'ACTIVE',
+              agents: ['research-agent', 'analysis-agent', 'summary-agent', 'verification-agent'],
+              type: 'multi-agent',
+            },
+          ],
+        };
+      }),
+      getWorkflow: standardProcedure
+        .input(z.object({ userId: z.string().min(1), workflowId: z.string().min(1) }))
+        .query(({ input }) => {
+          if (input.workflowId === 'certification-knowledge-summary') {
+            return {
+              success: true,
+              data: {
+                id: 'certification-knowledge-summary',
+                name: 'Personal Knowledge Summary',
+                outcome: 'Produce a grounded summary from user-supplied text',
+                steps: [
+                  {
+                    id: 'step-collect',
+                    title: 'Collect Content',
+                    purpose: 'Read and validate the supplied text content',
+                    riskLevel: 'LOW',
+                    approvalPolicy: 'AUTO',
+                    agent: 'certification-agent',
+                  },
+                  {
+                    id: 'step-analyze',
+                    title: 'AI Analysis',
+                    purpose: 'Analyze the content and produce a structured summary',
+                    riskLevel: 'LOW',
+                    approvalPolicy: 'AUTO',
+                    agent: 'certification-agent',
+                  },
+                  {
+                    id: 'step-approval',
+                    title: 'Review Summary',
+                    purpose: 'The AI has prepared a summary. Continue to final verification?',
+                    riskLevel: 'MEDIUM',
+                    approvalPolicy: 'HUMAN_APPROVAL_REQUIRED',
+                    agent: null,
+                  },
+                  {
+                    id: 'step-verify',
+                    title: 'Final Verification',
+                    purpose: 'Verify the summary is complete and present the final result',
+                    riskLevel: 'LOW',
+                    approvalPolicy: 'AUTO',
+                    agent: 'certification-agent',
+                  },
+                ],
+                approvalGates: ['step-approval'],
+                riskLevel: 'MEDIUM',
+              },
+            };
+          }
+          if (input.workflowId === 'multi-agent-research-summary') {
+            return {
+              success: true,
+              data: {
+                id: 'multi-agent-research-summary',
+                name: 'Opportunity Research & Summary',
+                outcome: 'Multi-agent research, analysis, and summary of a topic',
+                steps: [
+                  {
+                    id: 'step-research',
+                    title: 'Research',
+                    purpose: 'Gather relevant information and research findings',
+                    riskLevel: 'LOW',
+                    approvalPolicy: 'AUTO',
+                    agent: 'research-agent',
+                  },
+                  {
+                    id: 'step-analysis',
+                    title: 'Analysis',
+                    purpose: 'Analyze research findings and extract key insights',
+                    riskLevel: 'LOW',
+                    approvalPolicy: 'AUTO',
+                    agent: 'analysis-agent',
+                  },
+                  {
+                    id: 'step-summary',
+                    title: 'Summary',
+                    purpose: 'Produce a concise, well-structured summary',
+                    riskLevel: 'LOW',
+                    approvalPolicy: 'AUTO',
+                    agent: 'summary-agent',
+                  },
+                  {
+                    id: 'step-multi-approval',
+                    title: 'Review Findings',
+                    purpose: 'The agents have prepared findings. Continue to verification?',
+                    riskLevel: 'MEDIUM',
+                    approvalPolicy: 'HUMAN_APPROVAL_REQUIRED',
+                    agent: null,
+                  },
+                  {
+                    id: 'step-multi-verify',
+                    title: 'Final Verification',
+                    purpose: 'Verify the summary is complete and present the final result',
+                    riskLevel: 'LOW',
+                    approvalPolicy: 'AUTO',
+                    agent: 'verification-agent',
+                  },
+                ],
+                approvalGates: ['step-multi-approval'],
+                riskLevel: 'MEDIUM',
+              },
+            };
+          }
+          return { success: false, error: `Workflow not found: ${input.workflowId}` };
+        }),
+    }),
+
     // ── Live Intelligence Bridge (EPIC-017) ────────────────────────────────
     //    Orchestrates the full loop through the EXISTING Brain (EPIC-016),
     //    Intelligence (EPIC-015), Marketplace (EPIC-013) and Execution
@@ -5463,6 +5696,596 @@ export function createAppRouter(services: ApiApplicationService) {
       enableProvider: standardProcedure
         .input(opsProviderInput)
         .mutation(({ input, ctx }) => createOpsRouter(services.ops).enableProvider(input, ctx)),
+    }),
+    // ── SPRINT-027 — voice.* foundation seams (no UI yet) ──────────────
+    // Thin procedures over the SpeechApplicationService: honest capability
+    // status, bounded STT/TTS seams, the VOICE ≠ AUTHORIZATION decision and
+    // the owner-scoped conversation store. All behind auth + rate tiers;
+    // ownership enforced by the central middleware (input.userId match) and
+    // the service (owner-scoped stores).
+    voice: router({
+      status: standardProcedure
+        .input(voiceStatusInput)
+        .query(({ input, ctx }) => createVoiceRouter(services.voice).status(input, ctx)),
+      transcribe: standardProcedure
+        .input(voiceTranscribeInput)
+        .mutation(({ input, ctx }) => createVoiceRouter(services.voice).transcribe(input, ctx)),
+      synthesize: standardProcedure
+        .input(voiceSynthesizeInput)
+        .mutation(({ input, ctx }) => createVoiceRouter(services.voice).synthesize(input, ctx)),
+      assessAction: standardProcedure
+        .input(voiceAssessInput)
+        .mutation(({ input, ctx }) => createVoiceRouter(services.voice).assessAction(input, ctx)),
+      // ── SPRINT-028 — voice assistant (voice → Brain bridge) ──────────
+      // handleUtterance translates one spoken turn into the existing Brain
+      // pipeline; confirmSensitive is THE ONLY approval path for a voice-
+      // initiated sensitive action (explicit NON-VOICE confirmation through
+      // the existing Brain approval authority); rejectSensitive mirrors it.
+      handleUtterance: standardProcedure
+        .input(voiceHandleUtteranceInput)
+        .mutation(({ input, ctx }) =>
+          createVoiceRouter(services.voice, services.voiceAssistant).handleUtterance(input, ctx),
+        ),
+      confirmSensitive: standardProcedure
+        .input(voiceSensitiveDecisionInput)
+        .mutation(({ input, ctx }) =>
+          createVoiceRouter(services.voice, services.voiceAssistant).confirmSensitive(input, ctx),
+        ),
+      rejectSensitive: standardProcedure
+        .input(voiceSensitiveDecisionInput)
+        .mutation(({ input, ctx }) =>
+          createVoiceRouter(services.voice, services.voiceAssistant).rejectSensitive(input, ctx),
+        ),
+      createConversation: standardProcedure
+        .input(voiceCreateConversationInput)
+        .mutation(({ input, ctx }) =>
+          createVoiceRouter(services.voice).createConversation(input, ctx),
+        ),
+      listConversations: standardProcedure
+        .input(voiceListConversationsInput)
+        .query(({ input, ctx }) => createVoiceRouter(services.voice).listConversations(input, ctx)),
+      appendTurn: standardProcedure
+        .input(voiceAppendTurnInput)
+        .mutation(({ input, ctx }) => createVoiceRouter(services.voice).appendTurn(input, ctx)),
+      clearConversation: standardProcedure
+        .input(voiceClearConversationInput)
+        .mutation(({ input, ctx }) =>
+          createVoiceRouter(services.voice).clearConversation(input, ctx),
+        ),
+    }),
+
+    // ── SPRINT-029 — proactive intelligence (composition over the Brain) ──
+    // refresh rides the EXISTING brain.discoverIntelligence pipeline;
+    // dismiss/accept honor the user's explicit choice (accept refuses any
+    // authorization-required recommendation — no self-authorization);
+    // assessBusiness performs research/score ONLY, never executing.
+    proactive: router({
+      // ── SPRINT-029 — proactive intelligence (composition over the Brain) ──
+      refresh: standardProcedure
+        .input(proactiveInputs.refresh)
+        .mutation(({ input, ctx }) =>
+          createProactiveRouter(services.proactive).refresh(input, ctx),
+        ),
+      list: standardProcedure
+        .input(proactiveInputs.list)
+        .query(({ input, ctx }) => createProactiveRouter(services.proactive).list(input, ctx)),
+      dismiss: standardProcedure
+        .input(proactiveInputs.dismiss)
+        .mutation(({ input, ctx }) =>
+          createProactiveRouter(services.proactive).dismiss(input, ctx),
+        ),
+      accept: standardProcedure
+        .input(proactiveInputs.accept)
+        .mutation(({ input, ctx }) => createProactiveRouter(services.proactive).accept(input, ctx)),
+      briefing: standardProcedure
+        .input(proactiveInputs.briefing)
+        .query(({ input, ctx }) => createProactiveRouter(services.proactive).briefing(input, ctx)),
+      assessBusiness: standardProcedure
+        .input(proactiveInputs.assessBusiness)
+        .mutation(({ input, ctx }) =>
+          createProactiveRouter(services.proactive).assessBusiness(input, ctx),
+        ),
+    }),
+
+    // ── SPRINT-030 — intelligence fabric (composition over the frozen
+    //    estate: provider registry + cost ledger + proactive layer).
+    //    Provider health is OBSERVED only; cost policy is fail-closed;
+    //    autonomy levels never jump; selectStrategy is ADVISORY ranking
+    //    (actual routing stays in the frozen authority); workflows are
+    //    BOUNDED (no unbounded fan-out); verification chains are FIXED and
+    //    bounded (no AI-to-AI loops).
+    fabric: router({
+      getProviderHealth: standardProcedure
+        .input(fabricInputs.getProviderHealth)
+        .query(({ input, ctx }) =>
+          createFabricRouter(services.fabric).getProviderHealth(input, ctx),
+        ),
+      allProviderHealth: standardProcedure
+        .input(fabricInputs.allProviderHealth)
+        .query(({ input, ctx }) =>
+          createFabricRouter(services.fabric).allProviderHealth(input, ctx),
+        ),
+      observeOutcome: standardProcedure
+        .input(fabricInputs.observeOutcome)
+        .mutation(({ input, ctx }) =>
+          createFabricRouter(services.fabric).observeOutcome(input, ctx),
+        ),
+      checkCostPolicy: standardProcedure
+        .input(fabricInputs.checkCostPolicy)
+        .query(({ input, ctx }) => createFabricRouter(services.fabric).checkCostPolicy(input, ctx)),
+      classifyAutonomy: standardProcedure
+        .input(fabricInputs.classifyAutonomy)
+        .query(({ input, ctx }) =>
+          createFabricRouter(services.fabric).classifyAutonomy(input, ctx),
+        ),
+      selectStrategy: standardProcedure
+        .input(fabricInputs.selectStrategy)
+        .query(({ input, ctx }) => createFabricRouter(services.fabric).selectStrategy(input, ctx)),
+      validateWorkflow: standardProcedure
+        .input(fabricInputs.validateWorkflow)
+        .query(({ input, ctx }) =>
+          createFabricRouter(services.fabric).validateWorkflow(input, ctx),
+        ),
+      evaluateVerificationChain: standardProcedure
+        .input(fabricInputs.evaluateVerificationChain)
+        .query(({ input, ctx }) =>
+          createFabricRouter(services.fabric).evaluateVerificationChain(input, ctx),
+        ),
+    }),
+
+    // ── SPRINT-031 — active intelligence control plane (composition over the
+    //    existing Brain + proactive + fabric + cost ledger). Settings are
+    //    explicit + confirmed only (fail-closed); the emergency stop is
+    //    audited and never destructive; the cycle is BOUNDED and NEVER
+    //    executes; opportunity transitions are guarded (APPROVED/EXECUTED
+    //    require evidence from the EXISTING authorities).
+    control: router({
+      getSettings: standardProcedure
+        .input(controlInputs.settingsGet)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane).getSettings(input, ctx),
+        ),
+      updateSettings: standardProcedure
+        .input(controlInputs.settingsUpdate)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane).updateSettings(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      stopStatus: standardProcedure
+        .input(controlInputs.stopStatus)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane).stopStatus(input, ctx),
+        ),
+      engageStop: standardProcedure
+        .input(controlInputs.stopEngage)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane).engageStop(input, ctx),
+        ),
+      releaseStop: standardProcedure
+        .input(controlInputs.stopRelease)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane).releaseStop(input, ctx),
+        ),
+      runCycle: standardProcedure
+        .input(controlInputs.cycle)
+        .mutation(({ input, ctx }) => createControlRouter(services.controlPlane).cycle(input, ctx)),
+      todayBriefing: standardProcedure
+        .input(controlInputs.briefing)
+        .query(({ input, ctx }) => createControlRouter(services.controlPlane).briefing(input, ctx)),
+      listOpportunities: standardProcedure
+        .input(controlInputs.opportunitiesList)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane).listOpportunities(input, ctx),
+        ),
+      transitionOpportunity: standardProcedure
+        .input(controlInputs.opportunityTransition)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane).transitionOpportunity(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      gateAction: standardProcedure
+        .input(controlInputs.gate)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane).gateAction(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+    }),
+
+    // ── SPRINT-032 — world model & business operating system (composition
+    //    over the existing Brain + proactive assessor + Intelligence Fabric
+    //    + ActionClassPolicy + control plane). The world model is a bounded
+    //    owner-scoped index — observations REQUIRE provenance (no fabricated
+    //    facts), scores are advisory with every factor exposed, workflow
+    //    decomposition is validated against the existing WorkflowBounds,
+    //    external signals report UNAVAILABLE when no source is connected,
+    //    and nothing here approves/spends/executes.
+    world: router({
+      overview: standardProcedure
+        .input(worldInputs.overview)
+        .query(({ input, ctx }) => createWorldRouter(services.world).overview(input, ctx)),
+      graphEntities: standardProcedure
+        .input(worldInputs.entities)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).entities(input as Record<string, unknown>, ctx),
+        ),
+      graphRelations: standardProcedure
+        .input(worldInputs.relations)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).relations(input as Record<string, unknown>, ctx),
+        ),
+      graphObserve: standardProcedure
+        .input(worldInputs.observe)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).observe(input as Record<string, unknown>, ctx),
+        ),
+      graphLink: standardProcedure
+        .input(worldInputs.link)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).link(input as Record<string, unknown>, ctx),
+        ),
+      listBusinessUnits: standardProcedure
+        .input(worldInputs.businessUnitsList)
+        .query(({ input, ctx }) => createWorldRouter(services.world).businessUnitsList(input, ctx)),
+      createBusinessUnit: standardProcedure
+        .input(worldInputs.businessUnitCreate)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).businessUnitCreate(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      updateBusinessUnit: standardProcedure
+        .input(worldInputs.businessUnitUpdate)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).businessUnitUpdate(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      removeBusinessUnit: standardProcedure
+        .input(worldInputs.businessUnitRemove)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).businessUnitRemove(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      evaluateOpportunity: standardProcedure
+        .input(worldInputs.evaluateOpportunity)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).evaluateOpportunity(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      opportunityPipeline: standardProcedure
+        .input(worldInputs.pipeline)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).pipeline(input as Record<string, unknown>, ctx),
+        ),
+      listRoles: standardProcedure
+        .input(worldInputs.rolesList)
+        .query(({ input, ctx }) => createWorldRouter(services.world).rolesList(input, ctx)),
+      registerRole: standardProcedure
+        .input(worldInputs.roleRegister)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).roleRegister(input as Record<string, unknown>, ctx),
+        ),
+      suggestWorkers: standardProcedure
+        .input(worldInputs.suggestWorkers)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).suggestWorkers(input as Record<string, unknown>, ctx),
+        ),
+      createWorkflow: standardProcedure
+        .input(worldInputs.workflowCreate)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).workflowCreate(input as Record<string, unknown>, ctx),
+        ),
+      listWorkflows: standardProcedure
+        .input(worldInputs.workflowsList)
+        .query(({ input, ctx }) => createWorldRouter(services.world).workflowsList(input, ctx)),
+      decomposeWorkflow: standardProcedure
+        .input(worldInputs.decomposeWorkflow)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).decomposeWorkflow(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      // SPRINT-036 — multi-provider orchestration plan (representation only)
+      orchestratePlan: standardProcedure
+        .input(worldInputs.orchestratePlan)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).orchestratePlan(input as Record<string, unknown>, ctx),
+        ),
+      listOrchestrationPlans: standardProcedure
+        .input(worldInputs.orchestrationPlansList)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).orchestrationPlansList(input, ctx),
+        ),
+      // SPRINT-037 — approval-gated execution through the EXISTING bridge.
+      // world.approveOrchestrationPlan routes the decision through the Brain
+      // (WorldApprovalPort); world.startOrchestrationPlan submits the APPROVED
+      // plan to the existing ExecutionRunService (the ONLY runtime path).
+      approveOrchestrationPlan: standardProcedure
+        .input(worldInputs.approveOrchestrationPlan)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world, services.executionRun).approveOrchestrationPlan(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      startOrchestrationPlan: standardProcedure
+        .input(worldInputs.startOrchestrationPlan)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world, services.executionRun).startOrchestrationPlan(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      listSignals: standardProcedure
+        .input(worldInputs.signals)
+        .query(({ input, ctx }) => createWorldRouter(services.world).signals(input, ctx)),
+      classifyBoundary: standardProcedure
+        .input(worldInputs.classifyBoundary)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).classifyBoundary(input as Record<string, unknown>, ctx),
+        ),
+      // SPRINT-033 Part F — revenue intelligence
+      registerRevenueStream: standardProcedure
+        .input(worldInputs.revenueRegister)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).revenueRegister(input as Record<string, unknown>, ctx),
+        ),
+      listRevenueStreams: standardProcedure
+        .input(worldInputs.revenueList)
+        .query(({ input, ctx }) => createWorldRouter(services.world).revenueList(input, ctx)),
+      removeRevenueStream: standardProcedure
+        .input(worldInputs.revenueRemove)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).revenueRemove(input as Record<string, unknown>, ctx),
+        ),
+      revenueSnapshot: standardProcedure
+        .input(worldInputs.revenueSnapshot)
+        .query(({ input, ctx }) => createWorldRouter(services.world).revenueSnapshot(input, ctx)),
+      revenueDecisions: standardProcedure
+        .input(worldInputs.revenueDecisions)
+        .query(({ input, ctx }) => createWorldRouter(services.world).revenueDecisions(input, ctx)),
+      // SPRINT-033 Part A — founder briefing
+      founderBriefing: standardProcedure
+        .input(worldInputs.founderBriefing)
+        .query(({ input, ctx }) => createWorldRouter(services.world).founderBriefing(input, ctx)),
+      // SPRINT-033 Part E — workflow execution blueprint
+      buildBlueprint: standardProcedure
+        .input(worldInputs.buildBlueprint)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).buildBlueprint(input as Record<string, unknown>, ctx),
+        ),
+      // SPRINT-034 — outcome evidence & revenue → outcome feedback
+      recordOutcomeEvidence: standardProcedure
+        .input(worldInputs.outcomeEvidenceRecord)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).outcomeEvidenceRecord(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      listOutcomeEvidence: standardProcedure
+        .input(worldInputs.outcomeEvidenceList)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).outcomeEvidenceList(input, ctx),
+        ),
+      applyOutcomeFeedback: standardProcedure
+        .input(worldInputs.outcomeFeedbackApply)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).outcomeFeedbackApply(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      // SPRINT-034 — blueprint → approval-gated execution
+      requestBlueprintApproval: standardProcedure
+        .input(worldInputs.blueprintApprovalRequest)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).blueprintApprovalRequest(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      listBlueprintApprovals: standardProcedure
+        .input(worldInputs.blueprintApprovalsList)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).blueprintApprovalsList(input, ctx),
+        ),
+      decideBlueprintApproval: standardProcedure
+        .input(worldInputs.blueprintApprovalDecide)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).blueprintApprovalDecide(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      // SPRINT-034 — cost-weighted revenue intelligence
+      revenueRanking: standardProcedure
+        .input(worldInputs.revenueRanking)
+        .query(({ input, ctx }) => createWorldRouter(services.world).revenueRanking(input, ctx)),
+      // SPRINT-034 — Founder Command Center (presentation-only read model)
+      commandCenter: standardProcedure
+        .input(worldInputs.commandCenter)
+        .query(({ input, ctx }) => createWorldRouter(services.world).commandCenter(input, ctx)),
+      // SPRINT-035 — bounded owner-scoped timeline (composed from existing stores)
+      timeline: standardProcedure
+        .input(worldInputs.timeline)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).timeline(input as Record<string, unknown>, ctx),
+        ),
+      // SPRINT-035 — honest signal health (never fabricated "live" status)
+      signalHealth: standardProcedure
+        .input(worldInputs.signalHealth)
+        .query(({ input, ctx }) => createWorldRouter(services.world).signalHealth(input, ctx)),
+      // ── SPRINT-038 — opportunity discovery & revenue validation ─────────
+      // Practical business problems (evidence-required), three advisory
+      // scores + LEVEL, bounded lifecycle, zero/low-cost experiment planner,
+      // customer discovery, VERIFIED-payment-only revenue validation, STOP
+      // recommendations, provider economics over the EXISTING fabric and the
+      // Opportunity Radar. Nothing here approves/spends/executes; the founder
+      // remains the ultimate authority.
+      problemRegister: standardProcedure
+        .input(worldInputs.problemRegister)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemRegister(input as Record<string, unknown>, ctx),
+        ),
+      problemList: standardProcedure
+        .input(worldInputs.problemList)
+        .query(({ input, ctx }) => createWorldRouter(services.world).problemList(input, ctx)),
+      problemGet: standardProcedure
+        .input(worldInputs.problemGet)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).problemGet(input as Record<string, unknown>, ctx),
+        ),
+      problemAddEvidence: standardProcedure
+        .input(worldInputs.problemAddEvidence)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemAddEvidence(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      problemRecordCustomerSignal: standardProcedure
+        .input(worldInputs.problemRecordCustomerSignal)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemRecordCustomerSignal(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      problemRecordVerifiedPayment: standardProcedure
+        .input(worldInputs.problemRecordVerifiedPayment)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemRecordVerifiedPayment(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      problemAssess: standardProcedure
+        .input(worldInputs.problemAssess)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemAssess(input as Record<string, unknown>, ctx),
+        ),
+      problemAdvance: standardProcedure
+        .input(worldInputs.problemAdvance)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemAdvance(input as Record<string, unknown>, ctx),
+        ),
+      problemPlanExperiment: standardProcedure
+        .input(worldInputs.problemPlanExperiment)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemPlanExperiment(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      problemCustomerDiscovery: standardProcedure
+        .input(worldInputs.problemCustomerDiscovery)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemCustomerDiscovery(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      problemProviderEconomics: standardProcedure
+        .input(worldInputs.problemProviderEconomics)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemProviderEconomics(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      problemBusinessCandidate: standardProcedure
+        .input(worldInputs.problemBusinessCandidate)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).problemBusinessCandidate(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      opportunityRadar: standardProcedure
+        .input(worldInputs.opportunityRadar)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).opportunityRadar(input as Record<string, unknown>, ctx),
+        ),
+      // SPRINT-039 — founder evidence loop
+      observationRecord: standardProcedure
+        .input(worldInputs.observationRecord)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).observationRecord(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      observationsList: standardProcedure
+        .input(worldInputs.observationsList)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).observationsList(input as Record<string, unknown>, ctx),
+        ),
+      prospectRegister: standardProcedure
+        .input(worldInputs.prospectRegister)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).prospectRegister(input as Record<string, unknown>, ctx),
+        ),
+      prospectAdvance: standardProcedure
+        .input(worldInputs.prospectAdvance)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).prospectAdvance(input as Record<string, unknown>, ctx),
+        ),
+      prospectsList: standardProcedure
+        .input(worldInputs.prospectsList)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).prospectsList(input as Record<string, unknown>, ctx),
+        ),
+      evidenceQualityView: standardProcedure
+        .input(worldInputs.evidenceQualityView)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).evidenceQualityView(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      factorCalibrate: standardProcedure
+        .input(worldInputs.factorCalibrate)
+        .mutation(({ input, ctx }) =>
+          createWorldRouter(services.world).factorCalibrate(input as Record<string, unknown>, ctx),
+        ),
+      nextBestActionView: standardProcedure
+        .input(worldInputs.nextBestActionView)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).nextBestActionView(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      opportunityCompare: standardProcedure
+        .input(worldInputs.opportunityCompare)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).opportunityCompare(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      opportunityDrilldownView: standardProcedure
+        .input(worldInputs.opportunityDrilldownView)
+        .query(({ input, ctx }) =>
+          createWorldRouter(services.world).opportunityDrilldownView(
+            input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
     }),
   });
 }

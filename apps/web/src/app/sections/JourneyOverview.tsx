@@ -30,15 +30,9 @@ export function JourneyOverview({ execution, metrics }: JourneyOverviewProps): R
         )
       : 0;
 
-  const journeyDays = [
-    { label: 'Mon', value: 60 },
-    { label: 'Tue', value: 80 },
-    { label: 'Wed', value: 45 },
-    { label: 'Thu', value: 90 },
-    { label: 'Fri', value: metrics.weeklyCompletion ? metrics.weeklyCompletion * 20 : 70 },
-    { label: 'Sat', value: 50 },
-    { label: 'Sun', value: metrics.monthlyCompletion ? metrics.monthlyCompletion * 6 : 65 },
-  ];
+  // Weekly activity is rendered honestly from the real weekly-completion total
+  // exposed by the Life OS snapshot (days active of 5 target days) plus a real
+  // streak — never invented per-day magnitudes. (SPRINT-047 data-honesty pass)
 
   return (
     <section>
@@ -137,7 +131,7 @@ export function JourneyOverview({ execution, metrics }: JourneyOverviewProps): R
         </Card>
       </div>
 
-      {/* Weekly Heat Map */}
+      {/* Weekly Activity Summary — honest representation from real data */}
       <Card variant="standard" padding="md" className="mt-4">
         <div className="flex items-center gap-2 mb-3">
           <Zap className="h-4 w-4 text-[#F59E0B]" />
@@ -146,21 +140,20 @@ export function JourneyOverview({ execution, metrics }: JourneyOverviewProps): R
             This Week
           </Badge>
         </div>
-        <div className="flex items-end gap-2 h-24">
-          {journeyDays.map((day) => (
-            <div key={day.label} className="flex-1 flex flex-col items-center gap-1">
-              <div
-                className="w-full rounded-t-lg transition-all duration-300"
-                style={{
-                  height: `${String(Math.max(day.value, 8))}%`,
-                  backgroundColor:
-                    day.value >= 70 ? '#2B5FD9' : day.value >= 40 ? '#93B4F5' : '#CBD5E1',
-                  opacity: day.value / 100,
-                }}
-              />
-              <span className="text-[10px] text-[#94A3B8]">{day.label}</span>
+        <div className="flex items-center gap-6 text-[13px] text-[#64748B]">
+          {metrics.weeklyCompletion !== undefined && (
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-[#111827]">
+                {metrics.weeklyCompletion ?? '--'} / 5 active days
+              </span>
             </div>
-          ))}
+          )}
+          {metrics.streak !== undefined && metrics.streak > 0 && (
+            <div className="flex items-center gap-2">
+              <Zap className="h-3.5 w-3.5 text-[#F59E0B]" />
+              <span className="font-medium text-[#111827]">{metrics.streak}-day streak</span>
+            </div>
+          )}
         </div>
       </Card>
     </section>
