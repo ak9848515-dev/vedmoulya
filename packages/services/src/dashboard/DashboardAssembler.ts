@@ -507,7 +507,7 @@ export class DashboardAssembler {
       {
         id: 'ask_ai',
         label: 'Ask AI',
-        description: 'Ask Phoenix for guidance or analysis',
+        description: 'Ask VedMoulya for guidance or analysis',
         icon: 'message-circle',
         route: '/ai',
         priority: 2,

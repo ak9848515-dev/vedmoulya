@@ -39,6 +39,10 @@ export interface UserReconstructionParams {
   bio?: string;
   timezone?: string;
   locale?: string;
+  age?: number;
+  gender?: string;
+  purpose?: string;
+  primaryGoal?: string;
   theme?: 'light' | 'dark' | 'system';
   language?: string;
   notificationsEnabled?: boolean;
@@ -126,6 +130,10 @@ export class UserFactory {
       bio: params.bio,
       timezone: params.timezone,
       locale: params.locale,
+      age: params.age,
+      gender: params.gender,
+      purpose: params.purpose,
+      primaryGoal: params.primaryGoal,
     });
     const preferences = new UserPreferences({
       theme: params.theme ?? 'system',

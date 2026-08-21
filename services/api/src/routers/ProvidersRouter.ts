@@ -129,6 +129,11 @@ export interface ProvidersHandlers {
   // Reports per-family state (CONFIGURED / NOT_CONFIGURED / UNSUPPORTED_RUNTIME /
   // MOCK / DISABLED / ERROR) with key NAMES only — never secret values.
   getRuntimeStatus: (input: { userId: string }, _ctx: TRPCContext) => Promise<ApiResponse>;
+  // SPRINT-049 — test connection for custom providers.
+  testConnection: (
+    input: { userId: string; endpointUrl: string; apiKey: string; protocol: string },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
 }
 
 export function createProvidersRouter(
@@ -319,5 +324,69 @@ export function createProvidersRouter(
           input as unknown as Parameters<ProviderExperienceService['explainModelSelection']>[1],
         ),
       ),
+
+    // SPRINT-049 — test connection for custom providers.
+    // Attempts a lightweight request to the endpoint to verify reachability
+    // and authentication. SECURITY: API key is server-side only.
+    testConnection: async (input, _ctx): Promise<ApiResponse> => {
+      const { endpointUrl, apiKey, protocol } = input;
+      if (!endpointUrl || !apiKey) {
+        return successResponse({
+          connected: false,
+          status: 'failed' as const,
+          message: 'Endpoint URL and API key are required',
+          testedAt: new Date().toISOString(),
+        });
+      }
+      try {
+        // For OpenAI-compatible protocols, test with a minimal models request.
+        if (protocol === 'openai-compatible' || protocol === '') {
+          const modelsUrl = endpointUrl.replace(/\/+$/, '') + '/models';
+          const response = await fetch(modelsUrl, {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (response.ok) {
+            return successResponse({
+              connected: true,
+              status: 'connected' as const,
+              message: `Connected successfully (${response.status})`,
+              testedAt: new Date().toISOString(),
+            });
+          }
+          return successResponse({
+            connected: false,
+            status: 'failed' as const,
+            message: `Endpoint returned ${response.status}: ${response.statusText}`,
+            testedAt: new Date().toISOString(),
+          });
+        }
+        // For other protocols, test basic reachability.
+        const response = await fetch(endpointUrl, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        return successResponse({
+          connected: response.ok,
+          status: response.ok ? ('connected' as const) : ('failed' as const),
+          message: response.ok
+            ? `Endpoint reachable (${response.status})`
+            : `Endpoint returned ${response.status}`,
+          testedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        return successResponse({
+          connected: false,
+          status: 'failed' as const,
+          message: `Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          testedAt: new Date().toISOString(),
+        });
+      }
+    },
   };
 }

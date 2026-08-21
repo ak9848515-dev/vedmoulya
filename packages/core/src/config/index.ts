@@ -182,7 +182,7 @@ export function loadConfiguration(): Configuration {
         minLength: 32,
         example: 'AIza...',
         reason:
-          'Google is catalog-only (no runtime adapter) — the key is never consumed; keep it unset.',
+          'Google Gemini is a runtime provider (SPRINT-049 — GoogleGeminiProvider via the Vercel AI SDK). Set AI_GOOGLE_API_KEY to register it; optional unless AI_DEFAULT_PROVIDER=google. Separate from Google OAuth.',
       }),
       deepseekKey: requireProdSecret('AI_DEEPSEEK_API_KEY', {
         required: aiEnabled && defaultProvider === 'deepseek',

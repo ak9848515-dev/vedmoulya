@@ -39,6 +39,7 @@ import {
 import dynamic from 'next/dynamic';
 import { ModelSelector, type ModelOption } from './ModelSelector.js';
 import { ProviderDetailView } from './ProviderDetailView.js';
+import { AddProviderPanel } from './AddProviderPanel.js';
 
 // ── Lazy-loaded registry tabs (progressive disclosure) ───────────────────────
 const BenchmarkDatasetsView = dynamic(
@@ -60,6 +61,7 @@ const FAMILY_COLORS: Record<string, string> = {
   openrouter: 'bg-[#7C3AED]/15 text-[#7C3AED]',
   ollama: 'bg-[#64748B]/15 text-[#64748B]',
   mock: 'bg-[#94A3B8]/15 text-[#64748B]',
+  custom: 'bg-[#F59E0B]/15 text-[#F59E0B]',
 };
 
 const FAMILY_LABELS: Record<string, string> = {
@@ -70,6 +72,7 @@ const FAMILY_LABELS: Record<string, string> = {
   openrouter: 'OpenRouter',
   ollama: 'Ollama (Local)',
   mock: 'Mock (Test)',
+  custom: 'Custom Provider',
 };
 
 // ── Availability indicator (NEVER depends on colour alone) ───────────────────
@@ -330,6 +333,16 @@ export default function ProvidersPage(): React.JSX.Element {
             }}
           />
         )}
+      </ErrorBoundary>
+
+      {/* ── SPRINT-049: Add AI Provider (always available) ───────────── */}
+      <ErrorBoundary section="add-provider">
+        <AddProviderPanel
+          onProviderAdded={() => {
+            // Re-fetch providers to show the new custom provider.
+            window.location.reload();
+          }}
+        />
       </ErrorBoundary>
 
       {/* ── Advanced: Registry tabs (progressive disclosure) ────────────── */}

@@ -56,6 +56,7 @@ import { DecisionCenter } from './sections/DecisionCenter.js';
 import { ProfileCard } from './sections/ProfileCard.js';
 import { TodayMissionCard } from './sections/TodayMissionCard.js';
 import { AISummaryCard } from './sections/AISummaryCard.js';
+import { AskAIInput } from './sections/AskAIInput.js';
 import { DashboardSkeleton } from './sections/DashboardSkeleton.js';
 import { usePullToRefresh } from '../lib/use-pull-to-refresh.js';
 import { markStartup, STARTUP_MARKS } from '../lib/startup.js';
@@ -441,7 +442,7 @@ export default function Home(): React.JSX.Element {
           PREMIUM HERO: Greeting + Life Score + Daily Focus + Quote
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="hero">
-        <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#1E4AA8] via-[#2B5FD9] to-[#5B8AEB] p-6 md:p-10 animate-slide-up">
+        <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#1E4AA8] via-[#2B5FD9] to-[#0EA5A9] p-6 md:p-10 animate-slide-up">
           <div
             className="absolute inset-0 opacity-10"
             style={{
@@ -518,11 +519,40 @@ export default function Home(): React.JSX.Element {
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
+          ASK — immediate AI readiness (SPRINT-048)
+          A premium ask bar that opens the existing AI Companion with the
+          typed question — no provider setup required to ask. The readiness
+          chip reflects the REAL provider runtime (never a fabricated state).
+          ═══════════════════════════════════════════════════════════════════ */}
+      {userId && (
+        <ErrorBoundary section="ask-ai">
+          <AskAIInput userId={userId} />
+        </ErrorBoundary>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          NOW — what matters this moment (SPRINT-043C IA tier)
+          ═══════════════════════════════════════════════════════════════════ */}
+      <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#0EA5A9] dark:text-[#66D0D3]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#0EA5A9]" aria-hidden="true" />
+        Now
+      </p>
+
+      {/* ═══════════════════════════════════════════════════════════════════
           TODAY'S MISSION (MOB-002)
           ═══════════════════════════════════════════════════════════════════ */}
       <div id="todays-mission">
         <ErrorBoundary section="mission">
-          <TodayMissionCard priority={topPriority} execution={execution} />
+          <TodayMissionCard
+            priority={topPriority}
+            execution={execution}
+            onContinue={() => {
+              router.push('/goals');
+            }}
+            onReviewBlockers={() => {
+              router.push('/goals');
+            }}
+          />
         </ErrorBoundary>
       </div>
 
@@ -540,7 +570,15 @@ export default function Home(): React.JSX.Element {
           ═══════════════════════════════════════════════════════════════════ */}
       {topPriority && (
         <ErrorBoundary section="top-priority">
-          <TopPriorityCard priority={topPriority} />
+          <TopPriorityCard
+            priority={topPriority}
+            onContinue={() => {
+              router.push('/goals');
+            }}
+            onReviewBlockers={() => {
+              router.push('/goals');
+            }}
+          />
         </ErrorBoundary>
       )}
 
@@ -559,26 +597,7 @@ export default function Home(): React.JSX.Element {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          Module Status Grid
-          ═══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary section="module-status">
-        <ModuleStatusGrid
-          career={career}
-          learning={learning}
-          business={business}
-          marketplace={marketplace}
-        />
-      </ErrorBoundary>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          Memory Timeline
-          ═══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary section="memory-timeline">
-        <MemoryTimeline memory={memory} />
-      </ErrorBoundary>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          Journey Overview
+          PROGRESS — Journey + Execution overview
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="journey">
         <JourneyOverview
@@ -592,14 +611,7 @@ export default function Home(): React.JSX.Element {
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          Priorities List
-          ═══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary section="priorities">
-        <PrioritiesList priorities={priorities} />
-      </ErrorBoundary>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          AI Recommendations + Notifications (two-column)
+          OPPORTUNITIES & SIGNALS — AI Recommendations + Notifications
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <ErrorBoundary section="recommendations">
@@ -614,7 +626,7 @@ export default function Home(): React.JSX.Element {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          AI Insights + Stats
+          INTELLIGENCE — AI Insights + Stats
           ═══════════════════════════════════════════════════════════════════ */}
       <ErrorBoundary section="ai-insights">
         <AIInsights
@@ -630,14 +642,47 @@ export default function Home(): React.JSX.Element {
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          Quick Actions (wired to module routes)
+          DEEP DIVE — secondary overview, progressively disclosed
+          (Module status · Memory timeline · Priorities · Quick actions)
+          All capabilities remain reachable; only the initial viewport is
+          decluttered (SPRINT-043C information-architecture principle).
           ═══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary section="quick-actions">
-        <QuickActions actions={quickActions} />
-      </ErrorBoundary>
+      <details className="group rounded-[20px] border border-[#E8EDF5] dark:border-[#334155] bg-white dark:bg-[#1E293B]">
+        <summary className="flex cursor-pointer select-none items-center justify-between gap-3 px-4 py-3 text-[14px] font-semibold text-[#374151] dark:text-[#E2E8F0] hover:bg-[#F1F5F9] dark:hover:bg-[#0F172A] transition-colors rounded-[20px]">
+          <span className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#0EA5A9]" aria-hidden="true" />
+            Deep dive — module status, memory, priorities, quick actions
+          </span>
+          <span
+            className="text-[12px] font-medium text-[#64748B] dark:text-[#94A3B8] transition-transform duration-200 group-open:rotate-180"
+            aria-hidden="true"
+          >
+            ▾
+          </span>
+        </summary>
+        <div className="space-y-5 px-4 pb-4">
+          <ErrorBoundary section="module-status">
+            <ModuleStatusGrid
+              career={career}
+              learning={learning}
+              business={business}
+              marketplace={marketplace}
+            />
+          </ErrorBoundary>
+          <ErrorBoundary section="memory-timeline">
+            <MemoryTimeline memory={memory} />
+          </ErrorBoundary>
+          <ErrorBoundary section="priorities">
+            <PrioritiesList priorities={priorities} />
+          </ErrorBoundary>
+          <ErrorBoundary section="quick-actions">
+            <QuickActions actions={quickActions} />
+          </ErrorBoundary>
+        </div>
+      </details>
 
       {/* Data freshness footer */}
-      <p className="text-center text-[11px] text-[#94A3B8] dark:text-[#64748B] pt-2">
+      <p className="text-center text-[12px] text-[#94A3B8] dark:text-[#64748B] pt-2">
         {dataUpdatedAt
           ? `Last synced ${new Date(dataUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
           : 'VedMoulya Life OS'}

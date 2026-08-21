@@ -37,6 +37,28 @@
   --color-secondary-blue-200: #dbe7fb;
   --color-secondary-blue-100: #eaf2ff;
 
+  /* ── Constitutional Teal — VedMoulya Intelligence Signal (DES-010A/D09) ── */
+  /* Reconciles the previously-unreachable token: enables `secondary-*`
+     utilities so the intelligence identity is expressible (SPRINT-043B). */
+  --color-teal-700: #0d969a;
+  --color-teal-600: #0ea5a9; /* ★ INTELLIGENCE */
+  --color-teal-500: #1eb4b8;
+  --color-teal-400: #3ec2c5;
+  --color-teal-300: #66d0d3;
+  --color-teal-200: #96e0e2;
+  --color-teal-100: #c5eff0;
+  --color-teal-50: #e8f8f9;
+
+  /* ── Constitutional Coral — Human / Founder Action (DES-010A/D09) ─────── */
+  --color-coral-700: #ee5545;
+  --color-coral-600: #ff6b5b; /* ★ ACTION / HUMAN */
+  --color-coral-500: #ff7d6e;
+  --color-coral-400: #ff9386;
+  --color-coral-300: #ffb0a5;
+  --color-coral-200: #ffcec7;
+  --color-coral-100: #ffe8e3;
+  --color-coral-50: #fff4f2;
+
   /* ── Neutral Scale (Warm) ────────────────────────────────────────────── */
   --color-neutral-900: #111827; /* Heading text */
   --color-neutral-800: #1f2937; /* Body text */
@@ -77,6 +99,19 @@
   --color-surface-card-border: #e8edf5;
   --color-surface-elevated: #ffffff;
   --color-surface-overlay: rgba(15, 23, 42, 0.5);
+
+  /* ── Semantic Text / Surface / Accent Tokens (single source of meaning) ── */
+  /* Purpose-named aliases so UI uses meaning over component-specific colors
+     (SPRINT-043B consolidation; values fixed by DES-010A). */
+  --color-text-primary: #111827;
+  --color-text-secondary: #374151;
+  --color-text-muted: #64748b;
+  --color-surface-primary: #f5f7fa;
+  --color-surface-secondary: #ffffff;
+  --color-surface-tertiary: #f1f5f9;
+  --color-accent-primary: #ff6b5b;
+  --color-accent-gold: #c89b3c;
+  --color-intelligence: #0ea5a9;
 
   /* ── Typography (DES-010A/D08) ───────────────────────────────────────── */
   --font-heading: 'Satoshi', 'Inter', system-ui, sans-serif;
@@ -263,5 +298,25 @@
   @media (min-width: 1024px) {
     padding-left: 64px;
     padding-right: 64px;
+  }
+}
+
+/* ── Reduced Motion (SPRINT-043B — P1 accessibility) ─────────────────────────
+   Coherent motion policy: honour `prefers-reduced-motion` globally so that
+   skeleton shimmer, slide-up, banner-in, smooth scroll and every CSS
+   transition are reduced/eliminated for users who request it — without
+   removing state feedback (opacity/colour changes that convey state remain).
+   JS animation surfaces (none shipped; CSS-based today) must respect the same
+   signal before any JS motion system is introduced. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }

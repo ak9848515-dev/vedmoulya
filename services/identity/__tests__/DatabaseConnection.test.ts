@@ -37,7 +37,10 @@ describe('DatabaseConnection', () => {
   describe('getDatabaseConfig', () => {
     it('returns the pool configuration from the core config', () => {
       const cfg = getDatabaseConfig();
-      expect(cfg.url).toContain('postgres://');
+      // Accept both the `postgres://` and `postgresql://` schemes (the latter
+      // is the standard libpq form — the previous `toContain('postgres://')`
+      // assertion was brittle and failed on a valid `postgresql://` URL).
+      expect(cfg.url).toMatch(/^postgres(ql)?:\/\//);
       expect(cfg.poolMin).toBeGreaterThanOrEqual(0);
       expect(cfg.poolMax).toBeGreaterThan(cfg.poolMin);
       expect(cfg.timeout).toBeGreaterThan(0);

@@ -1,0 +1,27 @@
+{
+  "name": "@vedmoulya/intelligence-fabric",
+  "version": "1.0.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "description": "Intelligence Fabric for VedMoulya — a COMPOSITION layer (SPRINT-030) that turns the existing Brain / capability marketplace / provider registry / cost ledger / proactive layer into a provider-neutral orchestration contract: runtime provider-health observation, cost-policy enforcement, autonomy levels, deterministic selection strategies, result normalization, bounded verification chains and workflow bounds. NOT an engine: no Brain / provider-selection / approval / budget / execution / memory / learning / scheduler / notification authority lives here — the frozen estate owns those; this package composes them through narrow ports.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "*",
+    "vitest": "*"
+  }
+}

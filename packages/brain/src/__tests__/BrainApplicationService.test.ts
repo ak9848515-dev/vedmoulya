@@ -1025,18 +1025,16 @@ describe('BrainApplicationService', () => {
     expect(explicit).toBeDefined();
     expect(explicit?.confidence).toBe(0.98);
     // Correction is stored on the outcome memory as the user's fact.
-    const correctionRecord = memory
-      .list('u1')
-      .find((m) => (m.corrections?.length ?? 0) > 0);
+    const correctionRecord = memory.list('u1').find((m) => (m.corrections?.length ?? 0) > 0);
     expect(correctionRecord?.corrections?.[0]?.statement).toBe('Do not use this approach again');
     expect(correctionRecord?.corrections?.[0]?.confidence).toBe(0.98);
   });
 
   it('correctLearning rejects empty/short statements and provider targets without id', async () => {
     const { service } = makeHarness();
-    expect((await service.correctLearning('u1', { statement: 'x', target: 'approach' })).success).toBe(
-      false,
-    );
+    expect(
+      (await service.correctLearning('u1', { statement: 'x', target: 'approach' })).success,
+    ).toBe(false);
     expect(
       (
         await service.correctLearning('u1', {

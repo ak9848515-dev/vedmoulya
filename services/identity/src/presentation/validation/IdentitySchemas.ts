@@ -31,6 +31,25 @@ export const registerUserSchema = z.object({
     .regex(/[0-9]/, 'Password must contain at least one number'),
 });
 
+// ── First-login profile setup (SPRINT-041B) ──────────────────────────────
+// Small closed vocabularies for the identity profile — the estate has no
+// existing gender/purpose taxonomy, so these are the identity profile's own
+// contract (never a parallel copy of another module's vocabulary).
+
+export const profileGenderEnum = z.enum(['female', 'male', 'non_binary', 'prefer_not_to_say']);
+
+export const profilePurposeEnum = z.enum([
+  'learning',
+  'building',
+  'career',
+  'business',
+  'personal',
+  'other',
+]);
+
+export const PROFILE_AGE_MIN = 13;
+export const PROFILE_AGE_MAX = 120;
+
 // ── Profile Update ────────────────────────────────────────────────────────
 
 export const updateProfileSchema = z.object({
@@ -41,6 +60,10 @@ export const updateProfileSchema = z.object({
   bio: z.string().max(500).optional(),
   timezone: z.string().max(64).optional(),
   locale: z.string().max(10).optional(),
+  age: z.number().int().min(PROFILE_AGE_MIN).max(PROFILE_AGE_MAX).optional(),
+  gender: profileGenderEnum.optional(),
+  purpose: profilePurposeEnum.optional(),
+  primaryGoal: z.string().min(1).max(200).optional(),
 });
 
 // ── Preferences Update ────────────────────────────────────────────────────

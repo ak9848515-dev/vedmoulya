@@ -23,6 +23,8 @@ function mockAuthService(): Record<string, unknown> {
     getGoogleAuthUrl: vi.fn(),
     signInWithGoogle: vi.fn(),
     signOut: vi.fn(),
+    getProfile: vi.fn(),
+    updateProfile: vi.fn(),
   };
 }
 
@@ -41,6 +43,118 @@ describe('createAuthRouter', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string };
     expect(body.status).toBe('healthy');
+  });
+
+  // ── SPRINT-041B — first-login profile (GET /me + PATCH /me/profile) ────
+
+  describe('GET /me', () => {
+    it('returns the authenticated user profile', async () => {
+      const service = mockAuthService();
+      (service.verifySession as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sub: 'usr_1',
+        email: 'a@b.com',
+        role: 'user',
+      });
+      (service.getProfile as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: 'usr_1',
+        email: 'a@b.com',
+        displayName: 'A',
+        profileComplete: false,
+      });
+      const res = await app(service).request('/me', {
+        headers: { authorization: 'Bearer token' },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { success: boolean; data: { userId: string } };
+      expect(body.success).toBe(true);
+      expect(body.data.userId).toBe('usr_1');
+      // userId came from the token (payload.sub), never from client input.
+      expect(service.getProfile).toHaveBeenCalledWith('usr_1');
+    });
+
+    it('rejects a missing token with 401', async () => {
+      const res = await app(mockAuthService()).request('/me');
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects an invalid token with 401', async () => {
+      const service = mockAuthService();
+      (service.verifySession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      const res = await app(service).request('/me', {
+        headers: { authorization: 'Bearer bad' },
+      });
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('PATCH /me/profile', () => {
+    it('updates the authenticated user profile (userId from token — no IDOR surface)', async () => {
+      const service = mockAuthService();
+      (service.verifySession as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sub: 'usr_1',
+        email: 'a@b.com',
+        role: 'user',
+      });
+      (service.updateProfile as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: 'usr_1',
+        email: 'a@b.com',
+        displayName: 'A',
+        age: 30,
+        gender: 'female',
+        purpose: 'learning',
+        primaryGoal: 'Master TS',
+        profileComplete: true,
+      });
+      const res = await app(service).request('/me/profile', {
+        method: 'PATCH',
+        headers: {
+          authorization: 'Bearer token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          age: 30,
+          gender: 'female',
+          purpose: 'learning',
+          primaryGoal: 'Master TS',
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { success: boolean; data: { profileComplete: boolean } };
+      expect(body.success).toBe(true);
+      expect(body.data.profileComplete).toBe(true);
+      expect(service.updateProfile).toHaveBeenCalledWith(
+        'usr_1',
+        expect.objectContaining({ age: 30 }),
+      );
+    });
+
+    it('rejects invalid profile data with 400 (backend remains authoritative)', async () => {
+      const service = mockAuthService();
+      (service.verifySession as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sub: 'usr_1',
+        email: 'a@b.com',
+        role: 'user',
+      });
+      const res = await app(service).request('/me/profile', {
+        method: 'PATCH',
+        headers: {
+          authorization: 'Bearer token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ age: 300 }),
+      });
+      expect(res.status).toBe(400);
+      expect(service.updateProfile).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unauthenticated update with 401', async () => {
+      const res = await app(mockAuthService()).request('/me/profile', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ age: 30 }),
+      });
+      expect(res.status).toBe(401);
+    });
   });
 
   describe('POST /sign-in', () => {

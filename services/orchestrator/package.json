@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.34",
     "@ai-sdk/openai": "^4.0.34",
     "@vedmoulya/ai": "*",
     "@vedmoulya/core": "*",

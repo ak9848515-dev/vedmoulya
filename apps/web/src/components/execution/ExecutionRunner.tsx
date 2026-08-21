@@ -157,10 +157,8 @@ export function ExecutionRunner({
 
   async function handleHandoff(executionId: string, stepId: string): Promise<void> {
     try {
-      // eslint-disable-next-line security/detect-object-injection -- React state keyed by step id (never user-controlled object access)
-      apply(
-        await completeHandoff.mutateAsync({ userId, executionId, stepId, note: notes[stepId] }),
-      );
+      const stepNote = notes[stepId]; // eslint-disable-line security/detect-object-injection -- React state keyed by step id (never user-controlled object access)
+      apply(await completeHandoff.mutateAsync({ userId, executionId, stepId, note: stepNote }));
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Could not record the hand-off.');
     }

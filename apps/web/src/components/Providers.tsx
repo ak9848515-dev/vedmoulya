@@ -14,6 +14,7 @@ import { api } from '../lib/trpc.js';
 import { ThemeProvider } from '@vedmoulya/ui';
 import { PWAProvider } from './PWAProvider.js';
 import { AuthBootstrap } from './AuthBootstrap.js';
+import { OnboardingRedirect } from './OnboardingRedirect.js';
 import { authRefreshLink } from '../auth/auth-link.js';
 import { getAccessToken, useAuthStore } from '../stores/auth-store.js';
 import { markStartup, STARTUP_MARKS } from '../lib/startup.js';
@@ -96,7 +97,10 @@ export function Providers({ children }: ProvidersProps): React.JSX.Element {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider defaultTheme="system">
           <PWAProvider>
-            <AuthBootstrap>{children}</AuthBootstrap>
+            <AuthBootstrap>
+              <OnboardingRedirect />
+              {children}
+            </AuthBootstrap>
           </PWAProvider>
         </ThemeProvider>
       </QueryClientProvider>

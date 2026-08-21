@@ -22,7 +22,7 @@
 //
 // Every store is owner-scoped by query construction; stored documents are
 // decisions/evidence/outcomes/timestamps/provenance only — never secrets,
-// tokens or chain-of-thought (SPRINT_022_PERSISTENCE_SECURITY.md).
+// tokens or chain-of-thought (SPRINT-022_PERSISTENCE_SECURITY.md).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { logger } from '@vedmoulya/core';
@@ -93,6 +93,35 @@ import {
 } from '@vedmoulya/live-intelligence-bridge';
 import type { DiscoveryStore } from '@vedmoulya/ai-world';
 import { InMemoryDiscoveryStore, PostgresDiscoveryStore } from '@vedmoulya/ai-world';
+import type { ConversationStore } from '@vedmoulya/voice';
+import type { ProactiveRecommendationStore } from '@vedmoulya/proactive';
+import { InMemoryProactiveStore, PostgresProactiveStore } from '@vedmoulya/proactive';
+import type { ControlStores } from '@vedmoulya/control-plane';
+import {
+  InMemoryControlStores,
+  PostgresSettingsStore as PostgresControlSettingsStore,
+  PostgresEmergencyStopStore as PostgresControlEmergencyStopStore,
+  PostgresOpportunityStore as PostgresControlOpportunityStore,
+} from '@vedmoulya/control-plane';
+import type { WorldStores } from '@vedmoulya/world-model';
+import {
+  InMemoryWorldStores,
+  PostgresBlueprintApprovalStore as PostgresWorldBlueprintApprovalStore,
+  PostgresBusinessUnitStore as PostgresWorldBusinessUnitStore,
+  PostgresObservationStore as PostgresWorldObservationStore,
+  PostgresOrchestrationPlanStore as PostgresWorldOrchestrationPlanStore,
+  PostgresOutcomeEvidenceStore as PostgresWorldOutcomeEvidenceStore,
+  PostgresProblemStore as PostgresWorldProblemStore,
+  PostgresProspectStore as PostgresWorldProspectStore,
+  PostgresRevenueStreamStore as PostgresWorldRevenueStreamStore,
+  PostgresRoleStore as PostgresWorldRoleStore,
+  PostgresWorkflowStore as PostgresWorldWorkflowStore,
+  PostgresWorldEntityStore,
+  PostgresWorldRelationStore,
+} from '@vedmoulya/world-model';
+import { InMemoryConversationStore, PostgresConversationStore } from '@vedmoulya/voice';
+import type { AuditLogStore } from './AuditLogStore.js';
+import { InMemoryAuditLogStore, PostgresAuditLogStore } from './AuditLogStore.js';
 import { createEISql } from './ProductionRepositories.js';
 
 /** The outcome-memory shape both the Brain memory port and the dashboard
@@ -130,6 +159,22 @@ export interface PersistenceStores {
   bridge: {
     loops: BridgeLoopStore;
   };
+  /** SPRINT-027 (R-2) — durable owner-scoped gateway audit log. */
+  auditLogs: AuditLogStore;
+  /** SPRINT-027 (Phase 5) — owner-scoped bounded conversation store. */
+  voice: {
+    conversations: ConversationStore;
+  };
+  /** SPRINT-029 — owner-scoped proactive recommendation store. */
+  proactive: ProactiveRecommendationStore;
+  /** SPRINT-031 — owner-scoped control-plane stores (autonomy settings,
+   *  emergency stop, opportunity lifecycle). */
+  control: ControlStores;
+  /** SPRINT-032 — owner-scoped world-model stores (bounded typed graph,
+   *  business units, AI workforce roles, business workflows).
+   *  SPRINT-033 (Part F) — revenue streams (evidence-carrying).
+   *  SPRINT-034 — verified outcome evidence + blueprint approval requests. */
+  world: WorldStores;
 }
 
 /** The store bundle plus its lifecycle handles. */
@@ -186,6 +231,13 @@ function createInMemoryStores(): PersistenceStores {
     bridge: {
       loops: new InMemoryBridgeLoopStore(),
     },
+    auditLogs: new InMemoryAuditLogStore(),
+    voice: {
+      conversations: new InMemoryConversationStore(),
+    },
+    proactive: new InMemoryProactiveStore(),
+    control: new InMemoryControlStores(),
+    world: new InMemoryWorldStores(),
   };
 }
 
@@ -217,6 +269,24 @@ function createPostgresStores(): PersistenceBundle {
   const notificationStore = new PostgresNotificationStore(sql);
   const acquisitionStore = new PostgresAcquisitionStore(sql);
   const loops = new PostgresBridgeLoopStore(sql);
+  const auditLogs = new PostgresAuditLogStore(sql);
+  const conversations = new PostgresConversationStore(sql);
+  const proactive = new PostgresProactiveStore(sql);
+  const controlSettings = new PostgresControlSettingsStore(sql);
+  const controlStops = new PostgresControlEmergencyStopStore(sql);
+  const controlOpportunities = new PostgresControlOpportunityStore(sql);
+  const worldEntities = new PostgresWorldEntityStore(sql);
+  const worldRelations = new PostgresWorldRelationStore(sql);
+  const worldUnits = new PostgresWorldBusinessUnitStore(sql);
+  const worldRoles = new PostgresWorldRoleStore(sql);
+  const worldWorkflows = new PostgresWorldWorkflowStore(sql);
+  const worldRevenueStreams = new PostgresWorldRevenueStreamStore(sql);
+  const worldOutcomeEvidence = new PostgresWorldOutcomeEvidenceStore(sql);
+  const worldBlueprintApprovals = new PostgresWorldBlueprintApprovalStore(sql);
+  const worldOrchestrationPlans = new PostgresWorldOrchestrationPlanStore(sql);
+  const worldProblems = new PostgresWorldProblemStore(sql);
+  const worldObservations = new PostgresWorldObservationStore(sql);
+  const worldProspects = new PostgresWorldProspectStore(sql);
 
   const stores: PersistenceStores = {
     discoveryStore,
@@ -230,6 +300,28 @@ function createPostgresStores(): PersistenceBundle {
       acquisitionStore,
     },
     bridge: { loops },
+    auditLogs,
+    voice: { conversations },
+    proactive,
+    control: {
+      settings: controlSettings,
+      emergencyStop: controlStops,
+      opportunities: controlOpportunities,
+    },
+    world: {
+      entities: worldEntities,
+      relations: worldRelations,
+      businessUnits: worldUnits,
+      roles: worldRoles,
+      workflows: worldWorkflows,
+      revenueStreams: worldRevenueStreams,
+      outcomeEvidence: worldOutcomeEvidence,
+      blueprintApprovals: worldBlueprintApprovals,
+      orchestrationPlans: worldOrchestrationPlans,
+      problems: worldProblems,
+      observations: worldObservations,
+      prospects: worldProspects,
+    },
   };
 
   const hydratable: Hydratable[] = [
@@ -251,18 +343,42 @@ function createPostgresStores(): PersistenceBundle {
     notificationStore,
     acquisitionStore,
     loops,
+    auditLogs,
+    conversations,
+    proactive,
+    controlSettings,
+    controlStops,
+    controlOpportunities,
+    worldEntities,
+    worldRelations,
+    worldUnits,
+    worldRoles,
+    worldWorkflows,
+    worldRevenueStreams,
+    worldOutcomeEvidence,
+    worldBlueprintApprovals,
+    worldOrchestrationPlans,
+    worldProblems,
+    worldObservations,
+    worldProspects,
   ];
 
   // Idempotent CREATE TABLE IF NOT EXISTS on every startup (fire-and-forget,
   // same convention as every EI engine factory — never blocks boot).
-  for (const store of hydratable) {
-    const withEnsure = store as { ensureTable?(): Promise<void> };
-    if (typeof withEnsure.ensureTable === 'function') {
-      void withEnsure.ensureTable().catch((error: unknown) => {
-        logger.warn('Persistence table creation deferred (database unreachable at startup)', {
-          error: safeError(error),
+  // Skipped under NODE_ENV=test: the persistence tests construct the Postgres
+  // stores on purpose but call ensureTable() themselves against their own
+  // pool; the bundle's fire-and-forget attempt would only log connection
+  // noise and race worker teardown.
+  if (process.env.NODE_ENV !== 'test') {
+    for (const store of hydratable) {
+      const withEnsure = store as { ensureTable?(): Promise<void> };
+      if (typeof withEnsure.ensureTable === 'function') {
+        void withEnsure.ensureTable().catch((error: unknown) => {
+          logger.warn('Persistence table creation deferred (database unreachable at startup)', {
+            error: safeError(error),
+          });
         });
-      });
+      }
     }
   }
 
@@ -365,5 +481,16 @@ export function resolvePersistenceBundle(
     bridge: {
       loops: overrides.bridge?.loops ?? base.bridge.loops,
     },
+    auditLogs: overrides.auditLogs ?? base.auditLogs,
+    voice: {
+      conversations: overrides.voice?.conversations ?? base.voice.conversations,
+    },
+    proactive: overrides.proactive ?? base.proactive,
+    control: {
+      settings: overrides.control?.settings ?? base.control.settings,
+      emergencyStop: overrides.control?.emergencyStop ?? base.control.emergencyStop,
+      opportunities: overrides.control?.opportunities ?? base.control.opportunities,
+    },
+    world: overrides.world ?? base.world,
   };
 }

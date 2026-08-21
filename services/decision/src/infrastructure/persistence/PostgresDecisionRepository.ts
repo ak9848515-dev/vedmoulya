@@ -24,6 +24,100 @@ export class PostgresDecisionRepository extends BaseRepository implements Decisi
     super('decision');
   }
 
+  /**
+   * Idempotent schema bootstrap — the estate-wide convention (every other
+   * Postgres store creates its tables with `CREATE TABLE IF NOT EXISTS` on
+   * startup; the decision store was an exception: its DB init only opened a
+   * connection, so production startup never created `decisions` /
+   * `decision_timeline` and every repository query failed against a fresh
+   * database). Mirrors `schema/decision.ts` column-for-column (SPRINT-045 —
+   * PRODUCTION DATABASE READINESS).
+   */
+  async ensureTable(): Promise<void> {
+    const db = getDatabase();
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS decisions (
+        id varchar(64) PRIMARY KEY,
+        title varchar(200) NOT NULL,
+        description text NOT NULL,
+        metadata jsonb DEFAULT '{}',
+        tags text[] DEFAULT '{}',
+        category varchar(32) NOT NULL,
+        initiator varchar(32) NOT NULL DEFAULT 'user',
+        status varchar(16) NOT NULL DEFAULT 'requested',
+        status_reason text,
+        priority_level varchar(16) NOT NULL DEFAULT 'medium',
+        priority_score double precision NOT NULL DEFAULT 5.0,
+        confidence_level varchar(16) NOT NULL DEFAULT 'unknown',
+        confidence_score double precision NOT NULL DEFAULT 0.0,
+        version_major integer NOT NULL DEFAULT 1,
+        version_minor integer NOT NULL DEFAULT 0,
+        version_patch integer NOT NULL DEFAULT 0,
+        requester varchar(100),
+        request_reason text,
+        request_context text,
+        selected_option_id varchar(64),
+        reasoning_method varchar(32),
+        reasoning_summary text,
+        reasoning_assumptions jsonb DEFAULT '[]',
+        reasoning_pros jsonb DEFAULT '[]',
+        reasoning_cons jsonb DEFAULT '[]',
+        outcome_result varchar(16),
+        outcome_description text,
+        outcome_actual_impact text,
+        outcome_lessons jsonb DEFAULT '[]',
+        knowledge_node_ids text[] DEFAULT '{}',
+        memory_ids text[] DEFAULT '{}',
+        options jsonb DEFAULT '[]',
+        evidence jsonb DEFAULT '[]',
+        constraints jsonb DEFAULT '[]',
+        entity_status varchar(16) NOT NULL DEFAULT 'active',
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now(),
+        completed_at timestamp
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS dec_category_idx ON decisions (category)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS dec_status_idx ON decisions (status)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS dec_priority_idx ON decisions (priority_score)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS dec_confidence_idx ON decisions (confidence_score)`,
+    );
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS dec_initiator_idx ON decisions (initiator)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS dec_entity_status_idx ON decisions (entity_status)`,
+    );
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS dec_created_at_idx ON decisions (created_at)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS dec_knowledge_node_ids_idx ON decisions (knowledge_node_ids)`,
+    );
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS decision_timeline (
+        id varchar(64) PRIMARY KEY,
+        decision_id varchar(64) NOT NULL,
+        event_type varchar(64) NOT NULL,
+        description text,
+        metadata jsonb DEFAULT '{}',
+        timestamp timestamp NOT NULL DEFAULT now()
+      );
+    `);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS dt_decision_id_idx ON decision_timeline (decision_id)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS dt_event_type_idx ON decision_timeline (event_type)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS dt_timestamp_idx ON decision_timeline (timestamp)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS dt_decision_timestamp_idx ON decision_timeline (decision_id, timestamp)`,
+    );
+  }
+
   // ── CRUD Operations ──────────────────────────────────────────────────────
 
   async findById(id: DecisionId): Promise<Decision | null> {

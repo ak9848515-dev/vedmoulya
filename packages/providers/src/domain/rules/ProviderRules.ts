@@ -21,6 +21,7 @@ export const PROVIDER_FAMILIES: readonly ProviderFamily[] = [
   'openrouter',
   'ollama',
   'mock',
+  'custom',
 ] as const;
 
 /** Provider name must be non-empty and reasonably short. */

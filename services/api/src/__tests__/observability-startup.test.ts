@@ -11,6 +11,18 @@ import {
   shutdownGatewayObservability,
 } from '../observability/startup.js';
 
+// Hermetic against a host-inherited environment (D-family): a shell that
+// sources `.env.local` exports OTEL_EXPORTER_OTLP_ENDPOINT into every child
+// process, which flips the exporter ON and breaks the "no endpoint" default
+// test. NODE_ENV is intentionally left as-is here (development under the
+// injected env): the lazy core config refuses localhost URLs outside
+// development, so the suite must not force NODE_ENV=test globally — the
+// signal-handler default test scopes its own NODE_ENV=test stub below.
+beforeEach(() => {
+  vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', '');
+  vi.stubEnv('OTEL_SERVICE_NAME', '');
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -55,6 +67,7 @@ describe('initGatewayObservability', () => {
   });
 
   it('does not install signal handlers by default in tests', () => {
+    vi.stubEnv('NODE_ENV', 'test'); // installSignals defaults to true outside NODE_ENV=test
     const on = vi.spyOn(process, 'on');
     initGatewayObservability();
     expect(on).not.toHaveBeenCalledWith('SIGTERM', expect.any(Function));

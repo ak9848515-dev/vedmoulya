@@ -32,6 +32,60 @@ export class PostgresExecutionRepository extends BaseRepository implements Execu
     super('execution');
   }
 
+  /**
+   * Idempotent schema bootstrap — the estate-wide convention (every other
+   * Postgres store creates its tables with `CREATE TABLE IF NOT EXISTS` on
+   * startup; the execution store was an exception: its DB init only opened a
+   * connection, so production startup never created `execution_plans` and
+   * every repository query failed against a fresh database). Mirrors
+   * `schema/execution.ts` column-for-column (SPRINT-045 — PRODUCTION
+   * DATABASE READINESS).
+   */
+  async ensureTable(): Promise<void> {
+    const db = getDatabase();
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS execution_plans (
+        id varchar(64) PRIMARY KEY,
+        title varchar(200) NOT NULL,
+        description text NOT NULL,
+        metadata jsonb DEFAULT '{}',
+        tags text[] DEFAULT '{}',
+        planning_level varchar(16) NOT NULL DEFAULT 'operational',
+        status varchar(16) NOT NULL DEFAULT 'pending',
+        status_reason text,
+        priority_level varchar(16) NOT NULL DEFAULT 'medium',
+        priority_score double precision NOT NULL DEFAULT 5.0,
+        progress_completed integer NOT NULL DEFAULT 0,
+        progress_total integer NOT NULL DEFAULT 1,
+        goal_references jsonb DEFAULT '[]',
+        decision_references jsonb DEFAULT '[]',
+        knowledge_node_ids text[] DEFAULT '{}',
+        memory_ids text[] DEFAULT '{}',
+        missions jsonb DEFAULT '[]',
+        tasks jsonb DEFAULT '[]',
+        timeline jsonb DEFAULT '{"entries":[]}',
+        context jsonb DEFAULT '{}',
+        entity_status varchar(16) NOT NULL DEFAULT 'active',
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now(),
+        completed_at timestamp
+      );
+    `);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS exec_planning_level_idx ON execution_plans (planning_level)`,
+    );
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS exec_status_idx ON execution_plans (status)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS exec_priority_idx ON execution_plans (priority_score)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS exec_entity_status_idx ON execution_plans (entity_status)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS exec_created_at_idx ON execution_plans (created_at)`,
+    );
+  }
+
   async findById(id: string): Promise<ExecutionPlan | null> {
     const db = getDatabase();
     const rows = await db.select().from(executionPlans).where(eq(executionPlans.id, id)).limit(1);

@@ -7,7 +7,13 @@ import { describe, expect, it } from 'vitest';
 import { CapabilityMarketplaceApplicationService } from '../application/CapabilityMarketplaceApplicationService.js';
 import type { CapabilityEnrichmentPort } from '../contracts/CapabilitySourcePort.js';
 import { InMemoryCapabilityPlanStore } from '../infrastructure/InMemoryCapabilityPlanStore.js';
-import { configuredProvider, testSource, videoRequest } from './fixtures.js';
+import {
+  configuredProvider,
+  localModel,
+  testSource,
+  unconfiguredProvider,
+  videoRequest,
+} from './fixtures.js';
 
 function service(
   options: { source?: ReturnType<typeof testSource> } = {},
@@ -132,5 +138,49 @@ describe('CapabilityMarketplaceApplicationService — plan lifecycle', () => {
     });
     const created = await svc.plan('user-a', videoRequest());
     expect(created.aiInsight).toBeUndefined();
+  });
+});
+
+describe('CapabilityMarketplaceApplicationService — marketplace view branches', () => {
+  it('marks a capability configurable when only an unconfigured provider exists', async () => {
+    const svc = service({
+      source: testSource({
+        providerCandidates: async () => [unconfiguredProvider()],
+        localModelCandidates: async () => [],
+      }),
+    });
+    const view = await svc.capabilities('user-a');
+    const text = view.capabilities.find((c) => c.id === 'TEXT_GENERATION');
+    expect(text?.ready).toBe(false);
+    expect(text?.configurable).toBe(true);
+    expect(text?.bestCandidate).toContain('Anthropic');
+  });
+
+  it('marks a capability configurable when only an unavailable local model exists', async () => {
+    const svc = service({
+      source: testSource({
+        providerCandidates: async () => [],
+        localModelCandidates: async () => [localModel({ available: false })],
+      }),
+    });
+    const view = await svc.capabilities('user-a');
+    const text = view.capabilities.find((c) => c.id === 'TEXT_GENERATION');
+    expect(text?.ready).toBe(false);
+    expect(text?.configurable).toBe(true);
+    expect(text?.bestCandidate).toContain('llama3.2');
+  });
+
+  it('reports neither ready nor configurable when no candidates exist', async () => {
+    const svc = service({
+      source: testSource({
+        providerCandidates: async () => [],
+        localModelCandidates: async () => [],
+      }),
+    });
+    const view = await svc.capabilities('user-a');
+    const text = view.capabilities.find((c) => c.id === 'TEXT_GENERATION');
+    expect(text?.ready).toBe(false);
+    expect(text?.configurable).toBe(false);
+    expect(text?.bestCandidate).toBeUndefined();
   });
 });

@@ -9,8 +9,9 @@
 
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button, Card, TextField } from '@vedmoulya/ui';
 import { Loader2, Mail, Lock, WifiOff, ShieldCheck, Sparkles } from 'lucide-react';
 import { beginGoogleSignIn, signInWithEmailAndPassword } from '../../auth/session-manager.js';
@@ -29,11 +30,20 @@ export default function LoginPage(): React.JSX.Element {
   const [submitting, setSubmitting] = useState<'google' | 'email' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const next = useMemo(() => {
+  // Resolved AT THE POINT OF USE (SPRINT-043E D1) — never cached in a
+  // mount-time useMemo: the protected-route redirect (SignInRedirect →
+  // router.replace('/login?next=...')) can land here with the query settling
+  // after first render, so a mount-time capture keeps a stale '/' and signs
+  // the user into the dashboard instead of the screen they were headed for.
+  // Re-reading the query on every render (and again in the submit handlers)
+  // keeps ?next= correct.
+  const resolveNext = (): string => {
     if (typeof window === 'undefined') return '/';
     const param = new URLSearchParams(window.location.search).get('next');
     return param && param.startsWith('/') ? param : '/';
-  }, []);
+  };
+
+  const next = resolveNext();
 
   // Already authenticated → skip the login screen.
   useEffect(() => {
@@ -79,7 +89,7 @@ export default function LoginPage(): React.JSX.Element {
       );
       return;
     }
-    router.replace(next);
+    router.replace(resolveNext());
   };
 
   return (
@@ -146,7 +156,17 @@ export default function LoginPage(): React.JSX.Element {
           </div>
 
           {/* Email / Password */}
-          <form onSubmit={(e) => void handleEmailSubmit(e)} className="space-y-4">
+          {/* The explicit action/method make any PRE-HYDRATION or no-JS native
+              submission a POST to /login — credentials travel in the request
+              body, never in the URL/query string/history. Once React hydrates,
+              handleEmailSubmit's preventDefault() stops native submission
+              entirely, so the SPA flow is unchanged. */}
+          <form
+            action="/login"
+            method="post"
+            onSubmit={(e) => void handleEmailSubmit(e)}
+            className="space-y-4"
+          >
             <TextField
               label="Email"
               type="email"
@@ -193,6 +213,21 @@ export default function LoginPage(): React.JSX.Element {
               {submitting === 'email' ? 'Signing in…' : 'Sign In'}
             </Button>
           </form>
+
+          {/* First-login account creation (SPRINT-041A) — visually subordinate
+              to Sign In; carries ?next= so a new user lands where they were
+              headed. */}
+          <div className="mt-6 pt-5 border-t border-[#E2E8F0] dark:border-[#334155] text-center">
+            <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">
+              New to VedMoulya?{' '}
+              <Link
+                href={next === '/' ? '/signup' : `/signup?next=${encodeURIComponent(next)}`}
+                className="font-semibold text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
+              >
+                Create an account
+              </Link>
+            </p>
+          </div>
         </Card>
 
         {/* Footer */}

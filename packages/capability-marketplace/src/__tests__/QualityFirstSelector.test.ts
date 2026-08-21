@@ -90,4 +90,116 @@ describe('QualityFirstSelector — quality-first selection', () => {
     expect(selected).toBeUndefined();
     expect(reasons.join(' ')).toMatch(/unavailable/);
   });
+
+  it('prefers stronger evidence confidence at equal quality (PROVIDER_DECLARED > INFERRED)', () => {
+    const declared = candidate({
+      id: 'a',
+      name: 'Declared',
+      quality: 0.8,
+      evidence: [{ claim: 'declared', source: 'registry', confidence: 'PROVIDER_DECLARED' }],
+    });
+    const inferred = candidate({
+      id: 'b',
+      name: 'Inferred',
+      quality: 0.8,
+      evidence: [{ claim: 'inferred', source: 'guess', confidence: 'INFERRED' }],
+    });
+    const { selected } = selector.select([inferred, declared]);
+    expect(selected?.id).toBe('a');
+  });
+
+  it('ranks MEASURED evidence above INFERRED at equal quality', () => {
+    const measured = candidate({
+      id: 'a',
+      name: 'Measured',
+      quality: 0.8,
+      evidence: [{ claim: 'measured', source: 'bench', confidence: 'MEASURED' }],
+    });
+    const inferred = candidate({
+      id: 'b',
+      name: 'Inferred',
+      quality: 0.8,
+      evidence: [{ claim: 'inferred', source: 'guess', confidence: 'INFERRED' }],
+    });
+    const { selected } = selector.select([inferred, measured]);
+    expect(selected?.id).toBe('a');
+  });
+
+  it('treats unknown evidence confidence as the weakest evidence', () => {
+    const unknown = candidate({
+      id: 'a',
+      name: 'Odd Confidence',
+      quality: 0.8,
+      evidence: [{ claim: 'odd', source: 'x', confidence: 'SOMETHING_ELSE' }],
+    });
+    const verified = candidate({
+      id: 'b',
+      name: 'Verified',
+      quality: 0.8,
+      evidence: [{ claim: 'verified', source: 'registry', confidence: 'VERIFIED' }],
+    });
+    const { selected } = selector.select([unknown, verified]);
+    expect(selected?.id).toBe('b');
+  });
+
+  it('prefers higher availability at equal quality and evidence', () => {
+    const high = candidate({
+      id: 'a',
+      name: 'High Availability',
+      quality: 0.8,
+      availability: 0.99,
+    });
+    const low = candidate({ id: 'b', name: 'Low Availability', quality: 0.8, availability: 0.5 });
+    const { selected } = selector.select([low, high]);
+    expect(selected?.id).toBe('a');
+  });
+
+  it('prefers a locally-available option over a free cloud one at equal quality', () => {
+    const local = candidate({
+      id: 'a',
+      name: 'Local',
+      quality: 0.8,
+      localAvailability: 'yes',
+      freeAvailability: 'PAID',
+    });
+    const freeCloud = candidate({
+      id: 'b',
+      name: 'Free Cloud',
+      quality: 0.8,
+      freeAvailability: 'FREE',
+    });
+    const { selected } = selector.select([freeCloud, local]);
+    expect(selected?.id).toBe('a');
+  });
+
+  it('prefers a FREE_WITH_QUOTA option over a paid one at equal quality', () => {
+    const quota = candidate({
+      id: 'a',
+      name: 'Quota',
+      quality: 0.8,
+      freeAvailability: 'FREE_WITH_QUOTA',
+    });
+    const paid = candidate({ id: 'b', name: 'Paid', quality: 0.8, freeAvailability: 'PAID' });
+    const { selected } = selector.select([paid, quota]);
+    expect(selected?.id).toBe('a');
+  });
+
+  it('falls back to cost when quality, evidence, readiness, availability and free rank all tie', () => {
+    const cheap = candidate({
+      id: 'a',
+      name: 'Cheap',
+      quality: 0.8,
+      freeAvailability: 'PAID',
+      estimatedCostUsd: 0.01,
+    });
+    const dear = candidate({
+      id: 'b',
+      name: 'Dear',
+      quality: 0.8,
+      freeAvailability: 'PAID',
+      estimatedCostUsd: 0.99,
+    });
+    const { selected } = selector.select([dear, cheap]);
+    expect(selected?.id).toBe('a');
+  });
 });

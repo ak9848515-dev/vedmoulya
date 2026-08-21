@@ -26,7 +26,7 @@ export function createCapabilityMarketplaceRouter(
 ): CapabilityMarketplaceHandlers {
   return {
     plan: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       const plan = await service.plan(input.userId, {
         outcome: input.outcome,
       });
@@ -34,19 +34,19 @@ export function createCapabilityMarketplaceRouter(
     },
 
     getPlan: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const plan = await service.getPlan(input.userId, input.planId);
       return fromServiceResult({ success: true, data: plan ?? null });
     },
 
     listPlans: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const plans = await service.listPlans(input.userId);
       return fromServiceResult({ success: true, data: plans });
     },
 
     capabilities: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const view = await service.capabilities(input.userId);
       return fromServiceResult({ success: true, data: view });
     },

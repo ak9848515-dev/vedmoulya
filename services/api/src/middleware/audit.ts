@@ -1,69 +1,58 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VedMoulya — API Gateway: Audit Logger Middleware
-// Logs API requests for observability and compliance
 // BLD-016A — API Gateway & Platform Services
+// SPRINT-027 (R-2) — durable audit logging.
+//
+// The gateway audit trail is now backed by an injectable AuditLogStore
+// (in-memory by default; Postgres write-through in production/staging via the
+// persistence bundle — see infrastructure/AuditLogStore.ts). The public API
+// (logAuditEvent / getAuditLog / createRequestAudit) is unchanged so routers
+// keep working; the storage backend is a wiring concern.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── Audit Event Types ───────────────────────────────────────────────────────
+import {
+  InMemoryAuditLogStore,
+  type AuditEntry,
+  type AuditEventType,
+  type AuditLogStore,
+} from '../infrastructure/AuditLogStore.js';
 
-export type AuditEventType =
-  | 'api.request'
-  | 'api.error'
-  | 'auth.login'
-  | 'auth.logout'
-  | 'config.update'
-  | 'notification.dismiss'
-  | 'cache.invalidate'
-  | 'search.perform';
+export type { AuditEntry, AuditEventType } from '../infrastructure/AuditLogStore.js';
 
-// ── Audit Entry ─────────────────────────────────────────────────────────────
+// Default: the deterministic in-memory store (dev/test). ApiApplicationService
+// replaces it with the Postgres write-through store in production/staging
+// (one setAuditStore call at gateway construction — the same wiring pattern
+// as the persistence bundle).
+let activeStore: AuditLogStore = new InMemoryAuditLogStore();
 
-export interface AuditEntry {
-  id: string;
-  timestamp: string;
-  type: AuditEventType;
-  userId: string;
-  path: string;
-  duration: number;
-  success: boolean;
-  error?: string;
-  metadata?: Record<string, unknown>;
+/** Swap the audit backend (gateway wiring / tests). */
+export function setAuditStore(store: AuditLogStore): void {
+  activeStore = store;
 }
 
-// ── Audit Logger ────────────────────────────────────────────────────────────
-
-const auditLog: AuditEntry[] = [];
-const MAX_LOG_SIZE = 10_000;
+/** The currently active audit backend (tests / status). */
+export function getAuditStore(): AuditLogStore {
+  return activeStore;
+}
 
 /**
- * Log an API audit event.
- * Stores in memory for now — will be wired to persistent storage in production.
+ * Log an API audit event. Owner-scoped, bounded (per-store retention),
+ * never throws into the caller — a failed durable write is logged loudly by
+ * the write-through store and the mirror keeps serving.
  */
 export function logAuditEvent(entry: Omit<AuditEntry, 'id'>): void {
   const auditEntry: AuditEntry = {
     ...entry,
     id: `audit_${String(Date.now())}_${Math.random().toString(36).slice(2, 8)}`,
   };
-
-  auditLog.push(auditEntry);
-
-  // Prevent unbounded memory growth
-  if (auditLog.length > MAX_LOG_SIZE) {
-    auditLog.shift();
-  }
+  activeStore.record(auditEntry);
 }
 
 /**
- * Query recent audit events for a user.
+ * Query recent audit events (optionally for one user).
  */
 export function getAuditLog(userId?: string, limit = 50): AuditEntry[] {
-  let entries = auditLog;
-
-  if (userId) {
-    entries = entries.filter((e) => e.userId === userId);
-  }
-
-  return entries.slice(-limit).reverse();
+  return activeStore.list(userId, limit);
 }
 
 /**

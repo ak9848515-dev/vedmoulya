@@ -75,7 +75,9 @@ class FixedClock implements ClockPort {
   }
 }
 
-function makePlan(caps: readonly string[] = ['RESEARCH', 'TEXT_GENERATION']): FactoryCapabilityPlan {
+function makePlan(
+  caps: readonly string[] = ['RESEARCH', 'TEXT_GENERATION'],
+): FactoryCapabilityPlan {
   return {
     id: 'plan-learning',
     requestedOutcome: 'learning benchmark outcome',
@@ -278,7 +280,9 @@ function signalsOf(h: LearningHarness, taskId: string) {
 }
 
 async function main(): Promise<void> {
-  console.log('SPRINT-025 — Continuous Learning, Outcome Memory & Adaptive Improvement: 15 Journeys');
+  console.log(
+    'SPRINT-025 — Continuous Learning, Outcome Memory & Adaptive Improvement: 15 Journeys',
+  );
   console.log('───────────────────────────────────────────────────────────────────────────');
 
   // ── 1. VERIFIED SUCCESS → LEARNING SIGNAL ─────────────────────────────────

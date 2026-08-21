@@ -49,6 +49,50 @@ vi.mock('../../lib/trpc.js', () => ({
         useMutation: () => ({ mutateAsync: mocks.mutateAsync }),
       },
     },
+    // SPRINT-028 — the companion now renders the voice toggle + status.
+    voice: {
+      status: {
+        useQuery: () => ({
+          data: { success: true, data: { stt: 'MOCK', tts: 'MOCK' } },
+          isError: false,
+        }),
+      },
+      handleUtterance: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      confirmSensitive: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      rejectSensitive: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+    },
+    // SPRINT-048 — the companion's readiness badge reads the provider runtime.
+    providers: {
+      getRuntimeStatus: {
+        useQuery: () => ({
+          data: {
+            success: true,
+            data: {
+              mode: 'dev',
+              defaultProvider: 'mock',
+              defaultProviderSupported: true,
+              providers: [
+                {
+                  family: 'mock',
+                  name: 'Mock',
+                  status: 'MOCK',
+                  canExecute: true,
+                  registered: true,
+                },
+              ],
+            },
+          },
+          isLoading: false,
+          isError: false,
+        }),
+      },
+    },
+    // SPRINT-029 — the companion now renders the proactive intelligence toggle.
+    proactive: {
+      refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isLoading: false }) },
+      dismiss: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      accept: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+    },
   },
 }));
 

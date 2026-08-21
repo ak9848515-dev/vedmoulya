@@ -46,6 +46,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { logger } from '@vedmoulya/core';
+import { envFlagEnabled } from './env-flags.js';
 import type { SchedulerApplicationService } from '@vedmoulya/ai-world-scheduler';
 import { getServices } from '../router.js';
 
@@ -78,6 +79,10 @@ export interface SchedulerCadenceTickResult {
    *  events detect; the Postgres-outage recovery edge is documented on
    *  createBrainIntelligenceRefresh). */
   notificationsEmitted: number;
+  /** SPRINT-030 — proactive recommendation refreshes performed (research /
+   *  recommend only — NO autonomous action; idempotent stable keys mean a
+   *  repeat refresh proposes nothing new). */
+  proactiveRefreshes: number;
   /** Users whose scheduler tick or intelligence refresh failed (isolated —
    *  never aborts the pass; the two share one per-user failure counter). */
   errors: number;
@@ -97,6 +102,9 @@ export interface SchedulerRuntimeStatus {
   maxUsersPerTick: number;
   /** EPIC-021 — whether the Brain opportunity refresh runs on this heartbeat. */
   refreshIntelligenceEnabled: boolean;
+  /** SPRINT-030 — whether the proactive recommendation refresh runs on this
+   *  heartbeat (research/recommend only — never autonomous action). */
+  proactiveRefreshEnabled: boolean;
   startedAt?: number;
   lastTickAt?: number;
   lastTick?: SchedulerCadenceTickResult;
@@ -118,6 +126,13 @@ export interface SchedulerIntelligenceRefreshPort {
   refresh(userId: string): Promise<{ newOpportunities: number; notificationsEmitted: number }>;
 }
 
+/** SPRINT-030 — per-user proactive recommendation refresh (research/recommend
+ *  only). The proactive layer never executes, approves or spends; stable-key
+ *  idempotency means a repeat refresh proposes nothing new. */
+export interface SchedulerProactiveRefreshPort {
+  refresh(userId: string): Promise<{ recommendationsRefreshed: number }>;
+}
+
 /** Minimal logger seam (defaults to the platform logger — no secrets). */
 export interface SchedulerCadenceLogger {
   info(message: string, fields?: Record<string, unknown>): void;
@@ -128,7 +143,8 @@ export interface SchedulerCadenceLogger {
 export interface SchedulerCadenceDriverOptions {
   /** Cadence in ms. Default 10 min (env `AI_WORLD_CADENCE_INTERVAL_MS` overrides). */
   intervalMs?: number;
-  /** Disable the cadence (env `AI_WORLD_CADENCE_ENABLED=0` also disables). */
+  /** Disable the cadence (env `AI_WORLD_CADENCE_ENABLED=0|false|no|off`
+   *  also disables — case-insensitive). */
   enabled?: boolean;
   /** Run one tick immediately on start so discovery begins now. Default true. */
   runImmediately?: boolean;
@@ -137,11 +153,21 @@ export interface SchedulerCadenceDriverOptions {
   /** Fail-closed wall-clock bound per pass (default 5 min). */
   maxTickDurationMs?: number;
   /** EPIC-021 — enable the Brain opportunity refresh on this heartbeat.
-   *  Default true; env `AI_WORLD_CADENCE_REFRESH_INTELLIGENCE=0` disables. */
+   *  Default true; env `AI_WORLD_CADENCE_REFRESH_INTELLIGENCE=0|false|no|off`
+   *  disables (case-insensitive). */
   refreshIntelligenceEnabled?: boolean;
   /** EPIC-021 — the Brain bridge. Defaults to the gateway singleton
    *  (brain.discoverIntelligence + ecosystemIntelligence.notify). */
   refreshIntelligence?: SchedulerIntelligenceRefreshPort;
+  /** SPRINT-030 — proactive recommendation refresh on this heartbeat.
+   *  Default true; env `AI_WORLD_CADENCE_PROACTIVE=0|false|no|off` disables
+   *  (case-insensitive). Research and recommendations are automatic; sensitive
+   *  execution is NOT (it stays behind the existing approval authority). */
+  proactiveRefreshEnabled?: boolean;
+  /** SPRINT-030 — the proactive bridge. Defaults to the gateway singleton
+   *  (proactive.refresh with runDiscovery:false — discovery already ran on
+   *  the same heartbeat). */
+  proactiveRefresh?: SchedulerProactiveRefreshPort;
   /** Scheduler accessor. Defaults to the gateway singleton (getServices()). */
   getScheduler?: () => SchedulerApplicationService;
   /** User source. Defaults to the identity directory (registered users). */
@@ -267,6 +293,17 @@ const brainIntelligenceRefresh: SchedulerIntelligenceRefreshPort = createBrainIn
   },
 });
 
+/** SPRINT-030 — default proactive bridge wired to the gateway singleton
+ *  (lazy — never constructed at module scope). Research/recommend only; the
+ *  proactive layer never executes or approves. runDiscovery:false because the
+ *  Brain bridge already ran discovery on the same heartbeat. */
+const defaultProactiveRefresh: SchedulerProactiveRefreshPort = {
+  async refresh(userId: string): Promise<{ recommendationsRefreshed: number }> {
+    const result = await getServices().proactive.refresh(userId, { runDiscovery: false });
+    return { recommendationsRefreshed: result.success ? result.data.length : 0 };
+  },
+};
+
 /**
  * Start the AI World discovery cadence. Idempotent — subsequent calls return
  * the existing driver. Each tick asks the EXISTING SchedulerApplicationService
@@ -279,7 +316,7 @@ export function startSchedulerCadenceDriver(
 ): SchedulerCadenceDriver {
   if (instance) return instance;
 
-  const enabled = options.enabled ?? process.env.AI_WORLD_CADENCE_ENABLED !== '0';
+  const enabled = options.enabled ?? envFlagEnabled(process.env.AI_WORLD_CADENCE_ENABLED);
   if (!enabled) {
     // No-op handle so callers need not branch; the singleton stays unset so a
     // later explicit start can enable the cadence.
@@ -290,6 +327,7 @@ export function startSchedulerCadenceDriver(
         reason: 'disabled',
         maxUsersPerTick: 0,
         refreshIntelligenceEnabled: false,
+        proactiveRefreshEnabled: false,
       }),
       lastTick: undefined,
     };
@@ -308,8 +346,13 @@ export function startSchedulerCadenceDriver(
   // driver stays a heartbeat: it only counts results + isolates failures;
   // dedup and opportunity detection stay in the Brain's discoverIntelligence.
   const refreshIntelligenceEnabled =
-    options.refreshIntelligenceEnabled ?? process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE !== '0';
+    options.refreshIntelligenceEnabled ??
+    envFlagEnabled(process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE);
   const refreshIntelligence = options.refreshIntelligence ?? brainIntelligenceRefresh;
+  // SPRINT-030 — proactive recommendation refresh (research/recommend only).
+  const proactiveRefreshEnabled =
+    options.proactiveRefreshEnabled ?? envFlagEnabled(process.env.AI_WORLD_CADENCE_PROACTIVE);
+  const proactiveRefresh = options.proactiveRefresh ?? defaultProactiveRefresh;
   const now = options.now ?? ((): number => Date.now());
   const log = options.log ?? logger;
 
@@ -330,6 +373,7 @@ export function startSchedulerCadenceDriver(
       runsSkipped: 0,
       opportunitiesFound: 0,
       notificationsEmitted: 0,
+      proactiveRefreshes: 0,
       errors: 0,
       errorSample: [],
       truncated: false,
@@ -387,6 +431,22 @@ export function startSchedulerCadenceDriver(
             }
           }
         }
+        // SPRINT-030 — proactive recommendation refresh on the SAME heartbeat.
+        // Research and recommendations are automatic; this port NEVER executes
+        // or approves anything (the proactive layer is proposal-only; stable
+        // keys make repeat refreshes idempotent). runDiscovery:false — the
+        // Brain bridge above already ran discovery for this user.
+        if (proactiveRefreshEnabled) {
+          try {
+            const refreshed = await proactiveRefresh.refresh(userId);
+            result.proactiveRefreshes += refreshed.recommendationsRefreshed;
+          } catch (error) {
+            result.errors += 1;
+            if (result.errorSample.length < ERROR_SAMPLE_LIMIT) {
+              result.errorSample.push(error instanceof Error ? error.message : String(error));
+            }
+          }
+        }
       }
     } catch (error) {
       // The pass itself failed (defensive — the loop above already isolates
@@ -404,6 +464,7 @@ export function startSchedulerCadenceDriver(
     if (
       result.runsStarted > 0 ||
       result.opportunitiesFound > 0 ||
+      result.proactiveRefreshes > 0 ||
       result.errors > 0 ||
       result.userDirectoryError
     ) {
@@ -413,6 +474,7 @@ export function startSchedulerCadenceDriver(
         runsSkipped: result.runsSkipped,
         opportunitiesFound: result.opportunitiesFound,
         notificationsEmitted: result.notificationsEmitted,
+        proactiveRefreshes: result.proactiveRefreshes,
         errors: result.errors,
         truncated: result.truncated,
         userDirectoryError: result.userDirectoryError,
@@ -452,6 +514,7 @@ export function startSchedulerCadenceDriver(
         intervalMs,
         maxUsersPerTick,
         refreshIntelligenceEnabled,
+        proactiveRefreshEnabled,
         startedAt,
         lastTickAt: lastTick?.finishedAt,
         lastTick,

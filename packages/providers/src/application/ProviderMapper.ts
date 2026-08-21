@@ -61,6 +61,7 @@ export const ProviderMapper = {
       hasEmbeddings: provider.hasFeature('embeddings'),
       createdAt: provider.createdAt.toISOString(),
       updatedAt: provider.updatedAt.toISOString(),
+      customConfig: provider.customConfig,
     };
   },
 

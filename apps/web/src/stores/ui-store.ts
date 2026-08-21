@@ -17,6 +17,10 @@ interface UIState {
   contentDensity: ContentDensity;
   /** Whether AI companion panel is open */
   aiPanelOpen: boolean;
+  /** A question queued from another surface (e.g. dashboard "Ask AI" insights)
+   *  to be pre-filled into the companion input on open. Null when none.
+   *  Honest hand-off between dashboard intelligence and the AI companion. (SPRINT-047) */
+  pendingQuestion: string | null;
   /** Global search modal open */
   globalSearchOpen: boolean;
   /** Notification panel open */
@@ -28,6 +32,7 @@ interface UIState {
   setContentDensity: (density: ContentDensity) => void;
   toggleAiPanel: () => void;
   setAiPanelOpen: (open: boolean) => void;
+  setPendingQuestion: (question: string | null) => void;
   setGlobalSearchOpen: (open: boolean) => void;
   setNotificationsPanelOpen: (open: boolean) => void;
   setAIWorldPanelOpen: (open: boolean) => void;
@@ -37,6 +42,7 @@ export const useUIStore = create<UIState>((set) => ({
   // ── State ───────────────────────────────────────────────────────────────
   contentDensity: 'comfortable',
   aiPanelOpen: false,
+  pendingQuestion: null,
   globalSearchOpen: false,
   notificationsPanelOpen: false,
   aiWorldPanelOpen: false,
@@ -50,6 +56,9 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setAiPanelOpen: (open: boolean): void => {
     set({ aiPanelOpen: open });
+  },
+  setPendingQuestion: (question: string | null): void => {
+    set({ pendingQuestion: question });
   },
   setGlobalSearchOpen: (open: boolean): void => {
     set({ globalSearchOpen: open });

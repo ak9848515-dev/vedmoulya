@@ -57,7 +57,18 @@ describe('KnowledgeAnalyticsService', () => {
       new Date().toISOString().slice(0, 10),
     );
     // Only items created inside the 14-day window land on the trend buckets.
-    expect(analytics.trend.reduce((sum, t) => sum + t.items, 0)).toBeGreaterThan(0);
+    // SPRINT-043E: the static catalog's hardcoded createdAt dates (2026-06..07)
+    // drift out of the 14-day window as wall-clock time advances, so in-window
+    // coverage uses a DETERMINISTIC relative-dated fixture — the test asserts
+    // the service behavior (zero-fill + in-window counting), not that a static
+    // fixture stays forever fresh.
+    const now = new Date();
+    const inWindow = items.slice(0, 2).map((item, i) => ({
+      ...item,
+      createdAt: new Date(now.getTime() - i * 86_400_000).toISOString(),
+    }));
+    const withWindow = service.aggregate([...items, ...inWindow]);
+    expect(withWindow.trend.reduce((sum, t) => sum + t.items, 0)).toBeGreaterThan(0);
   });
 
   it('handles an empty registry', () => {

@@ -53,54 +53,54 @@ export interface ExecutionBridgeHandlers {
 export function createExecutionBridgeRouter(service: ExecutionRunService): ExecutionBridgeHandlers {
   return {
     start: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       const result = await service.start(input.userId, input.planId);
       return fromServiceResult(result);
     },
 
-    get: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    get: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.get(input.userId, input.executionId));
     },
 
-    list: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    list: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.list(input.userId));
     },
 
     approve: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(
         await service.approve(input.userId, input.executionId, input.stepId, input.note),
       );
     },
 
     reject: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(
         await service.reject(input.userId, input.executionId, input.stepId, input.note),
       );
     },
 
     completeHandoff: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(
         await service.completeHandoff(input.userId, input.executionId, input.stepId, input.note),
       );
     },
 
-    cancel: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    cancel: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.cancel(input.userId, input.executionId));
     },
 
-    preferenceLedger: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    preferenceLedger: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.preferenceLedger(input.userId, input.executionId));
     },
 
-    intelligence: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    intelligence: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const run = service.get(input.userId, input.executionId);
       if (!run.success || !run.data) return fromServiceResult(run);
       return fromServiceResult({ success: true, data: service.intelligence(run.data) });

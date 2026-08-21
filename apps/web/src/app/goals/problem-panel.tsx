@@ -21,8 +21,13 @@ import {
   ArrowRight,
   ShieldCheck,
 } from 'lucide-react';
-import { OUTCOME_VERDICTS, OUTCOME_VERDICT_LABELS } from '@vedmoulya/brain';
-import type { OutcomeVerdict } from '@vedmoulya/brain';
+// Deep imports from pure constant modules (NOT the brain barrel): the barrel
+// pulls server-only infrastructure (PostgresBrainStores → node:fs/net) into the
+// client bundle and breaks `next build`. These two modules are type-only, so
+// the constants reach the client with zero server code attached.
+import { OUTCOME_VERDICTS } from '@vedmoulya/brain/types/outcome-types';
+import { OUTCOME_VERDICT_LABELS } from '@vedmoulya/brain/domain/OutcomeVerdict';
+import type { OutcomeVerdict } from '@vedmoulya/brain/types/outcome-types';
 import { useGoalsUnderstandProblem } from '../../lib/api-client.js';
 
 // ── SPRINT-024 — the honest outcome contract ────────────────────────

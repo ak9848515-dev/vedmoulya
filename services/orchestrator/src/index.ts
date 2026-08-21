@@ -10,6 +10,8 @@ import { MockProvider } from './providers/MockProvider.js';
 import { OpenAIProvider } from './providers/OpenAIProvider.js';
 import { VercelAIProvider } from './providers/VercelAIProvider.js';
 import { DeepSeekProvider } from './providers/DeepSeekProvider.js';
+import { GoogleGeminiProvider } from './providers/GoogleGeminiProvider.js';
+import { OpenAICompatibleProvider } from './providers/OpenAICompatibleProvider.js';
 import { OpenAIEmbeddingProvider } from './providers/OpenAIEmbeddingProvider.js';
 
 // ── Service Configuration ──────────────────────────────────────────────────
@@ -20,6 +22,14 @@ export interface OrchestratorConfig {
     anthropic?: { apiKey: string };
     google?: { apiKey: string };
     deepseek?: { apiKey: string };
+    /** SPRINT-049 — custom (user-defined) providers to register dynamically. */
+    custom?: Array<{
+      id: string;
+      name: string;
+      endpointUrl: string;
+      apiKey: string;
+      defaultModelId?: string;
+    }>;
     enableMock: boolean;
   };
 }
@@ -50,6 +60,8 @@ export { MockProvider } from './providers/MockProvider.js';
 export { OpenAIProvider } from './providers/OpenAIProvider.js';
 export { VercelAIProvider } from './providers/VercelAIProvider.js';
 export { DeepSeekProvider } from './providers/DeepSeekProvider.js';
+export { GoogleGeminiProvider } from './providers/GoogleGeminiProvider.js';
+export { OpenAICompatibleProvider } from './providers/OpenAICompatibleProvider.js';
 export { OpenAIEmbeddingProvider } from './providers/OpenAIEmbeddingProvider.js';
 export { AIMetrics } from './observability/AIMetrics.js';
 
@@ -99,6 +111,15 @@ export function resolveDeepSeekKey(): string | undefined {
   return process.env.AI_DEEPSEEK_API_KEY?.trim() || undefined;
 }
 
+/**
+ * Resolve the Google AI (Gemini) API key from the canonical production config
+ * variable (`AI_GOOGLE_API_KEY`, validated by @vedmoulya/core). This is a
+ * SEPARATE credential from Google OAuth — Google login ≠ Gemini authorization.
+ */
+export function resolveGoogleKey(): string | undefined {
+  return process.env.AI_GOOGLE_API_KEY?.trim() || undefined;
+}
+
 export function registerPlatformProviders(
   orchestrator: AIOrchestrationService,
   config?: Partial<OrchestratorConfig>,
@@ -124,6 +145,28 @@ export function registerPlatformProviders(
     // never the raw-fetch legacy adapter.
     orchestrator.registerProvider(new DeepSeekProvider(deepseekKey));
   }
+  const googleKey = providers?.google?.apiKey ?? resolveGoogleKey();
+  if (googleKey) {
+    // SPRINT-049: Google Gemini is wired through the Vercel AI SDK runtime
+    // (@ai-sdk/google — createGoogleGenerativeAI). The Google AI Studio API key
+    // is a SEPARATE credential from Google OAuth credentials.
+    orchestrator.registerProvider(new GoogleGeminiProvider(googleKey));
+  }
+  // SPRINT-049 — register dynamically-configured custom providers.
+  // Each custom provider gets an OpenAICompatibleProvider adapter that
+  // uses the provider's endpoint URL and API key.
+  const customProviders = providers?.custom ?? [];
+  for (const custom of customProviders) {
+    if (custom.apiKey && custom.endpointUrl) {
+      orchestrator.registerProvider(
+        new OpenAICompatibleProvider(custom.apiKey, custom.endpointUrl, custom.id, {
+          name: custom.name,
+          modelId: custom.defaultModelId,
+        }),
+      );
+    }
+  }
+
   const enableMock =
     providers?.enableMock ??
     (process.env.NODE_ENV !== 'production' || process.env.AI_ENABLE_MOCK === 'true');

@@ -2,6 +2,13 @@ import { defineConfig } from 'vitest/config';
 import path from 'path';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@vedmoulya/core': path.resolve(import.meta.dirname, '../../packages/core/src'),
+      '@vedmoulya/domain': path.resolve(import.meta.dirname, '../../packages/domain/src'),
+      '@vedmoulya/services': path.resolve(import.meta.dirname, '../../packages/services/src'),
+    },
+  },
   test: {
     globals: true,
     environment: 'node',
@@ -18,13 +25,6 @@ export default defineConfig({
         functions: 80,
         lines: 80,
       },
-    },
-  },
-  resolve: {
-    alias: {
-      '@vedmoulya/core': path.resolve(__dirname, '../../packages/core/src'),
-      '@vedmoulya/domain': path.resolve(__dirname, '../../packages/domain/src'),
-      '@vedmoulya/services': path.resolve(__dirname, '../../packages/services/src'),
     },
   },
 });

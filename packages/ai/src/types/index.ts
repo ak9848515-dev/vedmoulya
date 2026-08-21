@@ -40,7 +40,7 @@ export const CAPABILITY_TYPES: readonly CapabilityType[] = [
 // ── Provider Types ─────────────────────────────────────────────────────────
 
 export type ProviderFamily =
-  'openai' | 'anthropic' | 'google' | 'deepseek' | 'openrouter' | 'ollama' | 'mock';
+  'openai' | 'anthropic' | 'google' | 'deepseek' | 'openrouter' | 'ollama' | 'mock' | 'custom';
 
 export type ProviderStatus = 'healthy' | 'degraded' | 'unstable' | 'down';
 

@@ -32,6 +32,12 @@ export const users = pgTable(
     timezone: varchar('timezone', { length: 64 }),
     locale: varchar('locale', { length: 10 }),
 
+    // ── First-login profile setup (SPRINT-041B) ────────────────────────────
+    age: integer('age'),
+    gender: varchar('gender', { length: 32 }),
+    purpose: varchar('purpose', { length: 64 }),
+    primaryGoal: varchar('primary_goal', { length: 200 }),
+
     // ── Preferences ───────────────────────────────────────────────────────
     theme: varchar('theme', { length: 16 }).default('system').notNull(),
     language: varchar('language', { length: 10 }).default('en').notNull(),

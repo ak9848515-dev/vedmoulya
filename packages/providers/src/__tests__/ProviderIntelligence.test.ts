@@ -22,6 +22,7 @@ import {
   OpenAICompatibleModelDiscovery,
   InMemoryLocalModelDiscovery,
 } from '../infrastructure/LocalModelDiscovery.js';
+import { ProviderVersion } from '../domain/value-objects/ProviderVersion.js';
 
 function makeProvider(params: {
   id: string;
@@ -358,5 +359,213 @@ describe('LocalModelDiscovery — fail-safe, never fabricates', () => {
     const result = await discovery.discover();
     expect(result.discovered).toBe(false);
     expect(result.statusMessage).toContain('404');
+  });
+
+  it('Ollama adapter fails safe on a non-2xx response', async () => {
+    const discovery = new OllamaLocalModelDiscovery('http://localhost:11434', {
+      fetchFn: async () => new Response('boom', { status: 500 }),
+    });
+    const result = await discovery.discover();
+    expect(result.discovered).toBe(false);
+    expect(result.statusMessage).toContain('HTTP 500');
+  });
+
+  it('Ollama adapter handles an empty model list and string sizes', async () => {
+    const discovery = new OllamaLocalModelDiscovery('http://localhost:11434', {
+      fetchFn: async () =>
+        new Response(
+          JSON.stringify({
+            models: [{ name: 'tiny', size: '4.7GB', details: {} }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    });
+    const result = await discovery.discover();
+    expect(result.discovered).toBe(true);
+    expect(result.models[0]?.sizeGb).toBe(4.7);
+    expect(result.statusMessage).toContain('Discovered 1 model(s)');
+
+    const empty = new OllamaLocalModelDiscovery('http://localhost:11434', {
+      fetchFn: async () =>
+        new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    const emptyResult = await empty.discover();
+    expect(emptyResult.discovered).toBe(true);
+    expect(emptyResult.models).toHaveLength(0);
+  });
+
+  it('OpenAI-compatible adapter parses discovered models on success', async () => {
+    const discovery = new OpenAICompatibleModelDiscovery('lm-studio', 'http://localhost:1234', {
+      fetchFn: async () =>
+        new Response(JSON.stringify({ data: [{ id: 'local-llama' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    const result = await discovery.discover();
+    expect(result.discovered).toBe(true);
+    expect(result.models[0]?.id).toBe('local-llama');
+    expect(result.models[0]?.capabilitiesProvenance).toBe('INFERRED');
+  });
+
+  it('OpenAI-compatible adapter fails safe when the endpoint is unreachable', async () => {
+    const discovery = new OpenAICompatibleModelDiscovery('lm-studio', 'http://localhost:9', {
+      fetchFn: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+    });
+    const result = await discovery.discover();
+    expect(result.discovered).toBe(false);
+    expect(result.statusMessage).toContain('unreachable');
+    expect(result.error).toContain('ECONNREFUSED');
+  });
+
+  it('OpenAI-compatible adapter supports the openai-compatible runtime default', async () => {
+    const discovery = new OpenAICompatibleModelDiscovery('openai-compatible', undefined, {
+      fetchFn: async () =>
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    const result = await discovery.discover();
+    expect(result.runtime).toBe('openai-compatible');
+    expect(result.discovered).toBe(true);
+  });
+});
+
+describe('ProviderIntelligenceService — capability labels and free-availability branches', () => {
+  it('maps capability labels and deduplicates vision/audio/embeddings flags', () => {
+    const provider = makeProvider({
+      id: 'multimodal',
+      family: 'openai',
+      name: 'Multimodal',
+      input: 3,
+      output: 15,
+      models: [
+        {
+          id: 'mm1',
+          name: 'Multimodal One',
+          contextLength: 200000,
+          maxOutputTokens: 8192,
+          streaming: true,
+          vision: true,
+          functionCalling: true,
+          embeddings: true,
+          reasoning: true,
+          coding: false,
+          creativeWriting: false,
+          translation: false,
+          image: true,
+          audio: true,
+          video: false,
+          modalities: ['text', 'image', 'audio'],
+          capabilities: [
+            'vision',
+            'speech',
+            'image_understanding',
+            'content_generation',
+            'general_conversation',
+            'summarization',
+            'classification',
+            'translation',
+          ],
+        },
+      ],
+    });
+    const model = new ProviderIntelligenceService().buildProfile(provider).models[0];
+    expect(model?.capabilities.value).toContain('audio');
+    expect(model?.capabilities.value).toContain('embeddings');
+    expect(model?.capabilities.value).toContain('chat');
+    expect(model?.capabilities.value).toContain('generation');
+    // vision is added once despite being both a flag and a capability label.
+    expect(model?.capabilities.value.filter((c) => c === 'vision')).toHaveLength(1);
+  });
+
+  it('classifies a quota-limited free tier as limited availability', () => {
+    const provider = makeProvider({
+      id: 'google',
+      family: 'google',
+      name: 'Google',
+      costTier: 'free',
+      input: 0.5,
+      output: 2,
+    });
+    const model = new ProviderIntelligenceService().buildProfile(provider).models[0];
+    expect(model?.resourceType).toBe('FREE_API_QUOTA');
+    expect(model?.freeAvailability.value).toBe('limited');
+  });
+
+  it('classifies an enterprise-tagged provider as paid', () => {
+    const provider = makeProvider({
+      id: 'anthropic-ent',
+      family: 'anthropic',
+      name: 'Anthropic Ent',
+      costTier: 'high',
+      input: 5,
+      output: 25,
+      tags: ['enterprise'],
+    });
+    const model = new ProviderIntelligenceService().buildProfile(provider).models[0];
+    expect(model?.resourceType).toBe('ENTERPRISE');
+    expect(model?.freeAvailability.value).toBe('paid');
+  });
+
+  it('marks measured latency as MEASURED after a health sample', () => {
+    const provider = makeProvider({ id: 'measured', family: 'mock', name: 'Measured' });
+    provider.recordHealthSample({ ok: true, latencyMs: 42 });
+    const model = new ProviderIntelligenceService().buildProfile(provider).models[0];
+    expect(model?.latencyMs.provenance).toBe('MEASURED');
+    expect(model?.latencyMs.value).toBe(42);
+  });
+
+  it('structured output is false when neither function-calling nor reasoning is declared', () => {
+    const provider = makeProvider({
+      id: 'plain',
+      family: 'mock',
+      name: 'Plain',
+      models: [
+        {
+          id: 'p1',
+          name: 'Plain One',
+          contextLength: 4096,
+          maxOutputTokens: 1024,
+          streaming: false,
+          vision: false,
+          functionCalling: false,
+          embeddings: false,
+          reasoning: false,
+          coding: false,
+          creativeWriting: false,
+          translation: false,
+          image: false,
+          audio: false,
+          video: false,
+          modalities: ['text'],
+          capabilities: [],
+        },
+      ],
+    });
+    const model = new ProviderIntelligenceService().buildProfile(provider).models[0];
+    expect(model?.structuredOutput.value).toBe(false);
+    expect(model?.structuredOutput.provenance).toBe('PROVIDER_DECLARED');
+  });
+});
+
+describe('ProviderVersion — value object', () => {
+  it('parses, bumps and compares versions', () => {
+    const v = ProviderVersion.fromString('2.3.4');
+    expect(v.toString()).toBe('2.3.4');
+    expect(v.bumpMajor().toString()).toBe('3.0.0');
+    expect(v.bumpMinor().toString()).toBe('2.4.0');
+    expect(v.bumpPatch().toString()).toBe('2.3.5');
+    expect(v.equals(ProviderVersion.fromString('2.3.4'))).toBe(true);
+    expect(v.equals(ProviderVersion.fromString('2.3.5'))).toBe(false);
+    expect(ProviderVersion.fromString('garbage').toString()).toBe('1.0.0');
+    expect(ProviderVersion.fromString('2').toString()).toBe('2.0.0');
+    expect(ProviderVersion.initial().toString()).toBe('1.0.0');
   });
 });

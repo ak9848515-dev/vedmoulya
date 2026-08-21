@@ -100,6 +100,13 @@ describe('startSchedulerCadenceDriver (EPIC-018 runtime closure)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     stopSchedulerCadenceDriver();
+    // Hermetic against a host-inherited environment: the cadence family flags
+    // are controlled by the tests themselves, never by whatever exported them
+    // (e.g. a shell `AI_WORLD_CADENCE_ENABLED=false` — the D2 config trap —
+    // must not silently disable the driver under test).
+    delete process.env.AI_WORLD_CADENCE_ENABLED;
+    delete process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE;
+    delete process.env.AI_WORLD_CADENCE_PROACTIVE;
   });
 
   afterEach(() => {
@@ -459,6 +466,31 @@ describe('startSchedulerCadenceDriver (EPIC-018 runtime closure)', () => {
     }
   });
 
+  it('D2 — AI_WORLD_CADENCE_ENABLED=false (and other false-y spellings) disables the cadence', async () => {
+    const original = process.env.AI_WORLD_CADENCE_ENABLED;
+    try {
+      for (const value of ['false', 'FALSE', 'no', 'off', '0']) {
+        stopSchedulerCadenceDriver();
+        const h = makeHarness();
+        process.env.AI_WORLD_CADENCE_ENABLED = value;
+        const driver = startSchedulerCadenceDriver({
+          getScheduler: h.makeScheduler,
+          userSource: h.users,
+          log: h.log,
+          refreshIntelligence: h.refreshIntelligence,
+        });
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(h.scheduler.tick).not.toHaveBeenCalled();
+        expect(h.refresh).not.toHaveBeenCalled();
+        expect(getSchedulerCadenceDriver()).toBeUndefined();
+        expect(driver.status()).toMatchObject({ active: false, reason: 'disabled' });
+      }
+    } finally {
+      if (original === undefined) delete process.env.AI_WORLD_CADENCE_ENABLED;
+      else process.env.AI_WORLD_CADENCE_ENABLED = original;
+    }
+  });
+
   it('EPIC-021 — default bridge maps uncertainty to relevance and counts only emitted notifications', async () => {
     const notified: Array<{ title: string; relevance: number }> = [];
     const deps: BrainIntelligenceRefreshDeps = {
@@ -510,25 +542,28 @@ describe('startSchedulerCadenceDriver (EPIC-018 runtime closure)', () => {
     expect(failing.ecosystemIntelligence.notify).not.toHaveBeenCalled();
   });
 
-  it('EPIC-021 — honours AI_WORLD_CADENCE_REFRESH_INTELLIGENCE=0', async () => {
-    const h = makeHarness();
-    const original = process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE;
-    try {
-      process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE = '0';
-      startSchedulerCadenceDriver({
-        getScheduler: h.makeScheduler,
-        userSource: h.users,
-        log: h.log,
-        refreshIntelligence: h.refreshIntelligence,
-        intervalMs: 60_000,
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(h.scheduler.tick).toHaveBeenCalledTimes(2); // scheduler runs
-      expect(h.refresh).not.toHaveBeenCalled(); // bridge disabled
-      expect(getSchedulerCadenceDriver()?.status().refreshIntelligenceEnabled).toBe(false);
-    } finally {
-      if (original === undefined) delete process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE;
-      else process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE = original;
+  it('EPIC-021 — honours AI_WORLD_CADENCE_REFRESH_INTELLIGENCE=0 and false-y spellings', async () => {
+    for (const value of ['0', 'false', 'FALSE', 'no', 'off']) {
+      stopSchedulerCadenceDriver();
+      const h = makeHarness();
+      const original = process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE;
+      try {
+        process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE = value;
+        startSchedulerCadenceDriver({
+          getScheduler: h.makeScheduler,
+          userSource: h.users,
+          log: h.log,
+          refreshIntelligence: h.refreshIntelligence,
+          intervalMs: 60_000,
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.scheduler.tick).toHaveBeenCalledTimes(2); // scheduler runs
+        expect(h.refresh).not.toHaveBeenCalled(); // bridge disabled
+        expect(getSchedulerCadenceDriver()?.status().refreshIntelligenceEnabled).toBe(false);
+      } finally {
+        if (original === undefined) delete process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE;
+        else process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE = original;
+      }
     }
   });
 

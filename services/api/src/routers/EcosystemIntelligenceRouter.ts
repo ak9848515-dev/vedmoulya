@@ -29,7 +29,7 @@ import { fromServiceResult } from '../services/ResponseMapper.js';
 
 export interface EcosystemIntelligenceHandlers {
   // ── github.* ──────────────────────────────────────────────────────
-  getGitHubConnection: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
+  getGitHubConnection: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   beginGitHubConnect: (
     input: {
       userId: string;
@@ -45,9 +45,9 @@ export interface EcosystemIntelligenceHandlers {
   ) => Promise<ApiResponse>;
   verifyGitHub: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   revokeGitHub: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
-  disconnectGitHub: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
+  disconnectGitHub: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   listGitHubRepositories: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
-  getGitHubPermissions: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
+  getGitHubPermissions: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
 
   // ── ecosystemIntelligence.* ───────────────────────────────────────
   findBetterOption: (
@@ -80,15 +80,15 @@ export interface EcosystemIntelligenceHandlers {
   evaluateSecurity: (
     input: { userId: string; resourceId: string },
     ctx: TRPCContext,
-  ) => ApiResponse;
+  ) => Promise<ApiResponse>;
   evaluateLicense: (
     input: { userId: string; license?: string; modelLicense?: string },
     ctx: TRPCContext,
-  ) => ApiResponse;
+  ) => Promise<ApiResponse>;
   checkCapabilityFreshness: (
     input: { userId: string; resourceId: string },
     ctx: TRPCContext,
-  ) => ApiResponse;
+  ) => Promise<ApiResponse>;
   getAcquisitionPlan: (
     input: {
       userId: string;
@@ -107,11 +107,11 @@ export interface EcosystemIntelligenceHandlers {
       };
     },
     ctx: TRPCContext,
-  ) => ApiResponse;
+  ) => Promise<ApiResponse>;
   approveAcquisition: (
     input: { userId: string; repository: string },
     ctx: TRPCContext,
-  ) => ApiResponse;
+  ) => Promise<ApiResponse>;
   rejectAcquisition: (
     input: { userId: string; repository: string },
     ctx: TRPCContext,
@@ -132,10 +132,16 @@ export interface EcosystemIntelligenceHandlers {
     },
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;
-  listLifecycle: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
-  getLifecycle: (input: { userId: string; resourceId: string }, ctx: TRPCContext) => ApiResponse;
-  listNotifications: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
-  markNotificationRead: (input: { userId: string; id: string }, ctx: TRPCContext) => ApiResponse;
+  listLifecycle: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
+  getLifecycle: (
+    input: { userId: string; resourceId: string },
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
+  listNotifications: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
+  markNotificationRead: (
+    input: { userId: string; id: string },
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
 }
 
 export function createEcosystemIntelligenceRouter(
@@ -143,13 +149,13 @@ export function createEcosystemIntelligenceRouter(
 ): EcosystemIntelligenceHandlers {
   return {
     // ── github.* ──────────────────────────────────────────────────────
-    getGitHubConnection: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    getGitHubConnection: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.getGitHubConnection(input.userId) });
     },
 
     beginGitHubConnect: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult({
         success: true,
         data: await service.beginGitHubConnect(input.userId, input.scopes as never, {
@@ -160,7 +166,7 @@ export function createEcosystemIntelligenceRouter(
     },
 
     completeGitHubAuthorization: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult({
         success: true,
         data: await service.completeGitHubAuthorization(input.userId, input.code, input.state),
@@ -168,36 +174,36 @@ export function createEcosystemIntelligenceRouter(
     },
 
     verifyGitHub: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: await service.verifyGitHub(input.userId) });
     },
 
     revokeGitHub: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult({ success: true, data: await service.revokeGitHub(input.userId) });
     },
 
-    disconnectGitHub: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+    disconnectGitHub: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult({ success: true, data: service.disconnectGitHub(input.userId) });
     },
 
     listGitHubRepositories: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: await service.listGitHubRepositories(input.userId),
       });
     },
 
-    getGitHubPermissions: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    getGitHubPermissions: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.getGitHubConnection(input.userId) });
     },
 
     // ── ecosystemIntelligence.* ───────────────────────────────────────
     findBetterOption: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult({
         success: true,
         data: await service.findBetterOption(input.userId, input.capability as never, {
@@ -212,7 +218,7 @@ export function createEcosystemIntelligenceRouter(
     },
 
     findFreeAlternative: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: await service.findFreeAlternative(input.userId, input.capability as never),
@@ -220,7 +226,7 @@ export function createEcosystemIntelligenceRouter(
     },
 
     findLocalAlternative: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: await service.findLocalAlternative(input.userId, input.capability as never),
@@ -228,7 +234,7 @@ export function createEcosystemIntelligenceRouter(
     },
 
     findGitHubCapability: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: await service.findGitHubCapability(input.userId, input.capability as never),
@@ -236,23 +242,23 @@ export function createEcosystemIntelligenceRouter(
     },
 
     findBetterProvider: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: await service.findBetterProvider(input.userId, input.capability as never),
       });
     },
 
-    evaluateSecurity: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    evaluateSecurity: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: service.evaluateSecurity(input.userId, input.resourceId),
       });
     },
 
-    evaluateLicense: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    evaluateLicense: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: service.evaluateLicense(input.userId, {
@@ -262,16 +268,16 @@ export function createEcosystemIntelligenceRouter(
       });
     },
 
-    checkCapabilityFreshness: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    checkCapabilityFreshness: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: service.checkCapabilityFreshness(input.userId, input.resourceId),
       });
     },
 
-    getAcquisitionPlan: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+    getAcquisitionPlan: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult({
         success: true,
         data: service.getAcquisitionPlan(input.userId, {
@@ -312,8 +318,8 @@ export function createEcosystemIntelligenceRouter(
       });
     },
 
-    approveAcquisition: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+    approveAcquisition: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult({
         success: true,
         data: service.approveAcquisition(input.userId, input.repository),
@@ -321,7 +327,7 @@ export function createEcosystemIntelligenceRouter(
     },
 
     rejectAcquisition: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult({
         success: true,
         data: await service.rejectAcquisition(input.userId, input.repository),
@@ -329,7 +335,7 @@ export function createEcosystemIntelligenceRouter(
     },
 
     respondToRecommendation: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: await service.respondToRecommendation(
@@ -340,26 +346,26 @@ export function createEcosystemIntelligenceRouter(
       });
     },
 
-    listLifecycle: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    listLifecycle: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.listLifecycle(input.userId) });
     },
 
-    getLifecycle: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    getLifecycle: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: service.getLifecycle(input.userId, input.resourceId),
       });
     },
 
-    listNotifications: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    listNotifications: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.listNotifications(input.userId) });
     },
 
-    markNotificationRead: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    markNotificationRead: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({
         success: true,
         data: service.markNotificationRead(input.userId, input.id),

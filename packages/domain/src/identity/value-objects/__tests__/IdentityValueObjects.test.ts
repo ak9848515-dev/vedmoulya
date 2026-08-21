@@ -55,6 +55,49 @@ describe('UserProfile', () => {
     const profile = new UserProfile(fullProps);
     expect(profile.toJSON()).toEqual(fullProps);
   });
+
+  // ── SPRINT-041B — first-login profile completion ──────────────────────
+
+  it('isComplete() is false until all first-login fields are present', () => {
+    expect(new UserProfile({ displayName: 'A' }).isComplete()).toBe(false);
+    expect(new UserProfile({ displayName: 'A', age: 30 }).isComplete()).toBe(false);
+    expect(
+      new UserProfile({
+        displayName: 'A',
+        age: 30,
+        gender: 'female',
+        purpose: 'learning',
+      }).isComplete(),
+    ).toBe(false);
+  });
+
+  it('isComplete() is true when age/gender/purpose/primaryGoal are all set', () => {
+    const profile = new UserProfile({
+      displayName: 'Ada',
+      age: 36,
+      gender: 'female',
+      purpose: 'learning',
+      primaryGoal: 'Master TypeScript',
+    });
+    expect(profile.isComplete()).toBe(true);
+  });
+
+  it('with() preserves and updates the first-login fields', () => {
+    const profile = new UserProfile({ displayName: 'Ada' });
+    const updated = profile.with({
+      age: 36,
+      gender: 'female',
+      purpose: 'building',
+      primaryGoal: 'Ship an app',
+    });
+    expect(updated.age).toBe(36);
+    expect(updated.gender).toBe('female');
+    expect(updated.purpose).toBe('building');
+    expect(updated.primaryGoal).toBe('Ship an app');
+    expect(updated.isComplete()).toBe(true);
+    // The original is untouched (immutable value object).
+    expect(profile.isComplete()).toBe(false);
+  });
 });
 
 describe('UserPreferences', () => {

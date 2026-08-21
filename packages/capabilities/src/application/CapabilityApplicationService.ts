@@ -388,9 +388,7 @@ export class CapabilityApplicationService {
     return { success: true, data: caps.map((c) => CapabilityMapper.toDTO(c)) };
   }
 
-  async getCompositionTree(
-    id: string,
-  ): Promise<
+  async getCompositionTree(id: string): Promise<
     CapabilityResult<{
       tree: import('./CapabilityDTO.js').CapabilityCompositionDTO;
       leaves: string[];

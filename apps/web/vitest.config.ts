@@ -8,17 +8,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  // React plugin (hoisted from packages/ui): enables JSX transform for
-  // component tests (AICompanion Phase 13 UI validation). The Next.js
-  // tsconfig uses `jsx: preserve`, which the vitest transform must override
-  // to `automatic` — otherwise JSX stays unparsed and import-analysis fails.
-  plugins: [react()],
-  // Vitest 4's rolldown transform uses oxc options (esbuild is ignored);
-  // explicit jsx: automatic overrides the Next.js `jsx: preserve` so JSX in
-  // component tests is parsed and transformed.
+  // Vitest 4's rolldown transform uses oxc options. The Next.js tsconfig uses
+  // `jsx: preserve`, so we explicitly request the `automatic` JSX runtime —
+  // otherwise JSX in component tests stays unparsed and import-analysis fails.
+  // (No @vitejs/plugin-react here: under rolldown-vite its esbuild/jsx config
+  // is ignored and only triggers deprecation warnings — oxc handles the JSX
+  // transform natively.)
   oxc: { jsx: { runtime: 'automatic' } },
   test: {
     // MOB-001/002: auth, stores and lib modules are DOM-free logic (node env);

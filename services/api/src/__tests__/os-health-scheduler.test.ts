@@ -34,6 +34,10 @@ describe('startOSHealthScheduler', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     stopOSHealthScheduler();
+    // Hermetic against a host-inherited environment (D2 family): the flag is
+    // controlled by the tests themselves, never by whatever exported it.
+    delete process.env.OS_HEALTH_SCHEDULER_ENABLED;
+    delete process.env.OS_HEALTH_INTERVAL_MS;
   });
 
   afterEach(() => {
@@ -134,6 +138,26 @@ describe('startOSHealthScheduler', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(getOSHealthScheduler()?.lastRun).toMatchObject({ success: false, error: 'boom' });
+  });
+
+  it('D2 — OS_HEALTH_SCHEDULER_ENABLED=false (and other false-y spellings) disables the scheduler', async () => {
+    const original = process.env.OS_HEALTH_SCHEDULER_ENABLED;
+    try {
+      for (const value of ['false', 'FALSE', 'no', 'off', '0']) {
+        stopOSHealthScheduler();
+        const { dashboard, svc } = fakeOS();
+        process.env.OS_HEALTH_SCHEDULER_ENABLED = value;
+        const sched = startOSHealthScheduler({ getOS: () => svc, intervalMs: 30_000 });
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(dashboard).not.toHaveBeenCalled();
+        expect(getOSHealthScheduler()).toBeUndefined();
+        expect(sched.lastRun).toBeUndefined();
+        expect(() => sched.stop()).not.toThrow();
+      }
+    } finally {
+      if (original === undefined) delete process.env.OS_HEALTH_SCHEDULER_ENABLED;
+      else process.env.OS_HEALTH_SCHEDULER_ENABLED = original;
+    }
   });
 
   it('returns a no-op scheduler when disabled', async () => {

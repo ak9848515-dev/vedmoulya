@@ -15,6 +15,7 @@ import type {
   ProviderLifecycleStatus as ProviderLifecycleStatusValue,
   ProviderModel,
   ProviderRateLimits,
+  CustomProviderConfig,
 } from '../../types/provider-types.js';
 import type { ProviderId } from '../value-objects/ProviderId.js';
 import { ProviderLifecycleStatus } from '../value-objects/ProviderLifecycleStatus.js';
@@ -62,6 +63,7 @@ export class Provider {
   private _tags: string[];
   private _documentationUrl?: string;
   private _matrix: ProviderCapabilityMatrixEntry[];
+  private _customConfig?: CustomProviderConfig;
   private readonly _createdAt: Date;
   private _updatedAt: Date;
 
@@ -84,6 +86,7 @@ export class Provider {
     tags?: string[];
     documentationUrl?: string;
     matrix?: ProviderCapabilityMatrixEntry[];
+    customConfig?: CustomProviderConfig;
     createdAt?: Date;
     updatedAt?: Date;
   }) {
@@ -127,6 +130,7 @@ export class Provider {
     this._tags = params.tags ?? [];
     this._documentationUrl = params.documentationUrl;
     this._matrix = params.matrix ?? [];
+    this._customConfig = params.customConfig;
     this._createdAt = params.createdAt ?? new Date();
     this._updatedAt = params.updatedAt ?? new Date();
   }
@@ -186,6 +190,9 @@ export class Provider {
   }
   get matrix(): readonly ProviderCapabilityMatrixEntry[] {
     return Object.freeze(this._matrix.map((m) => ({ ...m })));
+  }
+  get customConfig(): CustomProviderConfig | undefined {
+    return this._customConfig ? { ...this._customConfig } : undefined;
   }
   get createdAt(): Date {
     return this._createdAt;
@@ -406,6 +413,7 @@ export class Provider {
     tags?: string[];
     documentationUrl?: string;
     matrix?: ProviderCapabilityMatrixEntry[];
+    customConfig?: CustomProviderConfig;
     createdAt?: Date;
     updatedAt?: Date;
   }): Provider {
@@ -428,8 +436,18 @@ export class Provider {
       tags: params.tags,
       documentationUrl: params.documentationUrl,
       matrix: params.matrix,
+      customConfig: params.customConfig,
       createdAt: params.createdAt,
       updatedAt: params.updatedAt,
     });
+  }
+
+  // ── Custom Provider Config ──────────────────────────────────────────────
+
+  /** Update custom provider configuration (only for family === 'custom'). */
+  updateCustomConfig(config: CustomProviderConfig): void {
+    this._customConfig = { ...config };
+    this._version = this._version.bumpMinor();
+    this._updatedAt = new Date();
   }
 }

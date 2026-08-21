@@ -444,8 +444,8 @@ export function BrainLearningPanel({
         </button>
       </div>
       <p className="mt-1 text-[11px] text-[#64748B] dark:text-[#94A3B8]">
-        Learning is evidence-based — every signal shows who stated it, and you can correct
-        anything. Corrections always outrank inferred patterns.
+        Learning is evidence-based — every signal shows who stated it, and you can correct anything.
+        Corrections always outrank inferred patterns.
       </p>
 
       {open && (
@@ -503,9 +503,7 @@ export function BrainLearningPanel({
             >
               <div className="flex items-center gap-1.5">
                 <SourceBadge source="EXPLICIT" kind="FACT" />
-                <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
-                  {c.target}
-                </span>
+                <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">{c.target}</span>
               </div>
               <p className="mt-1 text-[11px] font-medium text-[#111827] dark:text-[#F8FAFC]">
                 “{c.statement}”

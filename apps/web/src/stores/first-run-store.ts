@@ -33,7 +33,7 @@ export const useFirstRunStore = create<FirstRunState>()(
   persist(
     (set) => ({
       ollamaPromptDismissed: false,
-      dismissOllamaPrompt: () => {
+      dismissOllamaPrompt: (): void => {
         set({ ollamaPromptDismissed: true });
       },
     }),

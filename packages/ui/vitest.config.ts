@@ -1,8 +1,12 @@
+// VedMoulya — UI Package Vitest Configuration
+// Component tests run in jsdom with the shared setup. JSX is transformed by
+// Vitest 4's rolldown/oxc pipeline (no @vitejs/plugin-react: under
+// rolldown-vite its esbuild config is ignored and only triggers deprecation
+// warnings).
 import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  plugins: [react()],
+  oxc: { jsx: { runtime: 'automatic' } },
   test: {
     environment: 'jsdom',
     globals: true,

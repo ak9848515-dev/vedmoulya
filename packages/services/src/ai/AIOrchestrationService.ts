@@ -1078,9 +1078,7 @@ export class AIOrchestrationService extends BaseService {
     return { messages, optimization, selection };
   }
 
-  private buildContextSections(
-    request: OrchestrateRequestDTO,
-  ): Array<{
+  private buildContextSections(request: OrchestrateRequestDTO): Array<{
     source: import('./runtime/index.js').ContextSection['source'];
     category: import('./runtime/index.js').ContextSection['category'];
     content: string;

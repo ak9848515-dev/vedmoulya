@@ -135,6 +135,58 @@ export interface ProviderDefinition {
   matrix: ProviderCapabilityMatrixEntry[];
 }
 
+// ── Custom Provider Configuration (SPRINT-049) ─────────────────────────────
+
+/** Protocol type determines how the adapter communicates with the endpoint. */
+export type CustomProviderProtocol =
+  | 'openai-compatible' // OpenAI Chat Completions API compatible
+  | 'anthropic-compatible' // Anthropic Messages API compatible
+  | 'google-gemini' // Google generativelanguage API
+  | 'ollama' // Ollama local API
+  | 'custom'; // Custom protocol (future extension)
+
+/** Authentication method for custom providers. */
+export type CustomProviderAuthMethod =
+  | 'api-key' // Bearer token / API key
+  | 'oauth2' // OAuth 2.0 bearer token
+  | 'basic' // HTTP Basic auth
+  | 'none'; // No authentication (e.g., local endpoints)
+
+/** Deployment type for custom providers. */
+export type CustomProviderDeployment = 'cloud' | 'local' | 'enterprise';
+
+/**
+ * Configuration for a custom (user-defined) AI provider.
+ * Stored alongside the Provider entity when family === 'custom'.
+ * SECURITY: apiKey is server-side only — never exposed to the browser.
+ */
+export interface CustomProviderConfig {
+  /** Human-readable category label. */
+  category: 'Cloud AI' | 'Local AI' | 'Enterprise AI' | 'OpenAI-compatible' | 'Custom';
+  /** Protocol for adapter creation. */
+  protocol: CustomProviderProtocol;
+  /** Authentication method. */
+  authMethod: CustomProviderAuthMethod;
+  /** Base URL of the API endpoint (e.g., https://api.example.com/v1). */
+  endpointUrl: string;
+  /** API key or credential. SERVER-SIDE ONLY — never logged, never exposed to browser. */
+  apiKey?: string;
+  /** Default model id to use when none is specified. */
+  defaultModelId?: string;
+  /** Deployment type. */
+  deployment: CustomProviderDeployment;
+  /** Whether the provider is currently enabled. */
+  enabled: boolean;
+  /** Whether this provider is eligible to be the primary provider. */
+  primaryEligible: boolean;
+  /** Current connection status (honest — never fabricated). */
+  connectionStatus: 'untested' | 'connected' | 'failed' | 'testing';
+  /** Last connection test result message. */
+  connectionMessage?: string;
+  /** Timestamp of last connection test. */
+  lastTestedAt?: string;
+}
+
 // ── Search ─────────────────────────────────────────────────────────────────
 
 export interface ProviderSearchCriteria {

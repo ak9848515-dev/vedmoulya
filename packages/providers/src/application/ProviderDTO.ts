@@ -16,6 +16,7 @@ import type {
   ProviderBenchmarkCategory,
   ProviderBenchmarkDefinition,
   ProviderLifecycleStatus,
+  CustomProviderConfig,
 } from '../types/provider-types.js';
 
 // ── Command DTOs ─────────────────────────────────────────────────────────
@@ -58,6 +59,8 @@ export interface CreateProviderDTO {
   name: string;
   description: string;
   owner: string;
+  /** SPRINT-049 — custom provider configuration (required when family === 'custom'). */
+  customConfig?: CustomProviderConfig;
   models?: ProviderModelInput[];
   capabilities?: CapabilityType[];
   supportedModalities?: ModalityType[];
@@ -83,6 +86,8 @@ export interface UpdateProviderDTO {
   owner?: string;
   tags?: string[];
   documentationUrl?: string;
+  /** SPRINT-049 — custom provider configuration update. */
+  customConfig?: CustomProviderConfig;
   inputPerMillionTokens?: number;
   outputPerMillionTokens?: number;
   currency?: string;
@@ -164,6 +169,8 @@ export interface ProviderDTO {
   hasEmbeddings: boolean;
   createdAt: string;
   updatedAt: string;
+  /** SPRINT-049 — custom provider configuration (only for family === 'custom'). */
+  customConfig?: CustomProviderConfig;
 }
 
 export interface ProviderCapabilityMatrixDTO {

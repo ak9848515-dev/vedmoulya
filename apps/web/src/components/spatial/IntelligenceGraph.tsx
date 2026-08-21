@@ -176,7 +176,7 @@ function GraphNodeCard({
   isActive: boolean;
   isSelected: boolean;
   onClick: () => void;
-}) {
+}): React.JSX.Element {
   const config = STATUS_CONFIG[node.status];
 
   return (
@@ -215,7 +215,13 @@ function GraphNodeCard({
 
 // ── Inspector Panel ──────────────────────────────────────────────────────────
 
-function InspectorPanel({ node, onClose }: { node: GraphNode; onClose: () => void }) {
+function InspectorPanel({
+  node,
+  onClose,
+}: {
+  node: GraphNode;
+  onClose: () => void;
+}): React.JSX.Element {
   const config = STATUS_CONFIG[node.status];
 
   return (
@@ -261,7 +267,7 @@ function ActiveExecutionBar({
   execution,
 }: {
   execution: IntelligenceGraphData['activeExecution'];
-}) {
+}): React.JSX.Element | null {
   if (!execution) return null;
 
   const progress =
@@ -326,7 +332,10 @@ export interface IntelligenceGraphProps {
   onReject?: (executionId: string, stepId: string) => void;
 }
 
-export function IntelligenceGraph({ data, onNodeClick }: IntelligenceGraphProps) {
+export function IntelligenceGraph({
+  data,
+  onNodeClick,
+}: IntelligenceGraphProps): React.JSX.Element {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [filter, setFilter] = useState<string>('all');
 
@@ -496,7 +505,7 @@ function FilterButton({
   active: boolean;
   onClick: () => void;
   icon?: React.ReactNode;
-}) {
+}): React.JSX.Element {
   return (
     <button
       onClick={onClick}

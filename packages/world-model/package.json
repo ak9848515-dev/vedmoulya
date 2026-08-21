@@ -1,0 +1,31 @@
+{
+  "name": "@vedmoulya/world-model",
+  "version": "1.0.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "description": "VedMoulya World Model & Business Operating System (SPRINT-032) — a narrow COMPOSITION layer that represents the minimum useful world for better user decisions: a bounded owner-scoped typed graph over EXISTING entities (user/work/goals/opportunities/capabilities/providers/outcomes), configurable business units, evidence-only opportunity economics, a provider-neutral AI workforce role abstraction, a generic bounded workflow factory and an honest external-world signal interface. NOT an engine: no discovery, no provider selection, no approval, no spending, no execution, no memory promotion — every authority stays in the frozen estate and is reached through narrow ports.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@vedmoulya/core": "*",
+    "@vedmoulya/intelligence-fabric": "*",
+    "@vedmoulya/proactive": "*"
+  },
+  "devDependencies": {
+    "typescript": "*",
+    "vitest": "*"
+  }
+}

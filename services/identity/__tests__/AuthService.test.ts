@@ -224,6 +224,43 @@ describe('AuthService', () => {
       expect(result.session?.tokens.accessToken).toBeTruthy();
     });
 
+    it('verifies the new email in development/test (local runtime closure)', async () => {
+      const repo = makeRepository();
+      repo.findByEmail.mockResolvedValue(null);
+      const service = createService(repo);
+
+      const result = await service.signUp({
+        email: 'local@example.com',
+        displayName: 'Local Founder',
+        password: 'ValidPass1',
+      });
+
+      expect(result.success).toBe(true);
+      const saved = repo.save.mock.calls[0]?.[0] as { status: { emailVerified: boolean } };
+      expect(saved.status.emailVerified).toBe(true);
+    });
+
+    it('leaves the email unverified in production/staging (safeguard unchanged)', async () => {
+      const repo = makeRepository();
+      repo.findByEmail.mockResolvedValue(null);
+      const service = createService(repo);
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        const result = await service.signUp({
+          email: 'prod@example.com',
+          displayName: 'Prod User',
+          password: 'ValidPass1',
+        });
+
+        expect(result.success).toBe(true);
+        const saved = repo.save.mock.calls[0]?.[0] as { status: { emailVerified: boolean } };
+        expect(saved.status.emailVerified).toBe(false);
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
     it('rejects a duplicate email', async () => {
       const repo = makeRepository();
       repo.findByEmail.mockResolvedValue(makeUser());
@@ -250,6 +287,103 @@ describe('AuthService', () => {
       });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Registration failed');
+    });
+  });
+
+  // ── SPRINT-041B — first-login profile completion in sessions ────────────
+
+  describe('first-login profile completion (SPRINT-041B)', () => {
+    it('sign-up session reports profileComplete=false for a brand-new user', async () => {
+      const repo = makeRepository();
+      repo.findByEmail.mockResolvedValue(null);
+      repo.save.mockResolvedValue(undefined);
+      const service = createService(repo);
+
+      const result = await service.signUp({
+        email: 'new@example.com',
+        displayName: 'New User',
+        password: 'ValidPass1',
+      });
+      expect(result.success).toBe(true);
+      expect(result.session?.displayName).toBe('New User');
+      expect(result.session?.profileComplete).toBe(false);
+    });
+
+    it('sign-in session reports profileComplete=true once the profile is complete', async () => {
+      const repo = makeRepository();
+      const user = makeUser({
+        age: 30,
+        gender: 'female',
+        purpose: 'learning',
+        primaryGoal: 'Master TS',
+      });
+      repo.findByEmail.mockResolvedValue(user);
+      const service = createService(repo);
+
+      const result = await service.signInWithEmail('test@example.com', 'password');
+      expect(result.success).toBe(true);
+      expect(result.session?.profileComplete).toBe(true);
+    });
+
+    it('getProfile returns the stored profile with the derived completion state', async () => {
+      const repo = makeRepository();
+      const user = makeUser({
+        age: 30,
+        gender: 'male',
+        purpose: 'business',
+        primaryGoal: 'Launch a service',
+      });
+      repo.findById.mockResolvedValue(user);
+      const service = createService(repo);
+
+      const profile = await service.getProfile(user.id);
+      expect(profile.userId).toBe(user.id);
+      expect(profile.age).toBe(30);
+      expect(profile.gender).toBe('male');
+      expect(profile.purpose).toBe('business');
+      expect(profile.primaryGoal).toBe('Launch a service');
+      expect(profile.profileComplete).toBe(true);
+    });
+
+    it('getProfile throws NotFoundError for an unknown user', async () => {
+      const repo = makeRepository();
+      repo.findById.mockResolvedValue(null);
+      const service = createService(repo);
+      await expect(service.getProfile('missing')).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('updateProfile persists through the domain entity and returns completion', async () => {
+      const repo = makeRepository();
+      const user = makeUser();
+      repo.findById.mockResolvedValue(user);
+      const service = createService(repo);
+
+      const profile = await service.updateProfile(user.id, {
+        age: 25,
+        gender: 'non_binary',
+        purpose: 'career',
+        primaryGoal: 'Become a senior engineer',
+      });
+
+      expect(repo.update).toHaveBeenCalled();
+      expect(profile.profileComplete).toBe(true);
+      expect(profile.age).toBe(25);
+      expect(profile.primaryGoal).toBe('Become a senior engineer');
+      // The repository received the updated entity (verifies no direct DB writes
+      // and that the domain entity is the write path).
+      const saved = repo.update.mock.calls[0]?.[0] as { profile: { isComplete(): boolean } };
+      expect(saved.profile.isComplete()).toBe(true);
+    });
+
+    it('updateProfile leaves completion false when required fields are missing', async () => {
+      const repo = makeRepository();
+      const user = makeUser();
+      repo.findById.mockResolvedValue(user);
+      const service = createService(repo);
+
+      const profile = await service.updateProfile(user.id, { displayName: 'Renamed' });
+      expect(profile.displayName).toBe('Renamed');
+      expect(profile.profileComplete).toBe(false);
     });
   });
 });

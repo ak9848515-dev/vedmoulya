@@ -76,7 +76,12 @@ export function deriveLearningSignals(input: DeriveSignalsInput): LearningSignal
   // Artifact-level inconclusive evidence (SPRINT-024) stays UNKNOWN via the
   // verdict, never reaching the FAILED path here.
   const signals: LearningSignal[] = [];
-  const push = (fact: string, kind: LearningSignalKind, confidence: number, evidence: string[]): void => {
+  const push = (
+    fact: string,
+    kind: LearningSignalKind,
+    confidence: number,
+    evidence: string[],
+  ): void => {
     if (signals.length >= MAX_SIGNALS_PER_OUTCOME) return;
     signals.push({
       fact,
@@ -169,12 +174,9 @@ export function deriveLearningSignals(input: DeriveSignalsInput): LearningSignal
   }
 
   if (signals.length === 0) {
-    push(
-      'No provider evidence produced a learning signal for this outcome.',
-      'UNKNOWN',
-      0.5,
-      ['no executable provider outputs'],
-    );
+    push('No provider evidence produced a learning signal for this outcome.', 'UNKNOWN', 0.5, [
+      'no executable provider outputs',
+    ]);
   }
 
   return signals;

@@ -2,11 +2,30 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Drawer, DrawerOverlay, DrawerContent, VisuallyHidden } from '@vedmoulya/ui';
-import { Sparkles, X, Send, Mic, Brain, Loader2 } from 'lucide-react';
+import {
+  Sparkles,
+  X,
+  Send,
+  Brain,
+  Loader2,
+  Mic,
+  Radar,
+  Activity,
+  ShieldCheck,
+  Layers,
+  LayoutDashboard,
+} from 'lucide-react';
 import { useUIStore } from '../stores/ui-store.js';
 import { useAuthStore } from '../stores/auth-store.js';
 import { api } from '../lib/trpc.js';
+import { useProviderRuntimeStatus } from '../lib/api-client.js';
 import { Badge, Avatar } from '@vedmoulya/ui';
+import { VoicePanel } from './VoicePanel.js';
+import { ProactivePanel } from './ProactivePanel.js';
+import { FabricPanel } from './FabricPanel.js';
+import { ControlPanel } from './ControlPanel.js';
+import { WorldPanel } from './WorldPanel.js';
+import { CommandCenter } from './CommandCenter.js';
 
 interface Message {
   role: 'ai' | 'user';
@@ -62,13 +81,19 @@ export function stageLabel(stage: RuntimeStage): string {
 }
 
 export function AICompanion(): React.JSX.Element {
-  const { aiPanelOpen, setAiPanelOpen } = useUIStore();
+  const { aiPanelOpen, setAiPanelOpen, pendingQuestion, setPendingQuestion } = useUIStore();
   // AI-RUNTIME-002: the companion routes through the real ai.stream runtime
   // (capability → context optimization → EI-002/EI-004 model selection →
   // SDK streaming → validation). The stage label reflects the actual events
   // emitted by the runtime; the provider/model chip shows the run telemetry.
   const userId = useAuthStore((s) => s.user?.userId ?? '');
   const streamMutation = api.ai.stream.useMutation();
+  // SPRINT-048 — honest AI readiness: "AI Ready" only when a registered
+  // provider can actually execute a request (EPIC-019 runtime vocabulary,
+  // never fabricated). While unknown, the badge stays neutral.
+  const runtimeStatus = useProviderRuntimeStatus(userId);
+  const aiReadinessKnown = !runtimeStatus.isLoading && !runtimeStatus.isError;
+  const aiCanExecute = (runtimeStatus.data?.providers ?? []).some((p) => p.canExecute);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'ai',
@@ -82,6 +107,29 @@ export function AICompanion(): React.JSX.Element {
   const [streamingText, setStreamingText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // SPRINT-028 — voice assistant: live capability status (MOCK/CONFIGURED/
+  // UNAVAILABLE/ERROR — the server never claims CONFIGURED for a mock).
+  const voiceStatus = api.voice.status.useQuery(
+    { userId },
+    { enabled: Boolean(userId), refetchInterval: 60_000, retry: false },
+  );
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
+  // SPRINT-029 — proactive intelligence panel (recommendations are evidence-gated;
+  // nothing here authorizes anything — sensitive actions keep the existing approval path).
+  const [proactiveOpen, setProactiveOpen] = useState(false);
+  // SPRINT-030 — intelligence fabric panel (observed provider health; UNKNOWN until
+  // real calls are observed — never fabricated).
+  const [fabricOpen, setFabricOpen] = useState(false);
+  // SPRINT-031 — autonomy control panel (explicit settings + emergency stop + TODAY;
+  // fail-closed — nothing is granted without user confirmation).
+  const [controlOpen, setControlOpen] = useState(false);
+  // SPRINT-032 — world model & business operating system panel (bounded MY WORLD
+  // snapshot + opportunity pipeline with zero/low-capital budget filters + honest
+  // external-signal status).
+  const [worldOpen, setWorldOpen] = useState(false);
+  // SPRINT-034 — Founder Command Center (presentation-only TODAY / PORTFOLIO /
+  // INTELLIGENCE / AUTOMATION / APPROVALS over the existing read models).
+  const [commandCenterOpen, setCommandCenterOpen] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -94,6 +142,17 @@ export function AICompanion(): React.JSX.Element {
       }, 100);
     }
   }, [aiPanelOpen]);
+
+  // SPRINT-047 — hand-off from the dashboard's "Ask AI" insights: a question
+  // queued through the shared UI store is pre-filled into the input on open so
+  // the founder's chosen question arrives ready to send (no dead buttons, no
+  // extra navigation). Consumed exactly once per queue.
+  useEffect(() => {
+    if (aiPanelOpen && pendingQuestion) {
+      setInput(pendingQuestion);
+      setPendingQuestion(null);
+    }
+  }, [aiPanelOpen, pendingQuestion, setPendingQuestion]);
 
   const handleSend = async (): Promise<void> => {
     const prompt = input.trim();
@@ -184,7 +243,7 @@ export function AICompanion(): React.JSX.Element {
     <Drawer open={aiPanelOpen} onOpenChange={setAiPanelOpen}>
       <DrawerOverlay className="fixed inset-0 z-[100] bg-[rgba(15,23,42,0.5)]" />
       <DrawerContent
-        className="fixed z-[100] right-0 top-0 h-full w-[440px] bg-white shadow-xl flex flex-col"
+        className="fixed z-[100] right-0 top-0 h-full w-[440px] max-w-[100vw] bg-white shadow-xl flex flex-col"
         aria-label="AI Companion"
       >
         <VisuallyHidden>
@@ -202,11 +261,26 @@ export function AICompanion(): React.JSX.Element {
                 <div className="flex items-center gap-2">
                   <h3 className="text-[18px] font-semibold text-[#111827]">AI Companion</h3>
                   <Badge variant="ai" size="sm">
-                    Phoenix
+                    VedMoulya
                   </Badge>
                 </div>
-                <p className="text-[12px] text-[#22C55E] flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E]" /> Online
+                <p className="text-[12px] flex items-center gap-1">
+                  {!aiReadinessKnown ? (
+                    <span className="text-[#94A3B8]">Checking AI…</span>
+                  ) : aiCanExecute ? (
+                    <span className="text-[#22C55E]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] mr-1 inline-block" />{' '}
+                      AI Ready
+                    </span>
+                  ) : (
+                    <span
+                      className="text-[#B45309]"
+                      title="No AI provider can answer right now — add one in AI Providers."
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] mr-1 inline-block" />{' '}
+                      AI setup needed
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
@@ -277,6 +351,179 @@ export function AICompanion(): React.JSX.Element {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* SPRINT-028 — Voice assistant toggle (one coherent interaction model) */}
+        <div className="shrink-0 px-6 pb-3">
+          <button
+            onClick={() => {
+              setVoicePanelOpen((open) => !open);
+            }}
+            aria-expanded={voicePanelOpen}
+            aria-controls="voice-panel"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] ${
+              voicePanelOpen
+                ? 'bg-[#F5F3FF] text-[#7C3AED]'
+                : 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]'
+            }`}
+          >
+            <Mic className="h-3.5 w-3.5" />
+            {voicePanelOpen ? 'Hide voice' : 'Talk to VedMoulya'}
+            {voiceStatus.data?.success &&
+              (voiceStatus.data.data as { stt?: string }).stt === 'CONFIGURED' && (
+                <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E]" aria-hidden="true" />
+              )}
+          </button>
+        </div>
+
+        {/* Voice panel (collapsible) */}
+        {voicePanelOpen && (
+          <div id="voice-panel" className="shrink-0 px-6 pb-3 border-t border-[#E2E8F0] pt-3">
+            <VoicePanel
+              sttAvailable={
+                voiceStatus.data?.success
+                  ? (voiceStatus.data.data as { stt?: string }).stt === 'CONFIGURED'
+                  : true
+              }
+              onTranscript={(text) => {
+                setInput(text);
+                inputRef.current?.focus();
+              }}
+            />
+          </div>
+        )}
+
+        {/* SPRINT-029 — Proactive intelligence toggle */}
+        <div className="shrink-0 px-6 pb-3">
+          <button
+            onClick={() => {
+              setProactiveOpen((open) => !open);
+            }}
+            aria-expanded={proactiveOpen}
+            aria-controls="proactive-panel"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] ${
+              proactiveOpen
+                ? 'bg-[#F5F3FF] text-[#7C3AED]'
+                : 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]'
+            }`}
+          >
+            <Radar className="h-3.5 w-3.5" />
+            {proactiveOpen ? 'Hide recommendations' : 'What could help me today?'}
+          </button>
+        </div>
+
+        {/* Proactive panel (collapsible) */}
+        {proactiveOpen && (
+          <div id="proactive-panel" className="shrink-0 px-6 pb-3 border-t border-[#E2E8F0] pt-3">
+            <ProactivePanel />
+          </div>
+        )}
+
+        {/* SPRINT-030 — Intelligence fabric toggle (observed provider health; UNKNOWN until evidence) */}
+        <div className="shrink-0 px-6 pb-3">
+          <button
+            onClick={() => {
+              setFabricOpen((open) => !open);
+            }}
+            aria-expanded={fabricOpen}
+            aria-controls="fabric-panel"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] ${
+              fabricOpen
+                ? 'bg-[#F5F3FF] text-[#7C3AED]'
+                : 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]'
+            }`}
+          >
+            <Activity className="h-3.5 w-3.5" />
+            {fabricOpen ? 'Hide provider network' : 'Provider network'}
+          </button>
+        </div>
+
+        {/* Intelligence fabric panel (collapsible) — observed provider health only */}
+        {fabricOpen && (
+          <div id="fabric-panel" className="shrink-0 px-6 pb-3 border-t border-[#E2E8F0] pt-3">
+            <FabricPanel />
+          </div>
+        )}
+
+        {/* SPRINT-031 — Autonomy control toggle (explicit settings + emergency stop) */}
+        <div className="shrink-0 px-6 pb-3">
+          <button
+            onClick={() => {
+              setControlOpen((open) => !open);
+            }}
+            aria-expanded={controlOpen}
+            aria-controls="control-panel"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] ${
+              controlOpen
+                ? 'bg-[#F5F3FF] text-[#7C3AED]'
+                : 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]'
+            }`}
+          >
+            <ShieldCheck className="h-3.5 w-3.5" />
+            {controlOpen ? 'Hide autonomy control' : 'Autonomy control'}
+          </button>
+        </div>
+
+        {/* Autonomy control panel (collapsible) */}
+        {controlOpen && (
+          <div id="control-panel" className="shrink-0 px-6 pb-3 border-t border-[#E2E8F0] pt-3">
+            <ControlPanel />
+          </div>
+        )}
+
+        {/* SPRINT-032 — World model toggle (bounded MY WORLD + opportunity pipeline) */}
+        <div className="shrink-0 px-6 pb-3">
+          <button
+            onClick={() => {
+              setWorldOpen((open) => !open);
+            }}
+            aria-expanded={worldOpen}
+            aria-controls="world-panel"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] ${
+              worldOpen
+                ? 'bg-[#F5F3FF] text-[#7C3AED]'
+                : 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]'
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            {worldOpen ? 'Hide my world' : 'My world & opportunities'}
+          </button>
+        </div>
+
+        {/* World model panel (collapsible) */}
+        {worldOpen && (
+          <div id="world-panel" className="shrink-0 px-6 pb-3 border-t border-[#E2E8F0] pt-3">
+            <WorldPanel />
+          </div>
+        )}
+
+        {/* SPRINT-034 — Founder Command Center toggle */}
+        <div className="shrink-0 px-6 pb-3">
+          <button
+            onClick={() => {
+              setCommandCenterOpen((open) => !open);
+            }}
+            aria-expanded={commandCenterOpen}
+            aria-controls="command-center-panel"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] ${
+              commandCenterOpen
+                ? 'bg-[#F5F3FF] text-[#7C3AED]'
+                : 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]'
+            }`}
+          >
+            <LayoutDashboard className="h-3.5 w-3.5" />
+            {commandCenterOpen ? 'Hide command center' : 'Founder command center'}
+          </button>
+        </div>
+
+        {/* Founder Command Center panel (collapsible) — presentation only */}
+        {commandCenterOpen && (
+          <div
+            id="command-center-panel"
+            className="shrink-0 px-6 pb-3 border-t border-[#E2E8F0] pt-3"
+          >
+            <CommandCenter />
+          </div>
+        )}
+
         {/* Suggested Questions */}
         <div className="shrink-0 px-6 pb-3">
           <div className="flex flex-wrap gap-2">
@@ -311,13 +558,6 @@ export function AICompanion(): React.JSX.Element {
               aria-label="Type your message"
             />
             <button
-              onClick={() => {}}
-              className="p-1.5 rounded-lg hover:bg-white transition-colors"
-              aria-label="Voice input"
-            >
-              <Mic className="h-4 w-4 text-[#94A3B8]" />
-            </button>
-            <button
               onClick={() => {
                 void handleSend();
               }}
@@ -329,7 +569,7 @@ export function AICompanion(): React.JSX.Element {
             </button>
           </div>
           <p className="text-[11px] text-[#94A3B8] mt-2 text-center">
-            Powered by <span className="text-[#7C3AED] font-medium">Phoenix AI</span>
+            Powered by <span className="text-[#7C3AED] font-medium">VedMoulya Intelligence</span>
           </p>
         </div>
       </DrawerContent>

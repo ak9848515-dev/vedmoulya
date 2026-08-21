@@ -13,6 +13,11 @@ import {
 describe('DecisionConfig', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    // Hermetic defaults: the CI/developer shell may export DATABASE_URL (or
+    // DECISION_DATABASE_URL) for the local Docker runtime — remove both so
+    // the fallback default below is deterministic (SPRINT-045 env hardening).
+    vi.stubEnv('DECISION_DATABASE_URL', undefined);
+    vi.stubEnv('DATABASE_URL', undefined);
     resetDecisionConfig();
   });
 

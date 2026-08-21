@@ -19,6 +19,10 @@ import { GoogleProvider } from '../../auth/GoogleProvider.js';
 import { IdentityMetrics } from '../../observability/IdentityMetrics.js';
 import { IdentityAuditor } from '../../observability/IdentityAudit.js';
 import { IdentityTracer } from '../../observability/IdentityTracing.js';
+import {
+  type VerificationTokenStore,
+  createVerificationTokenStore,
+} from '../persistence/VerificationTokenStore.js';
 
 /** Register all identity infrastructure services with the DI container */
 export function registerIdentityServices(): void {
@@ -60,10 +64,26 @@ export function registerIdentityServices(): void {
     return new GoogleProvider();
   });
 
+  container.register<VerificationTokenStore>('identity.verification-token-store', () => {
+    const store = createVerificationTokenStore();
+    // SPRINT-045 — bootstrap the email-verification token table idempotently
+    // (estate convention). Fire-and-forget: in production/staging the Postgres
+    // store is used and the DDL is required; in dev/test the in-memory store
+    // is used and ensureTable is a no-op-safe optional call.
+    const withEnsure = store as VerificationTokenStore & { ensureTable?(): Promise<void> };
+    void withEnsure.ensureTable?.().catch((error: unknown) => {
+      console.warn('Verification token table creation failed', error);
+    });
+    return store;
+  });
+
   container.register<AuthService>('identity.auth-service', () => {
     const repository = container.resolve('identity.repository') as IdentityRepository;
     const eventPublisher = container.resolve('identity.event-publisher') as IdentityEventPublisher;
-    return new AuthService(repository, eventPublisher);
+    const verificationTokenStore = container.resolve(
+      'identity.verification-token-store',
+    ) as VerificationTokenStore;
+    return new AuthService(repository, eventPublisher, { verificationTokenStore });
   });
 
   // Authorization Services

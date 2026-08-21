@@ -19,6 +19,10 @@ export type {
   BenchmarkDifficulty,
   ProviderBenchmarkCategory,
   ProviderBenchmarkDefinition,
+  CustomProviderConfig,
+  CustomProviderProtocol,
+  CustomProviderAuthMethod,
+  CustomProviderDeployment,
 } from './types/provider-types.js';
 export {
   PROVIDER_LIFECYCLE_STATUSES,

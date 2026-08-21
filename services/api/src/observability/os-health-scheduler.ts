@@ -10,6 +10,7 @@
 import { logger } from '@vedmoulya/core';
 import type { OSApplicationService } from '@vedmoulya/os-intelligence';
 import { getServices } from '../router.js';
+import { envFlagEnabled } from './env-flags.js';
 
 /** Default cadence: one OS health pass every 5 minutes. */
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -35,7 +36,8 @@ export interface OSHealthPassResult {
 export interface OSHealthSchedulerOptions {
   /** Cadence in ms. Default 5 minutes (env `OS_HEALTH_INTERVAL_MS` overrides). */
   intervalMs?: number;
-  /** Disable the cadence (env `OS_HEALTH_SCHEDULER_ENABLED=0` also disables). */
+  /** Disable the cadence (env `OS_HEALTH_SCHEDULER_ENABLED=0|false|no|off`
+   *  also disables — case-insensitive). */
   enabled?: boolean;
   /**
    * Override the OS service accessor. Defaults to the gateway singleton
@@ -68,7 +70,7 @@ let instance: OSHealthScheduler | undefined;
 export function startOSHealthScheduler(options: OSHealthSchedulerOptions = {}): OSHealthScheduler {
   if (instance) return instance;
 
-  const enabled = options.enabled ?? process.env.OS_HEALTH_SCHEDULER_ENABLED !== '0';
+  const enabled = options.enabled ?? envFlagEnabled(process.env.OS_HEALTH_SCHEDULER_ENABLED);
   if (!enabled) {
     // No-op handle so callers (e.g. the route handler) need not branch. The
     // singleton stays unset so a later explicit start can enable the cadence.

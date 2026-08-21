@@ -16,9 +16,12 @@ import { clearMemoryStore, readPersistedSession } from '../secure-store.js';
 import {
   beginGoogleSignIn,
   completeGoogleSignIn,
+  completeProfile,
   logout,
+  refreshProfile,
   restoreSession,
   signInWithEmailAndPassword,
+  signUpWithEmailAndPassword,
 } from '../session-manager.js';
 
 const NOW = Date.now();
@@ -138,6 +141,83 @@ describe('login', () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
     const outcome = await signInWithEmailAndPassword('user@vedmoulya.com', 'secret');
     expect(outcome).toEqual({ ok: false, error: 'offline' });
+  });
+});
+
+// ── 2b. Sign-up (SPRINT-041A) ────────────────────────────────────────────────
+
+describe('sign-up', () => {
+  it('registers through the existing API and applies the returned session', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, data: SESSION_BODY }));
+
+    const outcome = await signUpWithEmailAndPassword({
+      displayName: 'Test User',
+      email: 'user@vedmoulya.com',
+      password: 'Secret123',
+    });
+    expect(outcome).toEqual({ ok: true });
+
+    // The same lifecycle as sign-in: session applied + persisted.
+    const state = useAuthStore.getState();
+    expect(state.accessToken).toBe('access-1');
+    expect(state.refreshToken).toBe('refresh-1');
+    expect(state.user?.email).toBe('user@vedmoulya.com');
+    expect(state.sessionReady).toBe(true);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/sign-up');
+    expect(JSON.parse(String(init.body))).toEqual({
+      displayName: 'Test User',
+      email: 'user@vedmoulya.com',
+      password: 'Secret123',
+    });
+  });
+
+  it('surfaces the backend message for a duplicate email', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          success: false,
+          error: { code: 'REGISTRATION_FAILED', message: 'Email already registered' },
+        },
+        409,
+      ),
+    );
+    const outcome = await signUpWithEmailAndPassword({
+      displayName: 'Test User',
+      email: 'taken@vedmoulya.com',
+      password: 'Secret123',
+    });
+    expect(outcome).toEqual({ ok: false, error: 'Email already registered' });
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it('detects offline sign-up', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const outcome = await signUpWithEmailAndPassword({
+      displayName: 'Test User',
+      email: 'user@vedmoulya.com',
+      password: 'Secret123',
+    });
+    expect(outcome).toEqual({ ok: false, error: 'offline' });
+  });
+
+  // SPRINT-045 — production/staging sign-up requires email verification: the
+  // backend returns verificationRequired with NO session, so the client must
+  // NOT apply a session and must surface the flag to the UI ("check your
+  // email" state instead of navigating on).
+  it('does not apply a session when verification is required', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ success: true, data: { verificationRequired: true } }),
+    );
+    const outcome = await signUpWithEmailAndPassword({
+      displayName: 'Test User',
+      email: 'user@vedmoulya.com',
+      password: 'Secret123',
+    });
+    expect(outcome).toEqual({ ok: true, verificationRequired: true });
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().accessToken).toBeNull();
   });
 });
 
@@ -393,5 +473,125 @@ describe('google sign-in', () => {
     const outcome = await completeGoogleSignIn('code-1', 'st-ATTACKER');
     expect(outcome.ok).toBe(false);
     expect(useAuthStore.getState().user).toBeNull();
+  });
+});
+
+describe('first-login profile (SPRINT-041B)', () => {
+  beforeEach(() => {
+    resetStore();
+    fetchMock.mockReset();
+  });
+
+  it('sign-up session carries the server-derived displayName + profileComplete=false', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        data: { ...SESSION_BODY, displayName: 'New User', profileComplete: false },
+      }),
+    );
+    const outcome = await signUpWithEmailAndPassword({
+      email: 'new@vedmoulya.com',
+      password: 'ValidPass1',
+      displayName: 'New User',
+    });
+    expect(outcome.ok).toBe(true);
+    expect(useAuthStore.getState().user?.displayName).toBe('New User');
+    expect(useAuthStore.getState().user?.profileComplete).toBe(false);
+  });
+
+  it('refreshProfile applies the server-authoritative completion state', async () => {
+    seedSession(SESSION_BODY);
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        data: {
+          userId: 'user-1',
+          email: 'user@vedmoulya.com',
+          displayName: 'Ada',
+          age: 30,
+          gender: 'female',
+          purpose: 'learning',
+          primaryGoal: 'Master TS',
+          profileComplete: true,
+        },
+      }),
+    );
+
+    await refreshProfile();
+    expect(useAuthStore.getState().user?.profileComplete).toBe(true);
+    expect(useAuthStore.getState().user?.displayName).toBe('Ada');
+  });
+
+  it('refreshProfile is offline-safe (keeps cached state, never clears the session)', async () => {
+    seedSession(SESSION_BODY);
+    useAuthStore.setState({
+      user: { ...SESSION_BODY, displayName: 'Cached', profileComplete: false },
+    } as never);
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await refreshProfile();
+    expect(useAuthStore.getState().accessToken).toBe('access-1');
+    expect(useAuthStore.getState().user?.profileComplete).toBe(false);
+  });
+
+  it('completeProfile PATCHes the profile and applies the returned state', async () => {
+    seedSession(SESSION_BODY);
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        data: {
+          userId: 'user-1',
+          email: 'user@vedmoulya.com',
+          displayName: 'New User',
+          age: 25,
+          gender: 'male',
+          purpose: 'career',
+          primaryGoal: 'Become senior',
+          profileComplete: true,
+        },
+      }),
+    );
+
+    const outcome = await completeProfile({
+      displayName: 'New User',
+      age: 25,
+      gender: 'male',
+      purpose: 'career',
+      primaryGoal: 'Become senior',
+    });
+    expect(outcome).toEqual({ ok: true });
+    expect(useAuthStore.getState().user?.profileComplete).toBe(true);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({
+      displayName: 'New User',
+      age: 25,
+      gender: 'male',
+      purpose: 'career',
+      primaryGoal: 'Become senior',
+    });
+  });
+
+  it('completeProfile surfaces backend validation errors', async () => {
+    seedSession(SESSION_BODY);
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        {
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Invalid input' },
+        },
+        400,
+      ),
+    );
+
+    const outcome = await completeProfile({ age: 300 } as never);
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error).toBe('Invalid input');
+    expect(useAuthStore.getState().user?.profileComplete).toBeUndefined();
+  });
+
+  it('completeProfile is rejected when there is no session', async () => {
+    const outcome = await completeProfile({ displayName: 'X' });
+    expect(outcome.ok).toBe(false);
   });
 });

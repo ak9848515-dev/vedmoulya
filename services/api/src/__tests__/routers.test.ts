@@ -1522,13 +1522,13 @@ describe('RateLimiter', () => {
 
   it('assertRateLimit allows requests under limit', async () => {
     const { assertRateLimit, RateLimitTiers } = await import('../middleware/rate-limit.js');
-    // Should not throw
-    expect(() => assertRateLimit('rate-test-user', RateLimitTiers.auth)).not.toThrow();
+    // Should not throw (async contract)
+    await expect(assertRateLimit('rate-test-user', RateLimitTiers.auth)).resolves.toBeUndefined();
   });
 
   it('getRateLimitStats returns null for unknown user', async () => {
     const { getRateLimitStats, RateLimitTiers } = await import('../middleware/rate-limit.js');
-    const stats = getRateLimitStats('unknown-user', RateLimitTiers.standard);
+    const stats = await getRateLimitStats('unknown-user', RateLimitTiers.standard);
     expect(stats).toBeNull();
   });
 });

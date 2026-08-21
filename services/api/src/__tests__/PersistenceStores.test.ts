@@ -65,9 +65,33 @@ describe('resolvePersistenceBundle (SPRINT-022)', () => {
   });
 });
 
-// ── Real-Postgres restart recovery (requires POSTGRES_TEST_URL) ──────────────
+// ── Real-Postgres restart recovery ──────────────────────────────────────────
+// Runs whenever a real Postgres is available: the explicit POSTGRES_TEST_URL
+// wins, otherwise the local docker-compose dev database (pgvector/pg16 on
+// :5432 — same service startup.sh/preflight probe) is auto-detected. The suite
+// honestly skips only when no Postgres is reachable (e.g. CI without Docker).
+//
+// ⚠ DESTRUCTIVE BY DESIGN: this suite runs cleanTables() — DELETE FROM on the
+// 19 store tables — before and after the run. It auto-targets the compose dev
+// container by construction (the credentials below ARE the committed
+// docker-compose defaults), so it only ever wipes the local dev database when
+// the compose stack is up. Never point POSTGRES_TEST_URL at a real database.
 
-const testUrl = process.env.POSTGRES_TEST_URL;
+const LOCAL_COMPOSE_TEST_URL = 'postgres://vedmoulya:vedmoulya-dev@localhost:5432/vedmoulya';
+
+const testUrl = await (async (): Promise<string | undefined> => {
+  if (process.env.POSTGRES_TEST_URL) return process.env.POSTGRES_TEST_URL;
+  let probe: postgres.Sql | undefined;
+  try {
+    probe = postgres(LOCAL_COMPOSE_TEST_URL, { max: 1, connect_timeout: 2 });
+    await probe`SELECT 1`;
+    return LOCAL_COMPOSE_TEST_URL;
+  } catch {
+    return undefined;
+  } finally {
+    await probe?.end().catch(() => undefined);
+  }
+})();
 
 const describeReal = testUrl ? describe : describe.skip;
 
@@ -94,6 +118,9 @@ describeReal('Persistence restart recovery against real Postgres', () => {
     'bridge_loop_runs',
     'ai_world_discovery_items',
     'ai_world_discovery_user_state',
+    'world_problems',
+    'world_observations',
+    'world_prospects',
   ];
 
   const importPackages = async (): Promise<{
@@ -102,15 +129,17 @@ describeReal('Persistence restart recovery against real Postgres', () => {
     ecosystem: typeof import('@vedmoulya/ecosystem-intelligence');
     bridge: typeof import('@vedmoulya/live-intelligence-bridge');
     aiWorld: typeof import('@vedmoulya/ai-world');
+    worldModel: typeof import('@vedmoulya/world-model');
   }> => {
-    const [scheduler, brain, ecosystem, bridge, aiWorld] = await Promise.all([
+    const [scheduler, brain, ecosystem, bridge, aiWorld, worldModel] = await Promise.all([
       import('@vedmoulya/ai-world-scheduler'),
       import('@vedmoulya/brain'),
       import('@vedmoulya/ecosystem-intelligence'),
       import('@vedmoulya/live-intelligence-bridge'),
       import('@vedmoulya/ai-world'),
+      import('@vedmoulya/world-model'),
     ]);
-    return { scheduler, brain, ecosystem, bridge, aiWorld };
+    return { scheduler, brain, ecosystem, bridge, aiWorld, worldModel };
   };
 
   const ensureTables = async (p: Awaited<ReturnType<typeof importPackages>>): Promise<void> => {
@@ -133,6 +162,9 @@ describeReal('Persistence restart recovery against real Postgres', () => {
       new p.ecosystem.PostgresAcquisitionStore(sql),
       new p.bridge.PostgresBridgeLoopStore(sql),
       new p.aiWorld.PostgresDiscoveryStore(sql),
+      new p.worldModel.PostgresProblemStore(sql),
+      new p.worldModel.PostgresObservationStore(sql),
+      new p.worldModel.PostgresProspectStore(sql),
     ];
     await Promise.all(stores.map((s) => (s as { ensureTable(): Promise<void> }).ensureTable()));
   };
@@ -173,6 +205,9 @@ describeReal('Persistence restart recovery against real Postgres', () => {
       acquisitions: new p.ecosystem.PostgresAcquisitionStore(sql),
       loops: new p.bridge.PostgresBridgeLoopStore(sql),
       discovery: new p.aiWorld.PostgresDiscoveryStore(sql),
+      problems: new p.worldModel.PostgresProblemStore(sql),
+      observations: new p.worldModel.PostgresObservationStore(sql),
+      prospects: new p.worldModel.PostgresProspectStore(sql),
     };
 
     const now = '2026-01-01T00:00:00.000Z';
@@ -404,6 +439,58 @@ describeReal('Persistence restart recovery against real Postgres', () => {
     ]);
     await a.discovery.markRead('u1', 'item-1');
 
+    // ── Founder evidence loop (SPRINT-038/039): problem + observation +
+    // prospect — provenance-carried, stable-key idempotent. ──
+    a.problems.save({
+      id: 'problem-1',
+      ownerId: 'u1',
+      stableKey: 'u1:local-test-founders-problem',
+      problemStatement: 'LOCAL TEST: founders spend hours on bookkeeping',
+      pain: 'recurring manual data entry',
+      evidence: [
+        {
+          id: 'ev-1',
+          ownerId: 'u1',
+          source: 'direct_observation',
+          observedAt: now,
+          reference: 'LOCAL TEST shop visit',
+          text: 'LOCAL TEST observation: manual re-keying',
+          confidence: 'ESTIMATED',
+          evidenceOnly: true,
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    } as never);
+    a.observations.save({
+      id: 'obs-1',
+      ownerId: 'u1',
+      problemId: 'problem-1',
+      timestamp: now,
+      sourceType: 'customer_conversation',
+      sourceReference: 'shop-a',
+      observedStatement: 'LOCAL TEST: owner said bookkeeping takes 4 hours weekly',
+      evidenceState: 'REPORTED_BY_CUSTOMER',
+      evidenceStrength: 'MODERATE',
+      provenance: { source: 'LOCAL TEST conversation with Shop A', observedAt: now },
+      verificationStatus: 'UNVERIFIED',
+      createdAt: now,
+      updatedAt: now,
+    } as never);
+    a.prospects.save({
+      id: 'pros-1',
+      ownerId: 'u1',
+      problemId: 'problem-1',
+      prospectReference: 'shop-b',
+      customerSegment: 'small-retail',
+      problemDiscussed: 'LOCAL TEST: manual bookkeeping pain',
+      discoveryStatus: 'WTP_SIGNAL',
+      evidence: [],
+      provenance: { source: 'LOCAL TEST intro call with Shop B', observedAt: now },
+      createdAt: now,
+      updatedAt: now,
+    } as never);
+
     await Promise.all([
       a.schedules.flush(),
       a.jobs.flush(),
@@ -422,6 +509,9 @@ describeReal('Persistence restart recovery against real Postgres', () => {
       a.notifications.flush(),
       a.acquisitions.flush(),
       a.loops.flush(),
+      a.problems.flush(),
+      a.observations.flush(),
+      a.prospects.flush(),
     ]);
 
     // ── "Restart": brand-new store instances over the SAME database ─────
@@ -444,6 +534,9 @@ describeReal('Persistence restart recovery against real Postgres', () => {
       acquisitions: new p.ecosystem.PostgresAcquisitionStore(sql),
       loops: new p.bridge.PostgresBridgeLoopStore(sql),
       discovery: new p.aiWorld.PostgresDiscoveryStore(sql),
+      problems: new p.worldModel.PostgresProblemStore(sql),
+      observations: new p.worldModel.PostgresObservationStore(sql),
+      prospects: new p.worldModel.PostgresProspectStore(sql),
     };
     await Promise.all([
       b.schedules.hydrate(),
@@ -464,6 +557,9 @@ describeReal('Persistence restart recovery against real Postgres', () => {
       b.acquisitions.hydrate(),
       b.loops.hydrate(),
       b.discovery.hydrate(),
+      b.problems.hydrate(),
+      b.observations.hydrate(),
+      b.prospects.hydrate(),
     ]);
 
     // ── Assertions: state survived, no duplicates, owner isolation ──────
@@ -500,6 +596,26 @@ describeReal('Persistence restart recovery against real Postgres', () => {
     ]);
     expect((await b.discovery.getUserState('u1', 'item-1')).read).toBe(true);
     expect((await b.discovery.getUserState('u2', 'item-1')).read).toBe(false); // owner isolation
+
+    // ── Founder evidence loop survived restart, no duplicates, IDOR ──────
+    expect(b.problems.get('u1', 'problem-1')?.problemStatement).toBe(
+      'LOCAL TEST: founders spend hours on bookkeeping',
+    );
+    expect(b.problems.list('u1')).toHaveLength(1);
+    expect(b.problems.get('u2', 'problem-1')).toBeUndefined(); // IDOR
+    expect(
+      b.problems.get('u1', 'problem-1')?.evidence.some((e) => e.source === 'direct_observation'),
+    ).toBe(true);
+
+    expect(b.observations.list('u1')).toHaveLength(1); // no duplicate after restart
+    expect(b.observations.get('u1', 'obs-1')?.evidenceState).toBe('REPORTED_BY_CUSTOMER');
+    expect(b.observations.listByProblem('u1', 'problem-1')).toHaveLength(1);
+    expect(b.observations.get('u2', 'obs-1')).toBeUndefined(); // IDOR
+
+    expect(b.prospects.list('u1')).toHaveLength(1);
+    expect(b.prospects.get('u1', 'pros-1')?.discoveryStatus).toBe('WTP_SIGNAL');
+    expect(b.prospects.listByProblem('u1', 'problem-1')).toHaveLength(1);
+    expect(b.prospects.get('u2', 'pros-1')).toBeUndefined(); // IDOR
 
     await cleanTables();
     await sql.end();

@@ -40,6 +40,13 @@ describe('NavBar', () => {
     rerender(<NavBar onMobileMenuToggle={onToggle} mobileMenuOpen />);
     expect(screen.getByLabelText('Close menu')).toBeDefined();
   });
+
+  it('renders mobileActions for mobile-only triggers (SPRINT-043E)', () => {
+    render(<NavBar mobileActions={<button aria-label="Open AI Companion">AI</button>} />);
+    // The mobile-only action must be present in the DOM (CSS hides desktop
+    // rightItems; mobileActions renders on small viewports).
+    expect(screen.getByRole('button', { name: 'Open AI Companion' })).toBeDefined();
+  });
 });
 
 describe('Sidebar', () => {

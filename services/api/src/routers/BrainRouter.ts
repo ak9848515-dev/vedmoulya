@@ -85,7 +85,7 @@ export function createEnterpriseBrainRouter(
   const svc = service;
   return {
     decideGoal: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await svc.decideGoal({
           goalId: input.goalId,
@@ -96,17 +96,17 @@ export function createEnterpriseBrainRouter(
     },
 
     getPlan: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(await svc.getPlan(input.planId));
     },
 
     listPlans: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(await svc.listPlans(input.goalId));
     },
 
     listDecisions: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(
         await svc.listDecisions({
           type: input.type as never,
@@ -119,22 +119,22 @@ export function createEnterpriseBrainRouter(
     },
 
     getDecision: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(await svc.getDecision(input.decisionId));
     },
 
     getTimeline: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(await svc.getTimeline({ limit: input.limit }));
     },
 
     getHistory: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(await svc.getHistory());
     },
 
     approveDecision: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await svc.approveDecision({
           decisionId: input.decisionId,
@@ -145,7 +145,7 @@ export function createEnterpriseBrainRouter(
     },
 
     rejectDecision: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await svc.rejectDecision({
           decisionId: input.decisionId,
@@ -156,33 +156,33 @@ export function createEnterpriseBrainRouter(
     },
 
     approvePlan: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await svc.approvePlan({ planId: input.planId, actor: input.actor, note: input.note }),
       );
     },
 
     rejectPlan: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await svc.rejectPlan({ planId: input.planId, actor: input.actor, note: input.note }),
       );
     },
 
     handOffPlan: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await svc.handOffPlan({ planId: input.planId, actor: input.actor, note: input.note }),
       );
     },
 
     getMetrics: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(await svc.getMetrics());
     },
 
     getDashboard: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(await svc.getDashboard());
     },
   };
@@ -193,30 +193,33 @@ export function createEnterpriseBrainRouter(
 // ══════════════════════════════════════════════════════════════════
 
 export interface BrainHandlers {
-  createTask: (input: { userId: string; input: string }, ctx: TRPCContext) => ApiResponse;
+  createTask: (input: { userId: string; input: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   plan: (input: { userId: string; taskId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   selectResources: (
     input: { userId: string; taskId: string },
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;
   execute: (input: { userId: string; taskId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
-  verify: (input: { userId: string; taskId: string }, ctx: TRPCContext) => ApiResponse;
+  verify: (input: { userId: string; taskId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   requestApproval: (
     input: { userId: string; taskId: string; action: string },
     ctx: TRPCContext,
-  ) => ApiResponse;
+  ) => Promise<ApiResponse>;
   approve: (
     input: { userId: string; taskId: string; action: string },
     ctx: TRPCContext,
-  ) => ApiResponse;
+  ) => Promise<ApiResponse>;
   reject: (
     input: { userId: string; taskId: string; action: string },
     ctx: TRPCContext,
-  ) => ApiResponse;
-  getStatus: (input: { userId: string; taskId: string }, ctx: TRPCContext) => ApiResponse;
-  listTasks: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
-  getDecisionRecords: (input: { userId: string; taskId: string }, ctx: TRPCContext) => ApiResponse;
-  cancel: (input: { userId: string; taskId: string }, ctx: TRPCContext) => ApiResponse;
+  ) => Promise<ApiResponse>;
+  getStatus: (input: { userId: string; taskId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
+  listTasks: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
+  getDecisionRecords: (
+    input: { userId: string; taskId: string },
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
+  cancel: (input: { userId: string; taskId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   evaluateOutcome: (
     input: {
       userId: string;
@@ -239,10 +242,13 @@ export interface BrainHandlers {
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;
   // EPIC-020 (Outcome & Revenue layer) — Today's Top 5
-  dailyPriorities: (input: { userId: string; limit?: number }, ctx: TRPCContext) => ApiResponse;
+  dailyPriorities: (
+    input: { userId: string; limit?: number },
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
   // EPIC-020 — continuous intelligence surface
   discoverIntelligence: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
-  listOpportunities: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
+  listOpportunities: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   updateOpportunity: (
     input: {
       userId: string;
@@ -250,8 +256,8 @@ export interface BrainHandlers {
       status: 'NEW' | 'RECOMMENDED' | 'ACCEPTED' | 'DISMISSED';
     },
     ctx: TRPCContext,
-  ) => ApiResponse;
-  listIntelligenceEvents: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
+  ) => Promise<ApiResponse>;
+  listIntelligenceEvents: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   updateIntelligenceEvent: (
     input: {
       userId: string;
@@ -259,8 +265,11 @@ export interface BrainHandlers {
       status: 'NEW' | 'REVIEWED' | 'RECOMMENDED' | 'DISMISSED';
     },
     ctx: TRPCContext,
-  ) => ApiResponse;
-  providerScores: (input: { userId: string; capability: string }, ctx: TRPCContext) => ApiResponse;
+  ) => Promise<ApiResponse>;
+  providerScores: (
+    input: { userId: string; capability: string },
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
   dashboard: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
 }
 
@@ -269,68 +278,68 @@ export function createBrainRouter(
   dashboard?: BrainDashboardService,
 ): BrainHandlers {
   return {
-    createTask: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    createTask: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.createTask(input.userId, input.input));
     },
 
     plan: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.plan(input.userId, input.taskId));
     },
 
     selectResources: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.selectResources(input.userId, input.taskId));
     },
 
     execute: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.execute(input.userId, input.taskId));
     },
 
-    verify: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    verify: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.verify(input.userId, input.taskId));
     },
 
-    requestApproval: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    requestApproval: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.requestApproval(input.userId, input.taskId, input.action));
     },
 
-    approve: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    approve: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.approve(input.userId, input.taskId, input.action));
     },
 
-    reject: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    reject: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.reject(input.userId, input.taskId, input.action));
     },
 
-    getStatus: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    getStatus: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.getStatus(input.userId, input.taskId));
     },
 
-    listTasks: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    listTasks: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.listTasks(input.userId));
     },
 
-    getDecisionRecords: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    getDecisionRecords: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.getDecisionRecords(input.userId, input.taskId));
     },
 
-    cancel: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    cancel: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.cancel(input.userId, input.taskId));
     },
 
     evaluateOutcome: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(
         await service.evaluateOutcome(
           input.userId,
@@ -343,7 +352,7 @@ export function createBrainRouter(
 
     // SPRINT-025 — user correction loop (auth + rate limit + IDOR at boundary).
     correctLearning: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(
         await service.correctLearning(input.userId, {
           statement: input.statement,
@@ -356,48 +365,48 @@ export function createBrainRouter(
     },
 
     // ── EPIC-020 (Outcome & Revenue layer) — Today's Top 5 ───────
-    dailyPriorities: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    dailyPriorities: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.dailyPriorities(input.userId, input.limit ?? 5));
     },
 
     // ── EPIC-020 — Continuous intelligence surface ───────────────
     discoverIntelligence: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.discoverIntelligence(input.userId));
     },
 
-    listOpportunities: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    listOpportunities: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.listOpportunities(input.userId));
     },
 
-    updateOpportunity: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    updateOpportunity: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(
         service.updateOpportunity(input.userId, input.opportunityId, input.status),
       );
     },
 
-    listIntelligenceEvents: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    listIntelligenceEvents: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.listIntelligenceEvents(input.userId));
     },
 
-    updateIntelligenceEvent: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    updateIntelligenceEvent: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(
         service.updateIntelligenceEvent(input.userId, input.eventId, input.status),
       );
     },
 
-    providerScores: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    providerScores: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.providerScores(input.capability as never));
     },
 
     dashboard: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       if (!dashboard) {
         return fromServiceResult({ success: false, error: 'Brain dashboard is not configured.' });
       }

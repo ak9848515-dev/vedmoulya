@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { Badge } from '@vedmoulya/ui';
-import { Mail, Flag, Sparkles } from 'lucide-react';
+import { Mail, Flag, Sparkles, Route } from 'lucide-react';
 import type { IdentitySummary } from './types.js';
 
 export interface ProfileCardProps {
@@ -72,6 +72,14 @@ export function ProfileCard({ identity, fallbackEmail }: ProfileCardProps): Reac
         {identity.primaryGoal && (
           <p className="flex items-center gap-1.5 text-[13px] text-[#2B5FD9] dark:text-[#6B8FEF] mt-0.5 truncate">
             <Flag className="h-3 w-3 shrink-0" /> {identity.primaryGoal}
+          </p>
+        )}
+        {identity.currentJourney && (
+          <p
+            className="flex items-center gap-1.5 text-[12px] text-[#0EA5A9] dark:text-[#66D0D3] mt-0.5 truncate"
+            title="Where you are in your journey"
+          >
+            <Route className="h-3 w-3 shrink-0" /> {identity.currentJourney}
           </p>
         )}
       </div>

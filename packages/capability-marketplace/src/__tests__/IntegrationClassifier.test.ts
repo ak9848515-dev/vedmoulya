@@ -95,4 +95,61 @@ describe('IntegrationClassifier — integration classification', () => {
     expect(result.classification).toBe('MANUAL');
     expect(result.apiAvailable).toBe('no');
   });
+
+  it('classifies a GitHub discovery with caution flags as GITHUB_PROJECT + UNKNOWN', () => {
+    const result = classifier.classifyDiscovery(
+      githubDiscovery({ github: { name: 'org/risky', license: 'unknown', flags: ['suspicious'] } }),
+    );
+    expect(result.integrationType).toBe('GITHUB_PROJECT');
+    expect(result.classification).toBe('UNKNOWN');
+    expect(result.apiAvailable).toBe('no');
+    expect(result.reasons.join(' ')).toMatch(/caution flags/);
+  });
+
+  it('treats a license or security flag as a caution flag', () => {
+    const flagged = classifier.classifyDiscovery(
+      githubDiscovery({
+        github: { name: 'org/unclear', license: 'unknown', flags: ['unclear_license'] },
+      }),
+    );
+    expect(flagged.classification).toBe('UNKNOWN');
+    const security = classifier.classifyDiscovery(
+      githubDiscovery({
+        github: { name: 'org/sec', license: 'MIT', flags: ['security_concerns'] },
+      }),
+    );
+    expect(security.classification).toBe('UNKNOWN');
+  });
+
+  it('classifies a generic discovery without integration evidence as EVALUATE', () => {
+    const result = classifier.classifyDiscovery({
+      itemId: 'disc-generic-1',
+      category: 'model',
+      title: 'Some model',
+      capabilities: ['TEXT_GENERATION'],
+      freeClass: 'FREE_WITH_QUOTA',
+      localAvailability: 'no',
+      configurable: false,
+      evidence: [],
+      securityFlags: [],
+    });
+    expect(result.integrationType).toBe('UNKNOWN');
+    expect(result.classification).toBe('EVALUATE');
+    expect(result.apiAvailable).toBe('UNKNOWN');
+    expect(result.reasons.join(' ')).toMatch(/evaluate/);
+  });
+
+  it('classifies an unconfigured local runtime as LOCAL_MODEL + CONFIGURE', () => {
+    const result = classifier.classifyProvider(
+      configuredProvider({
+        providerId: 'prov-ollama-2',
+        family: 'ollama',
+        name: 'Ollama 2',
+        configured: false,
+      }),
+    );
+    expect(result.integrationType).toBe('LOCAL_MODEL');
+    expect(result.classification).toBe('CONFIGURE');
+    expect(result.reasons.join(' ')).toMatch(/configure it to use/);
+  });
 });

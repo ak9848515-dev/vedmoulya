@@ -1,0 +1,30 @@
+{
+  "name": "@vedmoulya/control-plane",
+  "version": "1.0.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "description": "VedMoulya Active Intelligence & Autonomy Control Plane (SPRINT-031) — a narrow COMPOSITION layer that coordinates the existing Brain / Proactive / Intelligence-Fabric / CostLedger / Approval / Audit estate into a controlled continuous-intelligence lifecycle. NOT an engine: no discovery/provider-selection/approval/execution/memory/learning authority lives here — the frozen estate owns those; this package only OBSERVES, GATES and COORDINATES.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@vedmoulya/core": "*",
+    "@vedmoulya/intelligence-fabric": "*"
+  },
+  "devDependencies": {
+    "typescript": "*",
+    "vitest": "*"
+  }
+}

@@ -87,6 +87,7 @@ const handler = async (request: NextRequest): Promise<Response> => {
           reason: 'not_started',
           maxUsersPerTick: 0,
           refreshIntelligenceEnabled: false,
+          proactiveRefreshEnabled: false,
         },
     );
     registerPersistenceShutdownFlush();

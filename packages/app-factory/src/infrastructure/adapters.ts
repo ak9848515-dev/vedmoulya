@@ -13,11 +13,7 @@ import type { DeploymentAdapterPort, VersionControlPort } from '../contracts/fac
 export class LocalDeploymentAdapter implements DeploymentAdapterPort {
   readonly target = 'local' as const;
 
-  deploy(input: {
-    applicationId: string;
-    workspacePath: string;
-    authorized: boolean;
-  }): Promise<{
+  deploy(input: { applicationId: string; workspacePath: string; authorized: boolean }): Promise<{
     status: 'deployed' | 'blocked' | 'failed';
     message: string;
     artifactPath?: string;
@@ -41,11 +37,7 @@ export class LocalDeploymentAdapter implements DeploymentAdapterPort {
 export class VercelDeploymentAdapter implements DeploymentAdapterPort {
   readonly target = 'vercel' as const;
 
-  deploy(input: {
-    applicationId: string;
-    workspacePath: string;
-    authorized: boolean;
-  }): Promise<{
+  deploy(input: { applicationId: string; workspacePath: string; authorized: boolean }): Promise<{
     status: 'deployed' | 'blocked' | 'failed';
     message: string;
     artifactPath?: string;

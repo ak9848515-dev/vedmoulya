@@ -20,7 +20,7 @@ async function handle(request: NextRequest): Promise<Response> {
     return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
 
-  const response = await getAuthApp().fetch(request);
+  const response = await (await getAuthApp()).fetch(request);
   return withCorsHeaders(response, request);
 }
 

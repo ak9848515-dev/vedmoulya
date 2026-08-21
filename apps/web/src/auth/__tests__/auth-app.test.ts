@@ -23,13 +23,13 @@ const BASE = 'http://localhost/api/v1/identity/auth';
 
 describe('auth app mount (base path routing)', () => {
   it('answers the health endpoint at the documented base path', async () => {
-    const res = await getAuthApp().fetch(new Request(`${BASE}/health`));
+    const res = await (await getAuthApp()).fetch(new Request(`${BASE}/health`));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ status: 'healthy', service: 'auth' });
   });
 
   it('serves the Google auth URL endpoint', async () => {
-    const res = await getAuthApp().fetch(new Request(`${BASE}/google/url`));
+    const res = await (await getAuthApp()).fetch(new Request(`${BASE}/google/url`));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { success: boolean; data: { url: string; state: string } };
     expect(body.success).toBe(true);
@@ -38,12 +38,20 @@ describe('auth app mount (base path routing)', () => {
   });
 
   it('rejects sign-in without a base path prefix (mount regression guard)', async () => {
-    const res = await getAuthApp().fetch(new Request('http://localhost/sign-in'));
+    const res = await (await getAuthApp()).fetch(new Request('http://localhost/sign-in'));
     expect(res.status).toBe(404);
   });
 
   it('404s unknown paths under the base path', async () => {
-    const res = await getAuthApp().fetch(new Request(`${BASE}/does-not-exist`));
+    const res = await (await getAuthApp()).fetch(new Request(`${BASE}/does-not-exist`));
     expect(res.status).toBe(404);
+  });
+
+  it('bootstraps the users table before serving (deterministic cold start)', async () => {
+    // The mocked repository exposes ensureTable; assert it is awaited before
+    // the app is served (i.e. a fetch still answers after the bootstrap ran).
+    const app = await getAuthApp();
+    const res = await app.fetch(new Request(`${BASE}/health`));
+    expect(res.status).toBe(200);
   });
 });

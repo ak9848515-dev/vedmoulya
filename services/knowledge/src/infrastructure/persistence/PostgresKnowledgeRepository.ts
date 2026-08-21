@@ -39,6 +39,146 @@ export class PostgresKnowledgeRepository extends BaseRepository implements Knowl
     super('knowledge');
   }
 
+  /**
+   * Idempotent schema bootstrap — the estate-wide convention (every other
+   * Postgres store creates its tables with `CREATE TABLE IF NOT EXISTS` on
+   * startup; the knowledge store was an exception: its DB init only opened
+   * a connection, so production startup never created `knowledge_graphs` /
+   * `knowledge_nodes` / `knowledge_edges` / `knowledge_lineage` and every
+   * repository query failed against a fresh database). Mirrors
+   * `schema/knowledge.ts` column-for-column (SPRINT-045 — PRODUCTION
+   * DATABASE READINESS).
+   */
+  async ensureTable(): Promise<void> {
+    const db = getDatabase();
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS knowledge_graphs (
+        id varchar(64) PRIMARY KEY,
+        label varchar(200) NOT NULL,
+        description text,
+        status_state varchar(32) NOT NULL DEFAULT 'active',
+        status_reason text,
+        metadata jsonb DEFAULT '{}',
+        entity_status varchar(16) NOT NULL DEFAULT 'active',
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+    `);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kg_status_idx ON knowledge_graphs (status_state)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kg_created_at_idx ON knowledge_graphs (created_at)`,
+    );
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS knowledge_nodes (
+        id varchar(64) PRIMARY KEY,
+        graph_id varchar(64) NOT NULL,
+        category varchar(32) NOT NULL,
+        label varchar(200) NOT NULL,
+        description text,
+        metadata jsonb DEFAULT '{}',
+        tags text[] DEFAULT '{}',
+        status_state varchar(32) NOT NULL DEFAULT 'draft',
+        status_reason text,
+        confidence_level varchar(16) NOT NULL DEFAULT 'unknown',
+        confidence_score double precision NOT NULL DEFAULT 0,
+        source_type varchar(32) NOT NULL DEFAULT 'system_generated',
+        source_detail text,
+        source_timestamp timestamp,
+        quality_accuracy double precision NOT NULL DEFAULT 0.5,
+        quality_completeness double precision NOT NULL DEFAULT 0.5,
+        quality_consistency double precision NOT NULL DEFAULT 0.5,
+        quality_timeliness double precision NOT NULL DEFAULT 1.0,
+        quality_relevance double precision NOT NULL DEFAULT 0.5,
+        version_major integer NOT NULL DEFAULT 1,
+        version_minor integer NOT NULL DEFAULT 0,
+        version_patch integer NOT NULL DEFAULT 0,
+        entity_status varchar(16) NOT NULL DEFAULT 'active',
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS kn_graph_id_idx ON knowledge_nodes (graph_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS kn_category_idx ON knowledge_nodes (category)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS kn_label_idx ON knowledge_nodes (label)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kn_status_idx ON knowledge_nodes (status_state)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kn_confidence_idx ON knowledge_nodes (confidence_level)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kn_entity_status_idx ON knowledge_nodes (entity_status)`,
+    );
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS kn_tags_idx ON knowledge_nodes (tags)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kn_graph_category_idx ON knowledge_nodes (graph_id, category)`,
+    );
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS knowledge_edges (
+        id varchar(64) PRIMARY KEY,
+        graph_id varchar(64) NOT NULL,
+        source_id varchar(64) NOT NULL,
+        target_id varchar(64) NOT NULL,
+        type varchar(64) NOT NULL,
+        type_category varchar(32) NOT NULL DEFAULT 'association',
+        label varchar(200) NOT NULL,
+        weight double precision NOT NULL DEFAULT 0.5,
+        metadata jsonb DEFAULT '{}',
+        confidence_level varchar(16) NOT NULL DEFAULT 'medium',
+        confidence_score double precision NOT NULL DEFAULT 0.6,
+        status_state varchar(32) NOT NULL DEFAULT 'active',
+        status_reason text,
+        source_type varchar(32) NOT NULL DEFAULT 'system_generated',
+        source_detail text,
+        entity_status varchar(16) NOT NULL DEFAULT 'active',
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS ke_graph_id_idx ON knowledge_edges (graph_id)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS ke_source_id_idx ON knowledge_edges (source_id)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS ke_target_id_idx ON knowledge_edges (target_id)`,
+    );
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS ke_type_idx ON knowledge_edges (type)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS ke_status_idx ON knowledge_edges (status_state)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS ke_source_target_idx ON knowledge_edges (source_id, target_id)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS ke_graph_source_idx ON knowledge_edges (graph_id, source_id)`,
+    );
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS knowledge_lineage (
+        id varchar(64) PRIMARY KEY,
+        entity_id varchar(64) NOT NULL,
+        entity_type varchar(16) NOT NULL,
+        event_type varchar(64) NOT NULL,
+        source_id varchar(64) NOT NULL,
+        description text,
+        timestamp timestamp NOT NULL DEFAULT now()
+      );
+    `);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kl_entity_id_idx ON knowledge_lineage (entity_id)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kl_entity_type_idx ON knowledge_lineage (entity_type)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS kl_timestamp_idx ON knowledge_lineage (timestamp)`,
+    );
+  }
+
   // ── Node Operations ──────────────────────────────────────────────────────
 
   async findNodeById(id: KnowledgeNodeId): Promise<KnowledgeNode | null> {

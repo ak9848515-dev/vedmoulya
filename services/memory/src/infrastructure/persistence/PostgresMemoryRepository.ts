@@ -26,6 +26,122 @@ export class PostgresMemoryRepository extends BaseRepository implements MemoryRe
     super('memory');
   }
 
+  /**
+   * Idempotent schema bootstrap — the estate-wide convention (every other
+   * Postgres store creates its tables with `CREATE TABLE IF NOT EXISTS` on
+   * startup; the memory store was an exception: its DB init only opened a
+   * connection, so production startup never created `memories` /
+   * `memory_timeline` / `memory_snapshots` and every repository query failed
+   * against a fresh database). Mirrors `schema/memory.ts` column-for-column
+   * (SPRINT-045 — PRODUCTION DATABASE READINESS).
+   */
+  async ensureTable(): Promise<void> {
+    const db = getDatabase();
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS memories (
+        id varchar(64) PRIMARY KEY,
+        label varchar(200) NOT NULL,
+        description text,
+        content text NOT NULL,
+        metadata jsonb DEFAULT '{}',
+        tags text[] DEFAULT '{}',
+        category varchar(32) NOT NULL,
+        source_type varchar(32) NOT NULL DEFAULT 'observation',
+        source_detail text,
+        source_timestamp timestamp,
+        importance_level varchar(16) NOT NULL DEFAULT 'medium',
+        importance_score double precision NOT NULL DEFAULT 0.5,
+        confidence_level varchar(16) NOT NULL DEFAULT 'medium',
+        confidence_score double precision NOT NULL DEFAULT 0.6,
+        strength_score double precision NOT NULL DEFAULT 1.0,
+        freshness_score double precision NOT NULL DEFAULT 1.0,
+        state varchar(16) NOT NULL DEFAULT 'active',
+        state_reason text,
+        version_major integer NOT NULL DEFAULT 1,
+        version_minor integer NOT NULL DEFAULT 0,
+        version_patch integer NOT NULL DEFAULT 0,
+        knowledge_node_id varchar(64),
+        knowledge_edge_id varchar(64),
+        retention_class varchar(16) NOT NULL DEFAULT 'standard',
+        retention_ttl_days integer NOT NULL DEFAULT 365,
+        expires_at timestamp,
+        recall_count integer NOT NULL DEFAULT 0,
+        last_recalled_at timestamp,
+        entity_status varchar(16) NOT NULL DEFAULT 'active',
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS mem_category_idx ON memories (category)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS mem_state_idx ON memories (state)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mem_importance_idx ON memories (importance_level)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mem_confidence_idx ON memories (confidence_level)`,
+    );
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS mem_strength_idx ON memories (strength_score)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mem_freshness_idx ON memories (freshness_score)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mem_knowledge_node_idx ON memories (knowledge_node_id)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mem_retention_class_idx ON memories (retention_class)`,
+    );
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS mem_expires_at_idx ON memories (expires_at)`);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mem_entity_status_idx ON memories (entity_status)`,
+    );
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS mem_created_at_idx ON memories (created_at)`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS memory_timeline (
+        id varchar(64) PRIMARY KEY,
+        memory_id varchar(64) NOT NULL,
+        event_type varchar(64) NOT NULL,
+        description text,
+        metadata jsonb DEFAULT '{}',
+        timestamp timestamp NOT NULL DEFAULT now()
+      );
+    `);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mt_memory_id_idx ON memory_timeline (memory_id)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mt_event_type_idx ON memory_timeline (event_type)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mt_timestamp_idx ON memory_timeline (timestamp)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS mt_memory_timestamp_idx ON memory_timeline (memory_id, timestamp)`,
+    );
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS memory_snapshots (
+        id varchar(64) PRIMARY KEY,
+        memory_id varchar(64) NOT NULL,
+        snapshot_data jsonb NOT NULL,
+        version_major integer NOT NULL,
+        version_minor integer NOT NULL,
+        version_patch integer NOT NULL,
+        reason text,
+        created_at timestamp NOT NULL DEFAULT now()
+      );
+    `);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS ms_memory_id_idx ON memory_snapshots (memory_id)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS ms_version_idx ON memory_snapshots (memory_id, version_major, version_minor, version_patch)`,
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS ms_created_at_idx ON memory_snapshots (created_at)`,
+    );
+  }
+
   // ── CRUD Operations ──────────────────────────────────────────────────────
 
   async findById(id: MemoryId): Promise<Memory | null> {

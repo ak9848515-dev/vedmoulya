@@ -13,6 +13,14 @@ export interface UserDTO {
   bio?: string;
   timezone?: string;
   locale?: string;
+  age?: number;
+  gender?: string;
+  purpose?: string;
+  primaryGoal?: string;
+  /** First-login profile completion (derived: all onboarding fields present).
+   *  Optional — set by UserMapper for real users; guest/partial assemblers
+   *  that build a UserDTO without profile data omit it. */
+  profileComplete?: boolean;
   theme: 'light' | 'dark' | 'system';
   language: string;
   statusState: string;
@@ -38,6 +46,12 @@ export interface UpdateProfileDTO {
   email: string;
   avatarUrl?: string;
   bio?: string;
+  age?: number;
+  gender?: string;
+  purpose?: string;
+  primaryGoal?: string;
+  /** First-login profile completion (derived: all onboarding fields present). */
+  profileComplete: boolean;
   updatedAt: string;
 }
 

@@ -68,73 +68,73 @@ export function createLiveIntelligenceBridgeRouter(
 ): LiveIntelligenceHandlers {
   return {
     start: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.start(input.userId, input.objective));
     },
 
     discover: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.discover(input.userId, input.loopId));
     },
 
     compare: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.compare(input.userId, input.loopId));
     },
 
     recommend: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.recommend(input.userId, input.loopId));
     },
 
     approve: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await service.approve(input.userId, input.loopId, input.recommendationId),
       );
     },
 
     reject: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await service.reject(input.userId, input.loopId, input.recommendationId),
       );
     },
 
     handOff: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.handOff(input.userId, input.loopId));
     },
 
-    verify: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    verify: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.verify(input.userId, input.loopId));
     },
 
     evaluateAndLearn: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await service.evaluateAndLearn(input.userId, input.loopId, input.outputAccepted),
       );
     },
 
-    get: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    get: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.get(input.userId, input.loopId));
     },
 
-    list: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    list: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.list(input.userId));
     },
 
-    performanceProfile: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    performanceProfile: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult(service.performanceProfile(input.userId));
     },
 
     emitNotification: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(
         await service.emitNotification(input.userId, input.loopId, {
           kind: input.kind,

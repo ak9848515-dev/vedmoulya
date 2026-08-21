@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AuthService } from './AuthService.js';
 import { mapErrorToResponse } from '../presentation/middleware/ErrorMapper.js';
+import { updateProfileSchema } from '../presentation/validation/IdentitySchemas.js';
 
 // ── Request Schemas ────────────────────────────────────────────────────────
 
@@ -110,6 +111,56 @@ export function createAuthRouter(authService: AuthService): Hono {
     }
   });
 
+  // ── Email Verification (SPRINT-045) ──────────────────────────────────
+  // POST /verify-email — consume the token from the emailed link. Token
+  // validity is proven by possession (only the hash is stored), so these
+  // endpoints are intentionally unauthenticated. Failures return 400 with a
+  // distinct code — the UI maps them to user-facing copy.
+  const verifyEmailSchema = z.object({ token: z.string().min(20) });
+  router.post('/verify-email', async (c) => {
+    try {
+      const body: Record<string, unknown> = await c.req.json();
+      const parsed = verifyEmailSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid input' } },
+          400,
+        );
+      }
+      const result = await authService.verifyEmail(parsed.data.token);
+      if (!result.success) {
+        return c.json(
+          { success: false, error: { code: 'VERIFY_FAILED', message: result.error } },
+          400,
+        );
+      }
+      return c.json({ success: true, data: { verified: true } }, 200);
+    } catch (error) {
+      return mapErrorToResponse(error, c);
+    }
+  });
+
+  // POST /resend-verification — always succeeds (no account enumeration):
+  // unknown emails and already-verified accounts are indistinguishable from
+  // a genuine resend.
+  const resendVerificationSchema = z.object({ email: z.string().email() });
+  router.post('/resend-verification', async (c) => {
+    try {
+      const body: Record<string, unknown> = await c.req.json();
+      const parsed = resendVerificationSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid input' } },
+          400,
+        );
+      }
+      await authService.resendVerificationEmail(parsed.data.email);
+      return c.json({ success: true, data: { sent: true } }, 200);
+    } catch (error) {
+      return mapErrorToResponse(error, c);
+    }
+  });
+
   // ── Sign-Out ─────────────────────────────────────────────────────────
   router.post('/sign-out', async (c) => {
     try {
@@ -196,6 +247,81 @@ export function createAuthRouter(authService: AuthService): Hono {
       }
 
       return c.json({ success: true, data: result.session }, 200);
+    } catch (error) {
+      return mapErrorToResponse(error, c);
+    }
+  });
+
+  // ── Self-service Profile (SPRINT-041B — first-login profile setup) ────
+  // Both routes are JWT-authenticated and derive the userId from the verified
+  // token (payload.sub) — a caller can never target another user, so there is
+  // no IDOR surface. These compose the EXISTING AuthService + repository; the
+  // separate /users/:id/profile REST surface stays unexposed (it has no auth
+  // middleware and is not mounted by the web app).
+  router.get('/me', async (c) => {
+    try {
+      const authHeader = c.req.header('Authorization');
+      if (!authHeader?.startsWith('Bearer ')) {
+        return c.json(
+          { success: false, error: { code: 'NO_TOKEN', message: 'No access token provided' } },
+          401,
+        );
+      }
+      const payload = await authService.verifySession(authHeader.slice(7));
+      if (!payload) {
+        return c.json(
+          {
+            success: false,
+            error: { code: 'TOKEN_INVALID', message: 'Invalid or expired access token' },
+          },
+          401,
+        );
+      }
+      const profile = await authService.getProfile(payload.sub);
+      return c.json({ success: true, data: profile }, 200);
+    } catch (error) {
+      return mapErrorToResponse(error, c);
+    }
+  });
+
+  router.patch('/me/profile', async (c) => {
+    try {
+      const authHeader = c.req.header('Authorization');
+      if (!authHeader?.startsWith('Bearer ')) {
+        return c.json(
+          { success: false, error: { code: 'NO_TOKEN', message: 'No access token provided' } },
+          401,
+        );
+      }
+      const payload = await authService.verifySession(authHeader.slice(7));
+      if (!payload) {
+        return c.json(
+          {
+            success: false,
+            error: { code: 'TOKEN_INVALID', message: 'Invalid or expired access token' },
+          },
+          401,
+        );
+      }
+
+      const body: Record<string, unknown> = await c.req.json();
+      const parsed = updateProfileSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          {
+            success: false,
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'Invalid input',
+              details: parsed.error.flatten(),
+            },
+          },
+          400,
+        );
+      }
+
+      const profile = await authService.updateProfile(payload.sub, parsed.data);
+      return c.json({ success: true, data: profile }, 200);
     } catch (error) {
       return mapErrorToResponse(error, c);
     }

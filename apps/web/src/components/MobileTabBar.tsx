@@ -75,7 +75,7 @@ export const MobileTabBar = memo(function MobileTabBar(): React.JSX.Element {
               </span>
               <span
                 className={`
-                  text-[10px] font-medium leading-none transition-colors duration-200
+                  text-[12px] font-medium leading-none transition-colors duration-200
                   ${isActive ? 'text-[#2B5FD9] dark:text-[#6B8FEF]' : 'text-[#94A3B8] dark:text-[#64748B]'}
                 `}
               >

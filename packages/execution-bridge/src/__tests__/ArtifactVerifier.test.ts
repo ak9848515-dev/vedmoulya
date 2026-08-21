@@ -255,6 +255,161 @@ describe('NodeArtifactReader — real filesystem (bounded, confined)', () => {
   });
 });
 
+describe('ArtifactVerifier — additional branch coverage', () => {
+  it('FILE_ABSENT fails-closed when the path is denied (unsafe)', async () => {
+    const v = verifierFor(reader({ '../x': { denied: true } }));
+    const res = await v.verify([{ checkId: 'a', type: 'FILE_ABSENT', path: '../x' }]);
+    expect(res.passed).toBe(false);
+    expect(res.checks[0].status).toBe('FAIL');
+  });
+
+  it('JSON_FIELD validates expectedValue (pass + mismatch)', async () => {
+    const v = verifierFor(reader({ 'd.json': { content: '{"status":"ok"}' } }));
+    const match = await v.verify([
+      {
+        checkId: 'a',
+        type: 'JSON_FIELD',
+        path: 'd.json',
+        requiredFields: ['status'],
+        expectedValue: 'ok',
+      },
+    ]);
+    expect(match.passed).toBe(true);
+    const mismatch = await v.verify([
+      {
+        checkId: 'a',
+        type: 'JSON_FIELD',
+        path: 'd.json',
+        requiredFields: ['status'],
+        expectedValue: 'nope',
+      },
+    ]);
+    expect(mismatch.passed).toBe(false);
+    expect(mismatch.checks[0].detail).toMatch(/does not match/);
+  });
+
+  it('JSON verification fails-closed on a denied read', async () => {
+    const v = verifierFor(reader({ 'd.json': { denied: true } }));
+    const res = await v.verify([{ checkId: 'a', type: 'JSON_VALID', path: 'd.json' }]);
+    expect(res.passed).toBe(false);
+    expect(res.checks[0].status).toBe('FAIL');
+  });
+
+  it('CSV fails on empty content, missing header and denied reads', async () => {
+    const empty = verifierFor(reader({ 'e.csv': { content: '   \n' } }));
+    expect((await empty.verify([{ checkId: 'a', type: 'CSV_VALID', path: 'e.csv' }])).passed).toBe(
+      false,
+    );
+    const noHeader = verifierFor(reader({ 'h.csv': { content: '\n' } }));
+    const nh = await noHeader.verify([{ checkId: 'a', type: 'CSV_VALID', path: 'h.csv' }]);
+    expect(nh.passed).toBe(false);
+    expect(nh.checks[0].detail).toMatch(/empty/);
+    const denied = verifierFor(reader({ 'h.csv': { denied: true } }));
+    expect((await denied.verify([{ checkId: 'a', type: 'CSV_VALID', path: 'h.csv' }])).passed).toBe(
+      false,
+    );
+    const unknown = verifierFor(reader({ 'h.csv': { unreadable: true } }));
+    const unk = await unknown.verify([{ checkId: 'a', type: 'CSV_VALID', path: 'h.csv' }]);
+    expect(unk.checks[0].status).toBe('UNKNOWN');
+  });
+
+  it('CALCULATION covers count, length and equals kinds plus their failure paths', async () => {
+    const v = verifierFor(
+      reader({ 'c.json': { content: '{"items":[1,2],"label":"abcd","value":7}' } }),
+    );
+    const count = await v.verify([
+      {
+        checkId: 'a',
+        type: 'CALCULATION',
+        path: 'c.json',
+        calculation: { kind: 'count', field: 'items', expected: 2 },
+      },
+    ]);
+    expect(count.passed).toBe(true);
+    const length = await v.verify([
+      {
+        checkId: 'a',
+        type: 'CALCULATION',
+        path: 'c.json',
+        calculation: { kind: 'length', targetField: 'label', expected: 4 },
+      },
+    ]);
+    expect(length.passed).toBe(true);
+    const equals = await v.verify([
+      {
+        checkId: 'a',
+        type: 'CALCULATION',
+        path: 'c.json',
+        calculation: { kind: 'equals', valueField: 'value', expected: 7 },
+      },
+    ]);
+    expect(equals.passed).toBe(true);
+
+    const notArray = await v.verify([
+      {
+        checkId: 'a',
+        type: 'CALCULATION',
+        path: 'c.json',
+        calculation: { kind: 'sum', field: 'label', expected: 1 },
+      },
+    ]);
+    expect(notArray.checks[0].status).toBe('FAIL');
+    const notString = await v.verify([
+      {
+        checkId: 'a',
+        type: 'CALCULATION',
+        path: 'c.json',
+        calculation: { kind: 'length', targetField: 'value', expected: 1 },
+      },
+    ]);
+    expect(notString.checks[0].status).toBe('FAIL');
+    const notNumber = await v.verify([
+      {
+        checkId: 'a',
+        type: 'CALCULATION',
+        path: 'c.json',
+        calculation: { kind: 'equals', valueField: 'label', expected: 1 },
+      },
+    ]);
+    expect(notNumber.checks[0].status).toBe('FAIL');
+    const noCalc = await v.verify([{ checkId: 'a', type: 'CALCULATION', path: 'c.json' }]);
+    expect(noCalc.checks[0].status).toBe('FAIL');
+  });
+
+  it('DRY_RUN fails without an expected marker, on denied reads, and reports UNKNOWN', async () => {
+    const noMarker = verifierFor(reader({ 'd.log': { content: 'ran' } }));
+    const nm = await noMarker.verify([{ checkId: 'a', type: 'DRY_RUN', path: 'd.log' }]);
+    expect(nm.checks[0].status).toBe('FAIL');
+    const denied = verifierFor(reader({ 'd.log': { denied: true } }));
+    expect(
+      (await denied.verify([{ checkId: 'a', type: 'DRY_RUN', path: 'd.log' }])).checks[0].status,
+    ).toBe('FAIL');
+    const unknown = verifierFor(reader({ 'd.log': { unreadable: true } }));
+    expect(
+      (await unknown.verify([{ checkId: 'a', type: 'DRY_RUN', path: 'd.log' }])).checks[0].status,
+    ).toBe('UNKNOWN');
+  });
+
+  it('summarizes mixed UNKNOWN + FAIL outcomes honestly', async () => {
+    const v = verifierFor(
+      reader({
+        'good.json': { content: '{}' },
+        'bad.json': { content: '{x' },
+        'u.json': { unreadable: true },
+      }),
+    );
+    const res = await v.verify([
+      { checkId: 'a', type: 'JSON_VALID', path: 'good.json' },
+      { checkId: 'b', type: 'JSON_VALID', path: 'bad.json' },
+      { checkId: 'c', type: 'JSON_VALID', path: 'u.json' },
+    ]);
+    expect(res.passed).toBe(false);
+    expect(res.failedCount).toBe(1);
+    expect(res.unknownCount).toBe(1);
+    expect(res.summary).toContain('inconclusive');
+  });
+});
+
 describe('StepVerifier.verifyArtifacts + attachArtifacts', () => {
   it('passes only when the execution contract AND the real artifact both verify', async () => {
     const { StepVerifier } = await import('../domain/StepVerifier.js');

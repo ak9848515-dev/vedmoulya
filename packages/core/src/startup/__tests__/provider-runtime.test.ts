@@ -33,7 +33,7 @@ describe('AI provider runtime registry — dev mode without credentials', () => 
   const env = { AUTH_JWT_SECRET: JWT, NODE_ENV: 'development' };
 
   it('catalog families without an adapter report UNSUPPORTED_RUNTIME (never AVAILABLE)', () => {
-    for (const family of ['anthropic', 'google', 'openrouter', 'ollama']) {
+    for (const family of ['anthropic', 'openrouter', 'ollama']) {
       const state = stateByFamily(env, 'development', family);
       expect(state.status).toBe('UNSUPPORTED_RUNTIME');
       expect(state.adapterImplemented).toBe(false);
@@ -42,9 +42,18 @@ describe('AI provider runtime registry — dev mode without credentials', () => 
     }
   });
 
-  it('openai/deepseek without keys report NOT_CONFIGURED (adapter exists, dormant)', () => {
+  it('Google has an adapter but no key → NOT_CONFIGURED (not UNSUPPORTED_RUNTIME)', () => {
+    const state = stateByFamily(env, 'development', 'google');
+    expect(state.status).toBe('NOT_CONFIGURED');
+    expect(state.adapterImplemented).toBe(true);
+    expect(state.registered).toBe(false);
+    expect(state.canExecute).toBe(true);
+  });
+
+  it('openai/deepseek/google without keys report NOT_CONFIGURED (adapter exists, dormant)', () => {
     expect(stateByFamily(env, 'development', 'openai').status).toBe('NOT_CONFIGURED');
     expect(stateByFamily(env, 'development', 'deepseek').status).toBe('NOT_CONFIGURED');
+    expect(stateByFamily(env, 'development', 'google').status).toBe('NOT_CONFIGURED');
   });
 
   it('mock is active in development (registered, executable, free)', () => {
@@ -87,6 +96,28 @@ describe('AI provider runtime registry — configured providers', () => {
     expect(result.providers).toContain('deepseek');
   });
 
+  it('configured Google Gemini → CONFIGURED + registered (SPRINT-049)', () => {
+    const GOOGLE_KEY = 'AIzaSy-test-abcdefghijklmnopqrstuvwxyz1234';
+    const envWithGoogle = { AUTH_JWT_SECRET: JWT, AI_GOOGLE_API_KEY: GOOGLE_KEY };
+    const state = stateByFamily(envWithGoogle, 'production', 'google');
+    expect(state.status).toBe('CONFIGURED');
+    expect(state.registered).toBe(true);
+    expect(state.canExecute).toBe(true);
+    const result = runtimeExecutionReady(envWithGoogle, 'production');
+    expect(result.ok).toBe(true);
+    expect(result.providers).toContain('google');
+  });
+
+  it('google is a valid AI_DEFAULT_PROVIDER when configured (SPRINT-049)', () => {
+    const GOOGLE_KEY = 'AIzaSy-test-abcdefghijklmnopqrstuvwxyz1234';
+    const result = validateDefaultProvider(
+      { ...envWithDeepSeek, AI_DEFAULT_PROVIDER: 'google', AI_GOOGLE_API_KEY: GOOGLE_KEY },
+      'production',
+    );
+    expect(result.ok).toBe(true);
+    expect(result.family).toBe('google');
+  });
+
   it('deepseek is a valid AI_DEFAULT_PROVIDER (runtime-supported)', () => {
     const result = validateDefaultProvider(
       { ...envWithDeepSeek, AI_DEFAULT_PROVIDER: 'deepseek' },
@@ -121,6 +152,22 @@ describe('AI provider runtime registry — unsupported providers', () => {
     const result = validateDefaultProvider(env, 'production');
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/catalog/i);
+  });
+
+  it('a Google key with adapter → CONFIGURED (not UNSUPPORTED_RUNTIME)', () => {
+    const GOOGLE_KEY = 'AIzaSy-test-abcdefghijklmnopqrstuvwxyz1234';
+    const env = { AUTH_JWT_SECRET: JWT, AI_GOOGLE_API_KEY: GOOGLE_KEY };
+    const state = stateByFamily(env, 'production', 'google');
+    expect(state.status).toBe('CONFIGURED');
+    expect(state.adapterImplemented).toBe(true);
+  });
+
+  it('Google without key → NOT_CONFIGURED (adapter exists but dormant)', () => {
+    const env = { AUTH_JWT_SECRET: JWT };
+    const state = stateByFamily(env, 'production', 'google');
+    expect(state.status).toBe('NOT_CONFIGURED');
+    expect(state.adapterImplemented).toBe(true);
+    expect(state.registered).toBe(false);
   });
 
   it('AI_DEFAULT_PROVIDER=mock is rejected in production (never silent)', () => {

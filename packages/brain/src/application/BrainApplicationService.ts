@@ -19,7 +19,6 @@ import { ProviderRoleAssigner } from '../domain/ProviderRoleAssigner.js';
 import { ParallelPlanner } from '../domain/ParallelPlanner.js';
 import { ConflictDetector } from '../domain/ConflictDetector.js';
 import { OutputAssembler } from '../domain/OutputAssembler.js';
-import { CriticStrategy } from '../domain/CriticStrategy.js';
 import { BrainBudgetGuard } from '../domain/BrainBudgetGuard.js';
 import { BrainPolicyEngine } from '../domain/BrainPolicyEngine.js';
 import { BrainDecisionRecorder, type DecisionInput } from '../domain/BrainDecisionRecorder.js';
@@ -119,7 +118,6 @@ export class BrainApplicationService {
   private readonly planner = new ParallelPlanner();
   private readonly conflicts = new ConflictDetector();
   private readonly assembler = new OutputAssembler(this.conflicts);
-  private readonly critic = new CriticStrategy();
   private readonly budgetGuard: BrainBudgetGuard;
   private readonly policy = new BrainPolicyEngine();
   private readonly decisions: BrainDecisionRecorder;
@@ -1080,8 +1078,7 @@ export class BrainApplicationService {
         capturedAt: now,
         provenance: `correction:${id}`,
       }).fact,
-      reason:
-        'Explicit user correction — this outranks any weak system inference.',
+      reason: 'Explicit user correction — this outranks any weak system inference.',
       confidence: correction.confidence,
     });
 
@@ -1092,7 +1089,12 @@ export class BrainApplicationService {
           userId: string;
           taskId: string;
           taskType: string;
-          providers: Array<{ providerId: string; capability: string; role: string; succeeded: boolean }>;
+          providers: Array<{
+            providerId: string;
+            capability: string;
+            role: string;
+            succeeded: boolean;
+          }>;
           selectedReason: string[];
           outcome: 'SUCCESS' | 'PARTIAL' | 'FAILED';
           userAccepted: boolean;

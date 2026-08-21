@@ -2100,9 +2100,7 @@ export class ClientOperationsApplicationService {
     if (pending.length > 0) await Promise.all(pending);
   }
 
-  private async resolvePortalSession(
-    token: string,
-  ): Promise<
+  private async resolvePortalSession(token: string): Promise<
     ClientOpsResult<{
       clientId: string;
       agencyUserId: string;

@@ -3,10 +3,16 @@ import { createCatalogProviders, CATALOG_SIZE } from '../provider-catalog.js';
 import { PROVIDER_FAMILIES } from '../../domain/rules/ProviderRules.js';
 
 describe('provider catalog', () => {
-  it('seeds exactly the 7 real provider families', () => {
+  it('seeds the 7 built-in provider families (custom is user-added, not in catalog)', () => {
     expect(CATALOG_SIZE).toBe(7);
     const providers = createCatalogProviders();
-    expect(providers.map((p) => p.id).sort()).toEqual([...PROVIDER_FAMILIES].sort());
+    const catalogIds = providers.map((p) => p.id).sort();
+    // All catalog providers must be valid families.
+    for (const id of catalogIds) {
+      expect(PROVIDER_FAMILIES).toContain(id);
+    }
+    // 'custom' is a valid family but not in the seed catalog (user-added).
+    expect(catalogIds).not.toContain('custom');
   });
 
   it('every provider exposes at least one model and a non-empty capability matrix', () => {

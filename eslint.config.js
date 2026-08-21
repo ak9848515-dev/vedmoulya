@@ -280,6 +280,11 @@ export default tseslint.config(
       // typed value or a fixed constant list, never raw user input (same proven
       // closed-union pattern as the Brain / Enterprise Brain UI maps).
       'apps/web/src/app/ecosystem-intelligence/intelligence-ui.ts',
+      // Intelligence Graph (SPRINT-055): STATUS_CONFIG[node.status] and
+      // TYPE_ICONS[node.type] index typed records over the closed GraphNode
+      // status/type unions — keys are never raw user input (same proven
+      // closed-union pattern).
+      'apps/web/src/components/spatial/IntelligenceGraph.tsx',
       'apps/web/src/app/ecosystem-intelligence/task-panel.tsx',
       'apps/web/src/app/ecosystem-intelligence/github-panel.tsx',
       'apps/web/src/app/ecosystem-intelligence/repository-panel.tsx',
@@ -295,6 +300,17 @@ export default tseslint.config(
       'packages/ai-world-scheduler/src/domain/ChangeDetector.ts',
       'packages/ai-world-scheduler/src/domain/DiscoveryScheduler.ts',
       'packages/ai-world-scheduler/src/application/SchedulerApplicationService.ts',
+      // SPRINT-039 FounderEvidenceLoop — PROSPECT_NEXT[from] (from:
+      // ProspectDiscoveryStatus, the closed status union; the record covers
+      // every key, noUncheckedIndexedAccess keeps reads null-safe) and the
+      // discovery chain scenario iterates a fixed `as const` status array
+      // with a bounded loop index — identical closed-union rationale.
+      'packages/world-model/src/domain/FounderEvidenceLoop.ts',
+      'packages/world-model/src/benchmark/CustomerDiscoveryScenarios.ts',
+      // Ecosystem Workflow Execution (SPRINT-051/052): execution.stepResults[i]
+      // where i is a bounded loop index over an owner-scoped typed array —
+      // never user-controlled, same rationale as InMemoryContinuousStores.
+      'packages/ecosystem/src/application/WorkflowExecutionService.ts',
     ],
     rules: {
       'security/detect-object-injection': 'off',

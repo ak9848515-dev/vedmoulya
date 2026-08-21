@@ -29,6 +29,12 @@ export { registerIdentityServices, identityModule } from './infrastructure/di/Id
 
 // ── Authentication ─────────────────────────────────────────────────────────
 export { AuthService } from './auth/AuthService.js';
+export type {
+  SignUpResult,
+  SignInResult,
+  VerifyEmailResult,
+  AuthSession,
+} from './auth/AuthService.js';
 export { TokenService } from './auth/TokenService.js';
 export type { AccessTokenPayload, RefreshTokenPayload, TokenPair } from './auth/TokenService.js';
 export { PasswordService } from './auth/PasswordService.js';
@@ -36,6 +42,28 @@ export { GoogleProvider } from './auth/GoogleProvider.js';
 export type { GoogleUserProfile, GoogleAuthResult } from './auth/GoogleProvider.js';
 export { requireAuth, optionalAuth } from './auth/AuthMiddleware.js';
 export { createAuthRouter, authRouteConfig } from './auth/AuthRoutes.js';
+export {
+  createVerificationToken,
+  hashVerificationToken,
+  buildVerificationLink,
+} from './auth/VerificationToken.js';
+export {
+  LogVerificationEmailSender,
+  SmtpVerificationEmailSender,
+  createVerificationEmailSender,
+  resolveAppOrigin,
+} from './auth/VerificationEmailSender.js';
+export type {
+  VerificationEmail,
+  VerificationEmailSender,
+  SmtpEmailConfig,
+} from './auth/VerificationEmailSender.js';
+export {
+  PostgresVerificationTokenStore,
+  InMemoryVerificationTokenStore,
+  createVerificationTokenStore,
+} from './infrastructure/persistence/VerificationTokenStore.js';
+export type { VerificationTokenStore } from './infrastructure/persistence/VerificationTokenStore.js';
 
 // ── Authorization ─────────────────────────────────────────────────────────
 export { AuthorizationService } from './authorization/AuthorizationService.js';

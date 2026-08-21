@@ -89,6 +89,14 @@ const AICompanion = dynamic(
   },
 );
 
+const OllamaFirstRunDialog = dynamic(
+  () => import('./OllamaFirstRunDialog.js').then((mod) => ({ default: mod.OllamaFirstRunDialog })),
+  {
+    ssr: false,
+    loading: () => null,
+  },
+);
+
 // ── Module Icon Map ─────────────────────────────────────────────────────────
 
 const moduleIcons: Record<string, React.ReactNode> = {
@@ -118,6 +126,7 @@ const moduleIcons: Record<string, React.ReactNode> = {
   loop: <RefreshCw className="h-5 w-5" />,
   applications: <Boxes className="h-5 w-5" />,
   'content-agency': <PenSquare className="h-5 w-5" />,
+  ecosystem: <Boxes className="h-5 w-5" />,
   settings: <Settings className="h-5 w-5" />,
 };
 
@@ -177,6 +186,8 @@ function routeForSection(section: NavSectionId): string | undefined {
       return '/applications';
     case 'content-agency':
       return '/content-agency';
+    case 'ecosystem':
+      return '/ecosystem';
     default:
       return undefined;
   }
@@ -327,6 +338,15 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
           <NavBar
             className="dark:bg-[#0F172A] dark:border-[#334155]"
             logo={logo}
+            mobileActions={
+              <button
+                onClick={handleAiPanelClick}
+                className="p-2 rounded-lg hover:bg-[#F5F3FF] transition-colors"
+                aria-label="Open AI Companion"
+              >
+                <PanelRightOpen className="h-5 w-5 text-[#7C3AED]" />
+              </button>
+            }
             leftItems={
               <button
                 onClick={handleToggleCollapse}
@@ -434,6 +454,9 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
 
       {/* ── AI Companion Panel ─────────────────────────────────────── */}
       <AICompanion />
+
+      {/* ── First-run "Your Private AI Option" prompt (SPRINT-048) ── */}
+      <OllamaFirstRunDialog />
 
       {/* ── Command Palette ──────────────────────────────────────────── */}
       <CommandPalette />

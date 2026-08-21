@@ -21,8 +21,8 @@ import { fromServiceResult } from '../services/ResponseMapper.js';
 import type { SchedulerRuntimeStatus } from '../observability/scheduler-cadence.js';
 
 export interface SchedulerHandlers {
-  getStatus: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
-  listSchedules: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
+  getStatus: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
+  listSchedules: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   setSchedule: (
     input: {
       userId: string;
@@ -31,7 +31,7 @@ export interface SchedulerHandlers {
       frequency?: ScheduleFrequency;
     },
     ctx: TRPCContext,
-  ) => ApiResponse;
+  ) => Promise<ApiResponse>;
   runNow: (
     input: { userId: string; jobCategory: DiscoveryJobCategory },
     ctx: TRPCContext,
@@ -39,12 +39,12 @@ export interface SchedulerHandlers {
   cancelRun: (
     input: { userId: string; jobCategory: DiscoveryJobCategory },
     ctx: TRPCContext,
-  ) => ApiResponse;
-  listRuns: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
-  getLedger: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
-  listSourcePolicies: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
+  ) => Promise<ApiResponse>;
+  listRuns: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
+  getLedger: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
+  listSourcePolicies: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   /** EPIC-018 runtime closure: whether automatic discovery is actually active. */
-  getRuntimeStatus: (input: { userId: string }, ctx: TRPCContext) => ApiResponse;
+  getRuntimeStatus: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
 }
 
 /**
@@ -59,13 +59,13 @@ export function createSchedulerRouter(
   runtimeStatus?: () => SchedulerRuntimeStatus,
 ): SchedulerHandlers {
   return {
-    getStatus: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    getStatus: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.getStatus(input.userId) });
     },
 
-    getRuntimeStatus: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    getRuntimeStatus: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const status = runtimeStatus
         ? runtimeStatus()
         : ({
@@ -73,17 +73,18 @@ export function createSchedulerRouter(
             reason: 'not_started',
             maxUsersPerTick: 0,
             refreshIntelligenceEnabled: false,
+            proactiveRefreshEnabled: false,
           } satisfies SchedulerRuntimeStatus);
       return fromServiceResult({ success: true, data: status });
     },
 
-    listSchedules: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    listSchedules: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.listSchedules(input.userId) });
     },
 
-    setSchedule: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    setSchedule: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const result = service.setSchedule(input.userId, input.jobCategory, {
         enabled: input.enabled,
         frequency: input.frequency,
@@ -92,27 +93,27 @@ export function createSchedulerRouter(
     },
 
     runNow: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(await service.runNow(input.userId, input.jobCategory));
     },
 
-    cancelRun: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+    cancelRun: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       return fromServiceResult(service.cancel(input.userId, input.jobCategory));
     },
 
-    listRuns: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    listRuns: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.listRuns(input.userId) });
     },
 
-    getLedger: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    getLedger: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.getLedger(input.userId) });
     },
 
-    listSourcePolicies: (input, _ctx): ApiResponse => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+    listSourcePolicies: async (input, _ctx): Promise<ApiResponse> => {
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       return fromServiceResult({ success: true, data: service.listSourcePolicies() });
     },
   };

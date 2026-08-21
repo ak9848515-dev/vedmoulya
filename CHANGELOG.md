@@ -10,6 +10,546 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **SPRINT-042 — FOUNDER EVIDENCE ENTRY UI** (2026-08-16, 🟢 COMPLETE — PURE
+  COMPOSITION SPRINT, NEW ENGINES CREATED: 0). `EvidenceEntryPanel` in the
+  Command Center INTELLIGENCE tab: problem registration (evidence REQUIRED),
+  observation (provenance REQUIRED), prospect registration (provenance
+  REQUIRED, discoveryStatus not sendable), advance (display-only valid
+  transitions; backend rejects illegal jumps with INVALID_TRANSITION),
+  verified-payment capture (real payment-evidence text REQUIRED). Every
+  mutation maps 1:1 to an existing gateway procedure; zero business rules in
+  React; honest EMPTY/UNKNOWN states; backend errors verbatim; every save
+  refreshes radar/NBA. Fixed two genuine UI defects found by live Chrome
+  verification: D1 `handleSaved` now refetches `prospectsQuery` (stale
+  next-state options after a transition); D2 the drawer-open effect now
+  depends on `[open]` only (was an infinite `problemList` refetch loop — 30+
+  refetches in 2s, each burning a rate-limit token). Real-Chrome Scenarios
+  1–9 **19–20/20 PASS** incl. cross-user mutation **403 FORBIDDEN** live;
+  web **292/292** · api **1010/1010** · identity **295/295** · typecheck **0**
+  · lint **0/0** · `next build` **PASS**. No fabricated evidence/customers/
+  revenue.
+
+- **SPRINT-041B — FIRST-LOGIN PROFILE SETUP VERIFICATION + RECTIFICATION**
+  (2026-08-16, 🟢 COMPLETE — VERIFICATION + MINIMAL RECTIFICATION SPRINT,
+  **NEW ENGINES CREATED: 0**). The first-login profile experience did not
+  exist; built it entirely over the existing estate:
+  - Domain: `UserProfile` gained `age/gender/purpose/primaryGoal` and a
+    deterministic `isComplete()` — the server is the source of first-login
+    truth, never client flags.
+  - Persistence: 4 idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+    columns on the existing `users` table (verified live against Docker
+    Postgres).
+  - API: JWT-authenticated `GET /api/v1/identity/auth/me` +
+    `PATCH /api/v1/identity/auth/me/profile` — userId derived from the
+    verified token, IDOR-impossible by construction.
+  - Web: `refreshProfile()` / `completeProfile()` through the existing
+    auth-api/session-manager/store; `/onboarding/profile` page (existing UI
+    components, Name prefilled, closed vocabularies); single central
+    `OnboardingRedirect` gate in Providers (explicit `profileComplete===false`
+    only; auth-flow screens excluded — no loop).
+  - **Defects found by live Chrome verification + fixed:** D1 the gate did not
+    re-fire on client-side navigation after signup (no pathname dependency) →
+    now watches `usePathname()`; D2 `?next=` captured at mount could be stale
+    → now resolved at the point of use. +2 regression tests.
+  - Verified: real-Chrome Scenarios A–D **15/15 PASS**; web **276/276**,
+    identity **295/295**, api **1010/1010**, typecheck **0**, lint **0/0**,
+    `next build` **PASS** (58 pages).
+
+- **SPRINT-041 — FOUNDER OPERATING LOOP HARDENING + REAL-WORLD READINESS**
+  (2026-08-16, 🟢 COMPLETE — HARDENING + VERIFICATION SPRINT, **NEW ENGINES
+  CREATED: 0**): the founder operating loop is now trustworthy for repeated
+  founder use — verified live against the gateway with clearly-marked LOCAL
+  TEST data (no fabricated evidence/customers/revenue). **Genuine defects
+  found + fixed (minimal):** D1 — `advanceProspect` (world-model) fabricated a
+  payment-evidence default (`Verified payment from X.`) when `verifiedPaymentText`
+  was omitted, letting a VERIFIED_PAYMENT transition succeed with zero
+  verification evidence; it now REQUIRES real evidence text
+  (`PAYMENT_EVIDENCE_REQUIRED`) · D2 — `evidenceQuality` (world-model) reported
+  `provenance: HIGH` with zero records (`every()` over `[]` is vacuously true);
+  now `UNKNOWN` with zero records · D3 — `nextBestAction` /
+  `opportunityComparisonState` (world-model) let a stale advisory STOP
+  (`stopReason` from an assessment taken before a verified payment) say STOP
+  forever, and a paid opportunity's TALK_TO_CUSTOMERS claimed "evidence quality
+  is insufficient"; advisory STOP now yields to verified-payment evidence
+  (founder-terminal REJECTED/DISMISSED still dominate) and the paid-opportunity
+  NBA explains repeatability honestly · D4 — real-Postgres restart-recovery test
+  (`PersistenceStores.test.ts`) extended to the world evidence-loop stores
+  (`world_problems`/`world_observations`/`world_prospects`). **Verification:**
+  live evidence loop **26/26 PASS** · world-model **302/302** · services/api
+  **1010/1010** · identity **283/283** · web **247/247** · typecheck 0 · lint
+  0/0 · `next build` PASS (57 pages) · benchmarks chain exit 0 (opportunity
+  20/20 · evidence 20/20 · discovery 10/10 · calibration 13/13 · provider 11/11
+  · learning 25/25 · quality gates 16/16) · coverage gate 45/45 PASS. Honest:
+  the ONE founder blocker is that evidence-loop ENTRY has no web-UI mutation
+  surface yet (Command Center is presentation + founder-approval only by
+  design) — next highest-value follow-up is a Command Center evidence-entry UI.
+- **SPRINT-040 — FOUNDER EVIDENCE LOOP + LOCAL RUNTIME VERIFICATION** (2026-08-16,
+  🟢 COMPLETE — VERIFICATION + DEFECT-FIX SPRINT, **NEW ENGINES CREATED: 0**): the
+  first end-to-end operational path was proven live over the frozen estate —
+  Docker runtime → register/login → founder observation → provenance validation →
+  evidence persistence → scoring → customer discovery → next-best-action →
+  verified-payment progression — with the founder remaining the ultimate
+  authority. **Defects found + fixed (minimal):** D1 — the identity `users` table
+  was the ONE Postgres store never created anywhere (its DB init only opened a
+  connection), so first-run auth failed `REGISTRATION_FAILED`; fixed with the
+  estate-convention `PostgresIdentityRepository.ensureTable()` (idempotent
+  `CREATE TABLE IF NOT EXISTS users` + unique email/google_id indexes), wired
+  fire-and-forget in `createProductionIdentityRepository()` and **awaited** in the
+  web auth-app for a deterministic cold start · D2 — `IDENTITY_DATABASE_URL`
+  unset locally → added to gitignored `apps/web/.env.local` pointing at the Docker
+  Postgres (dev creds already public in compose; no API keys) · D3 — no email-
+  verification delivery exists anywhere (no SMTP), while the domain blocks
+  sign-in for unverified accounts → registered users could never sign in; fixed
+  with a dev/test-only `user.verifyEmail()` at registration in the existing
+  `AuthService.signUp` (mirrors the existing Google path; production/staging
+  unchanged — the domain rule still blocks until a real verification flow ships) ·
+  D4 — Next dev cache corruption (`vendor-chunks/@vercel.js`, environment
+  artifact) → `.next` cleared. **Live verification:** sign-up 201 · duplicate 409 ·
+  validation 400 · sign-in 200 · session 200 · sign-out 200; provenance refusal;
+  claimed VERIFIED downgraded to OBSERVED; calibration refuses UNKNOWN fabrication;
+  prospect bounded chain + invalid-jump refusal; verified-payment-only ladder
+  REVENUE_VERIFIED → REPEAT_REVENUE → REPEATABLE_BUSINESS; explainable next-best-
+  action (TALK_TO_CUSTOMERS, NO_COST, explicit STOP branch); radar/drilldown/
+  command-center read models; honest empty datasets. Suites: world-model
+  **298/298**, identity **283/283** (+2 verify-split tests), api **1010/1010**,
+  web **220/220** (+1 auth-app bootstrap test); typecheck **0**; scoped lint
+  **0/0**; `next build` **PASS** (56 pages); benchmarks chain **all PASS**;
+  coverage gate **2/2 PASS** (identity 88.14/80.39/92.39/89.07, api
+  93.01/80.07/95.03/93.83). Docker: postgres + redis healthy, `vedmoulya_default`
+  network, `/` + `/login` 200. Honest: `vedmoulya-web` is not a container (not in
+  compose — web runs via `next dev`); production email verification remains a
+  documented pre-existing gap; only LOCAL TEST data used — nothing fabricated.
+  Deliverables: `04_Sprints/SPRINT-040_*` (8).
+- **SPRINT-039 — FOUNDER EVIDENCE LOOP** (2026-08-15, 🟢 COMPLETE — COMPOSITION
+  SPRINT, **NEW ENGINES CREATED: 0**): closed the last loop between the founder's REAL
+  observations and the system's advisory scoring over the frozen estate —
+  **founder observations with MANDATORY provenance** (`FounderObservation`;
+  provenance-required, refused `PROVENANCE_REQUIRED` otherwise; sanitized at the
+  boundary; explicit evidence states OBSERVED/REPORTED_BY_CUSTOMER/FOUNDER_OBSERVED/
+  DOCUMENTED/VERIFIED/HYPOTHESIS/UNKNOWN/CONFLICTING; claimed VERIFIED downgraded,
+  never trusted at face value; HYPOTHESIS is the honest default) ·
+  **customer-discovery ledger** (`CustomerDiscoveryRecord` — NOT a CRM, no PII dumps;
+  bounded status chain CONTACTED→…→VERIFIED_PAYMENT with LOST from any active state;
+  discovery ≠ validation, interest ≠ revenue, WTP ≠ payment; ONLY a verified_payment
+  record reaches REVENUE_VERIFIED) · **bounded evidence calibration**
+  (`CALIBRATION_DELTA_MAX` 0.05 per event over the EXISTING SPRINT-038 factors;
+  strength-scaled; UNKNOWN never becomes zero; conflicts visible, never silently
+  resolved; every adjustment keeps its evidence trail) · **deterministic 8-dimension
+  evidence quality** (provenance/directness/recency/independence/repetition/
+  specificity/contradiction/verification; honest UNKNOWN; stale evidence never
+  inflates) · **explainable NEXT BEST ACTION** (TALK_TO_CUSTOMERS/TEST_WTP/
+  REQUEST_PAYMENT/VERIFY_PROBLEM/RUN_NO_COST_EXPERIMENT/STOP with WHY/EVIDENCE/
+  LEARNING/RISK/NEXT-DECISION; the system CAN say "do not build this") ·
+  **evidence-driven opportunity comparison** (STRONG_EVIDENCE/PROMISING/
+  NEEDS_CUSTOMER_VALIDATION/INSUFFICIENT_EVIDENCE/STOP/UNKNOWN — a high score alone
+  is never STRONG_EVIDENCE) · **Command Center drill-downs** (expandable evidence /
+  prospects / next action per opportunity; honest EMPTY copy) · **voice read-only
+  presentation** (CommandCenterQuestionRouter evidence questions; VOICE ≠
+  AUTHORIZATION preserved) · owner-scoped stores (in-memory + Postgres
+  `world_observations` / `world_prospects`) · gateway `world.*` +10 procedures
+  (observationRecord/observationsList/prospectRegister/prospectAdvance/
+  prospectsList/evidenceQualityView/factorCalibrate/nextBestActionView/
+  opportunityCompare/opportunityDrilldownView — auth + rate tier + IDOR + zod) ·
+  **`evidence:benchmark` 20/20 + `discovery:benchmark` 10/10** wired into `npm run
+benchmarks` (now 20 harnesses) + vitest gates. Verification 2026-08-15: world-model
+  **298/298 (23 files)**, services/api **1010 (50 files)**, web **219/219 (22 files)**,
+  typecheck **0**, lint **0 errors · 0 warnings**, `next build` **PASS**, benchmarks
+  chain all PASS, coverage gate **world-model 91.11/82.18/90.83/94.34 · api PASS**,
+  production-config-check honest. Honest: **EMPTY datasets** — NO fabricated
+  observations/prospects/customers/revenue; real founder observation entry ready now;
+  live world signals + real provider execution remain **OPERATOR-REQUIRED**; no real
+  customer/revenue evidence exists. Deliverables: `04_Sprints/SPRINT-039_*` (13).
+- **SPRINT-038 — OPPORTUNITY DISCOVERY & REVENUE VALIDATION** (2026-08-15, 🟢 COMPLETE —
+  COMPOSITION SPRINT, **NEW ENGINES CREATED: 0**): VedMoulya became PRACTICAL over the
+  frozen estate — **practical problem representation** (`BusinessProblem`, evidence/
+  provenance-REQUIRED; a problem without evidence is refused `EVIDENCE_REQUIRED`;
+  evidence sanitized; confidence derived never fabricated; external evidence never
+  becomes authority — structural) · **three distinct advisory scores** (PROBLEM /
+  BUSINESS-OPPORTUNITY / EXPERIMENT — deterministic weighted composites, documented
+  weights, factors exposed, UNKNOWN never zero) · **explainable problem levels 0–4** ·
+  **bounded lifecycle** (no idea→business jump; transitions validated) ·
+  **verified-payment-only revenue ladder** (INTEREST/WTP never reach REVENUE_VERIFIED;
+  ONLY a verified payment does; 2→REPEAT_REVENUE, 3+→REPEATABLE_BUSINESS) ·
+  **zero/low-cost experiment planner** (NO_COST preferred; approvalRequired for
+  spend/external actions) · **customer discovery preparation** (never a fabricated
+  interview result) · **STOP / kill-bad-ideas** (the system CAN say "do not build
+  this") · **advisory Business Candidate** (requires verified payment + WTP evidence) ·
+  **provider economics over the existing Intelligence Fabric** (existing providers
+  preferred; capability gap → CAPABILITY GAP DETECTED founder notification; NO automatic
+  paid-provider adoption; PRIVATE never falls back to public) · **Opportunity Radar**
+  in the Command Center (presentation-only) · gateway `world.*` +13 procedures (auth +
+  rate tier + IDOR + zod) · owner-scoped problems store (in-memory + Postgres
+  `world_problems`) · **`opportunity:benchmark` 20/20** wired into `npm run benchmarks`
+  - vitest gate. Verification 2026-08-15: world-model **260/260 (21 files)**,
+    services/api **1000+1 skip (50 files)**, web **218/218 (22 files)**, typecheck **0**,
+    lint **0 errors · 0 warnings**, `next build` **PASS**, benchmarks all PASS (+20/20),
+    coverage gate **8/8 touched** (world-model 91.21/82.14/92.33/94.2). Honest: **EMPTY
+    datasets** — NO fabricated customers/revenue/market data; real observation entry
+    ready; live world signals + real provider execution remain **OPERATOR-REQUIRED**; no
+    real customer/revenue evidence exists. Deliverables: `04_Sprints/SPRINT-038_*` (12).
+- **SPRINT-037 — LIVE ORCHESTRATION & REAL-WORLD EXECUTION PROOF** (2026-08-15, 🟢 COMPLETE —
+  COMPOSITION + ACTIVATION SPRINT, **NEW ENGINES CREATED: 0**): proves the first complete
+  real-world execution loop over the frozen estate — **`OrchestrationPlanSource`**
+  (gateway infrastructure) adapts an APPROVED `OrchestrationPlan` into a
+  `FactoryCapabilityPlan` the EXISTING `ExecutionRunService` runs (approved-only
+  structural gate; `executed:false` never flipped; capability vocabulary mapped through
+  the existing `CapabilityMapper`; honest provider-state mapping UNKNOWN→CONFIGURE /
+  AVAILABLE→READY; per-step WHY/cost/privacy carried; NO alternate runtime) ·
+  **`world.approveOrchestrationPlan`** — approval routes EXCLUSIVELY through the
+  existing Brain approval port (decision recorded on the plan; no voice/model/plan
+  self-authorization) · **`world.startOrchestrationPlan`** — composes the existing
+  `ExecutionRunService.start` (auth + rate tier + IDOR + zod; unapproved plan →
+  deterministic rejection; idempotent per plan) · **Command Center** automation view +
+  AUTOMATION tab show the plan → provider/model/WHY → expected-vs-observed cost →
+  status → verification → outcome lifecycle (UNKNOWN stays UNKNOWN) ·
+  **`integration:provider` operator test** (`npm run integration:provider`) — composes
+  the REAL authorities, requires explicit operator configuration, fails clearly without
+  credentials (exit 2 — verified), strict cost/time limits, never silently falls back to
+  fake adapters. Verification 2026-08-15: services/api **1000 passed · 1 skipped · 50
+  files**, world-model **220/220 · 18 files**, typecheck **0** (`tsc -b` + api + web),
+  lint **0 errors · 0 warnings**, `next build` **PASS**, benchmarks chain all PASS
+  (16/16 + 13/13 + 11/11), coverage gate **45/45 PASS** (world-model 92.49/82.37/93.2/95.2;
+  api branch 80.32). Honest: LIVE provider execution remains **OPERATOR-REQUIRED** —
+  production-config-check reports AI PROVIDERS NOT_CONFIGURED, so the approved-plan →
+  bridge path is IMPLEMENTED + hermetic-TESTED but NOT LIVE-VERIFIED; multi-provider
+  live comparison = OPERATOR-REQUIRED; an analytical workflow records an OPPORTUNITY,
+  never REVENUE. Deliverables: `04_Sprints/SPRINT-037_*` (11) +
+  `SPRINT-037_PRODUCTION_READINESS.md`.
+- **SPRINT-036 — PRODUCTION MULTI-PROVIDER ORCHESTRATION** (2026-08-15, 🟢 COMPLETE —
+  COMPOSITION SPRINT, **NEW ENGINES CREATED: 0**): moves VedMoulya from "multi-provider
+  orchestration architecture exists" to "bounded real workflows are PLANNED across multiple
+  providers safely, cost-aware, privacy-aware and explainably" over the frozen estate
+  (Intelligence Fabric · WorkflowBounds · ActionClassPolicy · Brain approval · execution
+  bridge · CostLedger · ProviderHealthLedger all authoritative): **`MultiProviderOrchestrator`**
+  composition seam (world-model) — per-step provider binding + WHY + expected cost through
+  the EXISTING fabric `selectStrategy` (CHEAP/FAST/QUALITY/PRIVATE/BALANCED; privacy
+  overrides cost; PRIVATE + no local candidate → honest NO_SELECTION, never a public
+  fallback) · **bounded deterministic retry/fallback policy** (`decideRetryPolicy` — never
+  retries policy/cost/malformed; quota → fallback, no futile retry; transient → bounded
+  retry (≤ 3) → privacy-safe fallback → STOP; verification disagreement → NEEDS_REVIEW,
+  never price-resolved) · **orchestration plan store** (owner-scoped, stable-key idempotent
+  upsert, in-memory + Postgres `world_orchestration_plans`) · **deterministic provider
+  fixtures + scenario engine** (`ProviderOrchestrationScenarios` — the §14 workflow
+  research → reasoning → economic analysis → verification → finalization, **11/11 PASS**) ·
+  **`provider:benchmark` harness** (18th in the `npm run benchmarks` chain — strategy
+  tradeoff table, no winner declared) · gateway **`world.orchestratePlan` +
+  `world.listOrchestrationPlans`** (auth + rate tier + IDOR + zod; plan `executed:false` +
+  `authorizationRequired:true` STRUCTURAL — representation only, never executes/spends/
+  approves; runtime path remains the EXISTING execution bridge; provider output can never
+  grant authority). Verification 2026-08-15: world-model **214/214** (18 files, +14),
+  gateway **987 passed · 1 skipped** (49 files, +2), voice untouched, typecheck **0**
+  (`tsc -b` + api + world-model), lint **0 errors · 0 warnings**, `next build` **PASS**,
+  benchmarks chain **18/18 PASS**, coverage recomputed — world-model **92.49 stmts /
+  82.72 branch / 92.95 funcs / 95.19 lines**, api **93.19 / 80.32 / 95.15 / 93.99**,
+  coverage gate **45/45 PASSED**. Honest: live multi-provider EXECUTION remains
+  **OPERATOR-REQUIRED** (no credentials, no live calls — the normal suite is hermetic
+  fixtures); provider economics from fixtures not the ledger; autonomy levels unchanged.
+  Deliverables: `04_Sprints/SPRINT-036_*` (12).
+
+- **SPRINT-035 — PRODUCTION HARDENING, CALIBRATION & FOUNDER COMMAND CENTER COMPLETION**
+  (2026-08-15, 🟢 COMPLETE — HARDENING + COMPLETION SPRINT, **NEW ENGINES CREATED: 0**): closes
+  all six SPRINT-034 future items over the frozen estate (Brain · Intelligence Fabric ·
+  ActionClassPolicy · execution bridge · CostLedger · Memory · Voice remain authoritative):
+  **full coverage recompute** (world-model 93.73/83.92/95.60/96.50; services/api
+  93.18/**80.32**/95.14/93.98 — api branch restored 76.7%→80.32% via new
+  `WorldBridgePorts.test.ts` 34 tests over the REAL gateway seams; **coverage gate 45/45**,
+  no exclusions) · **Command Center drill-downs** (expandable WHAT/WHY/EVIDENCE/COST/RISK/
+  NEXT-ACTION per item; approval detail through the existing Brain authority) · **bounded
+  owner-scoped timeline** (composed from existing stores — no new event store; stable-key
+  idempotent, paginated, owner-isolated) · **cost view** over the real CostLedger
+  (OBSERVED/ESTIMATED/UNKNOWN — UNKNOWN never zero, ROI only with evidence) ·
+  **deterministic outcome/score calibration benchmark** (`CalibrationScenarios` + harness +
+  vitest gate — **13/13 PASS**; `FEEDBACK_DELTA_MAX` 0.05 safety boundary proven; unverified
+  evidence never scores; conflicting evidence visible; wired as the 17th `benchmarks`
+  harness) · **voice presentation of the Command Center** (`CommandCenterQuestionRouter` +
+  read-only `CommandCenterPresentationPort` — VOICE ≠ AUTHORIZATION preserved, no side
+  effects) · **honest per-kind signal health** (lastSuccess/lastError, AVAILABLE only after
+  a real observation) · **signal operator runbook** (no credentials) · **production
+  configuration check** (`scripts/production-config-check.ts`). Verification 2026-08-15:
+  world-model **200/200** (17 files), gateway **985+1 skip** (49 files), web **216/216**
+  (22 files), voice **115/115** (7 files), typecheck **0**, lint **0 errors · 0 warnings**,
+  `next build` **PASS**, benchmarks chain **17/17 PASS**, coverage gate **45/45 PASS**.
+  Honest: Postgres, AI providers, world signals, STT/TTS, approved-blueprint execution and
+  backup/recovery remain **OPERATOR_REQUIRED** — nothing unconfigured is silently assumed.
+  Deliverables: `04_Sprints/SPRINT-035_*` (12).
+
+- **SPRINT-034 — FOUNDER COMMAND CENTER & REAL-WORLD ACTIVATION** (2026-08-15, 🟢
+  COMPLETE — COMPOSITION + ACTIVATION SPRINT, **NEW ENGINES CREATED: 0**): closes the five
+  SPRINT-033 gaps over the frozen estate (Brain · Intelligence Fabric · ActionClassPolicy ·
+  execution bridge · CostLedger · Memory · Voice remain authoritative):
+  **Founder Command Center** (`apps/web/src/components/CommandCenter.tsx`, mounted in the
+  AICompanion) — presentation/composition ONLY TODAY / PORTFOLIO / INTELLIGENCE /
+  AUTOMATION / APPROVALS tabs over the existing read models; approvals route solely through
+  `world.decideBlueprintApproval` → the existing Brain approve/reject; no-spam TODAY,
+  UNKNOWN-cost honesty, UNAVAILABLE signal honesty, always-present boundary notice ·
+  **Revenue → outcome feedback** (`OutcomeEvidence`): VERIFIED-only actuals (unverified /
+  hypothesis / fabricated figures REFUSED — never inferred, UNKNOWN stays UNKNOWN); bounded
+  explainable feedback into `evaluateOpportunity` (Δ ≤ 0.05 per single outcome — one outcome
+  NEVER rewrites policy; every adjustment carries its evidence trail) · **Live world-signal
+  adapters** (`LiveSignalAdapter` over the frozen `WorldSignalSourcePort`):
+  operator-configurable (server-side token only), provenance-REQUIRED, untrusted-content
+  sanitizer (script/markup/control-char strip + payload caps + timeout), honest
+  AVAILABLE/UNAVAILABLE/ERROR — never fabricated SUCCESS · **Blueprint → approval-gated
+  execution** (`BlueprintApprovalFactory`): approval requests only for C/D-gated steps
+  (re-classified through the existing ActionClassPolicy — a stored class is never trusted),
+  full exposure (action/reason/business/workflow/provider/cost/scope/risk/outcome/
+  reversibility/authority), `executed:false` STRUCTURAL, decisions route exclusively through
+  the Brain authority; execution stays with the existing bridge — no alternate path, no
+  voice shortcut, no implicit approval · **Cost-weighted revenue intelligence**
+  (`CostWeightedRevenue` over CostLedger via a narrow `WorldCostPort`): margin/ROI-aware
+  ranking — UNKNOWN cost/revenue/margin never treated as zero; assumptions exposed;
+  roiUsd vs rankScore separated · durable owner-scoped stores (in-memory + Postgres
+  `world_outcome_evidence`, `world_blueprint_approvals`) · gateway `world.*` +7 procedures
+  (33 total — auth + rate tier + central IDOR + zod) · verification 2026-08-15 from source:
+  world-model **187/187** (16 files, +45), gateway **951 passed · 1 skipped** (48 files),
+  web **214/214** (22 files, +11 CommandCenter), typecheck **0** (`tsc -b`), lint **0**,
+  `next build` **PASS** · honest: live world signals, live approved-blueprint execution and
+  real revenue inflow remain OPERATOR-REQUIRED; no fabricated data, no income promises, no
+  automatic business creation · deliverables `04_Sprints/SPRINT-034_*` (10) · prior:
+  SPRINT-033 Autonomous Company OS 🟢 COMPLETE
+- **SPRINT-033 — AUTONOMOUS COMPANY OS** (2026-08-15, 🟢 COMPLETE — COMPOSITION SPRINT,
+  ZERO NEW ENGINES): extends `packages/world-model` (the SPRINT-032 business OS seam)
+  with the **founder intelligence, revenue intelligence and controlled execution
+  blueprint** representations the repository lacked: `RevenueIntelligence`
+  (evidence-carrying revenue streams — estimated/actual revenue, costs, automation %,
+  human effort, customers, conversion, retention; a figure without evidence is REFUSED;
+  advisory `RevenueSnapshot` totals/margins only from evidence; advisory
+  BUILD/BUY/AUTOMATE/OUTSOURCE/STOP/SCALE decision hints, UNKNOWN when no evidence) ·
+  `FounderBriefing` (advisory, no-spam composition — TODAY pending approvals /
+  active+high-risk opportunities / revenue streams / estimated revenue / daily cost /
+  emergency stop / autonomy posture + what-changed (recent world observations) +
+  attention items + signal status; `hasContent:false` → caller must NOT notify) ·
+  `WorkflowExecutionBlueprint` (the CONTROLLED Opportunity → founder approval →
+  workflow specification → provider/capability selection → execution (existing bridge
+  ONLY) → verification → outcome path as a REPRESENTATION — per-step A/B/C/D via the
+  existing `ActionClassPolicy`, approval gates on class-C steps, bounds via the
+  existing `WorkflowBounds`; `executed:false` + `authorizationRequired:true`
+  STRUCTURAL; no voice-only authorization, no hidden execution, no autonomous
+  spending) · Part B opportunity-model extensions (`expectedMargin` +
+  `founderInvolvement` factors 16→18 + closed `OPPORTUNITY_CATEGORIES` 17-category
+  vocabulary, normalized never invented) · owner-scoped revenue-stream persistence
+  (in-memory + Postgres `world_revenue_streams` in the shared persistence bundle) ·
+  gateway `world.*` +7 procedures (registerRevenueStream / listRevenueStreams /
+  removeRevenueStream / revenueSnapshot / revenueDecisions / founderBriefing /
+  buildBlueprint — auth + rate tier + central IDOR + zod; world.* now 26 procedures) ·
+  WorldPanel gains the founder briefing + revenue snapshot cards (existing design
+  system, evidence-only wording). **Zero new engines**: no Company/Revenue/Founder/
+  Execution engine; Brain (tasks+authorization), Fabric (provider strategy), execution
+  bridge (execution), memory (memory), CostLedger (cost accounting) all remain
+  authoritative; the new surfaces are advisory and structurally incapable of
+  approving/spending/executing. **Verification (2026-08-15):** world-model **142/142**
+  (12 files, +39 new), gateway **947 passed · 1 skipped (48 files)**, web **203/203**
+  (21 files), typecheck **0** (root + api + web), lint **0**, `next build` **PASS**.
+  **Honest:** live world signals + live multi-provider execution remain
+  OPERATOR-REQUIRED; the Founder Command Center (TODAY/PORTFOLIO/INTELLIGENCE/
+  AUTOMATION/APPROVALS) is a planned FUTURE surface (UX plan); no income promises,
+  no automatic business launch, no unsupported claim of autonomous operation.
+  **Deliverables:** `04_Sprints/SPRINT-033_{ROADMAP,COMPANY_OS_MODEL,OPPORTUNITY_MODEL,
+AI_WORKFORCE_MODEL,WORKFLOW_FACTORY,REVENUE_MODEL,AUTONOMY_SECURITY,UX_PLAN,
+TEST_REPORT,COMPLETION_REPORT}.md`.
+- **SPRINT-032 — WORLD MODEL & BUSINESS OPERATING SYSTEM** (2026-08-14, 🟢 COMPLETE —
+  COMPOSITION SPRINT, ZERO NEW ENGINES): new **`packages/world-model`** — the bounded,
+  owner-scoped **world representation + business operating model** composed over the
+  frozen estate: typed `WorldGraph` (23 entity types, closed 32-shape relation
+  vocabulary, provenance-REQUIRED observations — no fabricated facts, stable-key
+  idempotency, FIFO bounds 200 entities / 500 relations per owner, bounded paginated
+  queries, dangling-edge cleanup) · configurable `BusinessUnit` (identity, purpose,
+  target customer, offerings, workflows, opportunities, costs, revenue, KPIs,
+  automation 0–5, AI capabilities, human responsibilities, approval requirements —
+  never hard-coded businesses, never assumed profitable) · `OpportunityEconomics`
+  (16-factor evidence-only scoring, every factor exposed, advisory composite — never
+  objective truth; zero/low-capital NO_COST / LOW_COST / CAPITAL_REQUIRED / UNKNOWN
+  across ₹0–₹25,000 tiers; no income promises) · `AIWorkforce` (ROLE ≠ MODEL ≠
+  PROVIDER ≠ AGENT; advisory provider binding via the existing Fabric
+  `selectStrategy`; workers never execute/spend/approve, never escalate) ·
+  `WorkflowFactory` (generic business workflows + bounded decomposition through the
+  existing Fabric `WorkflowBounds` — `executed:false` structural) · `HumanAIBoundary`
+  (composes the existing `ActionClassPolicy` A/B/C/D) · `WorldSignalSourcePort`
+  interfaces ONLY (UNAVAILABLE / ERROR honesty — no fabricated world data) ·
+  `WorldModelService` composition seam + narrow ports · gateway **`world.*` 8
+  procedures** (auth + rate tier + IDOR + zod) via `WorldBridgePorts` · durable
+  owner-scoped in-memory + Postgres stores in the shared persistence bundle ·
+  `WorldPanel` in the AICompanion. Full suite **8 793 passed | 1 skipped (701
+  files)**; world-model **103/103** (99.3% stmts / 93.9% branches / 99.5% funcs);
+  typecheck **0**; lint **0**; `next build` **PASS**. Honest: live world signals and
+  live multi-provider execution remain **OPERATOR-REQUIRED**; the world model never
+  approves/spends/executes and never promotes to memory. Prior: SPRINT-031 control
+  plane 🟢 COMPLETE.
+- **SPRINT-031 — ACTIVE INTELLIGENCE & AUTONOMY CONTROL PLANE** (2026-08-14, 🟢
+  COMPLETE — COMPOSITION SPRINT, ZERO NEW ENGINES): new **`packages/control-plane`** —
+  autonomy settings (levels 0–5), emergency stop, cycle/gates, owner-scoped
+  opportunity lifecycle records; gateway `control.*` procedures + `ControlPanel` UX.
+- **SPRINT-030 — AUTONOMOUS INTELLIGENCE, MULTI-PROVIDER ORCHESTRATION &
+  CONTINUOUS OPERATIONS** (2026-08-14, 🟢 COMPLETE — COMPOSITION SPRINT, ZERO NEW
+  ENGINES): new **`packages/intelligence-fabric`** — the **Intelligence Fabric**, an
+  ADVISORY, provider-neutral orchestration layer that composes the frozen estate
+  without duplicating a single engine: **`StrategyCandidate`** orchestration contract
+  (provider count is config-driven; business logic never names a provider) ·
+  **`SelectionStrategy`** (CHEAP / FAST / QUALITY / PRIVATE / BALANCED — deterministic,
+  explainable, advisory; privacy overrides cost: a PRIVATE task never routes remote on
+  price alone, and with no local candidate selection honestly returns none) ·
+  **`ProviderHealthLedger`** (evidence-only runtime health — UNKNOWN until real calls
+  are observed; HEALTHY / DEGRADED / UNAVAILABLE / MISCONFIGURED derived
+  deterministically; quota exhaustion → UNAVAILABLE; never fabricated) ·
+  **`CostPolicyGuard`** (measure-only over the existing `CostLedger` trace spine — zero
+  spend is `undefined`, never 0; fail-closed caps task $1 / daily $10 / provider $5 /
+  workspace $20 with exhausted-bucket reporting; execution-time budget remains the
+  frozen `RunBudgetGuard`) · **`WorkflowBounds`** (depth ≤ 8 · tasks ≤ 24 · parallel
+  fan-out ≤ 8 · provider calls ≤ 64 · cost ≤ $5 · time ≤ 600 s — no unbounded fan-out,
+  no infinite loops) · **`VerificationChainPolicy`** (bounded A → critique → verify;
+  max depth 3 / providers 3 / steps 4 with deterministic stop conditions; disagreement
+  → NEEDS_REVIEW, never silent execution) · **`ResultNormalizer`** (provider-agnostic
+  text / json / tool / error contract + secret redaction of malicious provider output)
+  · **`AutonomyPolicy`** (levels 0–5 mapped onto the EXISTING A/B/C/D classification —
+  single-step transitions, class B requires an explicit user-authorization record,
+  class C at level 3 only ASKS (the existing approval authority decides), class D never;
+  silence / voice / AI-plans are never approval) · gateway **`fabric.*`** 8 procedures
+  (getProviderHealth / allProviderHealth / observeOutcome / checkCostPolicy /
+  classifyAutonomy / selectStrategy / validateWorkflow / evaluateVerificationChain —
+  auth + rate tier + central IDOR guard + zod) via **`FabricBridgePorts`** (the only
+  seams to the real CostLedger + provider registry) · cadence driver now optionally
+  refreshes proactive recommendations on the scheduler heartbeat (`ProactiveRefreshPort`,
+  `runDiscovery:false` default — no autonomous action, no-spam preserved) ·
+  **`FabricPanel`** (Provider Network) in the AICompanion — observed health only
+  ("UNKNOWN until real calls are observed") + autonomy-gating notice, keyboard + aria,
+  mobile-friendly · verification re-run 2026-08-14: full suite **8 613 passed | 1
+  skipped (682 files)**, gateway 922/46, web 190/19, fabric 53/8, proactive 60/7,
+  voice 107/6 (untouched), typecheck 0, lint 0, coverage gate **43/43** (api branch
+  81.33% restored via new bridge-port tests), `next build` PASS, benchmarks chain EXIT
+  0 · honest: the Fabric is ADVISORY — it observes / measures / selects / validates but
+  never executes, spends or authorizes; live multi-provider decomposition + execution
+  remain OPERATOR-REQUIRED (credentials + configured registry); outcome-memory evidence
+  into selection remains honest-empty (SPRINT-031); background cadence productization
+  with operator policy UI deferred. Deliverables: `04_Sprints/SPRINT-030_{BASELINE_AUDIT,
+ARCHITECTURE_REPORT,PROVIDER_ORCHESTRATION,SECURITY_REPORT,COST_INTELLIGENCE,
+AUTONOMY_MODEL,BUSINESS_OPPORTUNITY_MODEL,TEST_REPORT,COMPLETION_REPORT}.md`.
+
+- **SPRINT-029 — PROACTIVE INTELLIGENCE & AUTOMATION FABRIC** (2026-08-14, 🟢 COMPLETE —
+  COMPOSITION LAYER, ZERO NEW ENGINES): new **`packages/proactive`** — an evidence-only
+  recommendation model (10 categories: OPPORTUNITY · RISK · TASK · AUTOMATION ·
+  REVENUE_OPPORTUNITY · COST_SAVING · TIME_SAVING · LEARNING_OPPORTUNITY ·
+  BUSINESS_OPPORTUNITY · SYSTEM_IMPROVEMENT; an estimate is never fabricated, UNKNOWN
+  stays UNKNOWN) · **`ProactiveIntelligenceService`** composition seam riding the EXISTING
+  Brain pipeline (`discoverIntelligence`/`dailyPriorities`/`listOpportunities`/
+  `listTasks`; stable-key idempotency — re-refresh never duplicates; a DISMISSED
+  recommendation is never resurrected; bounded per owner) · **`ActionClassPolicy`
+  A/B/C/D** composing the frozen Brain `SENSITIVE_ACTIONS` + marketplace
+  irreversible-action vocabulary — NO new authorization authority; silence/voice/
+  AI-plans are never approval; `proactive.accept` on a class-C recommendation returns
+  `APPROVAL_REQUIRED` (the proactive layer can never authorize) · **`AutomationDiscovery`**
+  (repetitive workflows with a ≥2-occurrence evidence floor and the full TRIGGER → INPUT
+  → CAPABILITIES → TRANSFORMATION → APPROVAL → ACTION → VERIFICATION → OUTPUT → MEMORY
+  representation; class D never proposed) · **`BusinessOpportunityAssessor`**
+  (research/score ONLY — never spends/registers/publishes/commits; evidence-based
+  score; cost/revenue UNKNOWN honesty; always `authorizationRequired`) ·
+  **`DailyBriefingAssembler`** (no-spam — `hasContent:false` → caller must NOT notify) ·
+  owner-scoped recommendation store (in-memory + Postgres, `PRIMARY KEY (owner, key)`,
+  stable-id upserts) in the shared persistence bundle · gateway **`proactive.*`** 6
+  procedures (refresh/list/dismiss/accept/briefing/assessBusiness — auth + rate tier +
+  central IDOR guard + zod) · unified **`ProactivePanel`** UX in the AICompanion
+  (WHAT/WHY/VALUE/RISK/COST/ACTION cards, approval chip + disabled accept on class C,
+  durable dismiss, honest empty/loading/error wording, keyboard + aria, mobile-friendly)
+  · canonical `05_Docs/CURRENT_ARCHITECTURE_STATE.md` created · verification re-run
+  2026-08-14: full suite **8 540 passed | 1 skipped (671 files)**, gateway 907/44, web
+  186/18, proactive 59/7, voice 107/6, typecheck 0, lint 0, coverage gate **42/42**,
+  `next build` PASS, benchmarks chain EXIT 0 · honest: background proactive cadence
+  (`ProactiveSchedulerPort.onCadence`) prepared but NOT productized (refresh is
+  user-triggered today — SPRINT-030+); outcome-memory evidence reports honest empty (no
+  fabricated learning recommendations); live discovery/execution remain operator steps.
+  Deliverables: `04_Sprints/SPRINT-029_{PROACTIVE_INTELLIGENCE_REPORT,
+AUTOMATION_ARCHITECTURE,AUTHORIZATION_MODEL,PROVIDER_ORCHESTRATION,
+BUSINESS_OPPORTUNITY_MODEL,UX_REPORT,SECURITY_REPORT,TEST_REPORT,COMPLETION_REPORT}.md`
+  - `SPRINT-026_029_RECONCILIATION_REPORT.md`.
+
+- **SPRINT-028 — VEDMOULYA VOICE ASSISTANT** (2026-08-13, 🟢 COMPLETE — PRODUCTION
+  VOICE EXPERIENCE OVER THE EXISTING BRAIN, ZERO NEW ENGINES): real runtime-backed
+  **STT/TTS adapters** (`RuntimeSpeechToTextAdapter` / `RuntimeTextToSpeechAdapter` —
+  provider-neutral OpenAI-compatible HTTP, bounded payloads, AbortSignal + timeouts,
+  normalized errors, `kind: REAL`, credentials server-side only) · **Voice → Brain
+  bridge** (`VoiceAssistantService` — transcribe → existing intent interpretation →
+  ANSWER intents reuse the exact `ai.stream` Q&A runtime, ACTION intents become real
+  `brain.createTask` tasks) · **VOICE ≠ AUTHORIZATION** enforced + proven: sensitive
+  actions route to `WAITING_FOR_APPROVAL`, approval ONLY via the non-voice
+  `voice.confirmSensitive` button which calls the existing Brain `approve` authority
+  (no voice-only shortcut — structural test) · **owner-scoped conversation turns** with
+  no promotion path into facts/preferences/outcomes/learning · **`voice.status`
+  truth**: live probe distinguishes CONFIGURED (real adapter answers) / UNAVAILABLE /
+  ERROR / MOCK (never CONFIGURED) · **unified voice UX** in the AICompanion
+  (`VoicePanel` — IDLE/LISTENING/TRANSCRIBING/THINKING/WAITING_FOR_APPROVAL/
+  RESPONDING/SPEAKING/ERROR/CANCELLED states, mic control, transcript, cancellable
+  playback, retry, permission-denied recovery, keyboard + aria + live-region
+  accessibility, mobile-friendly; response text always stands — TTS failure is never a
+  task failure) · full suite **8 467 passed | 1 skipped (662 files)**, gateway
+  898/43, web 181/17, voice 107/6, typecheck 0, lint 0, coverage gate 41/41, `next
+build` PASS · honest: real STT/TTS providers remain operator-required
+  (`VOICE_STT_*`/`VOICE_TTS_*` env; voice.status reports MOCK never CONFIGURED until
+  configured). Deliverable: `04_Sprints/SPRINT-028_COMPLETION_REPORT.md`.
+
+- **SPRINT-027 — PLATFORM INTEGRITY & SPEECH FOUNDATION** (2026-08-13, 🟢 COMPLETE —
+  INTEGRITY GAPS CLOSED + SPEECH SEAMS IN PLACE, ZERO NEW ENGINES): R-1 rate limiting
+  moved from an in-memory sync helper to an async **RateLimiter port** (in-memory default
+  with honest `distributed:false`; explicit Redis backend `RATE_LIMIT_BACKEND=redis` with
+  INCR+PEXPIRE fixed window, loud once-only degradation to bounded in-memory buckets, and
+  fail-fast config errors — distributed safety is never silently claimed) · R-2 gateway
+  audit made **durable + owner-scoped** via a new `AuditLogStore` (WriteThroughDocumentStore
+  backed; in-memory only when unwired) · new **`packages/voice`** workspace: narrow
+  `SpeechToTextPort`/`TextToSpeechPort` seams + deterministic mock adapters (MOCK kind,
+  refused in production unless `VOICE_ENABLE_MOCK=true`) + `VoiceIntentGate` enforcing
+  **VOICE ≠ AUTHORIZATION** (reuses the Brain's `IntentInterpreter` + `SENSITIVE_ACTIONS`;
+  approval only via the existing non-voice mechanism) + owner-scoped bounded conversation
+  store (in-memory + Postgres; interaction artifacts with NO promotion into facts/
+  preferences/outcome memory/learning) + `SpeechApplicationService` composition seam + 8
+  `voice.*` gateway procedures (authenticated, rate-limited, owner-checked, honest
+  error-code mapping) · hygiene: **deleted dead `services/notifications`** (proven: zero
+  references), removed the dead Mic control + Phoenix branding from AICompanion and the
+  dashboard "Ask Phoenix" description · **pre-existing P1 fixed**: `next build` was red on
+  `main` because the goals problem-panel pulled server-only `node:*` into the client bundle
+  via the brain barrel — now deep-imports pure constant modules · full suite **8 100/8 100
+  PASS (646 files)**, gateway 745/38, web 167/16, typecheck 0, lint 0, benchmarks GREEN
+  (SPRINT-023 30/30 + SPRINT-024 36/36 + SPRINT-025 25/25), `next build` PASS · honest
+  status: real STT/TTS providers remain operator-required (`voice.status` reports MOCK,
+  never CONFIGURED). Deliverables: `04_Sprints/SPRINT-027_{BASELINE_AUDIT,EVIDENCE,COMPLETION_REPORT}.md`.
+
+- **SPRINT-026 — VOICE INTELLIGENCE + COMPLETE-SYSTEM ARCHITECTURE AUDIT** (2026-08-13,
+  🟢 COMPLETE — AUDIT + ARCHITECTURE SPRINT, no product features by design): a full
+  16-phase audit (forensic inventory → flow integrity → provider orchestration → voice
+  architecture + safety model → proactive/automation → UX → code quality →
+  database/persistence → security → testing → market research → capability map →
+  architectural decision → roadmap) with **every conclusion traceable to code, tests
+  or identified external research** — spot-checked core suites **251/251 PASS**
+  (brain + execution-bridge + capability-marketplace) and `tsc -b` + api typecheck **0**.
+  - **Verdict: the system is coherent.** The claimed Brain-governed pipeline, quality-first
+    provider selection, fail-closed approval/budget/verification, honest outcome verdicts,
+    durable owner-scoped persistence and zero-new-engines learning **match the
+    implementation**. No P0 defects. Two P1 operational gaps (in-memory rate limit R-1,
+    in-memory gateway audit R-2 — both single-instance-ok, both multi-instance/GA blockers),
+    plus P2/P3 hygiene findings.
+  - **Voice architecture decided:** voice is an **interaction layer over the existing
+    Brain** — the only missing foundation is a **speech runtime** (`TEXT_TO_SPEECH` /
+    `SPEECH_TO_TEXT` are catalog capabilities but no production provider adapter declares
+    `speech`; only Mock does) + an owner-scoped conversation store. New narrow
+    `SpeechToTextPort` / `TextToSpeechPort` adapter seams (frozen `ProviderAdapter`
+    discipline) + `brain.createTask` composition. Safety model: **voice never authorizes**
+    — plans are read aloud, confirmation requires a non-voice on-screen/PIN gesture
+    recorded in the decision store. No new intelligence/memory/approval/budget/scheduler/
+    notification/provider-selection engine.
+  - **Proactive + automation decided:** compose existing engines only — `dailyPriorities` +
+    `discoverIntelligence` + scheduler cadence + relevance-gated notifications for the
+    "attention digest"; `AutomationBoundaryEngine` A/B/C/D classification for automation
+    (external actions default to draft + approval). **No autonomous-agent engine.**
+  - **Key findings:** `services/notifications` is dead code (never imported — delete/archive);
+    AICompanion has a dead Mic button + misleading "Powered by Phoenix AI" label; frozen
+    pre-022 EI repositories still carry the latent `sql.json()` double-encoding pattern
+    (documented follow-up); several intelligence stores remain in-memory in production
+    (documented operator steps).
+  - **Deliverables:** `04_Sprints/SPRINT-026_{BASELINE_AUDIT,ARCHITECTURE_REPORT,
+VOICE_ARCHITECTURE,AUTOMATION_MAP,UX_AUDIT,SECURITY_AUDIT,TEST_GAP_REPORT,
+PRODUCT_RESEARCH,ROADMAP,COMPLETION_REPORT}.md`.
+  - **Roadmap:** 4 sprints to major release — SPRINT-027 (integrity + speech foundation),
+    SPRINT-028 (voice assistant), SPRINT-029 (proactive + automation), SPRINT-030
+    (production readiness + UX polish). GO on this roadmap; NO-GO on voice-as-engine and
+    on any GA before R-1/R-2 are closed.
+
 - **SPRINT-025 — CONTINUOUS LEARNING, OUTCOME MEMORY & ADAPTIVE IMPROVEMENT** (2026-08-12,
   🟢 GREEN — IMPLEMENTATION VERIFIED): makes VedMoulya learn from completed REAL
   problem-solving journeys — PROBLEM → UNDERSTAND → PLAN → EXECUTE → VERIFY → OUTCOME →
@@ -61,7 +601,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     learning benchmark **25/25** · root `tsc -b` + api + web typecheck **0** · full-repo
     lint **0**. Honest: live-provider execution + Postgres persistence for learning stores
     remain operator steps (the benchmark is a deterministic hermetic composition over the
-    real stores). Docs: `09_Documents/SPRINT-025_{BASELINE_AUDIT,EVIDENCE,COMPLETION_REPORT}.md`;
+    real stores). Docs: `04_Sprints/SPRINT-025_{BASELINE_AUDIT,EVIDENCE,COMPLETION_REPORT}.md`;
     MASTER_ROADMAP / PROJECT_STATUS / CHANGELOG / README / task_progress synchronized.
 
 - **SPRINT-024 — LIVE OUTCOME VERIFICATION & REAL-RUNTIME EXECUTION** (2026-08-12,
@@ -96,7 +636,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   untouched as regression) · runtime benchmark **36/36** · root + api typecheck **0** ·
   full-repo lint **0 problems**. Honest: live-provider execution remains an operator
   step (never fabricated). Docs:
-  `09_Documents/SPRINT-024_{BASELINE_AUDIT,EVIDENCE,COMPLETION_REPORT}.md`.
+  `04_Sprints/SPRINT-024_{BASELINE_AUDIT,EVIDENCE,COMPLETION_REPORT}.md`.
 
 - **SPRINT-023 — OUTCOME INTELLIGENCE & REAL-PROBLEM EXECUTION** (2026-08-12): a
   **composition sprint** — the 12-step problem→outcome loop (understand → define
@@ -280,7 +820,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   by real Postgres** (`JSON.stringify(x)::jsonb` stored escaped-JSON text —
   fixed via the `sql.json()` binding; the same latent pattern in the frozen
   pre-022 EI repositories is documented as a mechanical follow-up). Docs:
-  `09_Documents/SPRINT_022_{PERSISTENCE_ARCHITECTURE,PERSISTENCE_SECURITY,COMPLETION_REPORT}.md`.
+  `04_Sprints/SPRINT-022_{PERSISTENCE_ARCHITECTURE,PERSISTENCE_SECURITY,COMPLETION_REPORT}.md`.
 
 - **EPIC-018 closure — AI World Scheduler runtime cadence driver** (2026-08-12):
   closes the audit-found gap where `scheduler.tick()` had **no runtime caller** —

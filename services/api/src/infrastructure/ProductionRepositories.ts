@@ -18,7 +18,11 @@ import { PostgresCapabilityRepository } from '@vedmoulya/capabilities';
 import type { ContextRepository } from '@vedmoulya/context';
 import { PostgresContextRepository } from '@vedmoulya/context';
 import type { ExecutionStrategyRepository } from '@vedmoulya/execution-strategy';
-import { PostgresExecutionStrategyRepository } from '@vedmoulya/execution-strategy';
+import {
+  InMemoryExecutionStrategyRepository,
+  PostgresExecutionStrategyRepository,
+  createCatalogStrategies,
+} from '@vedmoulya/execution-strategy';
 import type { GoalRepository, TaskRepository } from '@vedmoulya/goals';
 import { PostgresGoalRepository, PostgresTaskRepository } from '@vedmoulya/goals';
 import type { PipelineRepository } from '@vedmoulya/intelligence';
@@ -68,27 +72,44 @@ import {
 import {
   registerIdentityServices,
   initializeDatabase as initializeIdentityDb,
+  PostgresIdentityRepository,
 } from '@vedmoulya/identity';
 import {
   registerMemoryServices,
   initializeDatabase as initializeMemoryDb,
+  PostgresMemoryRepository as MemoryPostgresRepository,
 } from '@vedmoulya/memory';
 import {
   registerDecisionServices,
   initializeDatabase as initializeDecisionDb,
+  PostgresDecisionRepository as DecisionPostgresRepository,
 } from '@vedmoulya/decision';
 import {
   registerExecutionServices,
   initializeDatabase as initializeExecutionDb,
+  PostgresExecutionRepository as ExecutionPostgresRepository,
 } from '@vedmoulya/execution';
 import {
   registerKnowledgeServices,
   initializeDatabase as initializeKnowledgeDb,
+  PostgresKnowledgeRepository as KnowledgePostgresRepository,
 } from '@vedmoulya/knowledge';
 
 /** Mutable singleton slot used by resolveOnce. */
 interface RepositorySlot<T> {
   instance?: T;
+}
+
+/**
+ * True under NODE_ENV=test. In test the gateway resolves the real production
+ * repository classes (the wiring tests assert that) but the Postgres side-
+ * effects (eager table creation / database initialization / migrations) are
+ * skipped: tests run on hermetic in-memory doubles and a local Postgres is
+ * not required. Skipping the fire-and-forget attempts removes the connection
+ * warnings from test output and the async write race at worker teardown.
+ */
+function isTestEnv(): boolean {
+  return process.env.NODE_ENV === 'test';
 }
 
 /** Singleton slot for the RAG repository (AI-RUNTIME-002). */
@@ -109,7 +130,7 @@ function resolveOnce<T>(
 ): T {
   if (slot.instance) return slot.instance;
   register();
-  initialize();
+  if (!isTestEnv()) initialize();
   slot.instance = container.resolve(key) as T;
   return slot.instance;
 }
@@ -149,8 +170,11 @@ export function createEISql(applicationName: string): ReturnType<typeof postgres
   });
 }
 
-/** Fire-and-forget table creation (safe: IF NOT EXISTS, every startup). */
+/** Fire-and-forget table creation (safe: IF NOT EXISTS, every startup).
+ *  Skipped in test env: tests run on hermetic doubles and the eager attempt
+ *  would only log connection noise (and race worker teardown). */
 function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): void {
+  if (isTestEnv()) return;
   void repo.ensureTable().catch((error: unknown) => {
     logger.warn(`${label} table creation failed`, {
       error: error instanceof Error ? error.message : String(error),
@@ -167,9 +191,16 @@ function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): voi
  * to call in every environment; the first identity query connects.
  */
 export function createProductionIdentityRepository(): IdentityRepository {
-  return resolveOnce(identitySlot, 'identity.repository', registerIdentityServices, () => {
+  const repo = resolveOnce(identitySlot, 'identity.repository', registerIdentityServices, () => {
     initializeIdentityDb();
-  });
+  }) as unknown as PostgresIdentityRepository;
+  // SPRINT-040 — first-run local-runtime fix: the identity `users` table is the
+  // ONE Postgres store that was never created anywhere (its DB init only opened
+  // a connection), so fresh environments failed auth with REGISTRATION_FAILED.
+  // Bootstrap it idempotently on every startup like every other registry.
+  // The web auth-app additionally awaits it for a deterministic cold start.
+  ensureTable(repo, 'Identity users');
+  return repo;
 }
 
 /**
@@ -177,9 +208,15 @@ export function createProductionIdentityRepository(): IdentityRepository {
  * registration (`memory.repository` → `PostgresMemoryRepository`).
  */
 export function createProductionMemoryRepository(): MemoryRepository {
-  return resolveOnce(memorySlot, 'memory.repository', registerMemoryServices, () => {
+  const repo = resolveOnce(memorySlot, 'memory.repository', registerMemoryServices, () => {
     initializeMemoryDb();
-  });
+  }) as unknown as MemoryPostgresRepository;
+  // SPRINT-045 — production schema bootstrap: the memory store's DB init only
+  // opened a connection, so `memories` / `memory_timeline` / `memory_snapshots`
+  // never existed in a fresh database. Bootstrap idempotently on every startup
+  // like every other registry (estate convention — CREATE TABLE IF NOT EXISTS).
+  ensureTable(repo, 'Memory');
+  return repo;
 }
 
 /**
@@ -187,9 +224,15 @@ export function createProductionMemoryRepository(): MemoryRepository {
  * DI registration (`decision.repository` → `PostgresDecisionRepository`).
  */
 export function createProductionDecisionRepository(): DecisionRepository {
-  return resolveOnce(decisionSlot, 'decision.repository', registerDecisionServices, () => {
+  const repo = resolveOnce(decisionSlot, 'decision.repository', registerDecisionServices, () => {
     initializeDecisionDb();
-  });
+  }) as unknown as DecisionPostgresRepository;
+  // SPRINT-045 — production schema bootstrap: the decision store's DB init only
+  // opened a connection, so `decisions` / `decision_timeline` never existed in
+  // a fresh database. Bootstrap idempotently on every startup like every other
+  // registry (estate convention — CREATE TABLE IF NOT EXISTS).
+  ensureTable(repo, 'Decision');
+  return repo;
 }
 
 /**
@@ -197,9 +240,15 @@ export function createProductionDecisionRepository(): DecisionRepository {
  * existing DI registration (`execution.repository` → `PostgresExecutionRepository`).
  */
 export function createProductionExecutionRepository(): ExecutionRepository {
-  return resolveOnce(executionSlot, 'execution.repository', registerExecutionServices, () => {
+  const repo = resolveOnce(executionSlot, 'execution.repository', registerExecutionServices, () => {
     initializeExecutionDb();
-  });
+  }) as unknown as ExecutionPostgresRepository;
+  // SPRINT-045 — production schema bootstrap: the execution store's DB init only
+  // opened a connection, so `execution_plans` never existed in a fresh database.
+  // Bootstrap idempotently on every startup like every other registry (estate
+  // convention — CREATE TABLE IF NOT EXISTS).
+  ensureTable(repo, 'Execution plans');
+  return repo;
 }
 
 /**
@@ -210,13 +259,21 @@ export function createProductionExecutionRepository(): ExecutionRepository {
  * (e.g. a config/connection error) is logged rather than silently swallowed.
  */
 export function createProductionKnowledgeRepository(): KnowledgeRepository {
-  return resolveOnce(knowledgeSlot, 'knowledge.repository', registerKnowledgeServices, () => {
+  const repo = resolveOnce(knowledgeSlot, 'knowledge.repository', registerKnowledgeServices, () => {
     void initializeKnowledgeDb().catch((error: unknown) => {
       logger.warn('Knowledge database initialization rejected (gateway wiring)', {
         error: error instanceof Error ? error.message : String(error),
       });
     });
-  });
+  }) as unknown as KnowledgePostgresRepository;
+  // SPRINT-045 — production schema bootstrap: the knowledge store's DB init
+  // only opened a connection (the same shape as the SPRINT-040 identity D1),
+  // so `knowledge_graphs` / `knowledge_nodes` / `knowledge_edges` /
+  // `knowledge_lineage` never existed in a fresh database and every repository
+  // query failed at runtime. Bootstrap them idempotently on every startup
+  // like every other registry (estate convention — CREATE TABLE IF NOT EXISTS).
+  ensureTable(repo, 'Knowledge graph');
+  return repo;
 }
 
 /**
@@ -333,6 +390,20 @@ export function createProductionContextRepository(): ContextRepository {
  */
 export function createProductionExecutionStrategyRepository(): ExecutionStrategyRepository {
   if (strategyRegistrySlot.instance) return strategyRegistrySlot.instance;
+
+  // Same convention as the provider registry factory: on a Docker-less
+  // development/test machine (NODE_ENV !== production/staging) the EI-004
+  // engine runs on the deterministic SEEDED in-memory catalog so the AI
+  // runtime's advisor (and every routing path) is fully usable without
+  // Postgres; strict environments ALWAYS use Postgres (fail-fast preserved).
+  const env: string = process.env.NODE_ENV ?? 'development';
+  const isStrict = env === 'production' || env === 'staging';
+  if (!isStrict) {
+    strategyRegistrySlot.instance = new InMemoryExecutionStrategyRepository(
+      createCatalogStrategies(),
+    );
+    return strategyRegistrySlot.instance;
+  }
 
   const sql = createEISql('vedmoulya-execution-strategy');
   const repo = new PostgresExecutionStrategyRepository(sql);
@@ -618,7 +689,7 @@ export function createProductionRagRepository(): RagRepository {
     // pool. Never throws here (lazy clients); the probe result is surfaced
     // through the `rag.getHealth` procedure.
     void probeRagSchema(sql, 1536);
-  } else {
+  } else if (!isTestEnv()) {
     runRagMigrations(sql, 1536).catch((error: unknown) => {
       logger.warn('RAG schema creation deferred (database unreachable at startup)', {
         error: error instanceof Error ? error.message : String(error),

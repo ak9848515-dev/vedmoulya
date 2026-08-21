@@ -14,9 +14,18 @@ import { priorityLabel, priorityColor } from './types.js';
 
 export interface TopPriorityCardProps {
   priority: Priority;
+  /** Navigates to the priority's home (e.g. the goals view). Falls back to a no-op
+      so the component remains safe to render in isolation (stories/docs). */
+  onContinue?: () => void;
+  /** Navigates to a place to review why this priority is blocked. */
+  onReviewBlockers?: () => void;
 }
 
-export function TopPriorityCard({ priority }: TopPriorityCardProps): React.JSX.Element {
+export function TopPriorityCard({
+  priority,
+  onContinue,
+  onReviewBlockers,
+}: TopPriorityCardProps): React.JSX.Element {
   const icon = priority.isBlocked ? (
     <AlertTriangle className="h-6 w-6 text-[#EF4444]" />
   ) : (
@@ -69,12 +78,12 @@ export function TopPriorityCard({ priority }: TopPriorityCardProps): React.JSX.E
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {!priority.isBlocked && (
-            <Button variant="primary" size="md">
+            <Button variant="primary" size="md" onClick={onContinue}>
               Continue <ArrowRight className="h-4 w-4" />
             </Button>
           )}
           {priority.isBlocked && (
-            <Button variant="secondary" size="md">
+            <Button variant="secondary" size="md" onClick={onReviewBlockers}>
               Review Blockers
             </Button>
           )}

@@ -10,12 +10,58 @@ import { PasswordService } from './PasswordService.js';
 import { TokenService, type TokenPair, type AccessTokenPayload } from './TokenService.js';
 import { GoogleProvider } from './GoogleProvider.js';
 import { IdentityEventPublisher } from '../infrastructure/events/IdentityEventPublisher.js';
+import {
+  type VerificationEmailSender,
+  createVerificationEmailSender,
+  resolveAppOrigin,
+} from './VerificationEmailSender.js';
+import {
+  type VerificationTokenStore,
+  createVerificationTokenStore,
+} from '../infrastructure/persistence/VerificationTokenStore.js';
+import {
+  createVerificationToken,
+  hashVerificationToken,
+  buildVerificationLink,
+} from './VerificationToken.js';
 
 export interface AuthSession {
   userId: string;
   email: string;
   role: string;
+  /** Display name (name is mandatory at registration). */
+  displayName: string;
+  /** First-login profile completion — server-derived from the stored profile
+   *  (SPRINT-041B). The client treats this as authoritative; a NEW user is
+   *  incomplete until they save age/gender/purpose/primaryGoal. */
+  profileComplete: boolean;
   tokens: TokenPair;
+}
+
+/** Self-service profile read model returned by GET /me and PATCH /me/profile. */
+export interface ProfileView {
+  userId: string;
+  email: string;
+  displayName: string;
+  givenName?: string;
+  familyName?: string;
+  age?: number;
+  gender?: string;
+  purpose?: string;
+  primaryGoal?: string;
+  /** First-login profile completion — derived from the stored profile. */
+  profileComplete: boolean;
+}
+
+/** Accepted self-service profile updates (PATCH /me/profile). */
+export interface ProfileUpdateInput {
+  displayName?: string;
+  givenName?: string;
+  familyName?: string;
+  age?: number;
+  gender?: string;
+  purpose?: string;
+  primaryGoal?: string;
 }
 
 export interface SignInResult {
@@ -28,6 +74,20 @@ export interface SignUpResult {
   success: boolean;
   session?: AuthSession;
   error?: string;
+  /** True when the account requires email verification before it can sign in
+   *  (production/staging — where the domain rule blocks unverified logins and
+   *  no session is issued). Development/test auto-verifies and never sets it. */
+  verificationRequired?: boolean;
+}
+
+export interface VerifyEmailResult {
+  success: boolean;
+  error?: 'invalid' | 'expired' | 'already-verified';
+}
+
+export interface AuthServiceOptions {
+  verificationTokenStore?: VerificationTokenStore;
+  emailSender?: VerificationEmailSender;
 }
 
 export class AuthService extends BaseService {
@@ -37,8 +97,14 @@ export class AuthService extends BaseService {
   private readonly tokenService: TokenService;
   private readonly googleProvider: GoogleProvider;
   private readonly eventPublisher: IdentityEventPublisher;
+  private readonly verificationTokenStore: VerificationTokenStore;
+  private readonly emailSender: VerificationEmailSender;
 
-  constructor(repository: IdentityRepository, eventPublisher: IdentityEventPublisher) {
+  constructor(
+    repository: IdentityRepository,
+    eventPublisher: IdentityEventPublisher,
+    options: AuthServiceOptions = {},
+  ) {
     super('auth');
     this.repository = repository;
     this.domainService = new IdentityDomainService(repository);
@@ -46,6 +112,8 @@ export class AuthService extends BaseService {
     this.tokenService = new TokenService();
     this.googleProvider = new GoogleProvider();
     this.eventPublisher = eventPublisher;
+    this.verificationTokenStore = options.verificationTokenStore ?? createVerificationTokenStore();
+    this.emailSender = options.emailSender ?? createVerificationEmailSender();
   }
 
   // ── Email/Password Sign-In ────────────────────────────────────────────
@@ -88,12 +156,7 @@ export class AuthService extends BaseService {
 
       return {
         success: true,
-        session: {
-          userId: user.id,
-          email: user.email.toString(),
-          role: user.role.role,
-          tokens,
-        },
+        session: this.buildSession(user, tokens),
       };
     } catch (error) {
       this.logger.error('Email sign-in failed', { error });
@@ -163,17 +226,34 @@ export class AuthService extends BaseService {
 
       return {
         success: true,
-        session: {
-          userId: user.id,
-          email: user.email.toString(),
-          role: user.role.role,
-          tokens,
-        },
+        session: this.buildSession(user, tokens),
       };
     } catch (error) {
       this.logger.error('Google sign-in failed', { error });
       return { success: false, error: 'Google authentication failed' };
     }
+  }
+
+  /** Build the session DTO shared by sign-in / sign-up / Google flows. The
+   *  profile-completion flag is server-derived from the stored profile — a new
+   *  user is incomplete until the first-login profile is saved. */
+  private buildSession(
+    user: {
+      id: string;
+      email: { toString(): string };
+      role: { role: string };
+      profile: { displayName: string; isComplete(): boolean };
+    },
+    tokens: TokenPair,
+  ): AuthSession {
+    return {
+      userId: user.id,
+      email: user.email.toString(),
+      role: user.role.role,
+      displayName: user.profile.displayName,
+      profileComplete: user.profile.isComplete(),
+      tokens,
+    };
   }
 
   // ── Session & Token Management ────────────────────────────────────────
@@ -228,6 +308,56 @@ export class AuthService extends BaseService {
     this.logger.info('User signed out', { userId });
   }
 
+  /** Read the authenticated user's own profile (server-authoritative source of
+   *  first-login completion). Caller must be the JWT-authenticated session; the
+   *  userId is derived from the token, never from client input. */
+  async getProfile(userId: string): Promise<ProfileView> {
+    const { createUserId } = await import('@vedmoulya/domain');
+    const id = createUserId(userId);
+    const user = await this.repository.findById(id);
+    if (!user) throw new NotFoundError('User', userId);
+    return {
+      userId: user.id,
+      email: user.email.toString(),
+      displayName: user.profile.displayName,
+      givenName: user.profile.givenName,
+      familyName: user.profile.familyName,
+      age: user.profile.age,
+      gender: user.profile.gender,
+      purpose: user.profile.purpose,
+      primaryGoal: user.profile.primaryGoal,
+      profileComplete: user.profile.isComplete(),
+    };
+  }
+
+  /** Update the authenticated user's own profile through the EXISTING domain
+   *  entity + repository (no second repository, no direct DB writes). The
+   *  userId comes from the verified token — cross-user updates are impossible
+   *  by construction. */
+  async updateProfile(userId: string, data: ProfileUpdateInput): Promise<ProfileView> {
+    const { createUserId } = await import('@vedmoulya/domain');
+    const id = createUserId(userId);
+    const user = await this.repository.findById(id);
+    if (!user) throw new NotFoundError('User', userId);
+
+    const updatedProfile = user.profile.with(data);
+    user.updateProfile(updatedProfile);
+    await this.repository.update(user);
+
+    return {
+      userId: user.id,
+      email: user.email.toString(),
+      displayName: updatedProfile.displayName,
+      givenName: updatedProfile.givenName,
+      familyName: updatedProfile.familyName,
+      age: updatedProfile.age,
+      gender: updatedProfile.gender,
+      purpose: updatedProfile.purpose,
+      primaryGoal: updatedProfile.primaryGoal,
+      profileComplete: updatedProfile.isComplete(),
+    };
+  }
+
   /** Register a new user with email/password */
   async signUp(params: {
     email: string;
@@ -257,8 +387,33 @@ export class AuthService extends BaseService {
         passwordHash,
       });
 
+      // Explicitly widened (string) — the web build's tsconfig types
+      // NODE_ENV as a literal union without 'staging', which would make the
+      // comparison below look unintentional.
+      const env: string = process.env.NODE_ENV ?? 'development';
+      const requiresVerification = env === 'production' || env === 'staging';
+      if (!requiresVerification) {
+        // Development/test only — verify at registration so a local user can
+        // sign in without an email round trip (mirrors the Google sign-in
+        // path's newUser.verifyEmail()). Production NEVER inherits this.
+        user.verifyEmail();
+      }
+
       await this.repository.save(user);
       await this.eventPublisher.publishUserCreated(user.id, user.email.toString());
+
+      if (requiresVerification) {
+        // Production: issue a verification token, send the email, and do NOT
+        // return a session — the domain rule blocks unverified sign-ins, so a
+        // session would be unusable after the first refresh. The user verifies
+        // via the emailed link, then signs in.
+        await this.issueAndSendVerification(user);
+        this.logger.info('User signed up — email verification required', { userId: user.id });
+        return {
+          success: true,
+          verificationRequired: true,
+        };
+      }
 
       // Generate tokens
       const tokens = await this.tokenService.generateTokenPair(
@@ -271,16 +426,93 @@ export class AuthService extends BaseService {
 
       return {
         success: true,
-        session: {
-          userId: user.id,
-          email: user.email.toString(),
-          role: user.role.role,
-          tokens,
-        },
+        session: this.buildSession(user, tokens),
       };
     } catch (error) {
       this.logger.error('Sign-up failed', { error });
       return { success: false, error: 'Registration failed' };
     }
+  }
+
+  /**
+   * Verify an email-verification token (the link the user opened).
+   * Security: only the SHA-256 hash is stored/looked up; expired and
+   * already-consumed tokens are rejected (one-time use + replay rejection);
+   * an unknown token fails identically to an invalid one (no oracle).
+   */
+  async verifyEmail(token: string): Promise<VerifyEmailResult> {
+    try {
+      const record = await this.verificationTokenStore.findByHash(hashVerificationToken(token));
+      if (!record) {
+        return { success: false, error: 'invalid' };
+      }
+      if (record.consumedAt) {
+        return { success: false, error: 'already-verified' };
+      }
+      if (record.expiresAt.getTime() < Date.now()) {
+        return { success: false, error: 'expired' };
+      }
+
+      const { createUserId } = await import('@vedmoulya/domain');
+      const user = await this.repository.findById(createUserId(record.userId));
+      if (!user) {
+        return { success: false, error: 'invalid' };
+      }
+      if (user.status.emailVerified) {
+        // The user is already verified — consume the stale token and report
+        // success (idempotent UX; no fabrication of a new verification).
+        await this.verificationTokenStore.markConsumed(record.id);
+        return { success: true };
+      }
+
+      user.verifyEmail();
+      await this.repository.update(user);
+      await this.verificationTokenStore.markConsumed(record.id);
+      await this.eventPublisher.publishUserEmailVerified(user.id);
+
+      this.logger.info('User email verified', { userId: user.id });
+      return { success: true };
+    } catch (error) {
+      this.logger.error('Email verification failed', { error });
+      return { success: false, error: 'invalid' };
+    }
+  }
+
+  /**
+   * Re-send the verification email. Always returns success (no account
+   * enumeration): an unknown email, an already-verified account, or a
+   * development-mode account are all indistinguishable from a successful send.
+   */
+  async resendVerificationEmail(email: string): Promise<{ success: boolean }> {
+    try {
+      const env: string = process.env.NODE_ENV ?? 'development';
+      const requiresVerification = env === 'production' || env === 'staging';
+      const user = await this.repository.findByEmail(Email.create(email));
+      if (requiresVerification && user && !user.status.emailVerified) {
+        await this.issueAndSendVerification(user);
+      }
+      return { success: true };
+    } catch (error) {
+      // Never leak delivery failure to the caller — the generic success keeps
+      // the endpoint enumeration-free; the operator sees the error in logs.
+      this.logger.error('Verification resend failed', { error });
+      return { success: true };
+    }
+  }
+
+  /** Issue a fresh verification token for a user and email the link. */
+  private async issueAndSendVerification(user: {
+    id: string;
+    email: { toString(): string };
+    profile: { displayName: string };
+  }): Promise<void> {
+    const { token, tokenHash, expiresAt } = createVerificationToken();
+    await this.verificationTokenStore.revokeForUser(user.id);
+    await this.verificationTokenStore.save(user.id, tokenHash, expiresAt);
+    await this.emailSender.sendVerificationEmail({
+      to: user.email.toString(),
+      displayName: user.profile.displayName,
+      verificationLink: buildVerificationLink(resolveAppOrigin(), token),
+    });
   }
 }

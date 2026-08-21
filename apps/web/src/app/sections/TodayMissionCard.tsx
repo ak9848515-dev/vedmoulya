@@ -16,11 +16,18 @@ import type { Priority, ExecutionSummary } from './types.js';
 export interface TodayMissionCardProps {
   priority?: Priority;
   execution: Pick<ExecutionSummary, 'activePlans' | 'completedToday' | 'blockedPlans'>;
+  /** Navigates to the mission's home (e.g. the goals view). Falls back to a no-op
+      so the component remains safe to render in isolation (stories/docs). */
+  onContinue?: () => void;
+  /** Navigates to a place to review why this priority is blocked. */
+  onReviewBlockers?: () => void;
 }
 
 export function TodayMissionCard({
   priority,
   execution,
+  onContinue,
+  onReviewBlockers,
 }: TodayMissionCardProps): React.JSX.Element {
   const hasMission = Boolean(priority);
   const doneToday = execution.completedToday;
@@ -68,12 +75,22 @@ export function TodayMissionCard({
           </p>
           <div className="mt-4 flex items-center gap-3">
             {!isBlocked && (
-              <Button variant="primary" size="md" className="flex-1 sm:flex-none">
+              <Button
+                variant="primary"
+                size="md"
+                className="flex-1 sm:flex-none"
+                onClick={onContinue}
+              >
                 Continue <ArrowRight className="h-4 w-4" />
               </Button>
             )}
             {isBlocked && (
-              <Button variant="secondary" size="md" className="flex-1 sm:flex-none">
+              <Button
+                variant="secondary"
+                size="md"
+                className="flex-1 sm:flex-none"
+                onClick={onReviewBlockers}
+              >
                 Review Blockers
               </Button>
             )}

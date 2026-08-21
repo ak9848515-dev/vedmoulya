@@ -9,6 +9,7 @@
 import React from 'react';
 import { Card } from '@vedmoulya/ui';
 import { Sparkles } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import type { Recommendation } from './types.js';
 
 export interface RecommendationsPanelProps {
@@ -20,6 +21,7 @@ export function RecommendationsPanel({
   recommendations,
   emptyMessage = 'No recommendations yet.',
 }: RecommendationsPanelProps): React.JSX.Element {
+  const router = useRouter();
   return (
     <section>
       <h2 className="text-[20px] font-heading font-semibold text-[#111827] mb-4 flex items-center gap-2">
@@ -44,13 +46,33 @@ export function RecommendationsPanel({
                     )}
                   </div>
                   <p className="text-[13px] text-[#64748B] mt-0.5">{rec.description}</p>
+                  {rec.reason && (
+                    <p className="text-[12px] text-[#374151] mt-1.5 flex items-start gap-1.5">
+                      <span
+                        className="mt-1 h-1 w-1 rounded-full bg-[#0EA5A9] shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span>
+                        <span className="font-semibold text-[#0EA5A9]">Why this matters — </span>
+                        {rec.reason}
+                      </span>
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 mt-2">
                     <span className="text-[11px] text-[#7C3AED] font-medium bg-[#F5F3FF] px-2 py-0.5 rounded-full">
                       {rec.confidence}% confidence
                     </span>
                     <span className="text-[11px] text-[#94A3B8]">{rec.sources.join(' + ')}</span>
                     {rec.actionLabel && (
-                      <button className="ml-auto text-[11px] font-medium text-[#2B5FD9] hover:text-[#1E4AA8] transition-colors">
+                      <button
+                        className="ml-auto text-[11px] font-medium text-[#2B5FD9] hover:text-[#1E4AA8] transition-colors"
+                        onClick={() => {
+                          if (rec.actionRoute.startsWith('/')) {
+                            router.push(rec.actionRoute);
+                          }
+                        }}
+                        type="button"
+                      >
                         {rec.actionLabel} →
                       </button>
                     )}

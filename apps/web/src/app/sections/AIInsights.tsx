@@ -10,6 +10,7 @@ import React from 'react';
 import { Card } from '@vedmoulya/ui';
 import { Brain, TrendingUp, Zap, Award, Lightbulb, Sparkles } from 'lucide-react';
 import type { Metrics, AIContext, ExecutionSummary, MemorySummary } from './types.js';
+import { useUIStore } from '../../stores/ui-store.js';
 
 export interface AIInsightsProps {
   metrics: Pick<Metrics, 'lifeScore'>;
@@ -26,6 +27,7 @@ export function AIInsights({
   aiContext,
   recommendationCount,
 }: AIInsightsProps): React.JSX.Element {
+  const { setAiPanelOpen, setPendingQuestion } = useUIStore();
   return (
     <section>
       <h2 className="text-[20px] font-heading font-semibold text-[#111827] mb-4 flex items-center gap-2">
@@ -35,7 +37,7 @@ export function AIInsights({
 
       {/* Stat Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card variant="standard" padding="md">
+        <Card variant="standard" padding="md" className="animate-slide-up">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-[#F0FDF4]">
               <TrendingUp className="h-5 w-5 text-[#22C55E]" />
@@ -46,7 +48,7 @@ export function AIInsights({
             </div>
           </div>
         </Card>
-        <Card variant="standard" padding="md">
+        <Card variant="standard" padding="md" className="animate-slide-up">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-[#EFF4FE]">
               <Zap className="h-5 w-5 text-[#2B5FD9]" />
@@ -59,7 +61,7 @@ export function AIInsights({
             </div>
           </div>
         </Card>
-        <Card variant="standard" padding="md">
+        <Card variant="standard" padding="md" className="animate-slide-up">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-[#FFFBEB]">
               <Award className="h-5 w-5 text-[#F59E0B]" />
@@ -70,7 +72,7 @@ export function AIInsights({
             </div>
           </div>
         </Card>
-        <Card variant="standard" padding="md">
+        <Card variant="standard" padding="md" className="animate-slide-up">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-[#F5F3FF]">
               <Lightbulb className="h-5 w-5 text-[#7C3AED]" />
@@ -120,7 +122,10 @@ export function AIInsights({
                     <li key={`q-${String(i)}`}>
                       <button
                         className="text-[13px] text-[#2B5FD9] hover:text-[#1E4AA8] transition-colors text-left flex items-start gap-2"
-                        onClick={() => {}}
+                        onClick={() => {
+                          setPendingQuestion(question);
+                          setAiPanelOpen(true);
+                        }}
                         type="button"
                       >
                         <span className="w-1.5 h-1.5 rounded-full bg-[#2B5FD9] mt-1.5 shrink-0" />

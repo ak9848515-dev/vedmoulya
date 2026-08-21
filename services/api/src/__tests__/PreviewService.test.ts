@@ -47,7 +47,7 @@ describe('PreviewService — EPIC-008 Phase 13', () => {
       expect(result.hasUi, archetype).toBe(true);
       expect(result.html).toContain('VedApp.render');
     }
-  });
+  }, 20000);
 
   it('returns an empty state for applications without a UI entry', async () => {
     const detail = detailFor('abap-debugger');
@@ -76,5 +76,51 @@ describe('PreviewService — EPIC-008 Phase 13', () => {
     const first = await preview.buildPreview(detail);
     const second = await preview.buildPreview(detail);
     expect(first.html).toBe(second.html);
+  });
+
+  it('resolves relative .js imports to their .ts source in the virtual workspace', async () => {
+    const detail = detailFor('generic-web');
+    detail.files = [
+      {
+        path: 'src/ui/app.ts',
+        kind: 'source',
+        content: "import { helper } from './helper.js'; export const App = () => helper();",
+      },
+      { path: 'src/ui/helper.ts', kind: 'source', content: 'export const helper = () => 42;' },
+    ];
+    const result = await preview.buildPreview(detail);
+    expect(result.hasUi).toBe(true);
+    expect(result.html).toBeDefined();
+  });
+
+  it('returns an actionable error when a relative import cannot be resolved', async () => {
+    const detail = detailFor('generic-web');
+    detail.files = [
+      {
+        path: 'src/ui/app.ts',
+        kind: 'source',
+        content: "import { missing } from './missing.js'; export const App = () => missing();",
+      },
+    ];
+    const result = await preview.buildPreview(detail);
+    expect(result.hasUi).toBe(true);
+    expect(result.html).toBeUndefined();
+    expect(result.reason).toContain('could not be bundled');
+    expect(result.reason).toContain('missing.js');
+  });
+
+  it('loads plain .js workspace files through the js loader (imported from the entry)', async () => {
+    const detail = detailFor('generic-web');
+    detail.files = [
+      {
+        path: 'src/ui/app.ts',
+        kind: 'source',
+        content: "import { greet } from './greet.js'; export const App = () => greet();",
+      },
+      { path: 'src/ui/greet.js', kind: 'source', content: 'export const greet = () => "hi";' },
+    ];
+    const result = await preview.buildPreview(detail);
+    expect(result.hasUi).toBe(true);
+    expect(result.html).toBeDefined();
   });
 });

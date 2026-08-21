@@ -35,37 +35,37 @@ export function createAIWorldRouter(
 
   return {
     getWorld: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const result = await svc.getWorld(input.userId);
       return fromServiceResult({ success: true, data: result });
     },
 
     getDigest: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const digest = await svc.getDigest(input.userId);
       return fromServiceResult({ success: true, data: digest });
     },
 
     list: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const items = await svc.listItems(input.userId);
       return fromServiceResult({ success: true, data: items });
     },
 
     getItem: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const item = await svc.getItem(input.userId, input.itemId);
       return fromServiceResult({ success: true, data: item ?? null });
     },
 
     markRead: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       await svc.markRead(input.userId, input.itemId);
       return fromServiceResult({ success: true, data: { ok: true } });
     },
 
     markAllRead: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       const items = await svc.listItems(input.userId);
       for (const item of items) {
         if (!item.read) {
@@ -76,7 +76,7 @@ export function createAIWorldRouter(
     },
 
     setAction: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.standard);
+      await assertRateLimit(input.userId, RateLimitTiers.standard);
       // The zod boundary already restricts action to the enum; the guard is a
       // defensive re-validation for the direct-handler test path.
       await svc.setAction(input.userId, input.itemId, input.action);
@@ -84,7 +84,7 @@ export function createAIWorldRouter(
     },
 
     runDiscovery: async (input, _ctx): Promise<ApiResponse> => {
-      assertRateLimit(input.userId, RateLimitTiers.heavy);
+      await assertRateLimit(input.userId, RateLimitTiers.heavy);
       const report = await svc.runDiscovery();
       return fromServiceResult({ success: true, data: report });
     },

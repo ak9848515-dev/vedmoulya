@@ -260,11 +260,14 @@ describe('Configuration', () => {
     const savedKey = process.env.AI_DEEPSEEK_API_KEY;
     const savedProvider = process.env.AI_DEFAULT_PROVIDER;
     const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    const savedOpenAiKey = process.env.AI_OPENAI_API_KEY;
     try {
       process.env.NODE_ENV = 'production';
       process.env.AI_DEFAULT_PROVIDER = 'deepseek';
       delete process.env.FF_AI_ASSISTANT_ENABLED;
       delete process.env.AI_DEEPSEEK_API_KEY;
+      // Clear other provider keys to avoid placeholder detection masking the deepseek error.
+      delete process.env.AI_OPENAI_API_KEY;
       expect(() => loadConfiguration()).toThrow(/AI_DEEPSEEK_API_KEY.*REQUIRED/);
     } finally {
       process.env.NODE_ENV = saved ?? 'test';
@@ -274,6 +277,8 @@ describe('Configuration', () => {
       else process.env.AI_DEFAULT_PROVIDER = savedProvider;
       if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
       else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+      if (savedOpenAiKey === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = savedOpenAiKey;
     }
   });
 
@@ -282,11 +287,14 @@ describe('Configuration', () => {
     const savedKey = process.env.AI_DEEPSEEK_API_KEY;
     const savedProvider = process.env.AI_DEFAULT_PROVIDER;
     const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    const savedOpenAiKey = process.env.AI_OPENAI_API_KEY;
     try {
       process.env.NODE_ENV = 'production';
       process.env.AI_DEFAULT_PROVIDER = 'deepseek';
       delete process.env.FF_AI_ASSISTANT_ENABLED;
       process.env.AI_DEEPSEEK_API_KEY = 'your-api-key';
+      // Clear other provider keys to avoid placeholder detection masking the deepseek error.
+      delete process.env.AI_OPENAI_API_KEY;
       expect(() => loadConfiguration()).toThrow(/AI_DEEPSEEK_API_KEY/);
     } finally {
       process.env.NODE_ENV = saved ?? 'test';
@@ -296,6 +304,8 @@ describe('Configuration', () => {
       else process.env.AI_DEFAULT_PROVIDER = savedProvider;
       if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
       else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+      if (savedOpenAiKey === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = savedOpenAiKey;
     }
   });
 
@@ -304,11 +314,14 @@ describe('Configuration', () => {
     const savedKey = process.env.AI_DEEPSEEK_API_KEY;
     const savedProvider = process.env.AI_DEFAULT_PROVIDER;
     const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
+    const savedOpenAiKey = process.env.AI_OPENAI_API_KEY;
     try {
       process.env.NODE_ENV = 'production';
       process.env.AI_DEFAULT_PROVIDER = 'deepseek';
       delete process.env.FF_AI_ASSISTANT_ENABLED;
       process.env.AI_DEEPSEEK_API_KEY = 'sk-test-0123456789abcdef0123456789abcdef0123456789abcdef';
+      // Clear other provider keys to avoid placeholder detection masking the deepseek validation.
+      delete process.env.AI_OPENAI_API_KEY;
       const cfg = loadConfiguration();
       expect(cfg.ai.deepseekKey).toBe('sk-test-0123456789abcdef0123456789abcdef0123456789abcdef');
       expect(cfg.ai.defaultProvider).toBe('deepseek');
@@ -320,6 +333,8 @@ describe('Configuration', () => {
       else process.env.AI_DEFAULT_PROVIDER = savedProvider;
       if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
       else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
+      if (savedOpenAiKey === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = savedOpenAiKey;
     }
   });
 

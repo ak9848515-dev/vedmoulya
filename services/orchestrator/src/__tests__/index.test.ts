@@ -13,6 +13,8 @@ import {
   OpenAIProvider,
   VercelAIProvider,
   DeepSeekProvider,
+  GoogleGeminiProvider,
+  OpenAICompatibleProvider,
   registerPlatformProviders,
 } from '../index.js';
 import { AIMetrics } from '../observability/AIMetrics.js';
@@ -70,8 +72,10 @@ describe('createOrchestrator', () => {
 
   it('creates an OpenAI embedding provider only when an API key is configured', () => {
     const OLD_KEY = process.env.OPENAI_API_KEY;
+    const OLD_AI_KEY = process.env.AI_OPENAI_API_KEY;
     try {
       delete process.env.OPENAI_API_KEY;
+      delete process.env.AI_OPENAI_API_KEY;
       expect(createOpenAIEmbeddingProvider()).toBeUndefined();
 
       process.env.OPENAI_API_KEY = 'sk-embed';
@@ -81,6 +85,8 @@ describe('createOrchestrator', () => {
     } finally {
       if (OLD_KEY === undefined) delete process.env.OPENAI_API_KEY;
       else process.env.OPENAI_API_KEY = OLD_KEY;
+      if (OLD_AI_KEY === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = OLD_AI_KEY;
     }
   });
 
@@ -94,6 +100,8 @@ describe('createOrchestrator', () => {
 describe('registerPlatformProviders', () => {
   const OLD_ENV = process.env.OPENAI_API_KEY;
   const OLD_DEEPSEEK_ENV = process.env.AI_DEEPSEEK_API_KEY;
+  const OLD_GOOGLE_ENV = process.env.AI_GOOGLE_API_KEY;
+  const OLD_AI_OPENAI_ENV = process.env.AI_OPENAI_API_KEY;
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -107,11 +115,24 @@ describe('registerPlatformProviders', () => {
     } else {
       process.env.AI_DEEPSEEK_API_KEY = OLD_DEEPSEEK_ENV;
     }
+    if (OLD_GOOGLE_ENV === undefined) {
+      delete process.env.AI_GOOGLE_API_KEY;
+    } else {
+      process.env.AI_GOOGLE_API_KEY = OLD_GOOGLE_ENV;
+    }
+    if (OLD_AI_OPENAI_ENV === undefined) {
+      delete process.env.AI_OPENAI_API_KEY;
+    } else {
+      process.env.AI_OPENAI_API_KEY = OLD_AI_OPENAI_ENV;
+    }
     delete process.env.AI_RUNTIME_LEGACY_RAW_FETCH;
   });
 
   it('registers mock and no real provider when no config keys and no env key', () => {
     delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
     const orchestrator = createOrchestrator();
     registerPlatformProviders(orchestrator, { providers: { enableMock: true } });
     expect(orchestrator.getProvider('mock')).toBeInstanceOf(MockProvider);
@@ -177,7 +198,9 @@ describe('registerPlatformProviders', () => {
 
   it('does not register DeepSeek when no key is configured', () => {
     delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OPENAI_API_KEY;
     delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
     const orchestrator = createOrchestrator();
     registerPlatformProviders(orchestrator, { providers: { enableMock: true } });
     expect(orchestrator.getProvider('deepseek')).toBeUndefined();
@@ -185,6 +208,9 @@ describe('registerPlatformProviders', () => {
 
   it('registers only mock when no config is provided', () => {
     delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
     const orchestrator = createOrchestrator();
     registerPlatformProviders(orchestrator);
     expect(orchestrator.getProvider('mock')).toBeInstanceOf(MockProvider);
@@ -195,9 +221,11 @@ describe('registerPlatformProviders', () => {
     const OLD_NODE_ENV = process.env.NODE_ENV;
     const OLD_AI_ENABLE_MOCK = process.env.AI_ENABLE_MOCK;
     const OLD_AI_OPENAI = process.env.AI_OPENAI_API_KEY;
+    const OLD_AI_GOOGLE = process.env.AI_GOOGLE_API_KEY;
     try {
       delete process.env.OPENAI_API_KEY;
       delete process.env.AI_DEEPSEEK_API_KEY;
+      delete process.env.AI_GOOGLE_API_KEY;
       process.env.AI_OPENAI_API_KEY = 'sk-openai-abcdefghijklmnopqrstuvwxyz123456789';
       process.env.NODE_ENV = 'development';
       delete process.env.AI_ENABLE_MOCK;
@@ -216,8 +244,9 @@ describe('registerPlatformProviders', () => {
         .sort();
 
       expect(actual).toEqual(expected);
-      // Anthropic/Google are catalog-only — they must never be registered.
+      // Anthropic is catalog-only (no adapter) — must never be registered.
       expect(actual).not.toContain('anthropic');
+      // Google has an adapter but no key in this test — not registered.
       expect(actual).not.toContain('google');
     } finally {
       if (OLD_NODE_ENV === undefined) delete process.env.NODE_ENV;
@@ -226,12 +255,143 @@ describe('registerPlatformProviders', () => {
       else process.env.AI_ENABLE_MOCK = OLD_AI_ENABLE_MOCK;
       if (OLD_AI_OPENAI === undefined) delete process.env.AI_OPENAI_API_KEY;
       else process.env.AI_OPENAI_API_KEY = OLD_AI_OPENAI;
+      if (OLD_AI_GOOGLE === undefined) delete process.env.AI_GOOGLE_API_KEY;
+      else process.env.AI_GOOGLE_API_KEY = OLD_AI_GOOGLE;
     }
   });
+  it('registers Google Gemini from the AI_GOOGLE_API_KEY env var', () => {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    process.env.AI_GOOGLE_API_KEY = 'AIzaSy-test-abcdefghijklmnopqrstuvwxyz1234';
+    const orchestrator = createOrchestrator();
+    registerPlatformProviders(orchestrator, { providers: { enableMock: true } });
+    expect(orchestrator.getProvider('google')).toBeInstanceOf(GoogleGeminiProvider);
+  });
+
+  it('registers Google Gemini from config key', () => {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
+    const orchestrator = createOrchestrator();
+    registerPlatformProviders(orchestrator, {
+      providers: {
+        google: { apiKey: 'AIzaSy-config-test-abcdefghijklmnopqrstuvwxyz' },
+        enableMock: true,
+      },
+    });
+    expect(orchestrator.getProvider('google')).toBeInstanceOf(GoogleGeminiProvider);
+  });
+
+  it('does not register Google when no key is configured', () => {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
+    const orchestrator = createOrchestrator();
+    registerPlatformProviders(orchestrator, { providers: { enableMock: true } });
+    expect(orchestrator.getProvider('google')).toBeUndefined();
+  });
+
+  it('registers all three real providers when all keys are present', () => {
+    process.env.AI_DEEPSEEK_API_KEY = 'sk-ds-all';
+    process.env.AI_GOOGLE_API_KEY = 'AIzaSy-all-abcdefghijklmnopqrstuvwxyz1234';
+    delete process.env.AI_RUNTIME_LEGACY_RAW_FETCH;
+    const orchestrator = createOrchestrator();
+    registerPlatformProviders(orchestrator, {
+      providers: { openai: { apiKey: 'sk-openai-all' }, enableMock: true },
+    });
+    expect(orchestrator.getProvider('openai')).toBeInstanceOf(VercelAIProvider);
+    expect(orchestrator.getProvider('deepseek')).toBeInstanceOf(DeepSeekProvider);
+    expect(orchestrator.getProvider('google')).toBeInstanceOf(GoogleGeminiProvider);
+  });
+
+  it('registers custom providers from config', () => {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
+    const orchestrator = createOrchestrator();
+    registerPlatformProviders(orchestrator, {
+      providers: {
+        enableMock: true,
+        custom: [
+          {
+            id: 'custom-acme',
+            name: 'Acme AI',
+            endpointUrl: 'https://acme.example.com/v1',
+            apiKey: 'sk-acme-test-key-12345678901234',
+            defaultModelId: 'acme-model-1',
+          },
+        ],
+      },
+    });
+    expect(orchestrator.getProvider('custom-acme')).toBeInstanceOf(OpenAICompatibleProvider);
+  });
+
+  it('does not register custom providers without API key', () => {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
+    const orchestrator = createOrchestrator();
+    registerPlatformProviders(orchestrator, {
+      providers: {
+        enableMock: true,
+        custom: [
+          {
+            id: 'custom-acme',
+            name: 'Acme AI',
+            endpointUrl: 'https://acme.example.com/v1',
+            apiKey: '',
+          },
+        ],
+      },
+    });
+    expect(orchestrator.getProvider('custom-acme')).toBeUndefined();
+  });
+
+  it('registers multiple custom providers independently', () => {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
+    const orchestrator = createOrchestrator();
+    registerPlatformProviders(orchestrator, {
+      providers: {
+        enableMock: true,
+        custom: [
+          {
+            id: 'custom-a',
+            name: 'Provider A',
+            endpointUrl: 'https://a.example.com/v1',
+            apiKey: 'sk-a-test-key-123456789012345',
+          },
+          {
+            id: 'custom-b',
+            name: 'Provider B',
+            endpointUrl: 'https://b.example.com/v1',
+            apiKey: 'sk-b-test-key-123456789012345',
+          },
+          {
+            id: 'custom-c',
+            name: 'Provider C',
+            endpointUrl: 'https://c.example.com/v1',
+            apiKey: 'sk-c-test-key-123456789012345',
+          },
+        ],
+      },
+    });
+    expect(orchestrator.getProvider('custom-a')).toBeInstanceOf(OpenAICompatibleProvider);
+    expect(orchestrator.getProvider('custom-b')).toBeInstanceOf(OpenAICompatibleProvider);
+    expect(orchestrator.getProvider('custom-c')).toBeInstanceOf(OpenAICompatibleProvider);
+  });
+
   it('does not register mock in production unless explicitly enabled (AI-RUNTIME-001)', () => {
     const OLD_NODE_ENV = process.env.NODE_ENV;
     const OLD_AI_ENABLE_MOCK = process.env.AI_ENABLE_MOCK;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
     try {
       process.env.NODE_ENV = 'production';
       delete process.env.AI_ENABLE_MOCK;

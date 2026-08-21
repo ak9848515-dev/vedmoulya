@@ -24,6 +24,12 @@ export interface AuthUser {
   userId: string;
   email: string;
   role: string;
+  /** Display name (name is mandatory at registration; updated by /me). */
+  displayName?: string;
+  /** First-login profile completion — SERVER-derived (session + GET /me).
+   *  undefined = unknown (e.g. legacy persisted sessions); the onboarding gate
+   *  only fires on an explicit false, never on unknown. */
+  profileComplete?: boolean;
 }
 
 export interface AuthSession {
@@ -53,6 +59,8 @@ interface AuthState {
   clearSession: () => void;
   setOffline: (offline: boolean) => void;
   setSessionReady: (ready: boolean) => void;
+  /** Apply server-authoritative profile data (displayName + completion). */
+  setProfile: (profile: { displayName?: string; profileComplete?: boolean }) => void;
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────
@@ -89,6 +97,17 @@ export const useAuthStore = create<AuthState>()(
       },
       setSessionReady: (ready: boolean): void => {
         set({ sessionReady: ready });
+      },
+      setProfile: (profile: { displayName?: string; profileComplete?: boolean }): void => {
+        set((state) => ({
+          user: state.user
+            ? {
+                ...state.user,
+                displayName: profile.displayName ?? state.user.displayName,
+                profileComplete: profile.profileComplete ?? state.user.profileComplete,
+              }
+            : state.user,
+        }));
       },
     }),
     {

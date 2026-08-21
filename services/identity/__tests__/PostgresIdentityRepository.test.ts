@@ -227,6 +227,48 @@ describe('PostgresIdentityRepository', () => {
     });
   });
 
+  describe('ensureTable (SPRINT-040 first-run bootstrap)', () => {
+    it('issues idempotent DDL creating the users table + unique indexes', async () => {
+      const executed: string[] = [];
+      const execute = vi.fn((q: unknown) => {
+        // drizzle passes its SQL object; stringify it so the DDL text is
+        // assertable regardless of the internal shape.
+        executed.push(typeof q === 'string' ? q : JSON.stringify(q));
+        return Promise.resolve(undefined);
+      });
+      mockGetDatabase.mockReturnValue({
+        select: vi.fn(() => makeQuery([])),
+        insert: vi.fn(() => makeQuery(undefined)),
+        update: vi.fn(() => makeQuery(undefined)),
+        delete: vi.fn(() => makeQuery(undefined)),
+        execute,
+      });
+
+      await repo.ensureTable();
+
+      // CREATE TABLE + 2 unique indexes + 4 idempotent ALTER ADD COLUMN
+      // (SPRINT-041B first-login profile columns — ALTER IF NOT EXISTS keeps
+      // existing databases migrated without touching stored values).
+      expect(execute).toHaveBeenCalledTimes(7);
+      expect(executed[0]).toContain('CREATE TABLE IF NOT EXISTS users');
+      expect(executed[0]).toContain('email varchar(255) NOT NULL');
+      expect(executed[0]).toContain('password_hash text NOT NULL');
+      expect(executed[0]).toContain('google_id varchar(128)');
+      expect(executed[1]).toContain('CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx');
+      expect(executed[2]).toContain('CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_idx');
+      expect(executed[3]).toContain('ALTER TABLE users ADD COLUMN IF NOT EXISTS age integer');
+      expect(executed[4]).toContain(
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS gender varchar(32)',
+      );
+      expect(executed[5]).toContain(
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS purpose varchar(64)',
+      );
+      expect(executed[6]).toContain(
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS primary_goal varchar(200)',
+      );
+    });
+  });
+
   describe('list / findByCreatedAtRange', () => {
     function makeDbForList() {
       const rows = [makeRow({ id: 'usr_1' }), makeRow({ id: 'usr_2' })];

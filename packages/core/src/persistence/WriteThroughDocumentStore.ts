@@ -23,7 +23,7 @@
 // structured data only: decisions, evidence references, outcomes,
 // timestamps, provenance. NEVER secrets, API keys, OAuth tokens or
 // chain-of-thought (enforced by the store contracts, documented in
-// SPRINT_022_PERSISTENCE_SECURITY.md).
+// SPRINT-022_PERSISTENCE_SECURITY.md).
 // ──────────────────────────────────────────────────────────────────
 
 import type postgres from 'postgres';

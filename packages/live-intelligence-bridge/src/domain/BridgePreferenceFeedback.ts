@@ -57,9 +57,7 @@ export class BridgePreferenceFeedback {
    * provider) aggregate of recent events, time-weighted (older events
    * decay). This is a DERIVED view — reversible, never permanent.
    */
-  taskProfile(
-    input: PreferenceFeedbackInput,
-  ): Array<{
+  taskProfile(input: PreferenceFeedbackInput): Array<{
     capability: string;
     providerId: string;
     modelId?: string;

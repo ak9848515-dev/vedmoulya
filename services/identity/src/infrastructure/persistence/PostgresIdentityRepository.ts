@@ -3,7 +3,7 @@
 // Concrete implementation of IdentityRepository using Drizzle ORM
 // ──────────────────────────────────────────────────────────────────
 
-import { eq, count, between } from 'drizzle-orm';
+import { eq, count, between, sql } from 'drizzle-orm';
 import { BaseRepository, type PaginationParams, type PaginatedResult } from '@vedmoulya/core';
 import type { IdentityRepository, User } from '@vedmoulya/domain';
 import type { UserId, Email } from '@vedmoulya/domain';
@@ -15,6 +15,80 @@ import { getDatabase } from './DatabaseConnection.js';
 export class PostgresIdentityRepository extends BaseRepository implements IdentityRepository {
   constructor() {
     super('identity');
+  }
+
+  /**
+   * Idempotent schema bootstrap — the estate-wide convention (every other
+   * Postgres store creates its table with `CREATE TABLE IF NOT EXISTS` on
+   * startup; the identity store was the ONE exception: its DB init only opened
+   * a connection, so first-run auth failed with REGISTRATION_FAILED against a
+   * missing `users` table). Mirrors `schema/users.ts` column-for-column.
+   *
+   * NOTE: the drizzle schema also declares `uniqueIndex` on statusState and
+   * createdAt — deliberately NOT mirrored here: a unique index on status
+   * (e.g. two users both 'pending') or on createdAt would break multi-user
+   * operation. The table has never been migrated anywhere, so no legacy
+   * contract is lost by creating the semantically-correct DDL (unique email /
+   * google_id only — email uniqueness is what enforces "duplicate email
+   * rejected" at the database level).
+   */
+  async ensureTable(): Promise<void> {
+    const db = getDatabase();
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS users (
+        id varchar(64) PRIMARY KEY,
+        email varchar(255) NOT NULL,
+        email_verified boolean NOT NULL DEFAULT false,
+        display_name varchar(100) NOT NULL,
+        given_name varchar(100),
+        family_name varchar(100),
+        avatar_url text,
+        bio text,
+        timezone varchar(64),
+        locale varchar(10),
+        age integer,
+        gender varchar(32),
+        purpose varchar(64),
+        primary_goal varchar(200),
+        theme varchar(16) NOT NULL DEFAULT 'system',
+        language varchar(10) NOT NULL DEFAULT 'en',
+        notifications_enabled boolean NOT NULL DEFAULT true,
+        email_notifications boolean NOT NULL DEFAULT true,
+        push_notifications boolean NOT NULL DEFAULT true,
+        weekly_digest boolean NOT NULL DEFAULT false,
+        reduced_motion boolean NOT NULL DEFAULT false,
+        reduced_transparency boolean NOT NULL DEFAULT false,
+        two_factor_enabled boolean NOT NULL DEFAULT false,
+        session_timeout_minutes integer NOT NULL DEFAULT 60,
+        login_notifications boolean NOT NULL DEFAULT true,
+        profile_visibility varchar(16) NOT NULL DEFAULT 'private',
+        show_online_status boolean NOT NULL DEFAULT true,
+        allow_data_sharing boolean NOT NULL DEFAULT false,
+        preferred_auth_method varchar(16) NOT NULL DEFAULT 'any',
+        status_state varchar(16) NOT NULL DEFAULT 'pending',
+        status_reason text,
+        status_changed_at timestamp,
+        entity_status varchar(16) NOT NULL DEFAULT 'active',
+        password_hash text NOT NULL,
+        password_updated_at timestamp NOT NULL DEFAULT now(),
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now(),
+        google_id varchar(128),
+        auth_provider varchar(32) NOT NULL DEFAULT 'email'
+      );
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email)`);
+    await db.execute(
+      sql`CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_idx ON users (google_id)`,
+    );
+    // SPRINT-041B — first-login profile columns. CREATE TABLE IF NOT EXISTS does
+    // NOT add columns to a table that already exists (e.g. the local Docker DB
+    // bootstrapped in SPRINT-040), so add them idempotently here. Never writes
+    // over existing values — new columns are NULL until the founder saves.
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS age integer`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender varchar(32)`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS purpose varchar(64)`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS primary_goal varchar(200)`);
   }
 
   /** Find a user by their unique identifier */
@@ -150,6 +224,10 @@ export class PostgresIdentityRepository extends BaseRepository implements Identi
       bio: row.bio ?? undefined,
       timezone: row.timezone ?? undefined,
       locale: row.locale ?? undefined,
+      age: row.age ?? undefined,
+      gender: row.gender ?? undefined,
+      purpose: row.purpose ?? undefined,
+      primaryGoal: row.primaryGoal ?? undefined,
       theme: row.theme as 'light' | 'dark' | 'system',
       language: row.language,
       notificationsEnabled: row.notificationsEnabled,
@@ -189,6 +267,10 @@ export class PostgresIdentityRepository extends BaseRepository implements Identi
       bio: user.profile.bio ?? null,
       timezone: user.profile.timezone ?? null,
       locale: user.profile.locale ?? null,
+      age: user.profile.age ?? null,
+      gender: user.profile.gender ?? null,
+      purpose: user.profile.purpose ?? null,
+      primaryGoal: user.profile.primaryGoal ?? null,
       theme: user.preferences.theme,
       language: user.preferences.language,
       notificationsEnabled: user.preferences.notificationsEnabled,

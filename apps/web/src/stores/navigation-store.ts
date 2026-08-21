@@ -39,6 +39,7 @@ export type NavSectionId =
   | 'content-agency'
   | 'insights'
   | 'search'
+  | 'ecosystem'
   | 'settings';
 
 export interface NavSection {
@@ -191,6 +192,14 @@ export function buildSidebarGroups(
           active: activeSection === 'capability-marketplace',
           onClick: (): void => {
             onNavigate('capability-marketplace');
+          },
+        },
+        {
+          id: 'ecosystem',
+          label: 'AI Ecosystem',
+          active: activeSection === 'ecosystem',
+          onClick: (): void => {
+            onNavigate('ecosystem');
           },
         },
         {

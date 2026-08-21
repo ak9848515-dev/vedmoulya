@@ -19,7 +19,7 @@ export function createNotificationRouter(dashboardService: DashboardApplicationS
 } {
   return {
     list: async (input: { userId: string }, ctx: TRPCContext): Promise<ApiResponse> => {
-      assertRateLimit(ctx.userId, RateLimitTiers.standard);
+      await assertRateLimit(ctx.userId, RateLimitTiers.standard);
       // Notifications are embedded in the dashboard snapshot
       const dashboard = await dashboardService.getDashboard(input.userId);
       const notifications = dashboard.success && dashboard.data ? dashboard.data.notifications : [];
@@ -35,7 +35,7 @@ export function createNotificationRouter(dashboardService: DashboardApplicationS
       input: { userId: string; notificationId: string },
       ctx: TRPCContext,
     ): Promise<ApiResponse> => {
-      assertRateLimit(ctx.userId, RateLimitTiers.standard);
+      await assertRateLimit(ctx.userId, RateLimitTiers.standard);
       const dashboard = await dashboardService.getDashboard(input.userId);
       if (!dashboard.success || !dashboard.data) {
         return {

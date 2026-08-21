@@ -68,6 +68,19 @@ export class IdentityEventPublisher {
     );
   }
 
+  /** Convenience: publish a user email-verified event */
+  async publishUserEmailVerified(userId: string, correlationId?: string): Promise<void> {
+    await this.publish(
+      {
+        type: 'identity.user.email.verified',
+        userId: createUserId(userId),
+        timestamp: new Date(),
+        data: {},
+      },
+      correlationId,
+    );
+  }
+
   /** Convenience: publish a user created event */
   async publishUserCreated(userId: string, email: string, correlationId?: string): Promise<void> {
     await this.publish(

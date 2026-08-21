@@ -55,8 +55,11 @@ describe('DatabaseConnection', () => {
   it('initializes the pool once and exposes the database', async () => {
     const mod = await loadModule();
     mod.initializeDatabase();
+    // Accept both the `postgres://` and `postgresql://` schemes (the latter
+    // is the standard libpq form — the previous `stringContaining('postgres://')`
+    // assertion was brittle and failed on a valid `postgresql://` URL).
     expect(mockPostgres).toHaveBeenCalledWith(
-      expect.stringContaining('postgres://'),
+      expect.stringMatching(/^postgres(ql)?:\/\//),
       expect.objectContaining({ max: 10 }),
     );
     expect(mockDrizzle).toHaveBeenCalledWith(mockSql, expect.anything());

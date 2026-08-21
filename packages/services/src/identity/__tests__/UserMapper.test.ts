@@ -117,6 +117,9 @@ describe('UserMapper entity mapping', () => {
         bio: 'Bio',
         timezone: 'UTC',
         locale: 'en',
+        // SPRINT-041B — the real UserProfile exposes isComplete(); the mapper
+        // derives first-login completion from it.
+        isComplete: () => false,
       },
       preferences: {
         theme: 'dark',

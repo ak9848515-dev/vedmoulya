@@ -460,6 +460,25 @@ describe('concurrency, cancellation, duplicate prevention (Phase 3)', () => {
     expect(h.runs.list('u1').some((r) => r.status === 'CANCELLED')).toBe(true);
   });
 
+  it('cancel() on an in-flight job succeeds and requests the mid-run stop', async () => {
+    const h = makeHarness();
+    h.scheduler.ensureDefaults('u1');
+    const job = h.jobs.get('u1', 'PROVIDER_MODEL_DISCOVERY')!;
+    job.inFlight = true;
+    h.jobs.save(job);
+
+    const result = h.scheduler.cancel('u1', 'PROVIDER_MODEL_DISCOVERY');
+    expect(result.success).toBe(true);
+    expect(h.jobs.get('u1', 'PROVIDER_MODEL_DISCOVERY')!.cancelRequested).toBe(true);
+  });
+
+  it('cancel() on an unknown job is honest (JOB_NOT_FOUND)', async () => {
+    const h = makeHarness();
+    const result = h.scheduler.cancel('no-jobs-user', 'PROVIDER_MODEL_DISCOVERY');
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe('JOB_NOT_FOUND');
+  });
+
   it('duplicate-run prevention: a scheduled run is skipped before its window', async () => {
     const h = makeHarness();
     h.discovery.scriptRuns([{ add: [{ id: 'm1' }] }]);
@@ -530,6 +549,18 @@ describe('change detection (Phase 6)', () => {
     expect(kinds).toContain('CRITICAL_CHANGE');
     expect(kinds).toContain('UPDATED');
     expect(kinds).toContain('REMOVED');
+  });
+
+  it('a run that only removes items is REMOVED (job status chip stays honest)', async () => {
+    const h = makeHarness();
+    h.discovery.scriptRuns([{ add: [{ id: 'gone' }] }]);
+    await runFirst(h);
+
+    h.discovery.scriptRuns([{ remove: ['gone'] }]);
+    const run = await runFirst(h);
+    expect(run.changeSummary.counts.REMOVED).toBe(1);
+    expect(run.changeSummary.counts.NEW).toBe(0);
+    expect(h.jobs.get('u1', 'PROVIDER_MODEL_DISCOVERY')?.lastChangeKind).toBe('REMOVED');
   });
 
   it('a security-flagged item is always CRITICAL_CHANGE', async () => {

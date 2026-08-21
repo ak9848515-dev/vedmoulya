@@ -93,6 +93,10 @@ export class IdentityApplicationService extends BaseService {
       bio?: string;
       timezone?: string;
       locale?: string;
+      age?: number;
+      gender?: string;
+      purpose?: string;
+      primaryGoal?: string;
     },
   ): Promise<UpdateProfileDTO> {
     const userId = createUserId(id);

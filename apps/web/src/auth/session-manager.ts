@@ -5,9 +5,14 @@
 //
 //   restoreSession()      → startup: hydrate → validate/refresh → sessionReady
 //   signInWithEmailAndPassword()
+//   signUpWithEmailAndPassword() → register via /auth/sign-up, then apply the
+//                                 returned session through the SAME lifecycle
 //   beginGoogleSignIn()   → fetch OAuth URL, save pending state, navigate
 //   completeGoogleSignIn()→ called by /oauth2redirect with the code
 //   refreshWithLock()     → single-flight token refresh (tRPC 401 retry)
+//   refreshProfile()      → re-fetch /me (server-authoritative first-login
+//                           completion), applied on every session restore
+//   completeProfile()     → save the first-login profile via PATCH /me/profile
 //   logout()              → server sign-out (best-effort) + clear everything
 //
 // Offline behavior: a network failure during validation/refresh NEVER logs the
@@ -23,12 +28,17 @@ import {
   AuthApiError,
   exchangeGoogleCode,
   fetchGoogleAuthUrl,
+  getProfile as apiGetProfile,
   isNetworkError,
   refreshAccessToken,
   signInWithEmail as apiSignInWithEmail,
   signOut as apiSignOut,
+  signUpWithEmail as apiSignUpWithEmail,
+  updateProfile as apiUpdateProfile,
   verifySession,
   type AuthTokenPair,
+  type ProfileUpdateInput,
+  type SignUpParams,
 } from './auth-api.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -45,22 +55,88 @@ interface PendingOAuth {
 
 // ── Session application ──────────────────────────────────────────────────────
 
-function toAuthUser(session: { userId: string; email: string; role: string }): AuthUser {
-  return { userId: session.userId, email: session.email, role: session.role };
+function toAuthUser(session: {
+  userId: string;
+  email: string;
+  role: string;
+  displayName?: string;
+  profileComplete?: boolean;
+}): AuthUser {
+  return {
+    userId: session.userId,
+    email: session.email,
+    role: session.role,
+    displayName: session.displayName,
+    profileComplete: session.profileComplete,
+  };
 }
 
 function applySession(session: {
   userId: string;
   email: string;
   role: string;
+  displayName?: string;
+  profileComplete?: boolean;
   tokens: AuthTokenPair;
 }): void {
-  useAuthStore.getState().setSession({
+  const store = useAuthStore.getState();
+
+  store.setSession({
     accessToken: session.tokens.accessToken,
     refreshToken: session.tokens.refreshToken,
     expiresAt: session.tokens.expiresAt,
     user: toAuthUser(session),
   });
+
+  store.setSessionReady(true);
+}
+
+// ── First-login profile (SPRINT-041B) ───────────────────────────────────────
+
+/**
+ * Re-fetch the authenticated user's profile from the server and apply the
+ * server-authoritative displayName + profileComplete to the store. Offline-safe
+ * (a network failure keeps the cached profile — never logs out, mirroring the
+ * token-restore behavior). Used after session restore and after profile save so
+ * first-login routing always reflects server state, never client-only flags.
+ */
+export async function refreshProfile(): Promise<void> {
+  const { accessToken } = useAuthStore.getState();
+  if (!accessToken) return;
+  try {
+    const profile = await apiGetProfile(accessToken);
+    useAuthStore.getState().setProfile({
+      displayName: profile.displayName,
+      profileComplete: profile.profileComplete,
+    });
+  } catch {
+    // Offline or transient — keep the cached profile. Never clears the session.
+  }
+}
+
+/**
+ * Save the first-login profile through the existing PATCH /me/profile endpoint
+ * and apply the returned server state. Returns ok on success; the caller
+ * redirects to the intended destination.
+ */
+export async function completeProfile(data: ProfileUpdateInput): Promise<SignInOutcome> {
+  const { accessToken } = useAuthStore.getState();
+  if (!accessToken) return { ok: false, error: 'Not authenticated.' };
+  try {
+    const profile = await apiUpdateProfile(accessToken, data);
+    useAuthStore.getState().setProfile({
+      displayName: profile.displayName,
+      profileComplete: profile.profileComplete,
+    });
+    return { ok: true };
+  } catch (error) {
+    if (isNetworkError(error)) return { ok: false, error: 'offline' };
+    const message =
+      error instanceof AuthApiError
+        ? error.message
+        : 'Could not save your profile. Please try again.';
+    return { ok: false, error: message };
+  }
 }
 
 // ── Single-flight refresh ────────────────────────────────────────────────────
@@ -165,12 +241,22 @@ async function doRestore(): Promise<void> {
       await refreshWithLock();
     }
   }
+  // Server-authoritative first-login completion on every load (SPRINT-041B).
+  await refreshProfile();
   useAuthStore.getState().setSessionReady(true);
 }
 
 // ── Sign-in ─────────────────────────────────────────────────────────────────
 
 export type SignInOutcome = { ok: true } | { ok: false; error: string };
+
+/**
+ * Sign-up outcome. `verificationRequired` (production/staging) means the
+ * account was created but needs email verification before it can sign in —
+ * the UI shows the "check your email" state instead of navigating on.
+ */
+export type SignUpOutcome =
+  { ok: true; verificationRequired?: boolean } | { ok: false; error: string };
 
 /** Email/password sign-in through the existing /auth/sign-in endpoint. */
 export async function signInWithEmailAndPassword(
@@ -185,6 +271,34 @@ export async function signInWithEmailAndPassword(
     if (isNetworkError(error)) return { ok: false, error: 'offline' };
     const message =
       error instanceof AuthApiError ? error.message : 'Sign-in failed. Please try again.';
+    return { ok: false, error: message };
+  }
+}
+
+// ── Sign-up ─────────────────────────────────────────────────────────────────
+
+/**
+ * Email/password account registration through the existing /auth/sign-up
+ * endpoint. In development/test the returned AuthSession is applied through
+ * the same lifecycle as sign-in (applySession → persisted store), so a freshly
+ * registered user is authenticated immediately. In production/staging the
+ * endpoint returns `verificationRequired` with NO session — the caller shows
+ * the email-verification state and never applies a session.
+ */
+export async function signUpWithEmailAndPassword(params: SignUpParams): Promise<SignUpOutcome> {
+  try {
+    const response = await apiSignUpWithEmail(params);
+    if (response.verificationRequired) {
+      return { ok: true, verificationRequired: true };
+    }
+    if (response.session) {
+      applySession(response.session);
+    }
+    return { ok: true };
+  } catch (error) {
+    if (isNetworkError(error)) return { ok: false, error: 'offline' };
+    const message =
+      error instanceof AuthApiError ? error.message : 'Sign-up failed. Please try again.';
     return { ok: false, error: message };
   }
 }

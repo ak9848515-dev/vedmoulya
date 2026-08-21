@@ -33,6 +33,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }):
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Font strategy (SPRINT-043B): preconnect to font hosts to reduce
+            render-blocking latency. Fonts remain runtime-loaded (Satoshi +
+            Inter + JetBrains Mono) per the existing visual system; no new
+            font dependency is introduced. */}
+        <link rel="preconnect" href="https://fonts.cdnfonts.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* Satoshi font for headings */}
         <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/satoshi" />
         {/* Inter font for body */}

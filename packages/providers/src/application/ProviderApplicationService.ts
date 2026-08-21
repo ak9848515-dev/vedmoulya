@@ -160,6 +160,7 @@ export class ProviderApplicationService {
       name: dto.name,
       description: dto.description,
       owner: dto.owner,
+      customConfig: dto.customConfig,
       models: dto.models?.map((m) => ({ ...m })),
       capabilities: dto.capabilities,
       supportedModalities: dto.supportedModalities,
@@ -267,6 +268,11 @@ export class ProviderApplicationService {
             : undefined,
         availability: dto.availability,
       });
+    }
+
+    // SPRINT-049 — custom provider config updates.
+    if (dto.customConfig !== undefined && provider.family === 'custom') {
+      provider.updateCustomConfig(dto.customConfig);
     }
 
     await this.repository.update(provider);

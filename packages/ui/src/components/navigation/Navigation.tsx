@@ -66,6 +66,10 @@ export interface NavBarProps {
   logo?: React.ReactNode;
   leftItems?: React.ReactNode;
   rightItems?: React.ReactNode;
+  /** Actions rendered on MOBILE viewports only (rightItems are desktop-only).
+      Used for the AI Companion / Command Center trigger so founders on phones
+      keep access to their opportunities (SPRINT-043E responsive cert). */
+  mobileActions?: React.ReactNode;
   mobileMenuOpen?: boolean;
   onMobileMenuToggle?: () => void;
   className?: string;
@@ -75,6 +79,7 @@ export function NavBar({
   logo,
   leftItems,
   rightItems,
+  mobileActions,
   mobileMenuOpen,
   onMobileMenuToggle,
   className,
@@ -88,6 +93,9 @@ export function NavBar({
         </div>
         <div className="flex items-center gap-3">
           <div className="hidden md:flex items-center gap-3">{rightItems}</div>
+          {mobileActions && (
+            <div className="md:hidden flex items-center gap-1">{mobileActions}</div>
+          )}
           <button
             onClick={onMobileMenuToggle}
             className="md:hidden p-2 rounded-lg hover:bg-[#F1F5F9] transition-colors"

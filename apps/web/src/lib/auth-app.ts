@@ -19,6 +19,8 @@ import {
   authRouteConfig,
   createAuthRouter,
   IdentityEventPublisher,
+  createVerificationTokenStore,
+  type VerificationTokenStore,
 } from '@vedmoulya/identity';
 import { createProductionIdentityRepository } from '@vedmoulya/api';
 import { consumeAuthRequest, resolveClientIp } from './auth-rate-limit.js';
@@ -55,11 +57,28 @@ function createAuthRateLimitMiddleware(): MiddlewareHandler {
 }
 
 /** Lazy singleton — module scope stays inert during `next build`. */
-export function getAuthApp(): Hono {
+export async function getAuthApp(): Promise<Hono> {
   if (authApp === null) {
     const repository = createProductionIdentityRepository();
+    // SPRINT-040 — deterministic first-run: await the idempotent `users`-table
+    // bootstrap so the very first sign-up cannot race the DDL (the gateway
+    // factory also fires it fire-and-forget; here we make the cold start
+    // deterministic). Optional-call keeps hermetic tests (stubbed repository)
+    // working unchanged.
+    await (repository as { ensureTable?(): Promise<void> }).ensureTable?.();
+    // SPRINT-045 — same deterministic cold-start for the email-verification
+    // token table: a fresh production database must have `email_verifications`
+    // before the first sign-up can issue a verification token.
+    const verificationTokenStore: VerificationTokenStore = createVerificationTokenStore();
+    await (
+      verificationTokenStore as VerificationTokenStore & {
+        ensureTable?(): Promise<void>;
+      }
+    ).ensureTable?.();
     const eventPublisher = new IdentityEventPublisher(new InMemoryEventBus());
-    const authService = new AuthService(repository, eventPublisher);
+    const authService = new AuthService(repository, eventPublisher, {
+      verificationTokenStore,
+    });
     authApp = new Hono()
       .use(`${authRouteConfig.basePath}/*`, createAuthRateLimitMiddleware())
       .route(authRouteConfig.basePath, createAuthRouter(authService));

@@ -319,6 +319,7 @@ function emptyProviderMarketplace(): ProviderMarketplaceDTO {
       'openrouter',
       'ollama',
       'mock',
+      'custom',
     ] as const),
     countByCapability: zeroRecord(CAPABILITY_TYPES),
   };

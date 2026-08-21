@@ -106,10 +106,10 @@ export const PROVIDER_RUNTIME_DESCRIPTORS: readonly ProviderRuntimeDescriptor[] 
     family: 'google',
     name: 'Google (Gemini)',
     envKeys: ['AI_GOOGLE_API_KEY'],
-    adapter: null,
-    canExecute: false,
+    adapter: 'GoogleGeminiProvider (Vercel AI SDK, @ai-sdk/google, generativelanguage API)',
+    canExecute: true,
     freeTier: false,
-    defaultEligibleStrict: false,
+    defaultEligibleStrict: true,
   },
   {
     family: 'openrouter',

@@ -141,26 +141,26 @@ describe('checkRateLimit', () => {
     vi.unstubAllEnvs();
   });
 
-  it('allows first request within limit', () => {
-    const result = checkRateLimit('user-1', { maxRequests: 3, windowMs: 60_000 });
+  it('allows first request within limit', async () => {
+    const result = await checkRateLimit('user-1', { maxRequests: 3, windowMs: 60_000 });
     expect(result).toBe(true);
   });
 
-  it('allows requests up to the limit', () => {
+  it('allows requests up to the limit', async () => {
     // First 3 should pass
-    expect(checkRateLimit('user-2', { maxRequests: 3, windowMs: 60_000 })).toBe(true);
-    expect(checkRateLimit('user-2', { maxRequests: 3, windowMs: 60_000 })).toBe(true);
-    expect(checkRateLimit('user-2', { maxRequests: 3, windowMs: 60_000 })).toBe(true);
+    expect(await checkRateLimit('user-2', { maxRequests: 3, windowMs: 60_000 })).toBe(true);
+    expect(await checkRateLimit('user-2', { maxRequests: 3, windowMs: 60_000 })).toBe(true);
+    expect(await checkRateLimit('user-2', { maxRequests: 3, windowMs: 60_000 })).toBe(true);
     // 4th should be blocked
-    expect(checkRateLimit('user-2', { maxRequests: 3, windowMs: 60_000 })).toBe(false);
+    expect(await checkRateLimit('user-2', { maxRequests: 3, windowMs: 60_000 })).toBe(false);
   });
 
-  it('uses different counters for different users', () => {
-    expect(checkRateLimit('user-a', { maxRequests: 1, windowMs: 60_000 })).toBe(true);
+  it('uses different counters for different users', async () => {
+    expect(await checkRateLimit('user-a', { maxRequests: 1, windowMs: 60_000 })).toBe(true);
     // Different user, different counter
-    expect(checkRateLimit('user-b', { maxRequests: 1, windowMs: 60_000 })).toBe(true);
+    expect(await checkRateLimit('user-b', { maxRequests: 1, windowMs: 60_000 })).toBe(true);
     // user-a is now blocked
-    expect(checkRateLimit('user-a', { maxRequests: 1, windowMs: 60_000 })).toBe(false);
+    expect(await checkRateLimit('user-a', { maxRequests: 1, windowMs: 60_000 })).toBe(false);
   });
 
   it('uses standard tier config', () => {
@@ -202,15 +202,21 @@ describe('checkRateLimit', () => {
 });
 
 describe('assertRateLimit', () => {
-  it('does not throw for first request', () => {
-    expect(() => assertRateLimit('user-3', { maxRequests: 2, windowMs: 60_000 })).not.toThrow();
-    expect(() => assertRateLimit('user-3', { maxRequests: 2, windowMs: 60_000 })).not.toThrow();
+  it('does not throw for first request', async () => {
+    await expect(
+      assertRateLimit('user-3', { maxRequests: 2, windowMs: 60_000 }),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertRateLimit('user-3', { maxRequests: 2, windowMs: 60_000 }),
+    ).resolves.toBeUndefined();
   });
 
-  it('throws TRPCError when limit exceeded', () => {
+  it('throws TRPCError when limit exceeded', async () => {
     const userId = `limited-${Date.now()}`;
-    assertRateLimit(userId, { maxRequests: 1, windowMs: 60_000 }); // first - ok
-    expect(() => assertRateLimit(userId, { maxRequests: 1, windowMs: 60_000 })).toThrow(TRPCError);
+    await assertRateLimit(userId, { maxRequests: 1, windowMs: 60_000 }); // first - ok
+    await expect(assertRateLimit(userId, { maxRequests: 1, windowMs: 60_000 })).rejects.toThrow(
+      TRPCError,
+    );
   });
 });
 
