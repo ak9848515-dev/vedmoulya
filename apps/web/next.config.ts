@@ -26,6 +26,12 @@ const nextConfig: NextConfig = {
     '@vedmoulya/api',
     '@vedmoulya/shared',
     '@vedmoulya/services',
+    // AI runtime — imported by services/api and client-side pages.
+    '@vedmoulya/ai',
+    // Ecosystem — imported by services/api and client-side pages.
+    '@vedmoulya/ecosystem',
+    // Voice — imported by services/api (server-side).
+    '@vedmoulya/voice',
     // Production gateway persistence wiring (SPRINT PR-002A/B) — the API
     // gateway resolves each engine's production repository through the
     // service module's DI registration, so all five services must be
