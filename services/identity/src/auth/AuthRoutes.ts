@@ -217,7 +217,8 @@ export function createAuthRouter(authService: AuthService): Hono {
   router.get('/google/url', (c) => {
     try {
       const state = crypto.randomUUID();
-      const url = authService.getGoogleAuthUrl(state);
+      const origin = new URL(c.req.url).origin;
+      const url = authService.getGoogleAuthUrl(state, origin);
       return c.json({ success: true, data: { url, state } }, 200);
     } catch (error) {
       return mapErrorToResponse(error, c);
@@ -225,19 +226,69 @@ export function createAuthRouter(authService: AuthService): Hono {
   });
 
   router.get('/google/callback', async (c) => {
-    try {
-      const code = c.req.query('code');
-      if (!code) {
-        return c.json(
-          {
-            success: false,
-            error: { code: 'MISSING_CODE', message: 'No authorization code provided' },
-          },
+    const code = c.req.query('code');
+    const state = c.req.query('state');
+
+    // Browser navigation from Google (Accept: text/html) must get an HTML page
+    // that completes the OAuth flow client-side.  Programmatic fetch requests
+    // (Accept: application/json) get the existing JSON envelope.
+    const accept = c.req.header('accept') ?? '';
+    const isBrowserNavigation = accept.includes('text/html');
+
+    if (!code) {
+      if (isBrowserNavigation) {
+        return c.html(
+          '<html><body><script>window.location.replace("/login?error=missing_code")</script></body></html>',
           400,
         );
       }
+      return c.json(
+        {
+          success: false,
+          error: { code: 'MISSING_CODE', message: 'No authorization code provided' },
+        },
+        400,
+      );
+    }
 
-      const result = await authService.signInWithGoogle(code);
+    if (isBrowserNavigation) {
+      // Serve an HTML page that completes the OAuth exchange client-side
+      // so the session is stored in the browser and the user lands on /.
+      const escapedCode = code.replace(/[&<>"']/g, '');
+      const escapedState = (state ?? '').replace(/[&<>"']/g, '');
+      return c.html(
+        `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Signing in…</title></head><body>` +
+          `<script>` +
+          `(function(){` +
+          `try{window.sessionStorage.setItem('vedmoulya-oauth-pending',` +
+          `JSON.stringify({state:'${escapedState}',next:'/'}))}catch(e){}` +
+          `fetch('/api/v1/identity/auth/google/callback?code=${escapedCode}&state=${escapedState}',` +
+          `{headers:{'Accept':'application/json'}})` +
+          `.then(function(r){return r.json()})` +
+          `.then(function(d){` +
+          `if(d.success&&d.data&&d.data.tokens){` +
+          `var t=d.data.tokens;` +
+          `try{` +
+          `var s=JSON.parse(localStorage.getItem('vedmoulya-auth')||'{}');` +
+          `s.state={accessToken:t.accessToken,refreshToken:t.refreshToken,` +
+          `expiresAt:t.expiresAt,user:{userId:d.data.userId,email:d.data.email,` +
+          `role:d.data.role,displayName:d.data.displayName,` +
+          `profileComplete:d.data.profileComplete}};` +
+          `localStorage.setItem('vedmoulya-auth',JSON.stringify(s.state))}catch(e){}` +
+          `window.location.replace('/')` +
+          `}else{window.location.replace('/login?error=google_failed')}` +
+          `}).catch(function(){window.location.replace('/login?error=network')})` +
+          `})();` +
+          `</script><p>Signing you in…</p></body></html>`,
+        200,
+        { 'Content-Type': 'text/html; charset=utf-8' },
+      );
+    }
+
+    // Programmatic (fetch / JSON) — existing behavior for client-side exchangeGoogleCode
+    try {
+      const origin = new URL(c.req.url).origin;
+      const result = await authService.signInWithGoogle(code, origin);
 
       if (!result.success) {
         return c.json(

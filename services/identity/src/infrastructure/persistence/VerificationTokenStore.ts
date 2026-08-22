@@ -115,7 +115,7 @@ export class InMemoryVerificationTokenStore implements VerificationTokenStore {
 
   save(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
     const existing = [...this.records.values()].find((r) => r.userId === userId);
-    if (existing) this.records.delete(existing.id);
+    if (existing) this.records.delete(existing.tokenHash);
     this.records.set(tokenHash, {
       id: randomUUID(),
       userId,

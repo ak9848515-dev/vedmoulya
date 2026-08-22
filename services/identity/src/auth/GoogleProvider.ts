@@ -30,16 +30,23 @@ export class GoogleProvider {
   constructor() {
     this.clientId = process.env.GOOGLE_CLIENT_ID ?? '';
     this.clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? '';
-    this.redirectUri =
-      process.env.GOOGLE_REDIRECT_URI ??
-      'http://localhost:3000/api/v1/identity/auth/google/callback';
+    this.redirectUri = process.env.GOOGLE_REDIRECT_URI ?? '';
   }
 
-  /** Get the Google OAuth2 authorization URL */
-  getAuthorizationUrl(state: string): string {
+  /** Get the Google OAuth2 authorization URL.
+   *  @param requestOrigin  When GOOGLE_REDIRECT_URI is not set, the origin
+   *  (scheme + host) from the incoming request is used to build the callback
+   *  URL dynamically — so production and development both get the correct
+   *  redirect URI without requiring an explicit env var. */
+  getAuthorizationUrl(state: string, requestOrigin?: string): string {
+    const redirectUri =
+      this.redirectUri ||
+      (requestOrigin
+        ? `${requestOrigin}/api/v1/identity/auth/google/callback`
+        : 'http://localhost:3000/api/v1/identity/auth/google/callback');
     const params = new URLSearchParams({
       client_id: this.clientId,
-      redirect_uri: this.redirectUri,
+      redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'openid email profile',
       state,
@@ -50,9 +57,15 @@ export class GoogleProvider {
     return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   }
 
-  /** Exchange an authorization code for tokens and fetch user profile */
-  async handleCallback(code: string): Promise<GoogleAuthResult> {
+  /** Exchange an authorization code for tokens and fetch user profile.
+   *  @param requestOrigin  Used to derive the redirect URI when GOOGLE_REDIRECT_URI is unset. */
+  async handleCallback(code: string, requestOrigin?: string): Promise<GoogleAuthResult> {
     try {
+      const redirectUri =
+        this.redirectUri ||
+        (requestOrigin
+          ? `${requestOrigin}/api/v1/identity/auth/google/callback`
+          : 'http://localhost:3000/api/v1/identity/auth/google/callback');
       // Exchange authorization code for tokens
       const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -61,7 +74,7 @@ export class GoogleProvider {
           code,
           client_id: this.clientId,
           client_secret: this.clientSecret,
-          redirect_uri: this.redirectUri,
+          redirect_uri: redirectUri,
           grant_type: 'authorization_code',
         }),
       });

@@ -167,14 +167,14 @@ export class AuthService extends BaseService {
   // ── Google OAuth Sign-In ──────────────────────────────────────────────
 
   /** Get Google OAuth authorization URL */
-  getGoogleAuthUrl(state: string): string {
-    return this.googleProvider.getAuthorizationUrl(state);
+  getGoogleAuthUrl(state: string, requestOrigin?: string): string {
+    return this.googleProvider.getAuthorizationUrl(state, requestOrigin);
   }
 
   /** Handle Google OAuth callback */
-  async signInWithGoogle(code: string): Promise<SignInResult> {
+  async signInWithGoogle(code: string, requestOrigin?: string): Promise<SignInResult> {
     try {
-      const result = await this.googleProvider.handleCallback(code);
+      const result = await this.googleProvider.handleCallback(code, requestOrigin);
 
       if (!result.success || !result.profile) {
         return { success: false, error: result.error ?? 'Google authentication failed' };
