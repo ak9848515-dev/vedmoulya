@@ -61,7 +61,12 @@ function runWorkspaceCoverage(ws) {
   // aggregate reflect ONLY this run — a stale coverage-final.json from an
   // earlier commit could otherwise let a zero-test workspace pass the gate.
   rmSync(join(cwd, 'coverage'), { recursive: true, force: true });
-  const result = spawnSync('npx', ['vitest', 'run', '--coverage'], {
+  // Pass --config explicitly so vitest uses the workspace-local vitest.config.ts
+  // instead of potentially walking up to the root vitest.config.ts (which has
+  // test.projects and triggers workspace mode that suppresses per-workspace
+  // coverage output).
+  const configPath = join(cwd, 'vitest.config.ts');
+  const result = spawnSync('npx', ['vitest', 'run', '--coverage', '--config', configPath], {
     cwd,
     encoding: 'utf8',
     timeout: 600_000,
