@@ -47,7 +47,11 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run typecheck
+      # SPRINT-066 workspace-scoped lint runner (aggregates every workspace +
+      # root scope). LINT_CONCURRENCY=2 parallelizes independent scopes.
       - run: npm run lint
+        env:
+          LINT_CONCURRENCY: '2'
       - run: npm run test
       - name: Quality benchmarks (hermetic)
         run: |

@@ -35,7 +35,7 @@ jobs:
   quality:
     name: 'G1-G2: Architecture & Code Quality'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,9 +43,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
-      # Gate 2: Code Quality — Linting
+      # Gate 2: Code Quality — Linting.
+      # `lint` is the SPRINT-066 workspace-scoped runner: it spawns one ESLint
+      # process per workspace + one root scope and aggregates all results.
+      # LINT_CONCURRENCY=2 parallelizes independent scopes (bounded by the
+      # per-scope heap headroom the runner configures); the aggregated run
+      # still covers apps/* + packages/* + services/* + root config/scripts.
       - name: Lint (ESLint)
         run: npm run lint
+        env:
+          LINT_CONCURRENCY: '2'
       # Gate 2: Code Quality — Formatting
       - name: Format check (Prettier)
         run: npm run format
