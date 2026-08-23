@@ -17,6 +17,15 @@ export class PostgresIdentityRepository extends BaseRepository implements Identi
     super('identity');
   }
 
+  // SPRINT-077 — concurrency guard: multiple callers (ProductionRepositories
+  // fire-and-forget + auth-app deterministic await) invoke ensureTable()
+  // concurrently on cold start. PostgreSQL's CREATE TABLE IF NOT EXISTS is NOT
+  // safe against concurrent DDL — two sessions can both pass the existence
+  // check and race, producing a pg_type_typname_nsp_index violation. The
+  // static promise ensures the DDL executes exactly once per process; all
+  // concurrent callers await the same promise.
+  private static ddlPromise: Promise<void> | null = null;
+
   /**
    * Idempotent schema bootstrap — the estate-wide convention (every other
    * Postgres store creates its table with `CREATE TABLE IF NOT EXISTS` on
@@ -33,6 +42,26 @@ export class PostgresIdentityRepository extends BaseRepository implements Identi
    * rejected" at the database level).
    */
   async ensureTable(): Promise<void> {
+    if (PostgresIdentityRepository.ddlPromise) {
+      return PostgresIdentityRepository.ddlPromise;
+    }
+    PostgresIdentityRepository.ddlPromise = this.runDdl();
+    try {
+      await PostgresIdentityRepository.ddlPromise;
+    } catch (error: unknown) {
+      // SPRINT-077 — clear on rejection so getAuthApp()'s built-in retry
+      // mechanism can re-attempt after transient PG failures. The estate
+      // convention treats ensureTable() failure as non-fatal/deferrable;
+      // all DDL uses IF NOT EXISTS so retry is idempotent. No concurrent
+      // DDL risk: runDdl() has settled (the promise rejected), so no
+      // lingering connection is executing DDL when we clear the guard.
+      PostgresIdentityRepository.ddlPromise = null;
+      throw error;
+    }
+  }
+
+  /** Execute the DDL statements exactly once per process. */
+  private async runDdl(): Promise<void> {
     const db = getDatabase();
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS users (

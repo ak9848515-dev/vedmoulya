@@ -86,6 +86,10 @@ describe('PostgresIdentityRepository', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // SPRINT-077 — reset the static ddlPromise between tests so each test
+    // starts with a clean concurrency guard.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (PostgresIdentityRepository as any).ddlPromise = null;
     repo = new PostgresIdentityRepository();
   });
 
@@ -266,6 +270,144 @@ describe('PostgresIdentityRepository', () => {
       expect(executed[6]).toContain(
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS primary_goal varchar(200)',
       );
+    });
+  });
+
+  // ── SPRINT-077 — ddlPromise concurrency guard & rejection semantics ──────
+
+  describe('ensureTable — ddlPromise concurrency guard (SPRINT-077)', () => {
+    it('concurrent callers share exactly one DDL execution', async () => {
+      let executeCount = 0;
+      const execute = vi.fn(() => {
+        executeCount += 1;
+        return Promise.resolve();
+      });
+      mockGetDatabase.mockReturnValue({
+        select: vi.fn(() => makeQuery([])),
+        insert: vi.fn(() => makeQuery(undefined)),
+        update: vi.fn(() => makeQuery(undefined)),
+        delete: vi.fn(() => makeQuery(undefined)),
+        execute,
+      });
+
+      // Fire two ensureTable() calls concurrently — the second call hits the
+      // static ddlPromise guard and returns the same in-flight promise.
+      const [p1, p2] = await Promise.all([repo.ensureTable(), repo.ensureTable()]);
+
+      expect(p1).toBeUndefined();
+      expect(p2).toBeUndefined();
+      // 7 DDL statements (CREATE TABLE + 2 indexes + 4 ALTER COLUMN), NOT 14.
+      expect(execute).toHaveBeenCalledTimes(7);
+    });
+
+    it('second caller receives the same promise while DDL is in-flight', async () => {
+      let resolveDdl: () => void;
+      const ddlReady = new Promise<void>((resolve) => {
+        resolveDdl = resolve;
+      });
+
+      const execute = vi.fn(() => ddlReady);
+      mockGetDatabase.mockReturnValue({
+        select: vi.fn(() => makeQuery([])),
+        insert: vi.fn(() => makeQuery(undefined)),
+        update: vi.fn(() => makeQuery(undefined)),
+        delete: vi.fn(() => makeQuery(undefined)),
+        execute,
+      });
+
+      // Start first call — it hits the first execute and suspends.
+      const p1 = repo.ensureTable();
+      // Start second call — ddlPromise is set, so it awaits the same promise.
+      const p2 = repo.ensureTable();
+
+      // Let DDL complete.
+      resolveDdl!();
+      await Promise.all([p1, p2]);
+
+      // The async function wraps each call in a new promise, so p1 !== p2.
+      // Shared execution is proven by: execute was called 7 times (not 14),
+      // and the second caller did not trigger a second DDL suite.
+      expect(execute).toHaveBeenCalledTimes(7);
+    });
+  });
+
+  describe('ensureTable — ddlPromise rejection clears cache (SPRINT-077)', () => {
+    it('rejection clears ddlPromise so a subsequent call retries DDL', async () => {
+      const dbError = new Error('connection refused');
+
+      // First attempt: execute rejects on the first DDL statement.
+      mockGetDatabase.mockReturnValue({
+        select: vi.fn(() => makeQuery([])),
+        insert: vi.fn(() => makeQuery(undefined)),
+        update: vi.fn(() => makeQuery(undefined)),
+        delete: vi.fn(() => makeQuery(undefined)),
+        execute: vi.fn(() => Promise.reject(dbError)),
+      });
+
+      await expect(repo.ensureTable()).rejects.toThrow('connection refused');
+
+      // ddlPromise should have been cleared by the catch block.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((PostgresIdentityRepository as any).ddlPromise).toBeNull();
+
+      // Second attempt: execute succeeds — a new DDL attempt starts.
+      const execute = vi.fn(() => Promise.resolve());
+      mockGetDatabase.mockReturnValue({
+        select: vi.fn(() => makeQuery([])),
+        insert: vi.fn(() => makeQuery(undefined)),
+        update: vi.fn(() => makeQuery(undefined)),
+        delete: vi.fn(() => makeQuery(undefined)),
+        execute,
+      });
+
+      await repo.ensureTable();
+
+      // The retry executed the full DDL suite (7 statements).
+      expect(execute).toHaveBeenCalledTimes(7);
+      // ddlPromise is now a resolved promise (not null — guard is set again).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((PostgresIdentityRepository as any).ddlPromise).not.toBeNull();
+    });
+
+    it('original error is rethrown to the caller', async () => {
+      const dbError = new Error('ECONNREFUSED');
+      mockGetDatabase.mockReturnValue({
+        select: vi.fn(() => makeQuery([])),
+        insert: vi.fn(() => makeQuery(undefined)),
+        update: vi.fn(() => makeQuery(undefined)),
+        delete: vi.fn(() => makeQuery(undefined)),
+        execute: vi.fn(() => Promise.reject(dbError)),
+      });
+
+      try {
+        await repo.ensureTable();
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect(error).toBe(dbError);
+      }
+    });
+
+    it('subsequent caller after rejection shares the new DDL promise', async () => {
+      const dbError = new Error('timeout');
+      mockGetDatabase.mockReturnValue({
+        select: vi.fn(() => makeQuery([])),
+        insert: vi.fn(() => makeQuery(undefined)),
+        update: vi.fn(() => makeQuery(undefined)),
+        delete: vi.fn(() => makeQuery(undefined)),
+        execute: vi.fn(() => Promise.reject(dbError)),
+      });
+
+      // Both concurrent callers get the same rejection.
+      const [err1, err2] = await Promise.allSettled([repo.ensureTable(), repo.ensureTable()]);
+
+      expect(err1.status).toBe('rejected');
+      expect(err2.status).toBe('rejected');
+      if (err1.status === 'rejected') expect(err1.reason).toBe(dbError);
+      if (err2.status === 'rejected') expect(err2.reason).toBe(dbError);
+
+      // ddlPromise is cleared.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((PostgresIdentityRepository as any).ddlPromise).toBeNull();
     });
   });
 

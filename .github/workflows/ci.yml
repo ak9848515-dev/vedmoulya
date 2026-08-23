@@ -259,6 +259,22 @@ jobs:
       # the real API and the builds could never reach READY. CI is exactly the
       # documented "non-production-like environment" for the explicit mock.
       AI_ENABLE_MOCK: 'true'
+      # SPRINT-077 — production AI config validation (ProductionAIConfig.ts)
+      # requires these env vars even when AI_ENABLE_MOCK is set, because the
+      # validation gate checks token budgets, provider timeout, and tool policy
+      # unconditionally in strict (production) mode. Safe CI-only values — the
+      # mock provider ignores token budgets/timeouts, and the allowlist is
+      # permissive enough for E2E test flows.
+      AI_MAX_INPUT_TOKENS: '8000'
+      AI_MAX_OUTPUT_TOKENS: '2048'
+      AI_PROVIDER_TIMEOUT_MS: '60000'
+      AI_TOOL_ALLOWLIST: 'echo,current_time,calculator'
+      # SPRINT-077 — email delivery mode. NODE_ENV=production (from next start)
+      # defaults the email sender to smtp, which requires SMTP_HOST/SMTP_PORT.
+      # The documented local-certification escape (VerificationEmailSender.ts)
+      # is EMAIL_DELIVERY_MODE=log — writes verification links to the app log
+      # instead of requiring a real SMTP server.
+      EMAIL_DELIVERY_MODE: 'log'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
