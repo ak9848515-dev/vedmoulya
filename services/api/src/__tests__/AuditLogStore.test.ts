@@ -7,7 +7,7 @@
 //     → getAuditLog) without changing the router-facing API.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type postgres from 'postgres';
 import {
   InMemoryAuditLogStore,
@@ -94,9 +94,20 @@ describe('PostgresAuditLogStore (write-through, owner-scoped, bounded)', () => {
 
 describe('middleware wiring (unchanged router-facing API)', () => {
   it('createRequestAudit → getAuditLog through an injected Postgres store', () => {
+    // createRequestAudit stamps entries with new Date().toISOString(); two
+    // back-to-back calls can land in the same millisecond, producing equal
+    // timestamps.  PostgresAuditLogStore.list() sorts by timestamp descending —
+    // equal timestamps leave the comparator at 0 and the stable sort preserves
+    // insertion order, so log[0] would be the first entry (success=true) instead
+    // of the expected second entry (success=false).  Freeze time and advance by
+    // 1 ms between calls so the sort is deterministic.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-23T00:00:00.000Z'));
     setAuditStore(new PostgresAuditLogStore(createFakeSql()));
     createRequestAudit('auth.login', 'alice', '/login', 3, true);
+    vi.setSystemTime(new Date('2026-08-23T00:00:00.001Z'));
     createRequestAudit('api.error', 'alice', '/x', 1, false, 'boom');
+    vi.useRealTimers();
     const log = getAuditLog('alice');
     expect(log).toHaveLength(2);
     expect(log[0]?.success).toBe(false);
