@@ -332,6 +332,67 @@ jobs:
             exit 1
           fi
           echo 'CI infrastructure ready (PostgreSQL + Redis)'
+      # SPRINT-079 — seed the E2E test user into the identity `users` table.
+      # The E2E auth helper (apps/web/e2e/helpers/auth.ts) mints a JWT for
+      # userId 'e2e-user' and injects it into localStorage, but no database
+      # row exists — every tRPC call that resolves identity (getUserById,
+      # checkAuthentication, assembler identity lookups) fails with NOT_FOUND.
+      # Pre-seed the user here (after infra readiness, before web build) so
+      # the server's ensureTable() is a no-op and the user row is already
+      # present when Playwright boots. DDL mirrors
+      # PostgresIdentityRepository.runDdl() exactly; ON CONFLICT DO NOTHING
+      # makes this idempotent.
+      - name: Seed E2E identity user
+        run: |
+          cat <<'EOSQL' | docker exec -i ci-postgres psql -U ci -d vedmoulya_ci
+          CREATE TABLE IF NOT EXISTS users (
+            id varchar(64) PRIMARY KEY,
+            email varchar(255) NOT NULL,
+            email_verified boolean NOT NULL DEFAULT false,
+            display_name varchar(100) NOT NULL,
+            given_name varchar(100),
+            family_name varchar(100),
+            avatar_url text,
+            bio text,
+            timezone varchar(64),
+            locale varchar(10),
+            age integer,
+            gender varchar(32),
+            purpose varchar(64),
+            primary_goal varchar(200),
+            theme varchar(16) NOT NULL DEFAULT 'system',
+            language varchar(10) NOT NULL DEFAULT 'en',
+            notifications_enabled boolean NOT NULL DEFAULT true,
+            email_notifications boolean NOT NULL DEFAULT true,
+            push_notifications boolean NOT NULL DEFAULT true,
+            weekly_digest boolean NOT NULL DEFAULT false,
+            reduced_motion boolean NOT NULL DEFAULT false,
+            reduced_transparency boolean NOT NULL DEFAULT false,
+            two_factor_enabled boolean NOT NULL DEFAULT false,
+            session_timeout_minutes integer NOT NULL DEFAULT 60,
+            login_notifications boolean NOT NULL DEFAULT true,
+            profile_visibility varchar(16) NOT NULL DEFAULT 'private',
+            show_online_status boolean NOT NULL DEFAULT true,
+            allow_data_sharing boolean NOT NULL DEFAULT false,
+            preferred_auth_method varchar(16) NOT NULL DEFAULT 'any',
+            status_state varchar(16) NOT NULL DEFAULT 'active',
+            status_reason text,
+            status_changed_at timestamp,
+            entity_status varchar(16) NOT NULL DEFAULT 'active',
+            password_hash text NOT NULL DEFAULT 'e2e-placeholder',
+            password_updated_at timestamp NOT NULL DEFAULT now(),
+            created_at timestamp NOT NULL DEFAULT now(),
+            updated_at timestamp NOT NULL DEFAULT now(),
+            google_id varchar(128),
+            auth_provider varchar(32) NOT NULL DEFAULT 'email'
+          );
+          CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email);
+          CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_idx ON users (google_id);
+          INSERT INTO users (id, email, email_verified, display_name, password_hash, entity_status, status_state)
+          VALUES ('e2e-user', 'e2e@vedmoulya.com', true, 'E2E User', 'e2e-placeholder', 'active', 'active')
+          ON CONFLICT (id) DO NOTHING;
+          EOSQL
+          echo 'E2E identity user seeded'
       - name: Build web app (production)
         run: npm run build -w apps/web
       - name: Install Playwright browsers
