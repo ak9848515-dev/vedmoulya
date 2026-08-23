@@ -20,7 +20,7 @@
 //   COVERAGE_GATE_FILTER=packages/ai,services/api node scripts/coverage-gate.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,7 +66,9 @@ function runWorkspaceCoverage(ws) {
   // test.projects and triggers workspace mode that suppresses per-workspace
   // coverage output).
   const configPath = join(cwd, 'vitest.config.ts');
-  const result = spawnSync('npx', ['vitest', 'run', '--coverage', '--config', configPath], {
+  const cmd = 'npx';
+  const args = ['vitest', 'run', '--coverage', '--config', configPath];
+  const result = spawnSync(cmd, args, {
     cwd,
     encoding: 'utf8',
     timeout: 600_000,
@@ -84,6 +86,45 @@ function runWorkspaceCoverage(ws) {
   const noData = !hasCoverageData(ws);
   // spawnSync failures (ENOENT, maxBuffer overflow) leave status null → failed.
   const failed = result.status !== 0 || thresholdErrors.length > 0 || noData;
+
+  // ── Diagnostic output for failing workspaces ────────────────────────────
+  if (failed) {
+    const coverageDir = join(cwd, 'coverage');
+    const coverageFile = join(coverageDir, 'coverage-final.json');
+    let coverageDirContents = [];
+    try {
+      coverageDirContents = readdirSync(coverageDir);
+    } catch {
+      coverageDirContents = ['(directory does not exist)'];
+    }
+    let npmVersion = 'n/a';
+    try {
+      npmVersion = execFileSync('npm', ['--version'], { encoding: 'utf8', timeout: 5_000 }).trim();
+    } catch { /* best-effort */ }
+
+    console.error(`\n=== VITEST FAILURE DIAGNOSTICS: ${ws} ===`);
+    console.error(`workspace: ${ws}`);
+    console.error(`cwd: ${cwd}`);
+    console.error(`config path: ${configPath}`);
+    console.error(`process.platform: ${process.platform}`);
+    console.error(`process.version: ${process.version}`);
+    console.error(`npm version: ${npmVersion}`);
+    console.error(`Vitest command: ${cmd} ${args.join(' ')}`);
+    console.error(`Vitest exit status: ${String(result.status)}`);
+    console.error(`Vitest signal: ${String(result.signal)}`);
+    console.error('');
+    console.error('stdout:');
+    console.error(result.stdout ?? '(empty)');
+    console.error('stderr:');
+    console.error(result.stderr ?? '(empty)');
+    console.error('');
+    console.error(`coverage directory: ${coverageDir}`);
+    console.error(`coverage-final.json: ${existsSync(coverageFile) ? 'exists' : 'MISSING'}`);
+    console.error('coverage directory contents:');
+    for (const entry of coverageDirContents) console.error(`  ${entry}`);
+    console.error('=== END VITEST FAILURE DIAGNOSTICS ===\n');
+  }
+
   return {
     ws,
     failed,
