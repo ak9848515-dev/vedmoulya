@@ -13,7 +13,13 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Do NOT cancel an in-progress run when a newer push lands on the same ref.
+  # G8 (e2e) is the long, final job in the chain: with cancel-in-progress: true
+  # a follow-up push would cancel the in-flight e2e job mid-run, so the run can
+  # never reach a decisive PASS/FAIL for G8 — it is merely "cancelled".  With
+  # cancel-in-progress: false the newer run is queued and the running run is
+  # allowed to complete its full gate, preserving BLF-01 gating semantics.
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: '22'
