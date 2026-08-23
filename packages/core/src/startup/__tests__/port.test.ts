@@ -69,20 +69,8 @@ describe('port probe — availability', () => {
     const free = await findFreePort();
     try {
       await free.close();
-      // On Linux the wildcard 0.0.0.0 probe inside probePort can transiently
-      // see the port as occupied immediately after close() — either the kernel
-      // hasn't fully released the socket or a concurrent process on a shared CI
-      // runner re-bound it in the gap.  Retry with bounded backoff (50 ms steps,
-      // 2 s ceiling) so the assertion holds on every platform without weakening
-      // the expected behavior.
-      let result;
-      const deadline = Date.now() + 2_000;
-      while (Date.now() < deadline) {
-        result = await probePort(free.port, '127.0.0.1', 1_500);
-        if (result.available) break;
-        await new Promise<void>((r) => setTimeout(r, 50));
-      }
-      expect(result!.available).toBe(true);
+      const result = await probePort(free.port, '127.0.0.1', 1500);
+      expect(result.available).toBe(true);
     } finally {
       await free.close();
     }

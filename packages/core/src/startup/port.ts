@@ -87,10 +87,16 @@ export async function probePort(
     }
     return { port, host, available: true };
   }
-  const [requestedAvailable, wildcardAvailable] = await Promise.all([
-    isPortAvailable(port, host, timeoutMs),
-    isPortAvailable(port, '0.0.0.0', timeoutMs),
-  ]);
+  // SPRINT-073: run the two availability binds SEQUENTIALLY.  A concurrent
+  // bind to both 127.0.0.1 and the wildcard 0.0.0.0 can self-collide at the
+  // kernel level on Linux (both listeners are on the same port, and their
+  // address sets overlap) — producing an EADDRINUSE that wrongly reports a
+  // genuinely free port as occupied.  Serializing (each probe's socket closes
+  // before the next binds) removes the race while preserving the identical
+  // availability semantics: both the requested host and the wildcard address
+  // must be bindable.
+  const requestedAvailable = await isPortAvailable(port, host, timeoutMs);
+  const wildcardAvailable = await isPortAvailable(port, '0.0.0.0', timeoutMs);
   const available = requestedAvailable && wildcardAvailable;
   const base: PortProbeResult = { port, host, available };
   if (available) return base;
