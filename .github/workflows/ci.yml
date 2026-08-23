@@ -159,8 +159,24 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: typescript
+      # analyze@v3: upload: "never" separates analysis from SARIF upload so
+      # genuine CodeQL failures still block CI, while a SARIF-only failure
+      # (Code Scanning unavailable) is caught below and becomes non-blocking.
       - name: Perform CodeQL analysis
+        id: codeql-analyze
         uses: github/codeql-action/analyze@v3
+        with:
+          upload: "never"
+      - name: Upload SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        id: upload-sarif
+        continue-on-error: true
+        with:
+          sarif_file: ${{ steps.codeql-analyze.outputs.sarif-output }}
+      - name: Report SARIF upload status
+        if: steps.upload-sarif.outcome == 'failure'
+        run: |
+          echo '::warning::CodeQL analysis completed successfully, but SARIF upload is unavailable because GitHub Code Scanning is not enabled/available for this repository.'
 
   # ── Gate 4: Accessibility ─────────────────────────────────────────────────
   a11y:
