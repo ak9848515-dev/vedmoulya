@@ -275,6 +275,17 @@ jobs:
       # is EMAIL_DELIVERY_MODE=log — writes verification links to the app log
       # instead of requiring a real SMTP server.
       EMAIL_DELIVERY_MODE: 'log'
+      # SPRINT-078 — engine database URLs. Every engine service (memory,
+      # knowledge, decision, execution, content-agency) uses
+      # requireProdExternalUrl() which rejects localhost/loopback in strict
+      # (production) mode. All engines share the single CI PostgreSQL
+      # container — each creates uniquely-named tables via
+      # CREATE TABLE IF NOT EXISTS, so there is no schema collision.
+      MEMORY_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
+      KNOWLEDGE_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
+      DECISION_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
+      EXECUTION_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
+      CONTENT_AGENCY_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
