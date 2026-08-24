@@ -7,10 +7,78 @@
 
 import { test, expect } from '@playwright/test';
 import { injectSession } from './helpers/auth.js';
+import { installAuthDiagnostics, captureBrowserState } from './helpers/auth-diagnostics.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const BASE_URL = 'http://localhost:3000';
+
+// ── SPRINT-086: Auth Diagnostic Test ───────────────────────────────────────
+// Captures the EXACT HTTP response from /auth/session and /auth/me
+// during E2E flow. This is the single highest-value diagnostic.
+// DO NOT REMOVE until root cause is confirmed.
+
+test.describe('SPRINT-086 Auth Diagnostics', () => {
+  test('capture auth request outcomes during authenticated navigation', async ({ page }) => {
+    // Mint and inject the same JWT the other tests use
+    await injectSession(page);
+
+    // Install diagnostic interceptors BEFORE navigation
+    const diag = installAuthDiagnostics(page);
+
+    // Navigate to the Home page (the most failing route)
+    await page.goto(BASE_URL);
+
+    // Wait for the auth/session response to arrive (bounded at 20s).
+    // We do NOT depend on heading visibility — this test captures data
+    // regardless of whether auth succeeds or fails.
+    try {
+      await page.waitForResponse((res) => res.url().includes('/api/v1/identity/auth/session'), {
+        timeout: 20_000,
+      });
+    } catch {
+      // If no auth request was made at all, that's also diagnostic info.
+      console.warn('[AUTH-DIAG] WARNING: no /auth/session request observed within 20s');
+    }
+
+    // Also wait for auth/me if it was made
+    try {
+      await page.waitForResponse((res) => res.url().includes('/api/v1/identity/auth/me'), {
+        timeout: 10_000,
+      });
+    } catch {
+      // auth/me might not be made if auth failed — that's diagnostic info.
+    }
+
+    // Give React a moment to process the auth response and re-render
+    await page.waitForTimeout(2_000);
+
+    // Capture whatever browser state exists
+    const browserState = await captureBrowserState(page);
+
+    // ── Report ──────────────────────────────────────────────────────
+    console.warn('\n========================================');
+    console.warn('SPRINT-086 AUTH DIAGNOSTIC REPORT');
+    console.warn('========================================');
+    console.warn(
+      `auth/session: status=${diag.sessionRequest?.status ?? 'NO REQUEST'} duration=${diag.sessionRequest?.durationMs ?? 'N/A'}ms`,
+    );
+    console.warn(
+      `auth/me:      status=${diag.meRequest?.status ?? 'NO REQUEST'} duration=${diag.meRequest?.durationMs ?? 'N/A'}ms`,
+    );
+    console.warn(`sessionRequest URL: ${diag.sessionRequest?.url ?? 'NONE'}`);
+    console.warn(`sessionRequest body: ${diag.sessionRequest?.bodySnippet ?? 'NONE'}`);
+    console.warn(`meRequest body: ${diag.meRequest?.bodySnippet ?? 'NONE'}`);
+    console.warn(`browser pathname: ${browserState?.pathname ?? 'UNKNOWN'}`);
+    console.warn(`browser userPresent: ${browserState?.userPresent ?? 'UNKNOWN'}`);
+    console.warn(`browser localStorage: ${browserState?.localStorageAuth ?? 'UNKNOWN'}`);
+    console.warn('========================================\n');
+
+    // The test MUST pass — it only collects data, never fails on auth.
+    // Any assertions here would mask the diagnostic output.
+    expect(true).toBe(true);
+  });
+});
 
 // ── Real auth (BLD-016C): every test runs authenticated ─────────────────────
 

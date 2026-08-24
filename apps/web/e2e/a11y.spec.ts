@@ -62,6 +62,16 @@ test.describe('Accessibility: Page Structure', () => {
       await page.goto(route.path);
       await page.waitForLoadState('networkidle');
 
+      // SPRINT-082: During SSR streaming and early hydration, Next.js App
+      // Router <Link> components may briefly render <a> elements without
+      // the href HTML attribute.  Wait for hydration to finish so the DOM
+      // reflects the final state before we audit it.
+      await page.waitForFunction(
+        () => document.querySelectorAll('a:not([href])').length === 0,
+        undefined,
+        { timeout: 5_000 },
+      );
+
       // Check for buttons without accessible names (no text, no aria-label, no child elements)
       // Note: buttons with text content only (no child elements) have text nodes,
       // so :not(:has(> *)) matches them. We use a more permissive check to avoid false positives.
