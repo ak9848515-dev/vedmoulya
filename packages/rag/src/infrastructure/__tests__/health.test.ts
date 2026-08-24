@@ -23,7 +23,7 @@ function makeFakeSql(results: Array<() => unknown>): postgres.Sql {
 
 describe('probeRagSchema', () => {
   it('returns true when the table and vector column exist', async () => {
-    const sql = makeFakeSql([() => [{ ok: 1 }], () => [{ data_type: 'vector' }]]);
+    const sql = makeFakeSql([() => [{ ok: 1 }], () => [{ ok: 1 }]]);
     await expect(probeRagSchema(sql, 1536)).resolves.toBe(true);
   });
 
@@ -33,7 +33,7 @@ describe('probeRagSchema', () => {
   });
 
   it('returns false when the embedding column is not a vector', async () => {
-    const sql = makeFakeSql([() => [{ ok: 1 }], () => [{ data_type: 'text' }]]);
+    const sql = makeFakeSql([() => [{ ok: 1 }], () => []]);
     await expect(probeRagSchema(sql, 1536)).resolves.toBe(false);
   });
 

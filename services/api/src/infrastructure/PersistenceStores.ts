@@ -363,21 +363,27 @@ function createPostgresStores(): PersistenceBundle {
     worldProspects,
   ];
 
-  // Idempotent CREATE TABLE IF NOT EXISTS on every startup (fire-and-forget,
-  // same convention as every EI engine factory — never blocks boot).
+  // Idempotent CREATE TABLE IF NOT EXISTS on every startup.
   // Skipped under NODE_ENV=test: the persistence tests construct the Postgres
   // stores on purpose but call ensureTable() themselves against their own
-  // pool; the bundle's fire-and-forget attempt would only log connection
-  // noise and race worker teardown.
+  // pool; the bundle's attempt would only log connection noise and race
+  // worker teardown.
+  //
+  // Collecting the ensureTable() promises (instead of fire-and-forget)
+  // so hydrate() can await them before running SELECT queries — this
+  // eliminates the race where hydration hits a missing table.
+  const ensureTablePromises: Promise<void>[] = [];
   if (process.env.NODE_ENV !== 'test') {
     for (const store of hydratable) {
       const withEnsure = store as { ensureTable?(): Promise<void> };
       if (typeof withEnsure.ensureTable === 'function') {
-        void withEnsure.ensureTable().catch((error: unknown) => {
-          logger.warn('Persistence table creation deferred (database unreachable at startup)', {
-            error: safeError(error),
-          });
-        });
+        ensureTablePromises.push(
+          withEnsure.ensureTable().catch((error: unknown) => {
+            logger.warn('Persistence table creation deferred (database unreachable at startup)', {
+              error: safeError(error),
+            });
+          }),
+        );
       }
     }
   }
@@ -386,7 +392,14 @@ function createPostgresStores(): PersistenceBundle {
     ...stores,
     // Hydration is error-isolated per store: one store's failure never
     // blocks the rest (the mirror simply starts empty and catches up).
+    // ensureTable() promises are awaited first so every backing table
+    // exists before the SELECT queries run.
     hydrate: async (): Promise<void> => {
+      // Wait for table creation to finish (best-effort — errors are logged,
+      // not thrown, so a missing table produces a clean per-store warning
+      // instead of aborting the entire bundle).
+      await Promise.all(ensureTablePromises);
+
       await Promise.all(
         hydratable.map(async (store) => {
           try {

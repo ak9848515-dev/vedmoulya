@@ -341,7 +341,10 @@ jobs:
       # the server's ensureTable() is a no-op and the user row is already
       # present when Playwright boots. DDL mirrors
       # PostgresIdentityRepository.runDdl() exactly; ON CONFLICT DO NOTHING
-      # makes this idempotent.
+      # makes this idempotent. The age/gender/purpose/primary_goal columns
+      # are required so UserProfile.isComplete() returns true — otherwise
+      # the OnboardingRedirect gate bounces every E2E journey to
+      # /onboarding/profile before dashboard content renders.
       - name: Seed E2E identity user
         run: |
           cat <<'EOSQL' | docker exec -i ci-postgres psql -U ci -d vedmoulya_ci
@@ -388,8 +391,8 @@ jobs:
           );
           CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email);
           CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_idx ON users (google_id);
-          INSERT INTO users (id, email, email_verified, display_name, password_hash, entity_status, status_state)
-          VALUES ('e2e-user', 'e2e@vedmoulya.com', true, 'E2E User', 'e2e-placeholder', 'active', 'active')
+          INSERT INTO users (id, email, email_verified, display_name, password_hash, entity_status, status_state, age, gender, purpose, primary_goal)
+          VALUES ('e2e-user', 'e2e@vedmoulya.com', true, 'E2E User', 'e2e-placeholder', 'active', 'active', 30, 'other', 'e2e-testing', 'e2e-validation')
           ON CONFLICT (id) DO NOTHING;
           EOSQL
           echo 'E2E identity user seeded'

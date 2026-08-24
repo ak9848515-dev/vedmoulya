@@ -107,14 +107,21 @@ export async function ensureRagReady(sql: Sql, dimension: number): Promise<strin
   if (rows.length === 0) {
     throw new Error('RAG readiness gate failed: rag_chunks table is missing after migrations');
   }
-  const cols = (await sql.unsafe(
-    `SELECT data_type
-     FROM information_schema.columns
-     WHERE table_name = 'rag_chunks' AND column_name = 'embedding'`,
+  // Verify the embedding column is a pgvector `vector` type.  The
+  // information_schema approach fails because pgvector registers its type
+  // with typcategory='U' (user-defined), so data_type returns
+  // 'USER-DEFINED' instead of 'vector'.  Querying pg_type directly is
+  // authoritative and works across all PostgreSQL + pgvector versions.
+  const vecType = (await sql.unsafe(
+    `SELECT 1 AS ok
+     FROM pg_type t
+     JOIN pg_attribute a ON a.atttypid = t.oid
+     JOIN pg_class c ON c.oid = a.attrelid
+     WHERE c.relname = 'rag_chunks'
+       AND a.attname = 'embedding'
+       AND t.typname = 'vector'`,
   )) as Array<Record<string, unknown>>;
-  const rawType = cols[0]?.data_type;
-  const dataType = typeof rawType === 'string' ? rawType : '';
-  if (!dataType.includes('vector')) {
+  if (vecType.length === 0) {
     throw new Error('RAG readiness gate failed: embedding column is not a pgvector vector column');
   }
   return applied;

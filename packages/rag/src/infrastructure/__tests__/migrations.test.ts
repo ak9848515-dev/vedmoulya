@@ -91,7 +91,7 @@ describe('ensureRagReady', () => {
     const sql = makeFakeSql([
       () => undefined, // migration up
       () => [{ ok: 1 }], // table exists
-      () => [{ data_type: 'vector' }], // vector column present
+      () => [{ ok: 1 }], // pg_type confirms vector column
     ]);
     const applied = await ensureRagReady(sql, 1536);
     expect(applied).toEqual(RAG_MIGRATIONS.map((m) => m.id));
@@ -111,7 +111,7 @@ describe('ensureRagReady', () => {
     const sql = makeFakeSql([
       () => undefined, // migration up
       () => [{ ok: 1 }], // table exists
-      () => [{ data_type: 'text' }], // not a vector column
+      () => [], // pg_type finds no vector column
     ]);
     await expect(ensureRagReady(sql, 1536)).rejects.toThrow(
       /embedding column is not a pgvector vector column/,

@@ -53,17 +53,20 @@ export async function probeRagSchema(sql: Sql, _dimension: number): Promise<bool
     )) as Array<Record<string, unknown>>;
     if (rows.length === 0) return false;
 
-    // Verify the vector column exists (the pgvector type name is `vector`).
-    const cols = (await sql.unsafe(
-      `SELECT data_type
-       FROM information_schema.columns
-       WHERE table_name = 'rag_chunks' AND column_name = 'embedding'`,
+    // Verify the embedding column is a pgvector `vector` type.
+    // information_schema returns 'USER-DEFINED' for pgvector columns
+    // (typcategory='U'), so we query pg_type directly which is
+    // authoritative across all PostgreSQL + pgvector versions.
+    const vecType = (await sql.unsafe(
+      `SELECT 1 AS ok
+       FROM pg_type t
+       JOIN pg_attribute a ON a.atttypid = t.oid
+       JOIN pg_class c ON c.oid = a.attrelid
+       WHERE c.relname = 'rag_chunks'
+         AND a.attname = 'embedding'
+         AND t.typname = 'vector'`,
     )) as Array<Record<string, unknown>>;
-    if (cols.length === 0) return false;
-
-    const rawType = cols[0]?.data_type;
-    const dataType = typeof rawType === 'string' ? rawType : '';
-    if (!dataType.includes('vector')) return false;
+    if (vecType.length === 0) return false;
 
     return true;
   } catch {
