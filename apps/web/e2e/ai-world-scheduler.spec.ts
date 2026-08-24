@@ -94,13 +94,20 @@ test.describe('AI World Discovery Activity — Real-User Journey (EPIC-018)', ()
     await page.getByRole('button', { name: 'Run AI News discovery now' }).click();
     await runNowResponse;
 
-    // 2) Wait for the subsequent scheduler-status GET that the handler
-    //    fires after the mutation (refreshScheduler → schedulerStatus.refetch).
+    // 2) Wait for the subsequent scheduler-status batched POST that the
+    //    handler fires after the mutation (refreshScheduler →
+    //    schedulerStatus.refetch).  With httpBatchLink the refetch lands as
+    //    a POST containing 'aiWorldScheduler.getStatus' in the URL path.
     //    This response carries the fresh lastScanAt that makes the UI
     //    display "Completed just now".
-    await page.waitForResponse(
-      (res) => res.url().includes('aiWorldScheduler.getStatus') && res.request().method() === 'GET',
-    );
+    await page.waitForResponse((res) => {
+      const url = res.url();
+      return (
+        res.request().method() === 'POST' &&
+        url.includes('/api/trpc') &&
+        url.includes('aiWorldScheduler.getStatus')
+      );
+    });
 
     // 3) Now the React Query cache is updated and React will re-render.
     //    The DOM assertion can safely poll.
