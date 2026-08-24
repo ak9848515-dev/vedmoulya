@@ -25,7 +25,7 @@
     "@vedmoulya/capabilities": "*"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
 }
