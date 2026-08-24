@@ -33,7 +33,11 @@ export function initializeDatabase(): void {
     const config = getDatabaseConfig();
     client = postgres(config.url, {
       max: config.maxConnections,
-      ssl: process.env.NODE_ENV === 'production' ? 'require' : undefined,
+      // SPRINT-080C — CI PostgreSQL (pgvector/pgvector:pg16) does not
+      // support SSL. The estate convention (createEISql, identity, all
+      // WriteThroughDocumentStore pools) omits ssl, so the Drizzle
+      // pools must match — ssl:'require' caused "table creation failed"
+      // warnings and missing-memory/decision/execution tables in G8 CI.
     });
 
     db = drizzle(client, { schema });

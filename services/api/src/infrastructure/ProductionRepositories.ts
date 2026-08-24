@@ -170,16 +170,40 @@ export function createEISql(applicationName: string): ReturnType<typeof postgres
   });
 }
 
-/** Fire-and-forget table creation (safe: IF NOT EXISTS, every startup).
- *  Skipped in test env: tests run on hermetic doubles and the eager attempt
- *  would only log connection noise (and race worker teardown). */
+/**
+ * Engine ensureTable() promise accumulator (SPRINT-080C).
+ *
+ * Memory/Decision/Execution tables are created by Drizzle repositories whose
+ * pools are constructed synchronously.  The estate convention is
+ * fire-and-forget (`void repo.ensureTable().catch(...)`), but a query that
+ * arrives before the table exists fails with "relation does not exist".  To
+ * eliminate this race, we COLLECT the promises here and expose
+ * `awaitAllEngineEnsureTables()` — called once during boot hydration — so
+ * every backing table is guaranteed to exist before the first query runs.
+ *
+ * Skipped in test env (hermetic doubles, no real Postgres).
+ */
+const engineEnsureTablePromises: Promise<void>[] = [];
+
 function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): void {
   if (isTestEnv()) return;
-  void repo.ensureTable().catch((error: unknown) => {
-    logger.warn(`${label} table creation failed`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  });
+  engineEnsureTablePromises.push(
+    repo.ensureTable().catch((error: unknown) => {
+      logger.warn(`${label} table creation failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }),
+  );
+}
+
+/**
+ * Await all collected engine ensureTable() promises (SPRINT-080C).
+ * Called during gateway boot hydration so Memory/Decision/Execution tables
+ * are guaranteed to exist before the first tRPC query touches them.
+ * Errors are already caught per-table; this only blocks until they settle.
+ */
+export async function awaitAllEngineEnsureTables(): Promise<void> {
+  await Promise.all(engineEnsureTablePromises);
 }
 
 /**

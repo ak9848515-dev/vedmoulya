@@ -267,6 +267,7 @@ import {
   createProductionContextFabricRepository,
   createProductionProviderRepository,
   createProductionRagRepository,
+  awaitAllEngineEnsureTables,
 } from '../infrastructure/ProductionRepositories.js';
 
 // ── ApiApplicationService ───────────────────────────────────────────────────
@@ -681,6 +682,10 @@ export class ApiApplicationService {
    * (the write-through stores keep working from that point forward).
    */
   async hydratePersistence(): Promise<void> {
+    // SPRINT-080C — ensure Memory/Decision/Execution tables exist before
+    // hydration queries run (the engine pools are constructed synchronously;
+    // without this, the first SELECT races the async CREATE TABLE).
+    await awaitAllEngineEnsureTables();
     const bounded = Promise.race([
       this.persistence.hydrate(),
       new Promise<void>((resolve) => {
