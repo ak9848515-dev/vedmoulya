@@ -47,6 +47,13 @@ export async function mintAccessToken(): Promise<string> {
 /**
  * Inject the session into localStorage (key must match the auth store's
  * persist name 'vedmoulya-auth') before the app boots.
+ *
+ * SPRINT-088B — Also pre-dismiss the Ollama first-run prompt
+ * (vedmoulya-first-run). The OllamaFirstRunDialog uses a Radix Dialog that,
+ * when open, sets aria-hidden="true" on #main-content via react-remove-scroll.
+ * This hides ALL page headings from the accessibility tree, causing every
+ * getByRole('heading') assertion in the E2E suite to fail with "element(s)
+ * not found" even though the heading IS in the DOM and visually rendered.
  */
 export async function injectSession(page: Page): Promise<void> {
   const accessToken = await mintAccessToken();
@@ -57,6 +64,15 @@ export async function injectSession(page: Page): Promise<void> {
         'vedmoulya-auth',
         JSON.stringify({
           state: { accessToken: token, user },
+          version: 0,
+        }),
+      );
+      // SPRINT-088B — pre-dismiss Ollama first-run prompt so the Radix Dialog
+      // never opens and does not set aria-hidden on #main-content.
+      localStorage.setItem(
+        'vedmoulya-first-run',
+        JSON.stringify({
+          state: { ollamaPromptDismissed: true },
           version: 0,
         }),
       );

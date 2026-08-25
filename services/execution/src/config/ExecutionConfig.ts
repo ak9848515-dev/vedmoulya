@@ -4,7 +4,7 @@
 // BLD-009 — Execution Intelligence Engine
 // ──────────────────────────────────────────────────────────────────
 
-import { requireProdExternalUrl } from '@vedmoulya/core';
+import { config, requireProdExternalUrl } from '@vedmoulya/core';
 
 export interface DatabaseConfig {
   url: string;
@@ -70,9 +70,12 @@ function loadConfigFromEnv(): ExecutionConfig {
   return {
     database: {
       // Production/staging: EXECUTION_DATABASE_URL must be a real non-localhost URL (PH-001/T2).
+      // SPRINT-088 — dev/test fallback inherits the platform database URL
+      // (see services/memory DatabaseConnection for the rationale: the old
+      // credential-less localhost default could never authenticate).
       url: requireProdExternalUrl(
         'EXECUTION_DATABASE_URL',
-        'postgres://localhost:5432/vedmoulya_execution',
+        process.env.DATABASE_URL || config.database.url,
       ),
       poolMax: Number(process.env.EXECUTION_DB_POOL_MAX ?? '10'),
       ssl: process.env.NODE_ENV === 'production' ? 'require' : false,

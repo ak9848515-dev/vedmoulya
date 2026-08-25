@@ -20,9 +20,14 @@ const requireProdExternalUrlMock = vi.hoisted(() =>
 
 vi.mock('postgres', () => ({ default: postgresMock }));
 vi.mock('drizzle-orm/postgres-js', () => ({ drizzle: drizzleMock }));
+// SPRINT-088 — the dev/test fallback chain now ends at config.database.url
+// (the credential-bearing platform URL) instead of a credential-less
+// per-service localhost default that could never authenticate.
+const TEST_PLATFORM_DB_URL = 'postgres://platform-db.test:5432/vedmoulya_test';
 vi.mock('@vedmoulya/core', () => ({
   logger: mockLogger,
   requireProdExternalUrl: requireProdExternalUrlMock,
+  config: { database: { url: TEST_PLATFORM_DB_URL } },
 }));
 
 const { initializeDatabase, closeDatabase, getDatabase } = await import('../DatabaseConnection.js');
@@ -45,7 +50,7 @@ describe('Execution DatabaseConnection', () => {
     drizzleMock.mockReturnValue({ __drizzle: true });
 
     await initializeDatabase();
-    expect(postgresMock).toHaveBeenCalledWith('postgres://localhost:5432/vedmoulya_execution', {
+    expect(postgresMock).toHaveBeenCalledWith(TEST_PLATFORM_DB_URL, {
       max: 10,
       ssl: undefined,
     });

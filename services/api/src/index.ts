@@ -31,6 +31,13 @@ export {
   createProductionExecutionRepository,
   createProductionKnowledgeRepository,
 } from './infrastructure/ProductionRepositories.js';
+// SPRINT-088 — bounded once-per-process engine table readiness gate. The
+// web route handler awaits this AFTER getServices() so every backing engine
+// table exists before ANY procedure queries it (the DashboardAssembler's
+// knowledge_nodes ILIKE probe raced CREATE TABLE IF NOT EXISTS on cold
+// starts because independent procedures never awaited hydration).
+export { awaitAllEngineEnsureTables } from './infrastructure/ProductionRepositories.js';
+
 export type {
   DependencyHealthResult,
   DependencyName,

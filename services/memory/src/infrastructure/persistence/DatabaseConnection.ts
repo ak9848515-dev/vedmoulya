@@ -7,7 +7,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { logger, requireProdExternalUrl } from '@vedmoulya/core';
+import { config, logger, requireProdExternalUrl } from '@vedmoulya/core';
 import * as schema from '../../schema/memory.js';
 
 let db: PostgresJsDatabase<typeof schema> | null = null;
@@ -16,10 +16,17 @@ let client: postgres.Sql<Record<string, unknown>> | null = null;
 /** Get the database configuration from environment variables */
 function getDatabaseConfig(): { url: string; maxConnections: number } {
   return {
-    // Production/staging: MEMORY_DATABASE_URL must be a real non-localhost URL (PH-001/T2).
+    // SPRINT-088 — dev/test fallback: inherit the platform database URL
+    // (IDENTITY_DATABASE_URL via @vedmoulya/core config) instead of a
+    // credential-less `postgres://localhost:5432/vedmoulya_memory`. The old
+    // default could never authenticate (postgres.js falls back to the OS
+    // username → 28P01), so every memory query silently failed in local
+    // environments that only configured IDENTITY_DATABASE_URL. Precedence:
+    // MEMORY_DATABASE_URL → DATABASE_URL → config.database.url; strict
+    // environments still fail fast on loopback (requireProdExternalUrl).
     url: requireProdExternalUrl(
       'MEMORY_DATABASE_URL',
-      process.env.DATABASE_URL ?? 'postgres://localhost:5432/vedmoulya_memory',
+      process.env.DATABASE_URL || config.database.url,
     ),
     maxConnections: Number(process.env.MEMORY_DB_POOL_MAX ?? process.env.DB_POOL_MAX ?? '10'),
   };

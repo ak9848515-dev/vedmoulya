@@ -189,8 +189,15 @@ function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): voi
   if (isTestEnv()) return;
   engineEnsureTablePromises.push(
     repo.ensureTable().catch((error: unknown) => {
-      logger.warn(`${label} table creation failed`, {
-        error: error instanceof Error ? error.message : String(error),
+      const message = error instanceof Error ? error.message : String(error);
+      // SPRINT-088F — log loudly but do NOT re-throw. A single engine's
+      // table-creation failure (e.g. connection-pool exhaustion) must not
+      // stop other engines from initializing or poison the entire process.
+      // The procedure will fail with "relation does not exist" until the
+      // table is created on the next hydration cycle — observable and
+      // actionable without being fatal.
+      logger.error(`${label} table creation failed`, {
+        error: message,
       });
     }),
   );
@@ -201,9 +208,17 @@ function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): voi
  * Called during gateway boot hydration so Memory/Decision/Execution tables
  * are guaranteed to exist before the first tRPC query touches them.
  * Errors are already caught per-table; this only blocks until they settle.
+ *
+ * SPRINT-088F — Sequential execution instead of Promise.all(): running
+ * ~19 DDL operations concurrently exhausts the CI PostgreSQL connection
+ * pool ("sorry, too many clients already"), causing transient table-
+ * creation failures that cascade into 500s. Sequential execution uses at
+ * most one connection per engine pool and avoids the burst.
  */
 export async function awaitAllEngineEnsureTables(): Promise<void> {
-  await Promise.all(engineEnsureTablePromises);
+  for (const promise of engineEnsureTablePromises) {
+    await promise;
+  }
 }
 
 /**

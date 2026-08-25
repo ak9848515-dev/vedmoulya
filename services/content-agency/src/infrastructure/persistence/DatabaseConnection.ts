@@ -4,7 +4,7 @@
 // EPIC-003 / SPRINT AC-001 — AI Content Agency Foundation
 // ──────────────────────────────────────────────────────────────────
 
-import { logger, requireProdExternalUrl } from '@vedmoulya/core';
+import { config, logger, requireProdExternalUrl } from '@vedmoulya/core';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '../../schema/content-agency.js';
@@ -24,9 +24,12 @@ export function getDatabaseConfig(): DatabaseConfig {
   return {
     // Production/staging: CONTENT_AGENCY_DATABASE_URL must be a real
     // non-localhost URL (same PH-001/T2 rule as the other engines).
+    // SPRINT-088 — dev/test fallback inherits the platform database URL
+    // (see services/memory DatabaseConnection for the full rationale: the
+    // old credential-less localhost default could never authenticate).
     url: requireProdExternalUrl(
       'CONTENT_AGENCY_DATABASE_URL',
-      process.env.DATABASE_URL ?? 'postgres://localhost:5432/vedmoulya_content_agency',
+      process.env.DATABASE_URL || config.database.url,
     ),
     poolMin: Number(process.env.DB_POOL_MIN ?? '2'),
     poolMax: Number(process.env.DB_POOL_MAX ?? '20'),

@@ -16,6 +16,7 @@
 
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import {
+  awaitAllEngineEnsureTables,
   createAuthContext,
   getAppRouter,
   getServices,
@@ -212,6 +213,43 @@ async function ensureHydrationIfRequired(requestUrl: string): Promise<void> {
   // proceed immediately without waiting for hydration.
 }
 
+// ── SPRINT-088G — Engine table readiness gate ────────────────────
+// Engine tables are created inside hydratePersistence() (SPRINT-087E),
+// which runs eagerly in the background on first request. Procedures
+// that query engine tables (lifeOS, dashboard, career, learning, etc.)
+// must wait for table readiness. health.check must NOT wait.
+//
+// This replaces the old global engineTablesPromise gate (SPRINT-088)
+// which poisoned ALL requests including health.check when any engine's
+// table creation failed. The new gate is explicitly bypassed for
+// health.check and resolves/rejects independently of hydration.
+let engineTablesReady: Promise<void> | null = null;
+
+function ensureEngineTablesReady(): void {
+  if (engineTablesReady) return;
+  // The promise is created from hydratePersistence()'s internal
+  // awaitAllEngineEnsureTables() — but we create our own wrapper
+  // so we can control retry semantics without modifying the service layer.
+  engineTablesReady = awaitAllEngineEnsureTables().catch((error: unknown) => {
+    // Transient failure (e.g. connection-pool exhaustion): reset the
+    // gate so the NEXT request can retry. The error is logged by the
+    // service layer; we just propagate the rejection to callers.
+    engineTablesReady = null;
+    throw error;
+  });
+}
+
+/**
+ * Determine whether the request URL targets health.check.
+ * health.check must remain available regardless of engine table state.
+ */
+function isHealthCheck(url: string): boolean {
+  const trpcPath = url.split('?')[0] ?? url;
+  const procedurePart = trpcPath.replace(/^\/api\/trpc\//, '');
+  const procedures = procedurePart.split(',');
+  return procedures.some((p) => p === 'health.check');
+}
+
 const handler = async (request: NextRequest): Promise<Response> => {
   // CORS preflight (the Capacitor WebView calls the remote gateway
   // cross-origin from https://localhost — MOB-001).
@@ -223,18 +261,23 @@ const handler = async (request: NextRequest): Promise<Response> => {
   // Hydration starts eagerly but does NOT block.
   ensureGatewayInitialized();
 
-  // Phase 2: only hydration-dependent procedures block here.
-  // Independent procedures proceed immediately.
-  // SPRINT-087E — Hydration is bounded + error-isolated per store (a
-  // database outage fails fast and the mirror starts empty, catching up on
-  // later writes).  The shared promise is created once and reused.
+  // Phase 1b: ensure engine table readiness promise exists.
+  // Created once, shared by all concurrent callers.
+  ensureEngineTablesReady();
+
+  // Phase 2: gate on engine tables for non-health procedures.
+  // health.check bypasses this gate entirely — it must always respond.
+  if (!isHealthCheck(request.url) && engineTablesReady) {
+    await engineTablesReady;
+  }
+
+  // Phase 2b: hydration-dependent procedures additionally await hydration.
   await ensureHydrationIfRequired(request.url);
 
+  // Phase 3: dispatch to tRPC.
   const response = await fetchRequestHandler({
     endpoint: '/api/trpc',
     req: request,
-    // Built lazily on the first request (module scope stays inert during
-    // `next build`, which runs under NODE_ENV=production without env vars).
     router: getAppRouter(),
     createContext: () => createAuthContext(request.headers),
   });

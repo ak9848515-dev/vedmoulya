@@ -7,7 +7,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { logger, requireProdExternalUrl } from '@vedmoulya/core';
+import { config, logger, requireProdExternalUrl } from '@vedmoulya/core';
 import * as schema from '../../schema/decision.js';
 
 let db: PostgresJsDatabase<typeof schema> | null = null;
@@ -16,10 +16,12 @@ let client: postgres.Sql<Record<string, unknown>> | null = null;
 /** Get the database configuration from environment variables */
 function getDatabaseConfig(): { url: string; maxConnections: number } {
   return {
-    // Production/staging: DECISION_DATABASE_URL must be a real non-localhost URL (PH-001/T2).
+    // SPRINT-088 — dev/test fallback inherits the platform database URL
+    // (see services/memory DatabaseConnection for the full rationale: the
+    // old credential-less localhost default could never authenticate).
     url: requireProdExternalUrl(
       'DECISION_DATABASE_URL',
-      process.env.DATABASE_URL ?? 'postgres://localhost:5432/vedmoulya_decision',
+      process.env.DATABASE_URL || config.database.url,
     ),
     maxConnections: Number(process.env.DECISION_DB_POOL_MAX ?? process.env.DB_POOL_MAX ?? '10'),
   };

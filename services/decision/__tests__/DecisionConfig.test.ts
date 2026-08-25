@@ -23,7 +23,9 @@ describe('DecisionConfig', () => {
 
   it('returns default config with environment-based values', () => {
     const config = getDecisionConfig();
-    expect(config.database.url).toBe('postgres://localhost:5432/vedmoulya_decision');
+    // SPRINT-088 — the dev/test fallback now inherits config.database.url
+    // (forced by tests/vitest.setup.ts to the deterministic test URL).
+    expect(config.database.url).toBe('postgres://test:test@db.vedmoulya.test:5432/vedmoulya');
     expect(config.database.poolMax).toBe(10);
     expect(config.cache.defaultTTLms).toBe(300000);
     expect(config.scoring.defaultPriorityScore).toBe(5);
@@ -59,7 +61,7 @@ describe('DecisionConfig', () => {
     const config = getDecisionConfig();
     expect(config.cache.defaultTTLms).toBe(60000);
     expect(config.scoring.defaultPriorityScore).toBe(8);
-    expect(config.database.url).toBe('postgres://localhost:5432/vedmoulya_decision'); // unchanged
+    expect(config.database.url).toBe('postgres://test:test@db.vedmoulya.test:5432/vedmoulya'); // unchanged
   });
 
   it('reset restores defaults', () => {

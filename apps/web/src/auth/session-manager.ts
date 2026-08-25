@@ -159,9 +159,12 @@ export function refreshWithLock(): Promise<boolean> {
 async function doRefresh(): Promise<boolean> {
   const { refreshToken } = useAuthStore.getState();
   if (!refreshToken) {
-    // An expired access token with no refresh token is a dead session — the
-    // user must sign in again.
-    useAuthStore.getState().clearSession();
+    // SPRINT-088 — nothing to rotate: keep the cached session instead of
+    // clearing it. This branch runs when a verify attempt hit a TRANSIENT
+    // failure (429 rate limit / 5xx) for a session that carries only an
+    // access token; destroying it logged users out on server hiccups. The
+    // token itself stays authoritative — tRPC calls still receive real 401s
+    // once it genuinely expires.
     return false;
   }
 
@@ -236,9 +239,15 @@ async function doRestore(): Promise<void> {
     if (isNetworkError(error)) {
       // Offline: keep the cached session and flag it rather than logging out.
       useAuthStore.setState({ offline: true });
-    } else {
-      // Token rejected server-side — try one refresh before giving up.
+    } else if (error instanceof AuthApiError && error.status === 401) {
+      // Definitive server-side rejection — try one refresh before giving up.
       await refreshWithLock();
+    } else {
+      // SPRINT-088 — transient verify failure (429 rate limit / 5xx): keep
+      // the cached session. A non-auth server hiccup must never log the user
+      // out; the token remains authoritative for tRPC until it truly expires
+      // (mirrors the documented offline-safety contract above).
+      useAuthStore.getState().setOffline(true);
     }
   }
   // Server-authoritative first-login completion on every load (SPRINT-041B).

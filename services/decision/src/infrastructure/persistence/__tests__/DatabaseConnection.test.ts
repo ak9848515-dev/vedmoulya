@@ -77,10 +77,13 @@ describe('Decision DatabaseConnection', () => {
     const mod = await loadFresh();
     mod.initializeDatabase();
 
-    expect(postgresMock).toHaveBeenCalledWith('postgres://localhost:5432/vedmoulya_decision', {
-      max: 10,
-      ssl: undefined,
-    });
+    // SPRINT-088 — the dev/test fallback inherits config.database.url (the
+    // credential-bearing platform URL); assert scheme + shape, not a specific
+    // host, so the test stays valid across environment setups.
+    expect(postgresMock).toHaveBeenCalledWith(
+      expect.stringMatching(/^postgres(ql)?:\/\//),
+      expect.objectContaining({ max: 10 }),
+    );
     expect(drizzleMock).toHaveBeenCalledWith(
       client,
       expect.objectContaining({ schema: expect.anything() }),

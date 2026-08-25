@@ -4,7 +4,7 @@
 // ARC-003 — Knowledge Graph Bounded Context
 // ──────────────────────────────────────────────────────────────────
 
-import { logger, requireProdExternalUrl } from '@vedmoulya/core';
+import { config, logger, requireProdExternalUrl } from '@vedmoulya/core';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '../../schema/knowledge.js';
@@ -22,10 +22,14 @@ export interface DatabaseConfig {
 /** Get the database configuration from environment */
 export function getDatabaseConfig(): DatabaseConfig {
   return {
-    // Production/staging: KNOWLEDGE_DATABASE_URL must be a real non-localhost URL (PH-001/T2).
+    // SPRINT-088 — dev/test fallback inherits the platform database URL
+    // (see services/memory DatabaseConnection for the full rationale: the
+    // old credential-less localhost default could never authenticate, which
+    // is why knowledge_nodes queries failed with "relation does not exist"
+    // in local environments that only configured IDENTITY_DATABASE_URL).
     url: requireProdExternalUrl(
       'KNOWLEDGE_DATABASE_URL',
-      process.env.DATABASE_URL ?? 'postgres://localhost:5432/vedmoulya_knowledge',
+      process.env.DATABASE_URL || config.database.url,
     ),
     poolMin: Number(process.env.DB_POOL_MIN ?? '2'),
     poolMax: Number(process.env.DB_POOL_MAX ?? '20'),

@@ -47,7 +47,12 @@ test.describe('Accessibility: Page Structure', () => {
   for (const route of ROUTES) {
     test(`${route.name} has a proper heading structure`, async ({ page }) => {
       await page.goto(route.path);
-      await page.waitForLoadState('networkidle');
+
+      // SPRINT-088 — wait for the ACTUAL invariants instead of racing
+      // networkidle: under load the SPA mounts headings/landmarks after the
+      // network goes quiet, so counting immediately was non-deterministic.
+      // Web-first assertions bound the wait to the assertion itself.
+      await expect(page.locator('h1, h2, h3').first()).toBeAttached();
 
       // Check that the page has at least one heading
       const headingCount = await page.locator('h1, h2, h3').count();
@@ -72,13 +77,23 @@ test.describe('Accessibility: Page Structure', () => {
         { timeout: 5_000 },
       );
 
-      // Check for buttons without accessible names (no text, no aria-label, no child elements)
-      // Note: buttons with text content only (no child elements) have text nodes,
-      // so :not(:has(> *)) matches them. We use a more permissive check to avoid false positives.
-      const suspiciousButtons = await page
-        .locator('button:not([aria-label]):not([aria-labelledby]):not(:has(> *))')
-        .count();
-      expect(suspiciousButtons).toBeLessThanOrEqual(3);
+      // SPRINT-088 — accessible-name audit: every button MUST have an
+      // accessible name (text content, aria-label or aria-labelledby).
+      // The previous heuristic (`:not(:has(> *))`) flagged text-named
+      // buttons as "suspicious" while silently SKIPPING icon-only buttons
+      // that contain an <svg> child without any label — false positives
+      // AND false negatives. This check is exact and stricter: zero
+      // unnamed buttons allowed.
+      const unnamedButtons = await page.locator('button').evaluateAll(
+        (buttons) =>
+          buttons.filter((b) => {
+            const labelled =
+              b.getAttribute('aria-label') !== null || b.getAttribute('aria-labelledby') !== null;
+            const text = (b.textContent || '').trim();
+            return !labelled && text.length === 0;
+          }).length,
+      );
+      expect(unnamedButtons).toBe(0);
 
       // Check for links with empty or missing href
       const brokenLinks = await page.locator('a[href=""], a:not([href])').count();

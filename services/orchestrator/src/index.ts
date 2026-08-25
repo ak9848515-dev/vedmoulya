@@ -124,6 +124,25 @@ export function registerPlatformProviders(
   orchestrator: AIOrchestrationService,
   config?: Partial<OrchestratorConfig>,
 ): void {
+  // SPRINT-088 — explicit-mock runtime: AI_ENABLE_MOCK=true declares a
+  // NON-production-like environment where every specialist call must take
+  // the deterministic path. Registering real providers alongside the mock
+  // made them ROUTE FIRST (registration order), so each orchestrate call
+  // burned its full timeout + retry/backoff budget against a fake/unreachable
+  // endpoint before falling back to mock (observed as 16s+ per AI-backed
+  // assembly and E2E journey timeouts across every engine that touches the
+  // AI runtime). When the operator explicitly enables the mock, ONLY the
+  // mock serves — honest, deterministic, and exactly the contract the CI
+  // E2E job documents. Production never sets AI_ENABLE_MOCK, so real
+  // provider registration there is unchanged.
+  // SPRINT-088 — in production/staging, AI_ENABLE_MOCK=true means only the
+  // mock serves (deterministic CI, no real provider timeouts).  In test
+  // (vitest), the same env var is set but the unit tests need to verify
+  // real-provider registration paths — skip the early return there.
+  if (process.env.AI_ENABLE_MOCK === 'true' && process.env.NODE_ENV !== 'test') {
+    orchestrator.registerProvider(new MockProvider());
+    return;
+  }
   const providers = config?.providers;
   const openaiKey = providers?.openai?.apiKey ?? resolveOpenAIKey();
   if (openaiKey) {
