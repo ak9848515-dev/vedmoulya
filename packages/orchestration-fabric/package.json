@@ -12,8 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vedmoulya/core": "workspace:*",
-    "@vedmoulya/ai": "workspace:*"
+    "@vedmoulya/core": "*",
+    "@vedmoulya/ai": "*"
   },
   "devDependencies": {
     "typescript": "5.8.3",
