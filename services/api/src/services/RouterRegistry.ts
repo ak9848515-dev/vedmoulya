@@ -26,6 +26,7 @@ import { createExecutionBridgeRouter } from '../routers/ExecutionBridgeRouter.js
 import { createContextRouter } from '../routers/ContextRouter.js';
 import { createExecutionStrategyRouter } from '../routers/ExecutionStrategyRouter.js';
 import { createOrchestratorRouter } from '../routers/OrchestratorRouter.js';
+import { createFabricOrchestratorRouter } from '../routers/OrchestrationFabricRouter.js';
 import { createGoalsRouter } from '../routers/GoalsRouter.js';
 import { createIntelligenceRouter } from '../routers/IntelligenceRouter.js';
 import { createLearningIntelligenceRouter } from '../routers/LearningIntelligenceRouter.js';
@@ -113,6 +114,14 @@ function createRequestMetricsMiddleware(): ReturnType<typeof t.middleware> {
 
 function createRateLimitMiddleware(tier: RateLimitConfig): ReturnType<typeof t.middleware> {
   return t.middleware(async ({ ctx, next }) => {
+    // SPRINT-092A — Skip rate limiting in non-production environments. In
+    // development/test, all E2E tests share a single userId (e2e-user).
+    // Parallel Playwright workers exhaust the per-user heavy-tier limit
+    // (20 req/min), causing spurious "Rate limit exceeded" errors on
+    // dashboard and factory pages. Rate limiting is a production concern;
+    // dev/test rely on the in-memory backend which has no distributed
+    // safety anyway.
+    if (process.env.NODE_ENV !== 'production') return next();
     const userId = ctx.userId;
     if (!(await checkRateLimitInternal(userId, tier))) {
       metrics.increment('api.ratelimit.hit');
@@ -6286,6 +6295,79 @@ export function createAppRouter(services: ApiApplicationService) {
             ctx,
           ),
         ),
+    }),
+
+    // ── SPRINT-093 — Orchestration Fabric (SPRINT-093) ───────────────
+    //    Central coordination: work submission, cancellation, queue state,
+    //    concurrency snapshot, metrics, and event stream. All procedures
+    //    are authenticated + rate-limited; work items are owner-scoped.
+    orchestrator: router({
+      submitWork: heavyProcedure
+        .input(
+          z.object({
+            userId: z.string().min(1),
+            workType: z.string().min(1),
+            priority: z.string().optional(),
+            description: z.string().min(1),
+            dependencies: z.array(z.string()).optional(),
+            requiresDatabase: z.boolean().optional(),
+            resourceProfile: z.string().optional(),
+            aiCapability: z.string().optional(),
+            idempotencyKey: z.string().optional(),
+          }),
+        )
+        .mutation(({ input, ctx }) => {
+          const orchRouter = createFabricOrchestratorRouter(services.orchestrator);
+          return orchRouter.submitWork(input, ctx);
+        }),
+
+      getWorkItem: standardProcedure
+        .input(z.object({ userId: z.string().min(1), workItemId: z.string().min(1) }))
+        .query(({ input, ctx }) => {
+          const orchRouter = createFabricOrchestratorRouter(services.orchestrator);
+          return orchRouter.getWorkItem(input, ctx);
+        }),
+
+      cancelWork: standardProcedure
+        .input(
+          z.object({
+            userId: z.string().min(1),
+            workItemId: z.string().min(1),
+            reason: z.string().min(1),
+          }),
+        )
+        .mutation(({ input, ctx }) => {
+          const orchRouter = createFabricOrchestratorRouter(services.orchestrator);
+          return orchRouter.cancelWork(input, ctx);
+        }),
+
+      getQueueState: standardProcedure
+        .input(z.object({ userId: z.string().min(1) }))
+        .query(({ input, ctx }) => {
+          const orchRouter = createFabricOrchestratorRouter(services.orchestrator);
+          return orchRouter.getQueueState(input, ctx);
+        }),
+
+      getConcurrency: standardProcedure
+        .input(z.object({ userId: z.string().min(1) }))
+        .query(({ input, ctx }) => {
+          const orchRouter = createFabricOrchestratorRouter(services.orchestrator);
+          return orchRouter.getConcurrency(input, ctx);
+        }),
+
+      getMetrics: standardProcedure
+        .input(z.object({ userId: z.string().min(1) }))
+        .query(({ input, ctx }) => {
+          const orchRouter = createFabricOrchestratorRouter(services.orchestrator);
+          return orchRouter.getMetrics(input, ctx);
+        }),
+
+      getEvents: standardProcedure
+        .input(z.object({ userId: z.string().min(1), limit: z.number().optional() }))
+        .query(({ input, ctx }) => {
+          const orchRouter = createFabricOrchestratorRouter(services.orchestrator);
+          return orchRouter.getEvents(input, ctx);
+        }),
     }),
   });
 }

@@ -22,6 +22,11 @@ test.describe('Ecosystem Intelligence — Real-User Journey (EPIC-015)', () => {
 
   test('task intelligence → GitHub connect → repository review → memory', async ({ page }) => {
     test.setTimeout(240_000);
+
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -65,7 +70,12 @@ test.describe('Ecosystem Intelligence — Real-User Journey (EPIC-015)', () => {
 
     // ── GitHub Connect: permission review → authorize → CONNECTED ───────
     await page.getByRole('tab', { name: 'GitHub Connect' }).click();
-    await expect(page.getByText('Connect GitHub — review requested permissions')).toBeVisible();
+    // The GitHub connection data is hydration-dependent: the server must
+    // complete persistence hydration before the github.getConnection query
+    // returns the DISCONNECTED view with the permission review form.
+    await expect(page.getByText('Connect GitHub — review requested permissions')).toBeVisible({
+      timeout: 120_000,
+    });
 
     // Baseline public_metadata is always checked; review the least-privilege
     // boundary (public discovery needs no repository access).

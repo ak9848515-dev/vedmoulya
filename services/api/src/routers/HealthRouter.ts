@@ -9,7 +9,7 @@
 // PH-002 — Enterprise Operations & Reliability (T3 Runtime Health)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { getRuntimeInfo, metrics } from '@vedmoulya/core';
+import { databaseManager, getRuntimeInfo, metrics } from '@vedmoulya/core';
 import type { LifeOSApplicationService } from '@vedmoulya/services';
 import type { InfrastructureHealthProbe } from '../services/InfrastructureHealthProbe.js';
 import type { TRPCContext } from '../router.js';
@@ -159,12 +159,20 @@ export function createHealthRouter(
           infrastructureHealth.checkDatabase(),
           infrastructureHealth.checkRedis(),
         ]);
+        // SPRINT-090 — shared-pool observability: per-pool utilization metrics
+        // (redacted URLs, consumers, in-flight/total queries) ride along with
+        // the live database probe. No credentials, tokens, or secrets.
+        const poolStats = databaseManager.getStats();
         components.push({
           name: 'database',
           status: db.status,
           message: db.message,
           latencyMs: db.latencyMs,
-          details: db.error ? { error: db.error } : undefined,
+          details: {
+            ...(db.error ? { error: db.error } : {}),
+            poolCount: poolStats.poolCount,
+            pools: poolStats.pools,
+          },
         });
         components.push({
           name: 'redis',
@@ -254,6 +262,17 @@ export function createHealthRouter(
       _input: unknown,
       _ctx: TRPCContext,
     ): { success: boolean; data: { status: string; uptime: number } } => {
+      // SPRINT-090B — DELIBERATE CONTRACT DIVERGENCE (documented, Phase 10):
+      // This tRPC procedure reports APPLICATION readiness (the LifeOS service
+      // aggregate) for authenticated dashboards/monitors. It is intentionally
+      // NOT the infrastructure readiness contract — that is the HTTP
+      // GET /health/ready endpoint (apps/web), which gates on gateway
+      // initialization + databaseManager.health() SELECT 1 and returns 503
+      // until satisfied. The two answer different questions:
+      //   tRPC  health.ready  → "is the application service layer usable?"
+      //   HTTP  /health/ready → "may the orchestrator send traffic here?"
+      // Do not merge them: process orchestration (Docker/K8s/Playwright)
+      // consumes only the HTTP contract; no duplicate initialization path.
       const isHealthy = lifeOSService.isHealthy();
       return {
         success: true,

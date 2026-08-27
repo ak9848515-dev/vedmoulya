@@ -24,6 +24,11 @@ test.describe('AI World Discovery Activity — Real-User Journey (EPIC-018)', ()
     page,
   }) => {
     test.setTimeout(240_000);
+
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -62,6 +67,15 @@ test.describe('AI World Discovery Activity — Real-User Journey (EPIC-018)', ()
     // labels also appear in the page's tab bar ("Providers", "GitHub"), so
     // scope each assertion to its schedule row via the unique frequency-select
     // aria-label ("<label> frequency") and its parent <li>.
+    //
+    // The scheduler status data is hydration-dependent: the server must
+    // complete engine table creation + persistence hydration before the
+    // aiWorldScheduler.getStatus query returns job rows.  Wait for the
+    // first frequency select to appear (generous timeout covers cold-start
+    // hydration), then check the remaining labels with the default timeout.
+    await expect(page.getByLabel('Critical changes frequency')).toBeVisible({
+      timeout: 120_000,
+    });
     for (const label of [
       'Critical changes',
       'Providers',
@@ -94,24 +108,14 @@ test.describe('AI World Discovery Activity — Real-User Journey (EPIC-018)', ()
     await page.getByRole('button', { name: 'Run AI News discovery now' }).click();
     await runNowResponse;
 
-    // 2) Wait for the subsequent scheduler-status batched POST that the
-    //    handler fires after the mutation (refreshScheduler →
-    //    schedulerStatus.refetch).  With httpBatchLink the refetch lands as
-    //    a POST containing 'aiWorldScheduler.getStatus' in the URL path.
-    //    This response carries the fresh lastScanAt that makes the UI
-    //    display "Completed just now".
-    await page.waitForResponse((res) => {
-      const url = res.url();
-      return (
-        res.request().method() === 'POST' &&
-        url.includes('/api/trpc') &&
-        url.includes('aiWorldScheduler.getStatus')
-      );
-    });
-
-    // 3) Now the React Query cache is updated and React will re-render.
-    //    The DOM assertion can safely poll.
-    await expect(page.getByText(/Completed (just now|1m ago)/)).toBeVisible({ timeout: 30_000 });
+    // 2) After the mutation, the handler calls refreshScheduler() which
+    //    refetches aiWorldScheduler.getStatus.  With httpBatchLink the
+    //    refetch may be batched with other queries and the exact URL
+    //    format varies.  Instead of relying on response interception
+    //    (which is fragile across batching strategies), poll the DOM
+    //    directly — the "Completed" text appears once the React Query
+    //    cache is updated with the fresh lastScanAt.
+    await expect(page.getByText(/Completed (just now|1m ago)/)).toBeVisible({ timeout: 60_000 });
 
     // ── Reload: schedule + history persist (same gateway process) ───────
     await page.reload();

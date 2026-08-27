@@ -1,12 +1,14 @@
 // ──────────────────────────────────────────────────────────────────
 // VedMoulya — Knowledge Database Connection
-// Postgres connection pool for Knowledge Graph persistence
+// SPRINT-090 — the PostgreSQL connection pool is now SHARED via the
+// @vedmoulya/core DatabaseManager (one bounded pool per database, never
+// one per engine). The knowledge engine keeps its own schema/drizzle surface.
 // ARC-003 — Knowledge Graph Bounded Context
 // ──────────────────────────────────────────────────────────────────
 
-import { config, logger, requireProdExternalUrl } from '@vedmoulya/core';
+import { config, databaseManager, logger, requireProdExternalUrl } from '@vedmoulya/core';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
+import type postgres from 'postgres';
 import * as schema from '../../schema/knowledge.js';
 
 let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
@@ -31,13 +33,18 @@ export function getDatabaseConfig(): DatabaseConfig {
       'KNOWLEDGE_DATABASE_URL',
       process.env.DATABASE_URL || config.database.url,
     ),
+    // SPRINT-090 — the connection budget is centrally owned by the shared
+    // DatabaseManager; per-engine pool knobs are deprecated.
     poolMin: Number(process.env.DB_POOL_MIN ?? '2'),
-    poolMax: Number(process.env.DB_POOL_MAX ?? '20'),
+    poolMax: Number(process.env.DB_POOL_MAX ?? '10'),
     timeout: Number(process.env.DB_TIMEOUT ?? '30000'),
   };
 }
 
-/** Initialize the database connection */
+/**
+ * Borrow the shared database pool and wrap it with the knowledge schema.
+ * Idempotent + lazy — no network I/O happens until the first query.
+ */
 export function initializeDatabase(
   dbConfig?: DatabaseConfig,
 ): Promise<ReturnType<typeof drizzle<typeof schema>>> {
@@ -48,13 +55,12 @@ export function initializeDatabase(
     url: cfg.url.replace(/\/\/.*@/, '//***@'),
   });
 
-  client = postgres(cfg.url, {
-    max: cfg.poolMax,
-    idle_timeout: cfg.timeout,
-    max_lifetime: 60 * 30,
-    connection: {
-      application_name: 'vedmoulya-knowledge',
-    },
+  client = databaseManager.getPool({
+    url: cfg.url,
+    poolMin: cfg.poolMin,
+    poolMax: cfg.poolMax,
+    idleTimeoutSeconds: Math.max(1, Math.ceil(cfg.timeout / 1000)),
+    applicationName: 'vedmoulya-knowledge',
   });
 
   db = drizzle(client, { schema });
@@ -70,12 +76,15 @@ export function getDatabase(): ReturnType<typeof drizzle<typeof schema>> {
   return db;
 }
 
-/** Close the database connection gracefully */
-export async function closeDatabase(): Promise<void> {
+/**
+ * Release this engine's handle on the shared pool. The shared pool is owned
+ * by DatabaseManager and is NEVER torn down from a single engine's
+ * closeDatabase().
+ */
+export function closeDatabase(): Promise<void> {
   if (client) {
-    await client.end();
     client = null;
     db = null;
-    logger.info('Knowledge database connection closed');
+    logger.info('Knowledge database connection released (shared pool stays open)');
   }
 }

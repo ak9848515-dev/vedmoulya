@@ -14,6 +14,8 @@ import { describe, expect, it, vi } from 'vitest';
 // The AuthService/repository are only touched by sign-in flows, which these
 // tests don't invoke — stub the production wiring to keep tests hermetic.
 vi.mock('@vedmoulya/api', () => ({
+  getServices: () => ({}),
+  awaitAllEngineEnsureTables: async () => {},
   createProductionIdentityRepository: () => ({}),
 }));
 

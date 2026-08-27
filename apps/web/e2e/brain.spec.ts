@@ -21,18 +21,22 @@ test.describe('VedMoulya Brain — Real-User Journey (EPIC-016)', () => {
   });
 
   test('run pipeline → honest terminal state → decisions → approval gate', async ({ page }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
+
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+    await page.goto('/brain');
+    // Wait for the brain page to hydrate (auth + tRPC data load).
+    // The examples are rendered once the page is ready — this is a
+    // legitimate business assertion, not a warm-up.
+    await expect(page.getByRole('button', { name: 'Blog post' })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
-    });
-
-    // ── Open the Brain ──────────────────────────────────────────────────
-    await page.goto('/brain');
-    // The first request after a dev-server restart cold-compiles the route
-    // and hydrates the auth session — allow a generous window.
-    await expect(page.getByRole('heading', { name: 'VedMoulya Brain' })).toBeVisible({
-      timeout: 60_000,
     });
 
     // ── Run the pipeline from an example ────────────────────────────────

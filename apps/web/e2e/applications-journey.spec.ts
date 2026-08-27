@@ -28,8 +28,12 @@ test.describe('Application Factory — Real-User Journey (EPIC-008)', () => {
   });
 
   test('login → create ABAP debugger → approve → build → files → deploy', async ({ page }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
 
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -99,6 +103,10 @@ test.describe('Application Factory — Real-User Journey (EPIC-008)', () => {
   }) => {
     test.setTimeout(240_000);
 
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -176,6 +184,10 @@ test.describe('Application Factory — Real-User Journey (EPIC-008)', () => {
     // lists it via factory.list, clicking it restores the workspace, and the
     // Plan tab still shows the plan + approval gate.
     await page.reload({ waitUntil: 'domcontentloaded' });
+    // SPRINT-093: The factory page gates its heading on auth hydration
+    // (hydrated + sessionReady). In the full parallel suite, the auth
+    // store's restoreSession() fetch can take longer — wait for the
+    // heading instead of a fixed timeout.
     await expect(page.getByRole('heading', { name: 'Application Factory' })).toBeVisible({
       timeout: 120_000,
     });

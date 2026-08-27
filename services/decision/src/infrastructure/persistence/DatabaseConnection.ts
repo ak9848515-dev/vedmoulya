@@ -1,20 +1,22 @@
 // ──────────────────────────────────────────────────────────────────
 // VedMoulya — Decision Database Connection
-// Singleton PostgreSQL connection pool for the Decision Engine
+// SPRINT-090 — the PostgreSQL connection pool is now SHARED via the
+// @vedmoulya/core DatabaseManager (one bounded pool per database, never
+// one per engine). The decision engine keeps its own schema/drizzle surface.
 // ARC-003/ARC-004 — Decision Intelligence Engine Bounded Context
 // ──────────────────────────────────────────────────────────────────
 
 import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
+import type postgres from 'postgres';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { config, logger, requireProdExternalUrl } from '@vedmoulya/core';
+import { config, databaseManager, logger, requireProdExternalUrl } from '@vedmoulya/core';
 import * as schema from '../../schema/decision.js';
 
 let db: PostgresJsDatabase<typeof schema> | null = null;
-let client: postgres.Sql<Record<string, unknown>> | null = null;
+let client: postgres.Sql | null = null;
 
 /** Get the database configuration from environment variables */
-function getDatabaseConfig(): { url: string; maxConnections: number } {
+function getDatabaseConfig(): { url: string; poolMin: number; poolMax: number } {
   return {
     // SPRINT-088 — dev/test fallback inherits the platform database URL
     // (see services/memory DatabaseConnection for the full rationale: the
@@ -23,23 +25,24 @@ function getDatabaseConfig(): { url: string; maxConnections: number } {
       'DECISION_DATABASE_URL',
       process.env.DATABASE_URL || config.database.url,
     ),
-    maxConnections: Number(process.env.DECISION_DB_POOL_MAX ?? process.env.DB_POOL_MAX ?? '10'),
+    // SPRINT-090 — the connection budget is centrally owned by the shared
+    // DatabaseManager; per-engine pool knobs are deprecated.
+    poolMin: Number(process.env.DB_POOL_MIN ?? '2'),
+    poolMax: Number(process.env.DB_POOL_MAX ?? '10'),
   };
 }
 
-/** Initialize the database connection pool */
+/** Borrow the shared database pool and wrap it with the decision schema. */
 export function initializeDatabase(): void {
   if (db) return;
 
   try {
-    const config = getDatabaseConfig();
-    client = postgres(config.url, {
-      max: config.maxConnections,
-      // SPRINT-080C — CI PostgreSQL (pgvector/pgvector:pg16) does not
-      // support SSL. The estate convention (createEISql, identity, all
-      // WriteThroughDocumentStore pools) omits ssl, so the Drizzle
-      // pools must match — ssl:'require' caused "table creation failed"
-      // warnings and missing-memory/decision/execution tables in G8 CI.
+    const cfg = getDatabaseConfig();
+    client = databaseManager.getPool({
+      url: cfg.url,
+      poolMin: cfg.poolMin,
+      poolMax: cfg.poolMax,
+      applicationName: 'vedmoulya-decision',
     });
 
     db = drizzle(client, { schema });
@@ -52,19 +55,16 @@ export function initializeDatabase(): void {
   }
 }
 
-/** Close the database connection pool */
-export async function closeDatabase(): Promise<void> {
+/**
+ * Release this engine's handle on the shared pool. The shared pool is owned
+ * by DatabaseManager and is NEVER torn down from a single engine's
+ * closeDatabase().
+ */
+export function closeDatabase(): Promise<void> {
   if (client) {
-    try {
-      await client.end();
-      logger.info('Decision database connection closed');
-    } catch (error) {
-      logger.warn('Error closing decision database connection', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
     client = null;
     db = null;
+    logger.info('Decision database connection released (shared pool stays open)');
   }
 }
 

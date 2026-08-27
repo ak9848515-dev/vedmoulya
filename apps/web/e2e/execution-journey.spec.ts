@@ -20,6 +20,11 @@ test.describe('Capability Execution — Real-User Journey (EPIC-014)', () => {
 
   test('plan → execute → approval → manual hand-off → resume → final state', async ({ page }) => {
     test.setTimeout(180_000);
+
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -45,10 +50,16 @@ test.describe('Capability Execution — Real-User Journey (EPIC-014)', () => {
     // The run card appears with an honest status badge (never a fake DONE).
     // The execution.start route cold-compiles on first hit — generous window.
     await expect(page.getByText('Execution', { exact: true })).toBeVisible({ timeout: 60_000 });
+    // The run status badge (e.g. MANUAL REQUIRED) shares text overlap with
+    // step capability labels (e.g. PARTIALLY AUTOMATED contains PARTIAL).
+    // Scope to .first() which targets the run-status badge rendered above
+    // the step timeline.
     await expect(
-      page.getByText(
-        /WAITING FOR APPROVAL|MANUAL REQUIRED|CONFIGURE REQUIRED|COMPLETED|PARTIAL|BLOCKED|FAILED|RUNNING/,
-      ),
+      page
+        .getByText(
+          /WAITING FOR APPROVAL|MANUAL REQUIRED|CONFIGURE REQUIRED|COMPLETED|PARTIAL|BLOCKED|FAILED|RUNNING/,
+        )
+        .first(),
     ).toBeVisible();
 
     // At least one executable step completed through the real port.

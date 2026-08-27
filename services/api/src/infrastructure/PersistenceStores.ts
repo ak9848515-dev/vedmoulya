@@ -372,18 +372,26 @@ function createPostgresStores(): PersistenceBundle {
   // Collecting the ensureTable() promises (instead of fire-and-forget)
   // so hydrate() can await them before running SELECT queries — this
   // eliminates the race where hydration hits a missing table.
-  const ensureTablePromises: Promise<void>[] = [];
+  // SPRINT-089 — Collect DDL operations instead of starting them eagerly.
+  // The old code called store.ensureTable() at construction time and pushed
+  // the promises into an array, starting ALL ~30 DDL operations concurrently.
+  // hydrate() then awaited Promise.all(ensureTablePromises), but the DDL was
+  // already running — the sequential await was a no-op.  Concurrent DDL
+  // exhausts the CI PostgreSQL connection pool ("sorry, too many clients").
+  //
+  // Now we store {store, label} tuples and run DDL sequentially inside
+  // hydrate().  At most one connection is borrowed at a time.
+  interface DeferredDDL {
+    store: Hydratable;
+    label: string;
+  }
+  const deferredDDL: DeferredDDL[] = [];
   if (process.env.NODE_ENV !== 'test') {
     for (const store of hydratable) {
       const withEnsure = store as { ensureTable?(): Promise<void> };
       if (typeof withEnsure.ensureTable === 'function') {
-        ensureTablePromises.push(
-          withEnsure.ensureTable().catch((error: unknown) => {
-            logger.warn('Persistence table creation deferred (database unreachable at startup)', {
-              error: safeError(error),
-            });
-          }),
-        );
+        // Store the repo — DDL will run sequentially in hydrate().
+        deferredDDL.push({ store, label: store.constructor.name });
       }
     }
   }
@@ -392,13 +400,19 @@ function createPostgresStores(): PersistenceBundle {
     ...stores,
     // Hydration is error-isolated per store: one store's failure never
     // blocks the rest (the mirror simply starts empty and catches up).
-    // ensureTable() promises are awaited first so every backing table
-    // exists before the SELECT queries run.
+    // DDL runs sequentially (SPRINT-089) to avoid connection-pool exhaustion.
     hydrate: async (): Promise<void> => {
-      // Wait for table creation to finish (best-effort — errors are logged,
-      // not thrown, so a missing table produces a clean per-store warning
-      // instead of aborting the entire bundle).
-      await Promise.all(ensureTablePromises);
+      // Run DDL sequentially — at most one connection at a time.
+      for (const { store, label } of deferredDDL) {
+        try {
+          await (store as unknown as { ensureTable(): Promise<void> }).ensureTable();
+        } catch (error: unknown) {
+          logger.warn(`Persistence table creation deferred (${label})`, {
+            error: safeError(error),
+          });
+        }
+      }
+      // (SPRINT-089) DDL already ran sequentially above.
 
       await Promise.all(
         hydratable.map(async (store) => {

@@ -25,6 +25,8 @@ vi.mock('@vedmoulya/core', async () => {
   };
 });
 
+import { databaseManager } from '@vedmoulya/core';
+
 interface DatabaseConnectionModule {
   initializeDatabase: () => void;
   closeDatabase: () => Promise<void>;
@@ -37,6 +39,8 @@ async function loadModule(): Promise<DatabaseConnectionModule> {
 
 describe('DatabaseConnection', () => {
   beforeEach(() => {
+    // Reset the shared-pool cache so each test starts from a fresh pool.
+    databaseManager.resetForTests();
     vi.clearAllMocks();
     mockPostgres.mockReturnValue(mockSql);
     mockDrizzle.mockReturnValue({ fakeDb: true });
@@ -62,7 +66,9 @@ describe('DatabaseConnection', () => {
       expect.stringMatching(/^postgres(ql)?:\/\//),
       expect.objectContaining({ max: 10 }),
     );
-    expect(mockDrizzle).toHaveBeenCalledWith(mockSql, expect.anything());
+    // SPRINT-090 — drizzle wraps the shared-pool handle (a Proxy over the
+    // driver), so only the call shape is asserted.
+    expect(mockDrizzle).toHaveBeenCalledWith(expect.anything(), expect.anything());
     expect(mod.getDatabase()).toEqual({ fakeDb: true });
     expect(mockLogger.info).toHaveBeenCalledWith('Memory database connection established');
   });
@@ -74,12 +80,15 @@ describe('DatabaseConnection', () => {
     expect(mockPostgres).toHaveBeenCalledTimes(1);
   });
 
-  it('closes the pool and resets the database reference', async () => {
+  it('releases the handle without ending the shared pool', async () => {
     const mod = await loadModule();
     mod.initializeDatabase();
     await mod.closeDatabase();
-    expect(mockEnd).toHaveBeenCalled();
-    expect(mockLogger.info).toHaveBeenCalledWith('Memory database connection closed');
+    // SPRINT-090 — the pool is owned by the shared DatabaseManager.
+    expect(mockEnd).not.toHaveBeenCalled();
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Memory database connection released (shared pool stays open)',
+    );
     expect(() => mod.getDatabase()).toThrow(/not initialized/);
   });
 
@@ -89,22 +98,10 @@ describe('DatabaseConnection', () => {
     expect(mockEnd).not.toHaveBeenCalled();
   });
 
-  it('warns when closing fails but still resets', async () => {
-    mockEnd.mockRejectedValueOnce(new Error('end failed'));
-    const mod = await loadModule();
-    mod.initializeDatabase();
-    await mod.closeDatabase();
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      'Error closing memory database connection',
-      expect.objectContaining({ error: 'end failed' }),
-    );
-    expect(() => mod.getDatabase()).toThrow(/not initialized/);
-  });
-
-  it('reads pool size from MEMORY_DB_POOL_MAX', async () => {
-    const saved = process.env.MEMORY_DB_POOL_MAX;
+  it('reads the shared pool budget from DB_POOL_MAX', async () => {
+    const saved = process.env.DB_POOL_MAX;
     try {
-      process.env.MEMORY_DB_POOL_MAX = '25';
+      process.env.DB_POOL_MAX = '25';
       const mod = await loadModule();
       mod.initializeDatabase();
       expect(mockPostgres).toHaveBeenCalledWith(
@@ -112,8 +109,8 @@ describe('DatabaseConnection', () => {
         expect.objectContaining({ max: 25 }),
       );
     } finally {
-      if (saved === undefined) delete process.env.MEMORY_DB_POOL_MAX;
-      else process.env.MEMORY_DB_POOL_MAX = saved;
+      if (saved === undefined) delete process.env.DB_POOL_MAX;
+      else process.env.DB_POOL_MAX = saved;
     }
   });
 

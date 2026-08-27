@@ -22,9 +22,13 @@ import {
   getDatabase,
   closeDatabase,
 } from '../src/infrastructure/persistence/DatabaseConnection.js';
+import { databaseManager } from '@vedmoulya/core';
 
 describe('DatabaseConnection', () => {
   beforeEach(() => {
+    // Reset the shared-pool cache so each test exercises a fresh pool (the
+    // pools map persists for the lifetime of this test file).
+    databaseManager.resetForTests();
     vi.clearAllMocks();
     mockPostgres.mockReturnValue({ end: vi.fn().mockResolvedValue(undefined) });
     mockDrizzle.mockReturnValue({ __mockDb: true });
@@ -95,12 +99,14 @@ describe('DatabaseConnection', () => {
   });
 
   describe('closeDatabase', () => {
-    it('ends the postgres client and clears the instance', async () => {
+    it('releases the engine handle without ending the shared pool', async () => {
       const client = { end: vi.fn().mockResolvedValue(undefined) };
       mockPostgres.mockReturnValue(client);
       initializeDatabase();
       await closeDatabase();
-      expect(client.end).toHaveBeenCalled();
+      // SPRINT-090 — the pool is owned by the shared DatabaseManager; a
+      // single engine releasing its handle must NOT tear it down.
+      expect(client.end).not.toHaveBeenCalled();
       expect(() => getDatabase()).toThrow(/Database not initialized/);
     });
 

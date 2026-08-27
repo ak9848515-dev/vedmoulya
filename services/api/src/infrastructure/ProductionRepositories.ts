@@ -5,7 +5,7 @@
 // SPRINT PR-002A (identity) + PR-002B (memory, decision, execution, knowledge)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { container, config, logger } from '@vedmoulya/core';
+import { container, databaseManager, logger } from '@vedmoulya/core';
 import postgres from 'postgres';
 import type { ProviderRepository } from '@vedmoulya/providers';
 import {
@@ -156,18 +156,20 @@ const memoryRegistrySlot: RepositorySlot<MemoryIntelligenceRepository> = {};
 const osRegistrySlot: RepositorySlot<OSIntelligenceRepository> = {};
 const contextFabricSlot: RepositorySlot<ContextFabricGraphRepository> = {};
 
-/** Create a lazily-connected postgres pool for an EI engine (same URL as
- *  the other engines; provider pattern). Safe to call in every environment:
- *  no network I/O happens until the first query. */
+/**
+ * Borrow the shared database pool for an EI engine (same URL as the other
+ * engines; provider pattern). SPRINT-090 — this is now a SHARED bounded pool
+ * managed by DatabaseManager: 17+ engine repositories resolve the SAME
+ * physical postgres.js pool instead of each opening its own. One pool controls
+ * PostgreSQL access; engine/AI orchestration concurrency is NOT limited by it
+ * (queries queue briefly when the bounded budget is saturated).
+ *
+ * Safe to call in every environment: no network I/O happens until the first
+ * query. The connection budget is explicit (DB_POOL_MAX, default 10; the
+ * SPRINT-089 diagnostic EI_POOL_MAX is honoured as a deprecated alias).
+ */
 export function createEISql(applicationName: string): ReturnType<typeof postgres> {
-  return postgres(config.database.url, {
-    max: 5,
-    idle_timeout: 30,
-    max_lifetime: 60 * 30,
-    connection: {
-      application_name: applicationName,
-    },
-  });
+  return databaseManager.getPool({ applicationName });
 }
 
 /**
@@ -183,41 +185,45 @@ export function createEISql(applicationName: string): ReturnType<typeof postgres
  *
  * Skipped in test env (hermetic doubles, no real Postgres).
  */
-const engineEnsureTablePromises: Promise<void>[] = [];
+/**
+ * SPRINT-089 — Collect DDL operations instead of starting them eagerly.
+ *
+ * The old code called `repo.ensureTable()` at module-load time (during
+ * `getServices()`), which kicked off ALL ~19 DDL operations concurrently
+ * via fire-and-forget promises.  The sequential `for...of` in
+ * `awaitAllEngineEnsureTables()` only awaited already-running promises —
+ * the concurrent DDL still exhausted the CI PostgreSQL connection pool
+ * ("sorry, too many clients already").
+ *
+ * Now we store {repo, label} tuples and run each DDL sequentially inside
+ * `awaitAllEngineEnsureTables()`.  At most one connection is borrowed
+ * at a time, keeping us well within the CI PostgreSQL `max_connections`.
+ */
+interface DeferredTable {
+  repo: { ensureTable(): Promise<void> };
+  label: string;
+}
+const deferredTables: DeferredTable[] = [];
 
 function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): void {
   if (isTestEnv()) return;
-  engineEnsureTablePromises.push(
-    repo.ensureTable().catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      // SPRINT-088F — log loudly but do NOT re-throw. A single engine's
-      // table-creation failure (e.g. connection-pool exhaustion) must not
-      // stop other engines from initializing or poison the entire process.
-      // The procedure will fail with "relation does not exist" until the
-      // table is created on the next hydration cycle — observable and
-      // actionable without being fatal.
-      logger.error(`${label} table creation failed`, {
-        error: message,
-      });
-    }),
-  );
+  deferredTables.push({ repo, label });
 }
 
 /**
- * Await all collected engine ensureTable() promises (SPRINT-080C).
- * Called during gateway boot hydration so Memory/Decision/Execution tables
- * are guaranteed to exist before the first tRPC query touches them.
- * Errors are already caught per-table; this only blocks until they settle.
- *
- * SPRINT-088F — Sequential execution instead of Promise.all(): running
- * ~19 DDL operations concurrently exhausts the CI PostgreSQL connection
- * pool ("sorry, too many clients already"), causing transient table-
- * creation failures that cascade into 500s. Sequential execution uses at
- * most one connection per engine pool and avoids the burst.
+ * Run all collected DDL operations sequentially (SPRINT-089).
+ * Called once during gateway boot hydration so every backing table is
+ * guaranteed to exist before the first tRPC query touches them.
+ * Errors are caught per-table so one engine's failure never blocks others.
  */
 export async function awaitAllEngineEnsureTables(): Promise<void> {
-  for (const promise of engineEnsureTablePromises) {
-    await promise;
+  for (const { repo, label } of deferredTables) {
+    try {
+      await repo.ensureTable();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`${label} table creation failed`, { error: message });
+    }
   }
 }
 

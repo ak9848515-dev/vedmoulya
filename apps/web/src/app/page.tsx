@@ -460,7 +460,7 @@ export default function Home(): React.JSX.Element {
                       ? 'Morning'
                       : new Date().getHours() < 17
                         ? 'Afternoon'
-                        : ' Evening'}
+                        : 'Evening'}
                     , <span className="text-[#A8C2F7]">{identity.displayName}</span>
                   </h1>
                   <Sparkles className="h-6 w-6 text-[#F59E0B]" />

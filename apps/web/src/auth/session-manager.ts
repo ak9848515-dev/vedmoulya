@@ -228,6 +228,13 @@ async function doRestore(): Promise<void> {
   if (knownExpired) {
     // Expired: refresh (or clear when there is no refresh token).
     await refreshWithLock();
+    // If refresh didn't succeed and there's no refresh token, the session is
+    // irrecoverable — clear it. (Offline sessions with a refresh token are
+    // kept; doRefresh already set the offline flag in that case.)
+    const postRefresh = useAuthStore.getState();
+    if (!postRefresh.refreshToken && !postRefresh.offline) {
+      postRefresh.clearSession();
+    }
     useAuthStore.getState().setSessionReady(true);
     return;
   }

@@ -23,17 +23,25 @@ vi.mock('drizzle-orm/postgres-js', () => ({ drizzle: drizzleMock }));
 // SPRINT-088 — the dev/test fallback chain now ends at config.database.url
 // (the credential-bearing platform URL) instead of a credential-less
 // per-service localhost default that could never authenticate.
-const TEST_PLATFORM_DB_URL = 'postgres://platform-db.test:5432/vedmoulya_test';
-vi.mock('@vedmoulya/core', () => ({
-  logger: mockLogger,
-  requireProdExternalUrl: requireProdExternalUrlMock,
-  config: { database: { url: TEST_PLATFORM_DB_URL } },
-}));
+const TEST_PLATFORM_DB_URL = vi.hoisted(() => 'postgres://platform-db.test:5432/vedmoulya_test');
+vi.mock('@vedmoulya/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vedmoulya/core')>();
+  return {
+    ...actual,
+    logger: mockLogger,
+    requireProdExternalUrl: requireProdExternalUrlMock,
+    config: { database: { url: TEST_PLATFORM_DB_URL } },
+  };
+});
+
+import { databaseManager } from '@vedmoulya/core';
 
 const { initializeDatabase, closeDatabase, getDatabase } = await import('../DatabaseConnection.js');
 
 describe('Execution DatabaseConnection', () => {
   beforeEach(() => {
+    // Reset the shared-pool cache so each test starts from a fresh pool.
+    databaseManager.resetForTests();
     postgresMock.mockReset();
     drizzleMock.mockReset();
     mockLogger.info.mockClear();
@@ -50,10 +58,11 @@ describe('Execution DatabaseConnection', () => {
     drizzleMock.mockReturnValue({ __drizzle: true });
 
     await initializeDatabase();
-    expect(postgresMock).toHaveBeenCalledWith(TEST_PLATFORM_DB_URL, {
-      max: 10,
-      ssl: undefined,
-    });
+    // SPRINT-090 — the pool is owned by the shared DatabaseManager.
+    expect(postgresMock).toHaveBeenCalledWith(
+      TEST_PLATFORM_DB_URL,
+      expect.objectContaining({ max: 10 }),
+    );
     expect(drizzleMock).toHaveBeenCalled();
     expect(getDatabase()).toEqual({ __drizzle: true });
     await closeDatabase();
@@ -72,14 +81,15 @@ describe('Execution DatabaseConnection', () => {
     await closeDatabase();
   });
 
-  it('closeDatabase resets the singleton', async () => {
+  it('closeDatabase releases the handle without ending the shared pool', async () => {
     const client = { end: vi.fn().mockResolvedValue(undefined) };
     postgresMock.mockReturnValue(client);
     drizzleMock.mockReturnValue({ __drizzle: true });
 
     await initializeDatabase();
     await closeDatabase();
-    expect(client.end).toHaveBeenCalledTimes(1);
+    // SPRINT-090 — a single engine must never tear down the shared pool.
+    expect(client.end).not.toHaveBeenCalled();
     expect(() => getDatabase()).toThrow(/not initialized/i);
   });
 

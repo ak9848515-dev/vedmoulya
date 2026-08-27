@@ -77,6 +77,16 @@ export type { ValidationResult, ValidationIssue, ValidationRule } from './valida
 export { Container, container } from './di/index.js';
 export type { ServiceFactory, ServiceDefinitionMeta } from './di/index.js';
 
+// Database — Shared Connection Manager (SPRINT-090)
+export { databaseManager } from './database/index.js';
+export type {
+  DatabaseManager,
+  DatabaseManagerHealth,
+  DatabaseManagerSnapshot,
+  DatabasePoolAccessOptions,
+  DatabasePoolStats,
+} from './database/index.js';
+
 // Feature Flags
 export { featureFlags } from './feature-flags/index.js';
 export type { FeatureFlagRegistry } from './feature-flags/index.js';

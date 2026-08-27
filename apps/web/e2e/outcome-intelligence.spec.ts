@@ -21,15 +21,19 @@ test.describe('Outcome & Revenue Intelligence — Real-User Journey (EPIC-020)',
 
   test('today priorities → pipeline → 3-value satisfaction → learning', async ({ page }) => {
     test.setTimeout(240_000);
+
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+    await page.goto('/brain');
+    // Wait for brain page to hydrate before capturing console errors.
+    await expect(page.getByRole('heading', { name: "Today's most valuable actions" })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
-    });
-
-    // ── Open the Brain operating view ───────────────────────────────────
-    await page.goto('/brain');
-    await expect(page.getByRole('heading', { name: 'VedMoulya Brain' })).toBeVisible({
-      timeout: 60_000,
     });
 
     // ── Today's Top 5 panel renders (mission §8) ────────────────────────
@@ -68,8 +72,10 @@ test.describe('Outcome & Revenue Intelligence — Real-User Journey (EPIC-020)',
     if ((await yesButton.count()) > 0) {
       // The three explicit feedback options are all present — never a hidden
       // chain-of-thought; concise decision explanations only.
-      await expect(partiallyButton).toBeVisible();
-      await expect(noButton).toBeVisible();
+      // SPRINT-094: Under parallel contention, buttons may render at
+      // different times — wait for each with a timeout.
+      await expect(partiallyButton).toBeVisible({ timeout: 30_000 });
+      await expect(noButton).toBeVisible({ timeout: 30_000 });
       await partiallyButton.click();
       // The learning feed records the outcome.
       await expect(page.getByText('accepted').first()).toBeVisible({ timeout: 30_000 });

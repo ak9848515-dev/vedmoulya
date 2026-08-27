@@ -22,18 +22,26 @@ vi.mock('drizzle-orm/postgres-js', () => ({ drizzle: drizzleMock }));
 // SPRINT-088 — the dev/test fallback chain now ends at config.database.url
 // (the credential-bearing platform URL) instead of a credential-less
 // per-service localhost default that could never authenticate.
-const TEST_PLATFORM_DB_URL = 'postgres://platform-db.test:5432/vedmoulya_test';
-vi.mock('@vedmoulya/core', () => ({
-  logger: mockLogger,
-  requireProdExternalUrl: requireProdExternalUrlMock,
-  config: { database: { url: TEST_PLATFORM_DB_URL } },
-}));
+const TEST_PLATFORM_DB_URL = vi.hoisted(() => 'postgres://platform-db.test:5432/vedmoulya_test');
+vi.mock('@vedmoulya/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vedmoulya/core')>();
+  return {
+    ...actual,
+    logger: mockLogger,
+    requireProdExternalUrl: requireProdExternalUrlMock,
+    config: { database: { url: TEST_PLATFORM_DB_URL } },
+  };
+});
+
+import { databaseManager } from '@vedmoulya/core';
 
 const { getDatabaseConfig, initializeDatabase, closeDatabase, getDatabase } =
   await import('../DatabaseConnection.js');
 
 describe('Knowledge DatabaseConnection', () => {
   beforeEach(() => {
+    // Reset the shared-pool cache so each test starts from a fresh pool.
+    databaseManager.resetForTests();
     postgresMock.mockReset();
     drizzleMock.mockReset();
     mockLogger.info.mockClear();
@@ -51,7 +59,8 @@ describe('Knowledge DatabaseConnection', () => {
     const cfg = getDatabaseConfig();
     expect(cfg.url).toBe(TEST_PLATFORM_DB_URL);
     expect(cfg.poolMin).toBe(2);
-    expect(cfg.poolMax).toBe(20);
+    // SPRINT-090 — the default budget is the shared DatabaseManager default.
+    expect(cfg.poolMax).toBe(10);
     expect(cfg.timeout).toBe(30000);
   });
 
@@ -76,9 +85,10 @@ describe('Knowledge DatabaseConnection', () => {
 
     const db = await initializeDatabase();
 
+    // SPRINT-090 — the pool is owned by the shared DatabaseManager.
     expect(postgresMock).toHaveBeenCalledWith(
       TEST_PLATFORM_DB_URL,
-      expect.objectContaining({ max: 20 }),
+      expect.objectContaining({ max: 10 }),
     );
     expect(drizzleMock).toHaveBeenCalled();
     expect(db).toEqual({ __drizzle: true });
@@ -114,7 +124,7 @@ describe('Knowledge DatabaseConnection', () => {
     expect(() => getDatabase()).toThrow(/not initialized/i);
   });
 
-  it('closeDatabase resets the singleton', async () => {
+  it('closeDatabase releases the handle without ending the shared pool', async () => {
     const client = { end: vi.fn().mockResolvedValue(undefined) };
     postgresMock.mockReturnValue(client);
     drizzleMock.mockReturnValue({ __drizzle: true });
@@ -122,7 +132,8 @@ describe('Knowledge DatabaseConnection', () => {
     await initializeDatabase();
     await closeDatabase();
 
-    expect(client.end).toHaveBeenCalledTimes(1);
+    // SPRINT-090 — a single engine must never tear down the shared pool.
+    expect(client.end).not.toHaveBeenCalled();
     expect(() => getDatabase()).toThrow(/not initialized/i);
   });
 

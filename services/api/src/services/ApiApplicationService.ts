@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { ExecutionTraceProvider } from '@vedmoulya/core';
+import { OrchestratorService as OrchestratorServiceFabric } from '@vedmoulya/orchestration-fabric';
 import type { TelemetryPort } from '@vedmoulya/core';
 import {
   AIOrchestrationService,
@@ -582,6 +583,13 @@ export class ApiApplicationService {
 
   // ── EPIC-020 — Continuous Intelligence (dashboard composition) ────────
   readonly brainDashboard: BrainDashboardService;
+
+  // ── SPRINT-093 — Orchestration Fabric ────────────────────────────────
+  /** Central orchestration service — work queuing, priority scheduling,
+   *  concurrency control, provider routing, backpressure, cancellation.
+   *  The orchestrator does NOT create database connections — it delegates
+   *  to engines which use DatabaseManager's shared bounded pool. */
+  readonly orchestrator: import('@vedmoulya/orchestration-fabric').OrchestratorService;
   /** Brain's durable outcome memory (shared with the dashboard). */
   readonly brainOutcomeMemory: OutcomeMemoryLike;
 
@@ -2143,6 +2151,18 @@ export class ApiApplicationService {
       alertEngine: new AlertEngine(),
       operatorGate: new OperatorGate(),
       auditTrail: new AuditTrail(),
+    });
+
+    // ── SPRINT-093 — Orchestration Fabric ──────────────────────────────
+    //    Central coordination layer for work queuing, priority scheduling,
+    //    concurrency control, provider routing, backpressure, cancellation.
+    //    The orchestrator does NOT create database connections — engines
+    //    delegate to DatabaseManager's shared bounded pool.
+    this.orchestrator = new OrchestratorServiceFabric({
+      tickIntervalMs: 100,
+      maxItemsPerTick: 50,
+      enableDependencyGraph: true,
+      enableProviderRouting: true,
     });
 
     // ── Create the Life OS integration layer ────────────────────────────

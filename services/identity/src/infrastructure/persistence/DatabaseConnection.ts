@@ -1,16 +1,19 @@
 // ──────────────────────────────────────────────────────────────────
 // VedMoulya — Identity Database Connection
-// PostgreSQL connection pool configuration
+// SPRINT-090 — the PostgreSQL connection pool is now SHARED via the
+// @vedmoulya/core DatabaseManager (one bounded pool per database, never
+// one per engine). This module keeps its lazy singleton API so the
+// repository/DI wiring is unchanged; only the backing pool source moved.
 // ──────────────────────────────────────────────────────────────────
 
-import { config, logger } from '@vedmoulya/core';
+import { config, databaseManager, logger } from '@vedmoulya/core';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
+import type postgres from 'postgres';
 import * as schema from '../../schema/users.js';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 
 let db: PostgresJsDatabase<typeof schema> | null = null;
-let client: ReturnType<typeof postgres> | null = null;
+let client: postgres.Sql | null = null;
 
 export interface DatabaseConfig {
   url: string;
@@ -29,20 +32,26 @@ export function getDatabaseConfig(): DatabaseConfig {
   };
 }
 
-/** Initialize the database connection */
+/**
+ * Borrow the shared database pool and wrap it with the identity schema.
+ * Idempotent + lazy — no network I/O happens until the first query.
+ * Explicit dbConfig overrides (tests / dedicated wiring) create a dedicated
+ * bounded pool; the default path always shares the process-wide pool.
+ */
 export function initializeDatabase(dbConfig?: DatabaseConfig): PostgresJsDatabase<typeof schema> {
   if (db) return db;
 
   const cfg = dbConfig ?? getDatabaseConfig();
-  logger.info('Initializing database connection', { url: cfg.url.replace(/\/\/.*@/, '//***@') });
+  logger.info('Initializing identity database connection', {
+    url: cfg.url.replace(/\/\/.*@/, '//***@'),
+  });
 
-  client = postgres(cfg.url, {
-    max: cfg.poolMax,
-    idle_timeout: cfg.timeout,
-    max_lifetime: 60 * 30,
-    connection: {
-      application_name: 'vedmoulya-identity',
-    },
+  client = databaseManager.getPool({
+    url: cfg.url,
+    poolMin: cfg.poolMin,
+    poolMax: cfg.poolMax,
+    idleTimeoutSeconds: Math.max(1, Math.ceil(cfg.timeout / 1000)),
+    applicationName: 'vedmoulya-identity',
   });
 
   db = drizzle(client, { schema });
@@ -58,12 +67,16 @@ export function getDatabase(): PostgresJsDatabase<typeof schema> {
   return db;
 }
 
-/** Close the database connection gracefully */
-export async function closeDatabase(): Promise<void> {
+/**
+ * Release this engine's handle on the shared pool. The shared pool is owned
+ * by DatabaseManager (databaseManager.closeAll() on process shutdown) and is
+ * NEVER torn down from a single engine's closeDatabase() — that would break
+ * every other engine sharing it.
+ */
+export function closeDatabase(): Promise<void> {
   if (client) {
-    await client.end();
     client = null;
     db = null;
-    logger.info('Database connection closed');
+    logger.info('Identity database connection released (shared pool stays open)');
   }
 }

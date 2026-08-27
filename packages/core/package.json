@@ -17,7 +17,9 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "postgres": "^3.4.0"
+  },
   "devDependencies": {
     "typescript": "^5.6.0",
     "vitest": "^4.1.10"

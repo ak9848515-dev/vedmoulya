@@ -27,6 +27,11 @@ test.describe('Live Intelligence Bridge — Real-User Journey (EPIC-017)', () =>
     page,
   }) => {
     test.setTimeout(240_000);
+
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());

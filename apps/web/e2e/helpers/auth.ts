@@ -58,12 +58,17 @@ export async function mintAccessToken(): Promise<string> {
 export async function injectSession(page: Page): Promise<void> {
   const accessToken = await mintAccessToken();
 
+  // SPRINT-090B — Include expiresAt so session-manager recognizes the token
+  // as valid (not expired) without requiring an online verify.  The JWT is
+  // minted with a 1-hour expiry; expiresAt = iat + 3600s in ms.
+  const expiresAt = Date.now() + 3_600_000;
+
   await page.addInitScript(
-    ({ token, user }) => {
+    ({ token, user, expires }) => {
       localStorage.setItem(
         'vedmoulya-auth',
         JSON.stringify({
-          state: { accessToken: token, user },
+          state: { accessToken: token, expiresAt: expires, user },
           version: 0,
         }),
       );
@@ -77,6 +82,6 @@ export async function injectSession(page: Page): Promise<void> {
         }),
       );
     },
-    { token: accessToken, user: TEST_USER },
+    { token: accessToken, user: TEST_USER, expires: expiresAt },
   );
 }

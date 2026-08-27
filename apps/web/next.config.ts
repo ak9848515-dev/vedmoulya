@@ -19,7 +19,6 @@ const nextConfig: NextConfig = {
   // (PasswordService) through the gateway's production identity wiring
   // (SPRINT PR-002A); it must stay external for the Next.js server bundle.
   serverExternalPackages: ['@vedmoulya/core', 'bcrypt', 'esbuild'],
-
   // ── Transpile monorepo packages ─────────────────────────────────────────
   transpilePackages: [
     '@vedmoulya/ui',
@@ -94,10 +93,13 @@ const nextConfig: NextConfig = {
     // Enterprise RAG Platform (EPIC-005 / AI-RUNTIME-002) — the /rag
     // explorer screen consumes RAG DTO types through the tRPC client.
     '@vedmoulya/rag',
+    // Orchestration Fabric (SPRINT-093/094) — work queuing, concurrency
+    // control, and provider routing integrated into the API gateway.
+    '@vedmoulya/orchestration-fabric',
   ],
 
   // ── Webpack Configuration ───────────────────────────────────────────────
-  webpack: (config: Record<string, unknown>) => {
+  webpack: (config: Record<string, unknown>, ctx: { isServer?: boolean }) => {
     // Resolve .js extension imports to .ts/.tsx in monorepo packages
     // ESM imports in @vedmoulya/ui use .js extensions for Node.js compatibility
     const resolve = config.resolve as Record<string, unknown>;
@@ -106,6 +108,19 @@ const nextConfig: NextConfig = {
       '.js': ['.ts', '.tsx', '.js'],
       '.mjs': ['.mts', '.mjs'],
     };
+    // SPRINT-090B — keep esbuild OUT of the server bundle. PreviewService
+    // (services/api → gateway bundle) statically imports esbuild; webpack's
+    // CJS context detection then pulls node_modules/esbuild/lib/*.d.ts into
+    // the graph and fails cold-start compilation of ANY route importing
+    // @vedmoulya/api (including /health/ready). Verified by A/B restart:
+    // without this hook the ready route fails with `Module parse failed`
+    // on main.d.ts; with it the graph compiles. Runtime behavior unchanged.
+    if (ctx.isServer) {
+      config.externals = [
+        ...([] as unknown[]).concat((config.externals ?? []) as unknown[]),
+        { esbuild: 'commonjs esbuild' },
+      ];
+    }
     return config;
   },
 
@@ -216,8 +231,13 @@ const nextConfig: NextConfig = {
   },
 
   // ── ESLint ───────────────────────────────────────────────────────────────
+  // The project uses a root-level flat ESLint config (eslint.config.js) with
+  // typescript-eslint + security plugins. Next.js' built-in ESLint integration
+  // expects eslint-config-next (the legacy .eslintrc format); the flat-config
+  // plugin is not detected at build time. Lint is run separately via
+  // `npm run lint` — skip the in-build pass to avoid the false warning.
   eslint: {
-    ignoreDuringBuilds: false,
+    ignoreDuringBuilds: true,
   },
 };
 

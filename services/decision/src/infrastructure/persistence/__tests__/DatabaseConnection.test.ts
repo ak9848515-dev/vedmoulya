@@ -30,6 +30,8 @@ vi.mock('@vedmoulya/core', async (importOriginal) => {
   return { ...actual, logger: mockLogger };
 });
 
+import { databaseManager } from '@vedmoulya/core';
+
 type DbModule = typeof import('../DatabaseConnection.js');
 
 /** Load a fresh module instance so the module-level db/client state resets. */
@@ -40,6 +42,8 @@ async function loadFresh(): Promise<DbModule> {
 
 describe('Decision DatabaseConnection', () => {
   beforeEach(() => {
+    // Reset the shared-pool cache so each test starts from a fresh pool.
+    databaseManager.resetForTests();
     // Plain vi.fn() mocks are NOT restored by vi.restoreAllMocks() — reset them
     // so call counts don't leak across tests. Pin NODE_ENV so the ssl option
     // (ssl: undefined unless production) is deterministic regardless of the
@@ -80,12 +84,13 @@ describe('Decision DatabaseConnection', () => {
     // SPRINT-088 — the dev/test fallback inherits config.database.url (the
     // credential-bearing platform URL); assert scheme + shape, not a specific
     // host, so the test stays valid across environment setups.
+    // SPRINT-090 — the pool is owned by the shared DatabaseManager.
     expect(postgresMock).toHaveBeenCalledWith(
       expect.stringMatching(/^postgres(ql)?:\/\//),
       expect.objectContaining({ max: 10 }),
     );
     expect(drizzleMock).toHaveBeenCalledWith(
-      client,
+      expect.anything(),
       expect.objectContaining({ schema: expect.anything() }),
     );
     expect(mockLogger.info).toHaveBeenCalledWith('Decision database connection established');
@@ -115,7 +120,7 @@ describe('Decision DatabaseConnection', () => {
     });
   });
 
-  it('closeDatabase ends the client and resets state', async () => {
+  it('closeDatabase releases the handle without ending the shared pool', async () => {
     const endMock = vi.fn().mockResolvedValue(undefined);
     postgresMock.mockReturnValue({ end: endMock });
     drizzleMock.mockReturnValue({});
@@ -124,23 +129,11 @@ describe('Decision DatabaseConnection', () => {
     mod.initializeDatabase();
     await mod.closeDatabase();
 
-    expect(endMock).toHaveBeenCalledTimes(1);
-    expect(mockLogger.info).toHaveBeenCalledWith('Decision database connection closed');
-    expect(() => mod.getDatabase()).toThrow('Decision database not initialized');
-  });
-
-  it('closeDatabase warns and still resets when ending fails', async () => {
-    const endMock = vi.fn().mockRejectedValue(new Error('end failed'));
-    postgresMock.mockReturnValue({ end: endMock });
-    drizzleMock.mockReturnValue({});
-
-    const mod = await loadFresh();
-    mod.initializeDatabase();
-    await mod.closeDatabase();
-
-    expect(mockLogger.warn).toHaveBeenCalledWith('Error closing decision database connection', {
-      error: 'end failed',
-    });
+    // SPRINT-090 — a single engine must never tear down the shared pool.
+    expect(endMock).not.toHaveBeenCalled();
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Decision database connection released (shared pool stays open)',
+    );
     expect(() => mod.getDatabase()).toThrow('Decision database not initialized');
   });
 

@@ -15,18 +15,36 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
-import {
-  awaitAllEngineEnsureTables,
-  createAuthContext,
-  getAppRouter,
-  getServices,
-  getSchedulerCadenceDriver,
-  initGatewayObservability,
-  startOSHealthScheduler,
-  startSchedulerCadenceDriver,
-} from '@vedmoulya/api';
 import { corsHeaders, isCorsPreflight, withCorsHeaders } from '../../../../lib/cors.js';
 import type { NextRequest } from 'next/server';
+
+// ── SPRINT-090B — Lazy gateway module load ──────────────────────────────────
+// @vedmoulya/api is loaded through a cached DYNAMIC import instead of a
+// static import. Statically pulling the whole gateway graph into this route's
+// compile entry crashed Next.js dev compile workers on cold start in the
+// local acceptance environment ("Jest worker encountered 2 child process
+// exceptions" — Node 24 + Next 15.5; CI/G8 run Node 22 where the static graph
+// also compiles). The dynamic-import path is proven by SPRINT-090A's
+// /health/ready route (identical pattern) and keeps RUNTIME semantics
+// unchanged: the first request still performs the exact same two-phase
+// gateway initialization, eager hydration, engine-DDL gate and dispatch.
+//
+// `typeof import(...)` is type-only and erased at build time — it does NOT
+// reintroduce the static edge into the bundle graph.
+type ApiModule = typeof import('@vedmoulya/api');
+
+let apiPromise: Promise<ApiModule> | null = null;
+
+function loadApi(): Promise<ApiModule> {
+  if (!apiPromise) {
+    apiPromise = import('@vedmoulya/api').catch((error: unknown) => {
+      // Transient module-load failure — allow a later request to retry.
+      apiPromise = null;
+      throw error;
+    });
+  }
+  return apiPromise;
+}
 
 // ── Route Handler: GET + POST ───────────────────────────────────────────────
 // Real authentication (BLD-016-C): the context is built from the verified
@@ -53,11 +71,11 @@ let observabilityInitialized = false;
 // the actual flush() runs only on process exit.
 let persistenceShutdownRegistered = false;
 
-function registerPersistenceShutdownFlush(): void {
+function registerPersistenceShutdownFlush(api: ApiModule): void {
   if (persistenceShutdownRegistered) return;
   persistenceShutdownRegistered = true;
   const flushPersistence = (): void => {
-    void getServices().flushPersistence();
+    void api.getServices().flushPersistence();
   };
   process.on('SIGTERM', flushPersistence);
   process.on('SIGINT', flushPersistence);
@@ -127,10 +145,10 @@ let hydrationPromise: Promise<void> | null = null;
  *   via hydrationPromise.  The onRejected handler here prevents an
  *   unhandled promise rejection while the error is also logged.
  */
-function startEagerHydration(): void {
+function startEagerHydration(api: ApiModule): void {
   if (hydrationPromise) return;
 
-  hydrationPromise = getServices().hydratePersistence();
+  hydrationPromise = api.getServices().hydratePersistence();
 
   // After hydration completes, start the scheduler cadence driver.
   // The driver's immediate first tick must see restart-surviving
@@ -147,10 +165,10 @@ function startEagerHydration(): void {
   // while preserving the original rejection for dependent callers.
   void hydrationPromise.then(
     () => {
-      startSchedulerCadenceDriver();
-      getServices().setSchedulerRuntimeStatusSource(
+      api.startSchedulerCadenceDriver();
+      api.getServices().setSchedulerRuntimeStatusSource(
         () =>
-          getSchedulerCadenceDriver()?.status() ?? {
+          api.getSchedulerCadenceDriver()?.status() ?? {
             active: false,
             reason: 'not_started',
             maxUsersPerTick: 0,
@@ -181,26 +199,26 @@ function startEagerHydration(): void {
 // The scheduler cadence driver is NOT started here; it starts later
 // when the hydration .then() callback fires.
 
-function ensureGatewayInitialized(): void {
+function ensureGatewayInitialized(api: ApiModule): void {
   if (observabilityInitialized) return;
   observabilityInitialized = true;
 
-  initGatewayObservability();
+  api.initGatewayObservability();
   // OS-003 operational cadence: a scheduled os.dashboard pass (default every
   // 5 min, see OS_HEALTH_INTERVAL_MS) so the OS snapshot history becomes a
   // continuous monitoring feed. Idempotent + unref'd — it never blocks or
   // holds the server open.
-  startOSHealthScheduler();
+  api.startOSHealthScheduler();
   // Construct the gateway services (lazy singleton — first call wires all
   // production Postgres repositories and probes; subsequent calls are no-ops).
-  getServices();
+  api.getServices();
   // Start persistence hydration eagerly.  Does NOT block — runs in the
   // background.  The scheduler cadence driver will start when hydration
   // completes (via the .then() callback in startEagerHydration).
-  startEagerHydration();
+  startEagerHydration(api);
   // Safe to register now: the actual flush() runs only on process exit,
   // after any in-flight requests complete.
-  registerPersistenceShutdownFlush();
+  registerPersistenceShutdownFlush(api);
 }
 
 // ── Phase 2: Hydration gate (shared promise, awaited only when needed) ──
@@ -225,12 +243,12 @@ async function ensureHydrationIfRequired(requestUrl: string): Promise<void> {
 // health.check and resolves/rejects independently of hydration.
 let engineTablesReady: Promise<void> | null = null;
 
-function ensureEngineTablesReady(): void {
+function ensureEngineTablesReady(api: ApiModule): void {
   if (engineTablesReady) return;
   // The promise is created from hydratePersistence()'s internal
   // awaitAllEngineEnsureTables() — but we create our own wrapper
   // so we can control retry semantics without modifying the service layer.
-  engineTablesReady = awaitAllEngineEnsureTables().catch((error: unknown) => {
+  engineTablesReady = api.awaitAllEngineEnsureTables().catch((error: unknown) => {
     // Transient failure (e.g. connection-pool exhaustion): reset the
     // gate so the NEXT request can retry. The error is logged by the
     // service layer; we just propagate the rejection to callers.
@@ -257,13 +275,18 @@ const handler = async (request: NextRequest): Promise<Response> => {
     return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
 
+  // SPRINT-090B — load the gateway module (cached dynamic import; see the
+  // note at the top of this file). First request pays one module evaluation;
+  // subsequent requests resolve the cached promise.
+  const api = await loadApi();
+
   // Phase 1: fast, idempotent — completes on every request in <100ms.
   // Hydration starts eagerly but does NOT block.
-  ensureGatewayInitialized();
+  ensureGatewayInitialized(api);
 
   // Phase 1b: ensure engine table readiness promise exists.
   // Created once, shared by all concurrent callers.
-  ensureEngineTablesReady();
+  ensureEngineTablesReady(api);
 
   // Phase 2: gate on engine tables for non-health procedures.
   // health.check bypasses this gate entirely — it must always respond.
@@ -278,8 +301,8 @@ const handler = async (request: NextRequest): Promise<Response> => {
   const response = await fetchRequestHandler({
     endpoint: '/api/trpc',
     req: request,
-    router: getAppRouter(),
-    createContext: () => createAuthContext(request.headers),
+    router: api.getAppRouter(),
+    createContext: () => api.createAuthContext(request.headers),
   });
   return withCorsHeaders(response, request);
 };

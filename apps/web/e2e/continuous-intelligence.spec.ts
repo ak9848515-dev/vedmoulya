@@ -25,15 +25,19 @@ test.describe('Continuous Intelligence — Real-User Journey (EPIC-020)', () => 
 
   test('operating dashboard → discover → opportunities → pipeline → learning', async ({ page }) => {
     test.setTimeout(240_000);
+
+    // SPRINT-090A: /health/ready readiness gate in Playwright webServer
+    // ensures the gateway is initialized before tests begin.
+    await page.goto('/brain');
+    // Wait for brain page to hydrate before capturing console errors.
+    await expect(page.getByRole('heading', { name: 'Continuous AI World' })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    // ── Capture console errors ──────────────────────────────────────────
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
-    });
-
-    // ── Open the Brain operating view ───────────────────────────────────
-    await page.goto('/brain');
-    await expect(page.getByRole('heading', { name: 'VedMoulya Brain' })).toBeVisible({
-      timeout: 60_000,
     });
 
     // ── Operating dashboard renders (EPIC-020 §13) ──────────────────────
@@ -44,7 +48,7 @@ test.describe('Continuous Intelligence — Real-User Journey (EPIC-020)', () => 
       timeout: 60_000,
     });
     await expect(page.getByRole('heading', { name: 'Opportunities' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'What the Brain learned' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'What VedMoulya learned' })).toBeVisible();
     // The discovery surface is explicit: discovery is never adoption.
     await expect(page.getByText(/Discovery is never adoption/)).toBeVisible();
 

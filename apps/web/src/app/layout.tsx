@@ -37,18 +37,35 @@ export default function RootLayout({ children }: { children: React.ReactNode }):
             render-blocking latency. Fonts remain runtime-loaded (Satoshi +
             Inter + JetBrains Mono) per the existing visual system; no new
             font dependency is introduced. */}
-        <link rel="preconnect" href="https://fonts.cdnfonts.com" crossOrigin="anonymous" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          key="preconnect-cdnfonts"
+          rel="preconnect"
+          href="https://fonts.cdnfonts.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          key="preconnect-gfonts"
+          rel="preconnect"
+          href="https://fonts.googleapis.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          key="preconnect-gstatic"
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
         {/* Satoshi font for headings */}
-        <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/satoshi" />
+        <link key="font-satoshi" rel="stylesheet" href="https://fonts.cdnfonts.com/css/satoshi" />
         {/* Inter font for body */}
         <link
+          key="font-inter"
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
         />
         {/* JetBrains Mono for code */}
         <link
+          key="font-jetbrains-mono"
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap"
         />

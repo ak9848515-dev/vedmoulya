@@ -33,6 +33,7 @@
     "@vedmoulya/capability-marketplace": "*",
     "@vedmoulya/execution-bridge": "*",
     "@vedmoulya/execution-orchestrator": "*",
+    "@vedmoulya/orchestration-fabric": "*",
     "@vedmoulya/goals": "*",
     "@vedmoulya/execution-strategy": "*",
     "@vedmoulya/identity": "*",
