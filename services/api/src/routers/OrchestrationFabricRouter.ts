@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { OrchestratorService } from '@vedmoulya/orchestration-fabric';
-import type { WorkType } from '@vedmoulya/orchestration-fabric';
+import type { WorkType, WorkPriority } from '@vedmoulya/orchestration-fabric';
 import type { TRPCContext } from '../router.js';
 
 // ── Router Factory ─────────────────────────────────────────────────────
@@ -39,14 +39,14 @@ export function createFabricOrchestratorRouter(orchestrator: OrchestratorService
     ) => {
       const result = orchestrator.submitWork({
         workType: input.workType as WorkType,
-        priority: (input.priority ?? 'user_submitted') as WorkType,
+        priority: (input.priority ?? 'user_submitted') as WorkPriority,
         description: input.description,
         ownerUserId: input.userId,
         dependencies: input.dependencies,
         idempotencyKey: input.idempotencyKey,
         resources: {
           requiresDatabase: input.requiresDatabase ?? false,
-          resourceProfile: (input.resourceProfile ?? 'ai_bound') as WorkType,
+          resourceProfile: (input.resourceProfile ?? 'ai_bound') as 'ai_bound',
           timeoutMs: 30000,
           aiCapability: input.aiCapability,
         },

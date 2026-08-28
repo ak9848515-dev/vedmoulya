@@ -79,4 +79,5 @@ export function closeDatabase(): Promise<void> {
     db = null;
     logger.info('Identity database connection released (shared pool stays open)');
   }
+  return Promise.resolve();
 }

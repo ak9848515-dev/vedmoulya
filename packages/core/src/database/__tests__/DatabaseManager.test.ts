@@ -144,4 +144,21 @@ describe('Shared Database Manager', () => {
   it('getPool is lazy — no postgres call until an engine asks for a pool', () => {
     expect(mockPostgres).not.toHaveBeenCalled();
   });
+
+  it('health returns error when probe times out', async () => {
+    // Override the sql template tag to return a hanging promise so the probe times out
+    const origImpl = mockSql.getMockImplementation();
+    mockSql.mockImplementation(() => new Promise(() => {}));
+    databaseManager.getPool({ url: TEST_URL });
+    const health = await databaseManager.health({ timeoutMs: 10 });
+    if (origImpl) mockSql.mockImplementation(origImpl);
+    expect(health.ok).toBe(false);
+    expect(health.error).toContain('timed out');
+  });
+
+  it('health returns error when no pools exist', async () => {
+    const health = await databaseManager.health();
+    expect(health.ok).toBe(false);
+    expect(health.error).toContain('No database pool');
+  });
 });

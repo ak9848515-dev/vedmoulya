@@ -85,4 +85,5 @@ export function closeDatabase(): Promise<void> {
     db = null;
     logger.info('Content-agency database connection released (shared pool stays open)');
   }
+  return Promise.resolve();
 }

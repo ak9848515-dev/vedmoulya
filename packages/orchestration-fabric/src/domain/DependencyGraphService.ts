@@ -310,7 +310,7 @@ export class DependencyGraphService {
     }
 
     for (const node of nodes.keys()) {
-      if (color.get(node) !== WHITE) continue;
+      if (color.get(node) !== 0) continue;
       const cycle = this.dfsCycle(node, adjacency, color, parent);
       if (cycle.length > 0) return cycle;
     }

@@ -67,6 +67,7 @@ export function closeDatabase(): Promise<void> {
     db = null;
     logger.info('Memory database connection released (shared pool stays open)');
   }
+  return Promise.resolve();
 }
 
 /** Get the database instance (must be initialized first) */

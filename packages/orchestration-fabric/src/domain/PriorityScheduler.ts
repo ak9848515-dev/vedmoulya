@@ -87,7 +87,8 @@ export class PriorityScheduler {
 
     // First, handle expired items
     for (let i = this.entries.length - 1; i >= 0; i--) {
-      const entry = this.entries[i];
+      const entry = this.entries.at(i);
+      if (!entry) continue;
       const workItem = this.workItemIndex.get(entry.workItemId);
       if (workItem?.expiresAt && new Date(workItem.expiresAt) < now) {
         expired.push(entry.workItemId);

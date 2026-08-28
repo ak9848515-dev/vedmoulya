@@ -64,6 +64,7 @@ export function closeDatabase(): Promise<void> {
     db = null;
     logger.info('Execution database connection released (shared pool stays open)');
   }
+  return Promise.resolve();
 }
 
 export function getDatabase(): PostgresJsDatabase<typeof schema> {

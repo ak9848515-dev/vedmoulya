@@ -603,8 +603,8 @@ export class OrchestratorService {
       // Check if retryable
       const isRetryable =
         workItem.attempts < workItem.retryPolicy.maxRetries &&
-        (workItem.retryPolicy.retryableReasons.length === 0 ||
-          workItem.retryPolicy.retryableReasons.some((r) => errorMsg.includes(r)) ||
+        ((workItem.retryPolicy.retryableReasons?.length ?? 0) === 0 ||
+          workItem.retryPolicy.retryableReasons?.some((r) => errorMsg.includes(r)) ||
           !workItem.retryPolicy.retryableReasons);
 
       if (isRetryable) {

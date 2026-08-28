@@ -109,8 +109,10 @@ export class ProviderRouter {
 
     scored.sort((a, b) => b.score - a.score);
 
-    const selected = scored[0].candidate;
-    const alternatives = scored.slice(1).map((s) => s.candidate);
+    const first = scored.shift();
+    if (!first) return null;
+    const selected = first.candidate;
+    const alternatives = scored.map((s) => s.candidate);
 
     const selection: ProviderSelection = {
       selectedProvider: selected.providerName,

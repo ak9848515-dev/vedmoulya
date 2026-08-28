@@ -101,10 +101,10 @@ export type {
 
 // ── Adapters ─────────────────────────────────────────────────────────────
 export {
-  EngineAdapter,
+  createEngineAdapter,
   ProviderHealthBridge,
-  MetricsBridge,
-  EventLoggerBridge,
+  exportMetricsToCore,
+  logOrchestratorEvent,
 } from './adapters/index.js';
 export {
   EngineHandlerRegistry,

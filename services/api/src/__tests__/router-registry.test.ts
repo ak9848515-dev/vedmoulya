@@ -2050,21 +2050,29 @@ describe('createAppRouter — request metrics middleware', () => {
   });
 
   it('increments api.requests.error when a procedure throws', async () => {
-    const errBefore = metrics.getCounter('api.requests.error');
-    const router = createAppRouter(createMockServices() as unknown as ApiApplicationService);
-    const ctx: TRPCContext = { userId: 'rr-metrics-err', email: 'e@v.com', role: 'user' };
-    const caller = t.createCallerFactory(router)(ctx);
+    // SPRINT-092A: rate-limit middleware skips in non-production. Temporarily
+    // enable production mode so the rate limiter is active for this test.
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const errBefore = metrics.getCounter('api.requests.error');
+      const router = createAppRouter(createMockServices() as unknown as ApiApplicationService);
+      const ctx: TRPCContext = { userId: 'rr-metrics-err', email: 'e@v.com', role: 'user' };
+      const caller = t.createCallerFactory(router)(ctx);
 
-    // Auth-tier rate limit is 10/min; exhaust it to force a thrown TRPCError.
-    for (let i = 0; i < 10; i++) {
-      await caller.identity.getProfile({ userId: 'rr-metrics-err' }).catch(() => {});
+      // Auth-tier rate limit is 10/min; exhaust it to force a thrown TRPCError.
+      for (let i = 0; i < 10; i++) {
+        await caller.identity.getProfile({ userId: 'rr-metrics-err' }).catch(() => {});
+      }
+      await expect(caller.identity.getProfile({ userId: 'rr-metrics-err' })).rejects.toMatchObject({
+        code: 'TOO_MANY_REQUESTS',
+      });
+
+      expect(metrics.getCounter('api.requests.error')).toBeGreaterThan(errBefore);
+      expect(metrics.getCounter('api.ratelimit.hit')).toBeGreaterThan(0);
+    } finally {
+      process.env.NODE_ENV = prev;
     }
-    await expect(caller.identity.getProfile({ userId: 'rr-metrics-err' })).rejects.toMatchObject({
-      code: 'TOO_MANY_REQUESTS',
-    });
-
-    expect(metrics.getCounter('api.requests.error')).toBeGreaterThan(errBefore);
-    expect(metrics.getCounter('api.ratelimit.hit')).toBeGreaterThan(0);
   });
 });
 
@@ -2072,18 +2080,26 @@ describe('createAppRouter — request metrics middleware', () => {
 
 describe('createAppRouter — rate limit enforcement', () => {
   it('rejects with TOO_MANY_REQUESTS after exhausting the auth tier', async () => {
-    const router = createAppRouter(createMockServices() as unknown as ApiApplicationService);
-    const createCaller = t.createCallerFactory(router);
-    const ctx: TRPCContext = { userId: 'rr-rl-user', email: 'rl@v.com', role: 'user' };
-    const caller = createCaller(ctx);
+    // SPRINT-092A: rate-limit middleware skips in non-production. Temporarily
+    // enable production mode so the rate limiter is active for this test.
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const router = createAppRouter(createMockServices() as unknown as ApiApplicationService);
+      const createCaller = t.createCallerFactory(router);
+      const ctx: TRPCContext = { userId: 'rr-rl-user', email: 'rl@v.com', role: 'user' };
+      const caller = createCaller(ctx);
 
-    for (let i = 0; i < 10; i++) {
-      const result = await caller.identity.getProfile({ userId: 'rr-rl-user' });
-      expect(result.success).toBe(true);
+      for (let i = 0; i < 10; i++) {
+        const result = await caller.identity.getProfile({ userId: 'rr-rl-user' });
+        expect(result.success).toBe(true);
+      }
+      await expect(caller.identity.getProfile({ userId: 'rr-rl-user' })).rejects.toMatchObject({
+        code: 'TOO_MANY_REQUESTS',
+      });
+    } finally {
+      process.env.NODE_ENV = prev;
     }
-    await expect(caller.identity.getProfile({ userId: 'rr-rl-user' })).rejects.toMatchObject({
-      code: 'TOO_MANY_REQUESTS',
-    });
   });
 });
 
