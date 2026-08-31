@@ -48,7 +48,7 @@
     "@vedmoulya/services": "^1.0.0",
     "@vedmoulya/shared": "^1.0.0",
     "@vedmoulya/ui": "^1.0.0",
-    "lucide-react": "^0.460.0",
+    "lucide-react": "^1.34.0",
     "next": "^15.0.0",
     "postcss": "^8.5.24",
     "react": "^19.0.0",
