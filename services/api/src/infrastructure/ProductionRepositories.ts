@@ -211,20 +211,44 @@ function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): voi
 }
 
 /**
- * Run all collected DDL operations sequentially (SPRINT-089).
- * Called once during gateway boot hydration so every backing table is
- * guaranteed to exist before the first tRPC query touches them.
- * Errors are caught per-table so one engine's failure never blocks others.
+ * Singleton promise for the engine DDL run.
+ *
+ * SPRINT-096 — Multiple callers invoke awaitAllEngineEnsureTables():
+ *   • auth-app.ts (fire-and-forget) for the identity/email-verification tables;
+ *   • ApiApplicationService.hydratePersistence() during gateway boot.
+ *
+ * Without a singleton guard both invocations run their own sequential DDL
+ * loop concurrently — two connections execute overlapping CREATE TABLE /
+ * CREATE TYPE statements against the same schema, racing on PostgreSQL
+ * system-catalog indexes (pg_type_typname_nsp_index, pg_class_relname_nsp_index).
+ *
+ * The singleton ensures exactly ONE sequential DDL pass executes. All
+ * concurrent callers await the same promise and receive the same result.
+ * If a new deferred table is registered AFTER the first run completes
+ * (unlikely in practice — all repositories are constructed during the
+ * synchronous boot phase), the next call re-runs only the new entries.
  */
+let engineTablesPromise: Promise<void> | undefined;
+let engineTablesRunCount = 0;
+
 export async function awaitAllEngineEnsureTables(): Promise<void> {
-  for (const { repo, label } of deferredTables) {
-    try {
-      await repo.ensureTable();
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error(`${label} table creation failed`, { error: message });
-    }
+  // Fast path: DDL already ran for all currently-registered tables.
+  if (engineTablesPromise && engineTablesRunCount >= deferredTables.length) {
+    return engineTablesPromise;
   }
+  // First call or new tables registered — run (or re-run) DDL.
+  engineTablesRunCount = deferredTables.length;
+  engineTablesPromise = (async (): Promise<void> => {
+    for (const { repo, label } of deferredTables) {
+      try {
+        await repo.ensureTable();
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error(`${label} table creation failed`, { error: message });
+      }
+    }
+  })();
+  return engineTablesPromise;
 }
 
 /**

@@ -165,6 +165,10 @@ function startEagerHydration(api: ApiModule): void {
   // while preserving the original rejection for dependent callers.
   void hydrationPromise.then(
     () => {
+      // SPRINT-096 — Start the OS health scheduler AFTER hydration so
+      // the os_health_registry table is guaranteed to exist before the
+      // first os.dashboard pass queries it.
+      api.startOSHealthScheduler();
       api.startSchedulerCadenceDriver();
       api.getServices().setSchedulerRuntimeStatusSource(
         () =>
@@ -204,18 +208,18 @@ function ensureGatewayInitialized(api: ApiModule): void {
   observabilityInitialized = true;
 
   api.initGatewayObservability();
-  // OS-003 operational cadence: a scheduled os.dashboard pass (default every
-  // 5 min, see OS_HEALTH_INTERVAL_MS) so the OS snapshot history becomes a
-  // continuous monitoring feed. Idempotent + unref'd — it never blocks or
-  // holds the server open.
-  api.startOSHealthScheduler();
   // Construct the gateway services (lazy singleton — first call wires all
   // production Postgres repositories and probes; subsequent calls are no-ops).
   api.getServices();
   // Start persistence hydration eagerly.  Does NOT block — runs in the
-  // background.  The scheduler cadence driver will start when hydration
-  // completes (via the .then() callback in startEagerHydration).
+  // background.  The scheduler cadence driver and OS health scheduler will
+  // start when hydration completes (via the .then() callback in
+  // startEagerHydration).
   startEagerHydration(api);
+  // SPRINT-096 — OS-003 operational cadence: MOVED to start after
+  // hydration completes (via the .then() callback in startEagerHydration)
+  // so the os_health_registry table is guaranteed to exist before the
+  // first os.dashboard pass queries it.
   // Safe to register now: the actual flush() runs only on process exit,
   // after any in-flight requests complete.
   registerPersistenceShutdownFlush(api);

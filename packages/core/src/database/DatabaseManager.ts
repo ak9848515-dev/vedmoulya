@@ -160,13 +160,22 @@ function trackQueries(pool: ManagedPool): postgres.Sql {
     return performance.now();
   };
   // Run a query and attach settlement tracking to the ORIGINAL thenable.
+  //
+  // IMPORTANT: check `result instanceof Promise` rather than
+  // `typeof result?.then === 'function'`.  postgres.js returns
+  // `Identifier` objects (from `sql('table_name')` identifier-escape
+  // calls) that extend an internal `NotTagged` class.  `NotTagged`
+  // defines `.then()` that deliberately throws NOT_TAGGED_CALL to
+  // catch misuse — but the duck-typing check incorrectly treats these objects
+  // as Promises and calls `.then()`, triggering the error.  Using
+  // `instanceof Promise` correctly distinguishes real query results
+  // (Promises) from identifier/parameter helpers.
   const run = <T>(invoke: () => T): T => {
     const beganAt = begin();
     try {
       const result = invoke();
-      const thenable = result as unknown as PromiseLike<unknown> | undefined;
-      if (result && typeof thenable?.then === 'function') {
-        thenable.then(
+      if (result instanceof Promise) {
+        result.then(
           () => {
             settle(beganAt);
           },
@@ -174,6 +183,10 @@ function trackQueries(pool: ManagedPool): postgres.Sql {
             settle(beganAt);
           },
         );
+      } else {
+        // Synchronous result (e.g. Identifier from sql('name') escape)
+        // — settle immediately so inFlight never leaks.
+        settle(beganAt);
       }
       return result;
     } catch (error) {
