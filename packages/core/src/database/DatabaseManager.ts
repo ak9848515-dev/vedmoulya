@@ -205,6 +205,31 @@ function trackQueries(pool: ManagedPool): postgres.Sql {
         const fn = value as (...a: unknown[]) => unknown;
         return (...args: unknown[]) => run(() => fn.apply(target as never, args as never));
       }
+      // DRIZZLE DEFENSIVE COPY — Drizzle ORM's construct() overwrites
+      // client.options.serializers['114'] and ['3802'] with a transparent
+      // passthrough (val => val) so it can handle JSON in its own mapping
+      // layer.  Because the pool is SHARED (SPRINT-090), that mutation
+      // leaks to every other consumer: WriteThroughDocumentStore's
+      // sql.json(doc) creates Parameter(doc, 3802), Bind() calls the
+      // now-passthrough serializer which returns the raw Object, and
+      // Buffer.byteLength(rawObject) throws:
+      //   "The 'string' argument must be of type string or an instance of
+      //    Buffer or ArrayBuffer. Received an instance of Object"
+      //
+      // SPRINT-097 FIX: the original frozenOptions cache was broken —
+      // Drizzle mutates the cached clone's serializers, and postgres.js
+      // then gets the same mutated object. Fix: create a FRESH shallow
+      // clone on every access so Drizzle's mutation never reaches
+      // postgres.js. The clone is ~6-property spread — negligible cost
+      // vs the actual DB query.
+      if (prop === 'options' && typeof value === 'object' && value !== null) {
+        const orig = value as Record<string, unknown>;
+        return {
+          ...orig,
+          parsers: { ...(orig.parsers as Record<string, unknown>) },
+          serializers: { ...(orig.serializers as Record<string, unknown>) },
+        };
+      }
       return value;
     },
   });

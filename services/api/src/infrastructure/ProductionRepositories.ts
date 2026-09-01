@@ -230,14 +230,24 @@ function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): voi
  */
 let engineTablesPromise: Promise<void> | undefined;
 let engineTablesRunCount = 0;
+let ddlInProgress = false;
 
 export async function awaitAllEngineEnsureTables(): Promise<void> {
+  const count = deferredTables.length;
   // Fast path: DDL already ran for all currently-registered tables.
-  if (engineTablesPromise && engineTablesRunCount >= deferredTables.length) {
+  if (engineTablesPromise && engineTablesRunCount >= count) {
+    return engineTablesPromise;
+  }
+  // SPRINT-097 FIX: another caller already started DDL — await its
+  // promise instead of racing on a second sequential DDL loop.
+  // JavaScript is single-threaded so the synchronous ddlInProgress
+  // check-and-set is atomic within a tick.
+  if (ddlInProgress && engineTablesPromise) {
     return engineTablesPromise;
   }
   // First call or new tables registered — run (or re-run) DDL.
-  engineTablesRunCount = deferredTables.length;
+  ddlInProgress = true;
+  engineTablesRunCount = count;
   engineTablesPromise = (async (): Promise<void> => {
     for (const { repo, label } of deferredTables) {
       try {
@@ -247,6 +257,7 @@ export async function awaitAllEngineEnsureTables(): Promise<void> {
         logger.error(`${label} table creation failed`, { error: message });
       }
     }
+    ddlInProgress = false;
   })();
   return engineTablesPromise;
 }

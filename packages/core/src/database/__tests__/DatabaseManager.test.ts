@@ -161,4 +161,47 @@ describe('Shared Database Manager', () => {
     expect(health.ok).toBe(false);
     expect(health.error).toContain('No database pool');
   });
+
+  // SPRINT-096D — Drizzle ORM's construct() overwrites
+  // client.options.serializers['114'] and ['3802'] with a transparent
+  // passthrough so it can handle JSON in its own mapping layer.  Because
+  // the pool is SHARED, that mutation leaked to every other consumer,
+  // causing Buffer.byteLength(Object) / Buffer.byteLength(Array) errors
+  // in Bind().  The Proxy now returns a defensive copy of options with
+  // independent parsers/serializers maps.
+  it('options.serializers isolation — Drizzle mutation does not leak to other consumers', () => {
+    const sql = databaseManager.getPool({ url: TEST_URL });
+
+    // Access options through the Proxy — this is what Drizzle does.
+    const optionsViaProxy = (sql as unknown as Record<string, unknown>).options as Record<
+      string,
+      unknown
+    >;
+    expect(optionsViaProxy).toBeDefined();
+
+    // Drizzle's construct() would do: client.options.serializers['114'] = transparentParser
+    const transparentParser = (val: unknown) => val;
+    const serializers = optionsViaProxy.serializers as Record<string, unknown>;
+    serializers['114'] = transparentParser;
+    serializers['3802'] = transparentParser;
+
+    // SPRINT-097 FIX: each access now returns a FRESH shallow clone, so
+    // Drizzle's mutation on the first clone does NOT leak to the second.
+    const optionsAgain = (sql as unknown as Record<string, unknown>).options as Record<
+      string,
+      unknown
+    >;
+    const serializersAgain = optionsAgain.serializers as Record<string, unknown>;
+    expect(serializersAgain['114']).not.toBe(transparentParser);
+
+    // The ORIGINAL rawSql.options.serializers must NOT have been mutated.
+    // The rawSql is the mock's internal sql object — accessing .options on the
+    // mock directly should still have the original (undefined) value for key 114.
+    // (In real code this would be JSON.stringify, not undefined.)
+    // Since we use a mock, the key simply won't exist on the mock's options.
+    const rawOptions = mockSql.options as Record<string, unknown>;
+    const rawSerializers = rawOptions?.serializers as Record<string, unknown> | undefined;
+    // The mock never set serializers['114'], so it should NOT be the transparentParser.
+    expect(rawSerializers?.['114']).not.toBe(transparentParser);
+  });
 });
