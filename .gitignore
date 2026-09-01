@@ -70,3 +70,4 @@ tmp/
 apps/web/out/
 apps/web/android/keystore.properties
 apps/web/android/*.jks
+.neon
