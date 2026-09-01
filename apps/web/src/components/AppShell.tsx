@@ -256,11 +256,15 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
     persistLastTab(tab.id);
   }, [pathname]);
 
-  // Auth screens (login / OAuth callback) and the client portal (AC-002,
-  // Module 7 — a standalone experience with its own shell) render full-screen
-  // without the app chrome (MOB-001).
+  // Auth screens (login / signup / OAuth callback) and the client portal
+  // (AC-002, Module 7) render full-screen without the app chrome (MOB-001).
+  // Unauthenticated routes must never expose the sidebar or topbar.
   if (
     pathname === '/login' ||
+    pathname === '/signup' ||
+    pathname.startsWith('/forgot-password') ||
+    pathname.startsWith('/reset-password') ||
+    pathname.startsWith('/verify-email') ||
     pathname.startsWith('/oauth2redirect') ||
     pathname.startsWith('/portal')
   ) {
