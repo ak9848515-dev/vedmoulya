@@ -122,7 +122,7 @@ jobs:
       # ── 2. API gateway image → GHCR (consumed by Railway / VPS) ───────────
       - name: Log in to GHCR
         if: github.event.inputs.stage == 'rc' || github.event.inputs.stage == 'ga'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
