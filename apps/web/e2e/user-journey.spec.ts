@@ -26,33 +26,35 @@ test.describe('SPRINT-086 Auth Diagnostics', () => {
     // Install diagnostic interceptors BEFORE navigation
     const diag = installAuthDiagnostics(page);
 
-    // Navigate to the Home page (the most failing route)
+    // Navigate to the Home page (the most failing route).
+    // SPRINT-097 FIX: register waitForResponse promises BEFORE goto so they
+    // capture in-flight auth requests. With the default waitUntil:'load',
+    // goto blocks until all resources finish — by the time it returns the
+    // session/me responses have already arrived, so waitForResponse would
+    // wait for a NEW response that never comes, exhausting the 30s test
+    // timeout.
+    const sessionPromise = page
+      .waitForResponse((res) => res.url().includes('/api/v1/identity/auth/session'), {
+        timeout: 20_000,
+      })
+      .catch(() => null);
+    const mePromise = page
+      .waitForResponse((res) => res.url().includes('/api/v1/identity/auth/me'), {
+        timeout: 10_000,
+      })
+      .catch(() => null);
+
     await page.goto(BASE_URL);
 
-    // Wait for the auth/session response to arrive (bounded at 20s).
-    // We do NOT depend on heading visibility — this test captures data
-    // regardless of whether auth succeeds or fails.
-    try {
-      await page.waitForResponse((res) => res.url().includes('/api/v1/identity/auth/session'), {
-        timeout: 20_000,
-      });
-    } catch {
-      // If no auth request was made at all, that's also diagnostic info.
+    // Collect the auth responses (may be null if timeout fired)
+    const sessionRes = await sessionPromise;
+    if (!sessionRes) {
       console.warn('[AUTH-DIAG] WARNING: no /auth/session request observed within 20s');
     }
-
-    // Also wait for auth/me if it was made
-    try {
-      await page.waitForResponse((res) => res.url().includes('/api/v1/identity/auth/me'), {
-        timeout: 10_000,
-      });
-    } catch {
-      // auth/me might not be made if auth failed — that's diagnostic info.
-    }
+    const meRes = await mePromise;
+    void meRes; // captured by interceptor regardless
 
     // Give React a moment to process the auth response and re-render.
-    // Wait for the DOM to settle rather than a fixed timeout — the page
-    // may close during parallel worker teardown if we hold too long.
     await page.waitForLoadState('domcontentloaded');
 
     // Capture whatever browser state exists
