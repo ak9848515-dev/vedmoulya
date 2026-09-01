@@ -239,16 +239,15 @@ jobs:
   e2e:
     name: 'G8: End-to-End Tests'
     runs-on: ubuntu-latest
-    # The 15-minute ceiling was exceeded by the sum of the job's four phases:
-    # npm ci + Next.js production build (~3-6 min) + Chromium download (~1-3 min)
-    # + a serial 46-test Playwright run (CI workers=1, retries=2) whose heavy
-    # factory-visual specs intentionally wait up to 180s for cold-compile first
-    # runs.  The suite is bounded (bounded waits; no observed hung step) but
-    # legitimately needs more than 15 minutes on the shared runner, so the
-    # ceiling is raised to a bounded 30 minutes.  This does NOT weaken the gate:
+    # SPRINT-097 — the 30-minute ceiling was exceeded on run 81 (cancelled
+    # mid-E2E at the 30-min mark). Setup alone (npm ci + Docker infra +
+    # Next.js production build + Chromium install) consumes ~12 min, leaving
+    # only ~18 min for the 46-test serial Playwright run (workers=1, retries=2)
+    # whose bridge/intelligence specs legitimately need 30+ min on the shared
+    # runner. Raised to a bounded 45 minutes — this does NOT weaken the gate:
     # CI Result still requires needs.e2e.result == "success" and there is no
     # continue-on-error and no skipped test.
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: [build]
     env:
       # The factory journey + visual specs build deterministic applications
@@ -286,6 +285,29 @@ jobs:
       DECISION_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
       EXECUTION_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
       CONTENT_AGENCY_DATABASE_URL: 'postgres://ci:ci@db.ci.internal:5432/vedmoulya_ci'
+      # ── G8 rate-limit posture ───────────────────────────────────────────────
+      # SPRINT-097 — the default production rate-limit tiers (standard: 100/min,
+      # heavy: 20/min, auth: 10/min) are calibrated for real per-user traffic,
+      # NOT for 56 E2E tests driven by a single 'e2e-user' identity. Every tRPC
+      # call from that user shares ONE bucket per tier in the in-memory limiter
+      # (CI runs a single Next.js process), so the suite — together with
+      # 1.2 s loop-status polling, factory-build polling, and the AI World cadence
+      # tick (which also defaults to enabled) — exhausts 100 req/min within the
+      # first ~30 tests, producing cascading 429s that surface as browser console
+      # errors (failing the "no console errors" gates) and prevent API data from
+      # loading (failing element-visibility / page-load-state waits).
+      #
+      # Fix: raise the CI tiers — still bounded, still enforced, never disabled.
+      # Production keeps its defaults (100/20/30/200/10). This is the documented
+      # per-environment tuning seam (RATE_LIMIT_<TIER>_MAX) the limiter was built
+      # for. Disabled AI World cadence so the scheduler tick does not consume
+      # budget (matches run-pw-ci.ps1; the scheduler is not under E2E test).
+      AI_WORLD_CADENCE_ENABLED: '0'
+      RATE_LIMIT_STANDARD_MAX: '2000'
+      RATE_LIMIT_HEAVY_MAX: '500'
+      RATE_LIMIT_SEARCH_MAX: '600'
+      RATE_LIMIT_AUTH_MAX: '100'
+      RATE_LIMIT_HEALTH_MAX: '1000'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
