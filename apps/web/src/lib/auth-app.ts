@@ -22,11 +22,7 @@ import {
   createVerificationTokenStore,
   type VerificationTokenStore,
 } from '@vedmoulya/identity';
-import {
-  createProductionIdentityRepository,
-  getServices,
-  awaitAllEngineEnsureTables,
-} from '@vedmoulya/api';
+import { createProductionIdentityRepository, awaitAllEngineEnsureTables } from '@vedmoulya/api';
 import { consumeAuthRequest, resolveClientIp } from './auth-rate-limit.js';
 
 let authApp: Hono | null = null;
@@ -63,26 +59,20 @@ function createAuthRateLimitMiddleware(): MiddlewareHandler {
 /** Lazy singleton — module scope stays inert during `next build`. */
 export async function getAuthApp(): Promise<Hono> {
   if (authApp === null) {
-    // SPRINT-089 / SPRINT-090B — gateway initialization + sequential DDL.
-    // The identity users table is already in the gateway's deferred DDL
-    // queue (from createProductionIdentityRepository()). Calling getServices()
-    // ensures the gateway is initialized and deferredTables is populated;
-    // awaitAllEngineEnsureTables() then runs ALL deferred DDL sequentially
-    // (including the identity users table) before we touch auth.  This
-    // eliminates the race where getAuthApp() ran its own eager DDL, opening
-    // a second connection that competed with the gateway's sequential DDL
-    // for the CI PostgreSQL connection pool ("sorry, too many clients").
+    // SPRINT-098B — The auth app is intentionally DECOUPLED from getServices()
+    // (the full gateway). getServices() constructs ApiApplicationService which
+    // loads the entire application config (AI keys, Redis, SMTP, etc.). On
+    // Vercel where some of these are not set, this crashes the auth app and
+    // returns 500 for ALL auth endpoints (sign-in, session, Google OAuth).
     //
-    // SPRINT-090B — DDL is now fire-and-forget here: the /session endpoint
-    // (used by session-manager startup restore) only verifies JWTs and must
-    // not block on database readiness.  Blocking caused E2E tests to hang:
-    // injectSession() → restoreSession() → verifySession() → getAuthApp()
-    // → awaitAllEngineEnsureTables() → ensureTable() → PostgreSQL
-    // connection → stuck (no DB in dev), so setSessionReady(true) was never
-    // reached and the brain page stayed at "Loading…" forever.
-    // The tRPC route handler already follows this same fire-and-forget
-    // pattern (engineTablesReady).
-    getServices();
+    // The auth app only needs the identity repository + email-verification
+    // table. createProductionIdentityRepository() registers its own DDL via
+    // ensureTable() into the shared deferredTables queue; the fire-and-forget
+    // awaitAllEngineEnsureTables() runs that DDL sequentially. No gateway
+    // initialization is required.
+    //
+    // SPRINT-090B — DDL is fire-and-forget: the /session endpoint only
+    // verifies JWTs and must not block on database readiness.
     void awaitAllEngineEnsureTables().catch(() => {});
     const repository = createProductionIdentityRepository();
     // SPRINT-045 — same deterministic cold-start for the email-verification

@@ -39,6 +39,17 @@ export class GoogleProvider {
    *  URL dynamically — so production and development both get the correct
    *  redirect URI without requiring an explicit env var. */
   getAuthorizationUrl(state: string, requestOrigin?: string): string {
+    // SPRINT-098B — In production/staging, GOOGLE_CLIENT_ID is mandatory.
+    // In dev/test the check is relaxed so unit tests and local dev work
+    // without real OAuth credentials.
+    const env: string = process.env.NODE_ENV ?? 'development';
+    if (!this.clientId && (env === 'production' || env === 'staging')) {
+      throw new Error(
+        'Google OAuth is not configured: GOOGLE_CLIENT_ID is missing. ' +
+          'Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI ' +
+          'in your Vercel environment variables.',
+      );
+    }
     const redirectUri =
       this.redirectUri ||
       (requestOrigin

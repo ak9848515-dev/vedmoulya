@@ -20,8 +20,27 @@ async function handle(request: NextRequest): Promise<Response> {
     return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
 
-  const response = await (await getAuthApp()).fetch(request);
-  return withCorsHeaders(response, request);
+  try {
+    const response = await (await getAuthApp()).fetch(request);
+    return withCorsHeaders(response, request);
+  } catch (error) {
+    // SPRINT-098B — Return a structured error instead of a bare 500 so the
+    // client can display a meaningful message and we can diagnose Vercel
+    // initialization failures from the response.
+    const message = error instanceof Error ? error.message : 'Auth service unavailable';
+    console.error('[auth-route] Initialization failed:', message);
+    const body = JSON.stringify({
+      success: false,
+      error: { code: 'AUTH_INIT_FAILED', message },
+    });
+    return withCorsHeaders(
+      new Response(body, {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      request,
+    );
+  }
 }
 
 export {
