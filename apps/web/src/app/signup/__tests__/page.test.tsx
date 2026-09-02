@@ -19,6 +19,7 @@ import React from 'react';
 
 const mocks = vi.hoisted(() => ({
   signUpWithEmailAndPassword: vi.fn(),
+  beginGoogleSignIn: vi.fn(),
   replace: vi.fn(),
 }));
 
@@ -28,6 +29,7 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('../../../auth/session-manager.js', () => ({
   signUpWithEmailAndPassword: mocks.signUpWithEmailAndPassword,
+  beginGoogleSignIn: mocks.beginGoogleSignIn,
 }));
 
 // Fresh auth state: no user, session not ready — the already-authenticated
@@ -164,12 +166,13 @@ describe('SignUpPage — ?next= resolved at point of use (SPRINT-043E D1)', () =
   it('uses the ?next= query when it settles AFTER mount (protected-route soft nav)', async () => {
     // Same regression as the /login page: a mount-time ?next= capture keeps a
     // stale '/' when the query settles after first render. The destination
-    // must be resolved at the point of use (submit handler).
+    // must be resolved at the point of use (submit / Google-completion handler).
     Object.defineProperty(window, 'location', {
       value: { search: '', pathname: '/signup' },
       writable: true,
     });
     mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    mocks.beginGoogleSignIn.mockResolvedValueOnce({ ok: true });
     render(<SignUpPage />);
     // The ?next= query arrives after the page mounted (client-side redirect).
     Object.defineProperty(window, 'location', {
@@ -178,16 +181,22 @@ describe('SignUpPage — ?next= resolved at point of use (SPRINT-043E D1)', () =
     });
     fillValidForm();
     fireEvent.submit(document.querySelector('form') as HTMLFormElement);
-
+    // After successful sign-up, the Google completion card appears.
     await waitFor(() => {
-      expect(mocks.replace).toHaveBeenCalledWith('/intelligence');
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    // Click "Continue with Google" — the ?next= should be resolved at this point.
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      expect(mocks.beginGoogleSignIn).toHaveBeenCalledWith('/intelligence');
     });
   });
 });
 
 describe('SignUpPage — registration flow (SPRINT-041A)', () => {
-  it('calls the existing sign-up API with the collected fields and redirects to /', async () => {
+  it('calls the existing sign-up API with the collected fields and shows Google completion', async () => {
     mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    mocks.beginGoogleSignIn.mockResolvedValueOnce({ ok: true });
     render(<SignUpPage />);
     fillValidForm();
     fireEvent.submit(document.querySelector('form') as HTMLFormElement);
@@ -201,21 +210,34 @@ describe('SignUpPage — registration flow (SPRINT-041A)', () => {
         familyName: undefined,
       });
     });
-    expect(mocks.replace).toHaveBeenCalledWith('/');
+    // Mandatory Google completion: the Google completion card appears after
+    // successful sign-up instead of navigating away.
+    expect(screen.getByText('Complete with Google')).not.toBeNull();
+    // Clicking "Continue with Google" without ?next= defaults to /.
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      expect(mocks.beginGoogleSignIn).toHaveBeenCalledWith('/');
+    });
   });
 
-  it('preserves the ?next= parameter on successful registration', async () => {
+  it('preserves the ?next= parameter through Google completion', async () => {
     Object.defineProperty(window, 'location', {
       value: { search: '?next=%2Fintelligence', pathname: '/signup' },
       writable: true,
     });
     mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    mocks.beginGoogleSignIn.mockResolvedValueOnce({ ok: true });
     render(<SignUpPage />);
     fillValidForm();
     fireEvent.submit(document.querySelector('form') as HTMLFormElement);
 
     await waitFor(() => {
-      expect(mocks.replace).toHaveBeenCalledWith('/intelligence');
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    // "Continue with Google" passes the ?next= parameter through.
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      expect(mocks.beginGoogleSignIn).toHaveBeenCalledWith('/intelligence');
     });
   });
 
@@ -296,5 +318,133 @@ describe('SignUpPage — registration flow (SPRINT-041A)', () => {
     render(<SignUpPage />);
     const back = screen.getByRole('link', { name: 'Back to Sign In' });
     expect(back.getAttribute('href')).toBe('/login?next=%2Fintelligence');
+  });
+});
+
+describe('SignUpPage — Google completion (PART 3 PATH A)', () => {
+  it('shows the Google completion card after successful sign-up with correct content', async () => {
+    mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    render(<SignUpPage />);
+    fillValidForm();
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => {
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    expect(screen.getByText(/Google authentication is required to finish/)).not.toBeNull();
+    expect(screen.getByText(/Continue with Google/)).not.toBeNull();
+    // The sign-up form is no longer visible.
+    expect(screen.queryByLabelText('Display Name')).toBeNull();
+  });
+
+  it('Continue with Google triggers beginGoogleSignIn with the resolved next value', async () => {
+    mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    mocks.beginGoogleSignIn.mockResolvedValueOnce({ ok: true });
+    render(<SignUpPage />);
+    fillValidForm();
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => {
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      expect(mocks.beginGoogleSignIn).toHaveBeenCalledWith('/');
+    });
+  });
+
+  it('displays Google sign-in errors and allows retry', async () => {
+    mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    mocks.beginGoogleSignIn.mockResolvedValueOnce({
+      ok: false,
+      error: 'Could not start Google sign-in. Please try again.',
+    });
+    render(<SignUpPage />);
+    fillValidForm();
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => {
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('Could not start Google sign-in.');
+    });
+    // The button is still available for retry.
+    expect(screen.getByRole('button', { name: /continue with google/i })).not.toBeNull();
+  });
+
+  it('shows offline message when Google sign-in fails due to network', async () => {
+    mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    mocks.beginGoogleSignIn.mockResolvedValueOnce({ ok: false, error: 'offline' });
+    render(<SignUpPage />);
+    fillValidForm();
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => {
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      expect(
+        screen.getByText('You appear to be offline. Check your connection and try again.'),
+      ).not.toBeNull();
+    });
+  });
+
+  it('sanitizes ?next= to prevent open redirects (only allows paths starting with /)', async () => {
+    Object.defineProperty(window, 'location', {
+      value: { search: '?next=https://evil.com', pathname: '/signup' },
+      writable: true,
+    });
+    mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    mocks.beginGoogleSignIn.mockResolvedValueOnce({ ok: true });
+    render(<SignUpPage />);
+    fillValidForm();
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => {
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      // External URL is rejected; next defaults to /.
+      expect(mocks.beginGoogleSignIn).toHaveBeenCalledWith('/');
+    });
+  });
+
+  it('the redirect is not blocked by the Google-completion loading state', async () => {
+    mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    mocks.beginGoogleSignIn.mockResolvedValueOnce({ ok: true });
+    render(<SignUpPage />);
+    fillValidForm();
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => {
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    // The Continue with Google button is present and interactive.
+    const googleBtn = screen.getByRole('button', {
+      name: /continue with google/i,
+    });
+    expect(googleBtn).not.toBeNull();
+    fireEvent.click(googleBtn);
+    await waitFor(() => {
+      expect(mocks.beginGoogleSignIn).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('blocks duplicate Google submissions while one is in flight', async () => {
+    mocks.signUpWithEmailAndPassword.mockResolvedValueOnce({ ok: true });
+    // Never resolves — simulates a slow/stuck OAuth redirect.
+    mocks.beginGoogleSignIn.mockReturnValueOnce(new Promise(() => {}));
+    render(<SignUpPage />);
+    fillValidForm();
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => {
+      expect(screen.getByText('Complete with Google')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    // Button shows loading state.
+    await waitFor(() => {
+      expect(screen.getByText('Connecting…')).not.toBeNull();
+    });
+    // Second click is ignored (googleSubmitting guard).
+    fireEvent.click(screen.getByRole('button', { name: /connecting/i }));
+    expect(mocks.beginGoogleSignIn).toHaveBeenCalledTimes(1);
   });
 });

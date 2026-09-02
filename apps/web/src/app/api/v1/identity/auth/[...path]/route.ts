@@ -31,8 +31,10 @@ async function handle(request: NextRequest): Promise<Response> {
     // SECURITY — never expose internal error details (env var names,
     // connection strings, infrastructure config) to the browser. Log the
     // full error server-side; return a safe generic message to the client.
-    console.error('[auth-route] Initialization failed:',
-      error instanceof Error ? error.message : String(error));
+    console.error(
+      '[auth-route] Initialization failed:',
+      error instanceof Error ? error.message : String(error),
+    );
     const body = JSON.stringify({
       success: false,
       error: {

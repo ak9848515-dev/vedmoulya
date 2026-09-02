@@ -49,6 +49,13 @@ describe('Knowledge DatabaseConnection', () => {
     requireProdExternalUrlMock.mockClear();
     requireProdExternalUrlMock.mockImplementation((_name: string, fallback: string) => fallback);
     vi.stubEnv('NODE_ENV', 'test');
+    // SPRINT-088/090 — isolate from the developer's real DATABASE_URL so the
+    // mocked config.database.url (TEST_PLATFORM_DB_URL) is the only source.
+    delete process.env.DATABASE_URL;
+    delete process.env.KNOWLEDGE_DATABASE_URL;
+    delete process.env.DB_POOL_MIN;
+    delete process.env.DB_POOL_MAX;
+    delete process.env.DB_TIMEOUT;
   });
 
   afterEach(() => {

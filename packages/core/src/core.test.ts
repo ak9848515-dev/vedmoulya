@@ -196,9 +196,14 @@ describe('Configuration', () => {
 
   // ── PH-001/T2 — production secret fail-fast (AI keys, OAuth, SMTP) ────────
 
-  it('requires the default AI provider key in production (PH-001/T2)', () => {
+  it('does not require AI provider keys in production — missing keys yield NOT_CONFIGURED state (PH-001/T2)', () => {
+    // The new architecture: AI credentials are AI-execution configuration,
+    // never authentication prerequisites. Missing keys must NOT block
+    // loadConfiguration(); instead the provider state correctly reflects
+    // NOT_CONFIGURED and the default provider metadata is consistent.
     const saved = process.env.NODE_ENV;
     const savedKey = process.env.AI_OPENAI_API_KEY;
+    const savedFallbackKey = process.env.OPENAI_API_KEY;
     const savedProvider = process.env.AI_DEFAULT_PROVIDER;
     const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
     try {
@@ -206,11 +211,22 @@ describe('Configuration', () => {
       process.env.AI_DEFAULT_PROVIDER = 'openai';
       delete process.env.FF_AI_ASSISTANT_ENABLED;
       delete process.env.AI_OPENAI_API_KEY;
-      expect(() => loadConfiguration()).toThrow(/AI_OPENAI_API_KEY.*REQUIRED/);
+      delete process.env.OPENAI_API_KEY;
+      const cfg = loadConfiguration();
+      // loadConfiguration succeeds — AI keys do not block config/auth init
+      expect(cfg.ai.openAiKey).toBeUndefined();
+      expect(cfg.ai.defaultProvider).toBe('openai');
+      expect(cfg.ai.defaultProviderSupported).toBe(true);
+      // OpenAI is NOT_CONFIGURED (adapter exists, key absent, dormant)
+      const openaiState = cfg.ai.providerStates.find((s) => s.family === 'openai');
+      expect(openaiState?.status).toBe('NOT_CONFIGURED');
+      expect(openaiState?.registered).toBe(false);
     } finally {
       process.env.NODE_ENV = saved ?? 'test';
       if (savedKey === undefined) delete process.env.AI_OPENAI_API_KEY;
       else process.env.AI_OPENAI_API_KEY = savedKey;
+      if (savedFallbackKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = savedFallbackKey;
       if (savedProvider === undefined) delete process.env.AI_DEFAULT_PROVIDER;
       else process.env.AI_DEFAULT_PROVIDER = savedProvider;
       if (savedAiFlag === undefined) delete process.env.FF_AI_ASSISTANT_ENABLED;
@@ -255,20 +271,37 @@ describe('Configuration', () => {
     }
   });
 
-  it('requires AI_DEEPSEEK_API_KEY in production when AI_DEFAULT_PROVIDER=deepseek (PH-001/T2)', () => {
+  it('does not require AI_DEEPSEEK_API_KEY in production — deepseek shows NOT_CONFIGURED when key is absent (PH-001/T2)', () => {
+    // The new architecture: missing DeepSeek credentials do not block
+    // loadConfiguration(). The provider state correctly reflects the
+    // NOT_CONFIGURED status. Credential enforcement is the responsibility
+    // of the provider execution/activation boundary (provider-runtime tests),
+    // not the configuration layer.
     const saved = process.env.NODE_ENV;
     const savedKey = process.env.AI_DEEPSEEK_API_KEY;
     const savedProvider = process.env.AI_DEFAULT_PROVIDER;
     const savedAiFlag = process.env.FF_AI_ASSISTANT_ENABLED;
     const savedOpenAiKey = process.env.AI_OPENAI_API_KEY;
+    const savedFallbackKey = process.env.OPENAI_API_KEY;
     try {
       process.env.NODE_ENV = 'production';
       process.env.AI_DEFAULT_PROVIDER = 'deepseek';
       delete process.env.FF_AI_ASSISTANT_ENABLED;
       delete process.env.AI_DEEPSEEK_API_KEY;
-      // Clear other provider keys to avoid placeholder detection masking the deepseek error.
       delete process.env.AI_OPENAI_API_KEY;
-      expect(() => loadConfiguration()).toThrow(/AI_DEEPSEEK_API_KEY.*REQUIRED/);
+      delete process.env.OPENAI_API_KEY;
+      const cfg = loadConfiguration();
+      // loadConfiguration succeeds — missing keys do not block config/auth init
+      expect(cfg.ai.deepseekKey).toBeUndefined();
+      expect(cfg.ai.defaultProvider).toBe('deepseek');
+      expect(cfg.ai.defaultProviderSupported).toBe(true);
+      // DeepSeek is NOT_CONFIGURED (adapter exists, key absent, dormant)
+      const dsState = cfg.ai.providerStates.find((s) => s.family === 'deepseek');
+      expect(dsState?.status).toBe('NOT_CONFIGURED');
+      expect(dsState?.registered).toBe(false);
+      // OpenAI is also NOT_CONFIGURED (key cleared above)
+      const oaiState = cfg.ai.providerStates.find((s) => s.family === 'openai');
+      expect(oaiState?.status).toBe('NOT_CONFIGURED');
     } finally {
       process.env.NODE_ENV = saved ?? 'test';
       if (savedKey === undefined) delete process.env.AI_DEEPSEEK_API_KEY;
@@ -279,6 +312,8 @@ describe('Configuration', () => {
       else process.env.FF_AI_ASSISTANT_ENABLED = savedAiFlag;
       if (savedOpenAiKey === undefined) delete process.env.AI_OPENAI_API_KEY;
       else process.env.AI_OPENAI_API_KEY = savedOpenAiKey;
+      if (savedFallbackKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = savedFallbackKey;
     }
   });
 
