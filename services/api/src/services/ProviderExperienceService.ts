@@ -16,7 +16,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { ProviderApplicationService } from '@vedmoulya/providers';
-import { classifyResource } from '@vedmoulya/providers';
+import { classifyResource, describeProviderSwitch } from '@vedmoulya/providers';
 import type { ProviderPreferencesService } from '@vedmoulya/providers';
 import type { ProviderPreferences } from '@vedmoulya/providers';
 import type { ProviderDTO, ProviderModelDTO } from '@vedmoulya/providers';
@@ -46,6 +46,12 @@ export interface ProviderExperienceRow {
   models: ProviderModelExperience[];
   availability: ProviderAvailability;
   enabled: boolean;
+  /**
+   * Mandatory-provider invariant (server-enforced): when the enable switch
+   * is disabled in the UI, the truthful reason ("VedMoulya requires at
+   * least one active AI provider." for the last enabled provider's switch).
+   */
+  switchDisabledReason?: string;
   resourceType: string;
   freeToUse: boolean;
   health: { status: string; score: number; latencyMs: number; quotaUsedPercent: number };
@@ -179,6 +185,9 @@ export class ProviderExperienceService {
     }
     const prefs = prefsResult.data;
     const disabled = new Set(prefs.disabledProviderIds);
+    // The SINGLE platform catalog (EI-002) — also the universe the
+    // mandatory-provider invariant is evaluated against.
+    const catalogIds = marketplace.data.providers.map((provider) => provider.id);
 
     const providers: ProviderExperienceRow[] = marketplace.data.providers.map((provider) => {
       const models: ProviderModelExperience[] = provider.models.map((m) => ({
@@ -206,6 +215,7 @@ export class ProviderExperienceService {
         models,
         availability: deriveAvailability(provider, prefs),
         enabled: !disabled.has(provider.id),
+        switchDisabledReason: describeProviderSwitch(prefs, catalogIds, provider.id),
         resourceType: classification.resourceType,
         freeToUse: classification.freeToUse,
         health: {

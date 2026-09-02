@@ -58,6 +58,7 @@ function makeUser(
 function makeRepository(overrides: Record<string, unknown> = {}) {
   return {
     findByEmail: vi.fn(),
+    findByGoogleId: vi.fn().mockResolvedValue(null),
     findById: vi.fn(),
     save: vi.fn(),
     update: vi.fn(),
@@ -154,6 +155,136 @@ describe('AuthService', () => {
 
       const result = await service.signInWithGoogle('bad-code');
       expect(result.success).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
+    // ── Account linking / duplicate prevention (secure identity rules) ──
+    function stubGoogleProfile(profile: Record<string, unknown>): void {
+      const fetchMock = vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes('oauth2.googleapis.com/token')) {
+          return new Response(JSON.stringify({ access_token: 'google-access-token' }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify(profile), { status: 200 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+    }
+
+    it('links a Google identity into an existing verified password account WITHOUT creating a duplicate', async () => {
+      const repo = makeRepository();
+      const user = makeUser(); // verified email/password account
+      repo.findByEmail.mockResolvedValue(user);
+      const service = createService(repo);
+      stubGoogleProfile({
+        id: 'g-1',
+        email: 'test@example.com',
+        verified_email: true,
+        name: 'Test User',
+        given_name: 'Test',
+        family_name: 'User',
+      });
+
+      const result = await service.signInWithGoogle('good-code');
+
+      expect(result.success).toBe(true);
+      expect(result.session?.userId).toBe(user.id);
+      // Same identity resolved — never a second account.
+      expect(repo.save).not.toHaveBeenCalled();
+      expect(repo.update).toHaveBeenCalledWith(user);
+      expect(mockPublishLoggedIn).toHaveBeenCalledWith(user.id);
+      vi.unstubAllGlobals();
+    });
+
+    it('fills missing profile fields and verifies an unverified email when linking', async () => {
+      const repo = makeRepository();
+      const user = makeUser({ givenName: '', familyName: '', emailVerified: false });
+      repo.findByEmail.mockResolvedValue(user);
+      const service = createService(repo);
+      stubGoogleProfile({
+        id: 'g-2',
+        email: 'test@example.com',
+        verified_email: true,
+        name: 'Test User',
+        given_name: 'Test',
+        family_name: 'User',
+      });
+
+      const result = await service.signInWithGoogle('good-code');
+
+      expect(result.success).toBe(true);
+      expect(user.profile.givenName).toBe('Test');
+      expect(user.profile.familyName).toBe('User');
+      expect(user.status.emailVerified).toBe(true);
+      expect(repo.save).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('resolves the existing Google-provisioned account instead of duplicating it', async () => {
+      const repo = makeRepository();
+      const googleUser = makeUser({ passwordHash: '' }); // created by an earlier Google signup
+      repo.findByEmail.mockResolvedValue(googleUser);
+      const service = createService(repo);
+      stubGoogleProfile({
+        id: 'g-3',
+        email: 'test@example.com',
+        verified_email: true,
+        name: 'Test User',
+        given_name: 'Test',
+        family_name: 'User',
+      });
+
+      const result = await service.signInWithGoogle('good-code');
+
+      expect(result.success).toBe(true);
+      expect(result.session?.userId).toBe(googleUser.id);
+      expect(repo.save).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('REFUSES to link an unverified Google email into an existing account (takeover protection)', async () => {
+      const repo = makeRepository();
+      const user = makeUser();
+      repo.findByEmail.mockResolvedValue(user);
+      const service = createService(repo);
+      stubGoogleProfile({
+        id: 'g-4',
+        email: 'test@example.com',
+        verified_email: false,
+        name: 'Impostor',
+        given_name: 'Impostor',
+        family_name: 'Claim',
+      });
+
+      const result = await service.signInWithGoogle('good-code');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/did not verify/i);
+      // No linking, no enrichment, no session.
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.save).not.toHaveBeenCalled();
+      expect(mockPublishLoggedIn).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('REFUSES to create an account from an unverified Google email', async () => {
+      const repo = makeRepository();
+      repo.findByEmail.mockResolvedValue(null);
+      const service = createService(repo);
+      stubGoogleProfile({
+        id: 'g-5',
+        email: 'new@example.com',
+        verified_email: false,
+        name: 'New User',
+        given_name: 'New',
+        family_name: 'User',
+      });
+
+      const result = await service.signInWithGoogle('good-code');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/did not verify/i);
+      expect(repo.save).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
     });
   });

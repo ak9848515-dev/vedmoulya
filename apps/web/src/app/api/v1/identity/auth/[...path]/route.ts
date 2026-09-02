@@ -27,11 +27,18 @@ async function handle(request: NextRequest): Promise<Response> {
     // SPRINT-098B — Return a structured error instead of a bare 500 so the
     // client can display a meaningful message and we can diagnose Vercel
     // initialization failures from the response.
-    const message = error instanceof Error ? error.message : 'Auth service unavailable';
-    console.error('[auth-route] Initialization failed:', message);
+    //
+    // SECURITY — never expose internal error details (env var names,
+    // connection strings, infrastructure config) to the browser. Log the
+    // full error server-side; return a safe generic message to the client.
+    console.error('[auth-route] Initialization failed:',
+      error instanceof Error ? error.message : String(error));
     const body = JSON.stringify({
       success: false,
-      error: { code: 'AUTH_INIT_FAILED', message },
+      error: {
+        code: 'AUTH_INIT_FAILED',
+        message: 'Authentication service is temporarily unavailable. Please try again later.',
+      },
     });
     return withCorsHeaders(
       new Response(body, {

@@ -57,3 +57,33 @@ describe('auth app mount (base path routing)', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('auth app mount (Part 2 — AI-independent authentication)', () => {
+  const SAVED_AI = {
+    AI_OPENAI_API_KEY: process.env.AI_OPENAI_API_KEY,
+    AI_GOOGLE_API_KEY: process.env.AI_GOOGLE_API_KEY,
+    AI_DEEPSEEK_API_KEY: process.env.AI_DEEPSEEK_API_KEY,
+    AI_DEFAULT_PROVIDER: process.env.AI_DEFAULT_PROVIDER,
+  };
+
+  it('initializes AND serves the Google OAuth URL endpoint with NO AI keys set', async () => {
+    // Simulate the failing production configuration: infrastructure present,
+    // every AI provider key ABSENT. Authentication must still work.
+    delete process.env.AI_OPENAI_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_DEFAULT_PROVIDER;
+    try {
+      const app = await getAuthApp();
+      const res = await app.fetch(new Request(`${BASE}/google/url`));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { success: boolean; data: { url: string } };
+      expect(body.success).toBe(true);
+      expect(body.data.url).toContain('accounts.google.com');
+      const health = await app.fetch(new Request(`${BASE}/health`));
+      expect(health.status).toBe(200);
+    } finally {
+      Object.assign(process.env, SAVED_AI);
+    }
+  });
+});

@@ -155,3 +155,125 @@ describe('ProviderPreferencesService', () => {
     expect(currentProviderUser()).toBeUndefined();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MANDATORY-PROVIDER INVARIANT (server-enforced — never frontend-only)
+//   1. enabledProviders.length >= 1 for every completed account.
+//   2. The Primary Brain must always reference an ENABLED provider.
+//   3. The default Primary Brain is Google Gemini (DEFAULT_PRIMARY_BRAIN_PROVIDER_ID).
+// The universe of providers is the SINGLE platform catalog, supplied here as
+// the lazy catalog getter exactly like the gateway does.
+// ─────────────────────────────────────────────────────────────────────────────
+import {
+  MANDATORY_PROVIDER_ERROR,
+  PRIMARY_BRAIN_DISABLED_ERROR,
+  PRIMARY_BRAIN_DISABLE_BLOCKED_ERROR,
+} from '../ProviderPreferencesService.js';
+import {
+  DEFAULT_PRIMARY_BRAIN_PROVIDER_ID,
+  defaultProviderPreferences,
+} from '../../types/preferences-types.js';
+
+describe('ProviderPreferencesService — mandatory-provider invariant', () => {
+  const CATALOG = ['google', 'openai', 'deepseek'];
+
+  function svcWithCatalog(store = new InMemoryProviderPreferencesStore()) {
+    return new ProviderPreferencesService(store, async () => [...CATALOG]);
+  }
+
+  it('every completed account starts with Google Gemini enabled and as Primary Brain', async () => {
+    const svc = svcWithCatalog();
+    const defaults = defaultProviderPreferences('u1');
+    expect(defaults.preferredProviderId).toBe(DEFAULT_PRIMARY_BRAIN_PROVIDER_ID);
+    expect(defaults.preferredProviderId).toBe('google');
+    expect(defaults.disabledProviderIds).toEqual([]);
+    expect(await svc.getPrimaryBrainProviderId('u1')).toBe('google');
+    expect(await svc.isProviderEnabled('u1', 'google')).toBe(true);
+  });
+
+  it('the last enabled provider can never be disabled (zero enabled is unreachable)', async () => {
+    const store = new InMemoryProviderPreferencesStore();
+    const svc = svcWithCatalog(store);
+    // Disable two of three (allowed; brain stays google → must be moved first).
+    await svc.updatePreferences('u1', { preferredProviderId: 'deepseek' });
+    expect((await svc.setProviderEnabled('u1', 'google', false)).success).toBe(true);
+    expect((await svc.setProviderEnabled('u1', 'openai', false)).success).toBe(true);
+    // Only deepseek (the brain) remains — disabling it MUST be refused.
+    const blocked = await svc.setProviderEnabled('u1', 'deepseek', false);
+    expect(blocked.success).toBe(false);
+    expect(blocked.error).toBe(MANDATORY_PROVIDER_ERROR);
+    // The account still has exactly one enabled provider.
+    expect(await svc.getEnabledProviderIds('u1', CATALOG)).toEqual(['deepseek']);
+  });
+  it('a catalog with a single provider can never be disabled at all', async () => {
+    const svc = new ProviderPreferencesService(new InMemoryProviderPreferencesStore(), async () => [
+      'google',
+    ]);
+    const blocked = await svc.setProviderEnabled('u1', 'google', false);
+    expect(blocked.success).toBe(false);
+    expect(blocked.error).toBe(MANDATORY_PROVIDER_ERROR);
+    expect(await svc.isProviderEnabled('u1', 'google')).toBe(true);
+  });
+
+  it('the Primary Brain cannot be disabled until another enabled provider is selected first', async () => {
+    const svc = svcWithCatalog();
+    // Default brain is google: disabling it is blocked with actionable guidance.
+    const blocked = await svc.setProviderEnabled('u1', 'google', false);
+    expect(blocked.success).toBe(false);
+    expect(blocked.error).toBe(PRIMARY_BRAIN_DISABLE_BLOCKED_ERROR);
+    expect(await svc.isProviderEnabled('u1', 'google')).toBe(true);
+    // SAFE TRANSITION: select openai as Primary Brain, THEN disable google.
+    const brainChange = await svc.updatePreferences('u1', { preferredProviderId: 'openai' });
+    expect(brainChange.success).toBe(true);
+    const nowAllowed = await svc.setProviderEnabled('u1', 'google', false);
+    expect(nowAllowed.success).toBe(true);
+    expect(await svc.getPrimaryBrainProviderId('u1')).toBe('openai');
+    expect(await svc.isProviderEnabled('u1', 'google')).toBe(false);
+  });
+
+  it('a patch can never leave the Primary Brain disabled', async () => {
+    const svc = svcWithCatalog();
+    // Bulk patch disabling the effective brain → refused.
+    const patch = await svc.updatePreferences('u1', { disabledProviderIds: ['google'] });
+    expect(patch.success).toBe(false);
+    expect(patch.error).toBe(PRIMARY_BRAIN_DISABLED_ERROR);
+    // The SAME patch with an explicit enabled Primary Brain succeeds.
+    const safe = await svc.updatePreferences('u1', {
+      preferredProviderId: 'deepseek',
+      disabledProviderIds: ['google'],
+    });
+    expect(safe.success).toBe(true);
+    // A brain that is itself in the disabled set is refused.
+    const brainDisabled = await svc.updatePreferences('u1', {
+      disabledProviderIds: ['deepseek'],
+    });
+    expect(brainDisabled.success).toBe(false);
+    expect(brainDisabled.error).toBe(PRIMARY_BRAIN_DISABLED_ERROR);
+  });
+
+  it('changing the Primary Brain and toggling providers persists (survives restart/refresh)', async () => {
+    const store = new InMemoryProviderPreferencesStore();
+    const svc = svcWithCatalog(store);
+    await svc.updatePreferences('u1', { preferredProviderId: 'openai' });
+    await svc.setProviderEnabled('u1', 'google', false);
+    await svc.setProviderEnabled('u1', 'deepseek', false);
+
+    // A NEW service instance over the SAME store (deployment restart/session
+    // renewal) reads the identical durable state.
+    const rehydrated = svcWithCatalog(store);
+    expect(await rehydrated.getPrimaryBrainProviderId('u1')).toBe('openai');
+    expect(await rehydrated.getEnabledProviderIds('u1', CATALOG)).toEqual(['openai']);
+    const prefs = await rehydrated.getPreferences('u1');
+    expect(prefs.data?.preferredProviderId).toBe('openai');
+    expect(prefs.data?.disabledProviderIds).toEqual(['google', 'deepseek']);
+  });
+
+  it('a catalog read failure never corrupts invariant-free preference writes', async () => {
+    const svc = new ProviderPreferencesService(new InMemoryProviderPreferencesStore(), () => {
+      throw new Error('registry down');
+    });
+    const result = await svc.updatePreferences('u1', { budgetPolicy: 'never_paid' });
+    expect(result.success).toBe(true);
+    expect(result.data?.budgetPolicy).toBe('never_paid');
+  });
+});

@@ -180,14 +180,33 @@ export class AuthService extends BaseService {
         return { success: false, error: result.error ?? 'Google authentication failed' };
       }
 
-      const { email, givenName, familyName, name } = result.profile;
+      const { id: googleId, email, givenName, familyName, name, verifiedEmail } = result.profile;
 
-      // Find or create user
-      const userEmail = Email.create(email);
-      let user = await this.repository.findByEmail(userEmail);
+      // SECURITY — account-takeover protection: only a Google-VERIFIED email
+      // may establish or link a VedMoulya identity. Google attests ownership
+      // of verified addresses; an unverified one must never link into (or
+      // claim) an existing account.
+      if (!verifiedEmail) {
+        return {
+          success: false,
+          error:
+            'Google did not verify this email address. Verify the email with your Google account, or sign in with your email and password.',
+        };
+      }
+
+      // PART 14 — identity resolution order: a Google identity ALWAYS
+      // resolves to the same account via its stored google_id (stable even
+      // if the profile email changes on the Google side); otherwise the
+      // verified email resolves the same identity.
+      let user = await this.repository.findByGoogleId(googleId);
+      if (!user) {
+        user = await this.repository.findByEmail(Email.create(email));
+      }
 
       if (!user) {
-        // Auto-register new Google users
+        // PATH B — Google-first signup: auto-register from the verified
+        // Google profile (missing profile details are collected in
+        // onboarding, never by forcing the signup form).
         const factory = new UserFactory(this.repository);
         const { user: newUser } = await factory.createNewUser({
           email,
@@ -198,10 +217,43 @@ export class AuthService extends BaseService {
         });
 
         newUser.verifyEmail();
+        newUser.linkGoogleIdentity(googleId);
         await this.repository.save(newUser);
         user = newUser;
 
         this.logger.info('New user registered via Google', { email });
+      } else {
+        // ACCOUNT LINKING — duplicate prevention: an existing account with
+        // the same verified email is the SAME identity. Enrich it with the
+        // Google profile where fields are missing instead of creating a
+        // second user:
+        //   - PATH A (email/password signup → Google completion): the
+        //     password credential is preserved; Google's verified-email proof
+        //     authorizes the link.
+        //   - A Google-provisioned account (no password) gains any missing
+        //     profile fields.
+        const profile = user.profile;
+        if (
+          !profile.displayName.trim() ||
+          !profile.givenName?.trim() ||
+          !profile.familyName?.trim()
+        ) {
+          user.updateProfile(
+            profile.with({
+              displayName: profile.displayName.trim() ? profile.displayName : name,
+              givenName: profile.givenName?.trim() ? profile.givenName : givenName,
+              familyName: profile.familyName?.trim() ? profile.familyName : familyName,
+            }),
+          );
+        }
+        if (!user.status.emailVerified) {
+          user.verifyEmail();
+          this.logger.info('Email verified via Google identity link', { userId: user.id });
+        }
+        // Persist the Google link (idempotent; refuses a DIFFERENT second
+        // Google identity — domain-enforced takeover protection).
+        user.linkGoogleIdentity(googleId);
+        this.logger.info('Google identity linked to existing account', { userId: user.id });
       }
 
       // Check authentication status

@@ -20,7 +20,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button, Card, TextField } from '@vedmoulya/ui';
 import { Loader2, Mail, Lock, User, ShieldCheck, Sparkles, ArrowLeft } from 'lucide-react';
-import { signUpWithEmailAndPassword } from '../../auth/session-manager.js';
+import { signUpWithEmailAndPassword, beginGoogleSignIn } from '../../auth/session-manager.js';
+import { GoogleIcon } from '../login/GoogleIcon.js';
 import { useAuthHydrated, useAuthStore } from '../../stores/auth-store.js';
 
 // ── Client-side validation (mirrors the backend zod schema) ─────────────────
@@ -96,8 +97,20 @@ export default function SignUpPage(): React.JSX.Element {
   const [submitting, setSubmitting] = useState(false);
   // SPRINT-045 — production/staging sign-up requires email verification; when
   // the server responds with verificationRequired (no session issued), the
-  // page swaps to the "check your email" state instead of navigating on.
+  // page swaps to the account-completion state instead of navigating on.
   const [verificationSent, setVerificationSent] = useState(false);
+  // PART 3 PATH A — Google is the account-COMPLETION step: after the signup
+  // details are saved, the user confirms with Google. The Identity Service
+  // resolves the existing account by Google's verified email, links the
+  // Google identity (duplicate-free), issues the session, and the central
+  // first-login gate routes the user to onboarding. Email verification
+  // remains available as the alternative secure completion path.
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  // PART 3 PATH A — after the signup form is accepted, the user is required to
+  // complete the account with Google. This gate keeps authentication independent
+  // of any AI credential while making Google identity the completion step.
+  const [googleCompletion, setGoogleCompletion] = useState(false);
 
   // Resolved AT THE POINT OF USE (SPRINT-043E D1) — never cached in a
   // mount-time useMemo: the protected-route redirect can land here with the
@@ -148,12 +161,40 @@ export default function SignUpPage(): React.JSX.Element {
       );
       return;
     }
+    // PART 3 PATH A — Google is the account-COMPLETION step. The email/password
+    // signup provisions a (possibly provisional) identity; Google authentication
+    // is required to finish linking the account. So on success we do NOT
+    // navigate away — we transition to the Google-completion card. (When email
+    // verification is required in staging/production, the verification card
+    // remains the gate as before.)
     if (outcome.verificationRequired) {
       setSubmitting(false);
       setVerificationSent(true);
       return;
     }
-    router.replace(resolveNext());
+    setGoogleCompletion(true);
+  };
+
+  // PART 3 PATH A — complete the just-created account with Google. The
+  // Identity Service resolves the EXISTING account by Google's verified
+  // email, links the Google identity (no duplicate user), marks the email
+  // verified via Google's attestation and issues the session; the central
+  // onboarding gate then routes the user to first-login setup.
+  const handleGoogle = async (): Promise<void> => {
+    if (googleSubmitting) return;
+    setGoogleError(null);
+    setGoogleSubmitting(true);
+    const outcome = await beginGoogleSignIn(next);
+    if (!outcome.ok) {
+      setGoogleSubmitting(false);
+      setGoogleError(
+        outcome.error === 'offline'
+          ? 'You appear to be offline. Check your connection and try again.'
+          : outcome.error,
+      );
+      return;
+    }
+    // On success the browser navigates to Google — state stays 'google'.
   };
 
   return (
@@ -214,12 +255,46 @@ export default function SignUpPage(): React.JSX.Element {
             </div>
           </Card>
         )}
-        {!verificationSent && (
+        {/* PART 3 PATH A — Google account completion step (after signup form accepted) */}
+        {googleCompletion && (
+          <Card variant="standard" padding="lg" className="shadow-2xl text-center">
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
+                <ShieldCheck className="h-6 w-6 text-emerald-600" aria-hidden="true" />
+              </div>
+              <h2 className="text-[20px] font-heading font-bold text-gray-900">
+                Complete with Google
+              </h2>
+              <p className="text-[14px] leading-relaxed text-gray-600 max-w-sm">
+                Google authentication is required to finish activating your VedMoulya account. This
+                links your Google identity to your account and issues your secure session — no AI
+                setup is needed.
+              </p>
+              {googleError && (
+                <p className="text-[13px] text-[#EF4444]" role="alert">
+                  {googleError}
+                </p>
+              )}
+              <Button
+                variant="outline"
+                size="lg"
+                fullWidth
+                loading={googleSubmitting}
+                onClick={() => void handleGoogle()}
+                className="h-12 !rounded-[16px] border-[#E2E8F0]"
+              >
+                {googleSubmitting ? 'Connecting…' : 'Continue with Google'}
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {!verificationSent && !googleCompletion && (
           <Card variant="standard" padding="lg" className="shadow-2xl">
             {/* The explicit action/method make any PRE-HYDRATION or no-JS native
               submission a POST to /signup — credentials travel in the request
               body, never in the URL/query string/history (same hardening as the
-              /login form). Once React hydrates, handleSubmit's preventDefault()
+              /login form).  Once React hydrates, handleSubmit's preventDefault()
               stops native submission entirely. */}
             <form
               action="/signup"
@@ -324,6 +399,31 @@ export default function SignUpPage(): React.JSX.Element {
                   {formError}
                 </p>
               )}
+
+              {/* PART 3 PATH B — skip the form: Google is the sole required
+                  signup step. Google-provided profile information seeds the
+                  account; only any missing required profile details are
+                  collected later during onboarding (never AI credentials). */}
+              <div className="relative my-2">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-[#E2E8F0] dark:border-[#334155]" />
+                </div>
+                <span className="relative inline-flex px-2 text-[12px] text-[#94A3B8]">
+                  Or continue with Google
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                fullWidth
+                loading={googleSubmitting}
+                onClick={() => void handleGoogle()}
+                className="h-12 !rounded-[16px] border-[#E2E8F0]"
+              >
+                <GoogleIcon className="h-5 w-5 mr-2" />
+                {googleSubmitting ? 'Connecting…' : 'Continue with Google'}
+              </Button>
 
               <Button
                 type="submit"

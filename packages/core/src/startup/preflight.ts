@@ -125,8 +125,11 @@ export interface PreflightEngineOptions {
    * --skip-docker mode (used by scripts/startup.sh when the Docker daemon is
    * down): Docker/database/redis REACHABILITY checks become DEGRADED warnings
    * (never required) so startup can continue in a degraded state. Hard
-   * configuration checks (missing/loopback store URLs, missing build, missing
-   * AI keys) are NEVER softened — production correctness is preserved.
+   * configuration checks (missing/loopback store URLs, missing build) are
+   * NEVER softened — production correctness is preserved. AI provider keys
+   * are context-aware by design (AI-EXECUTION configuration, never an
+   * authentication prerequisite): absent keys report DEGRADED and never
+   * block startup in any mode.
    */
   softenInfrastructure?: boolean;
 }
@@ -283,24 +286,28 @@ export class PreflightEngine {
         continues:
           'The web server can start, but every AI-backed feature would fail with "no provider available".',
         howToFix:
-          'Set AI_DEFAULT_PROVIDER=openai or AI_DEFAULT_PROVIDER=deepseek (the two runtime-supported families).',
+          'Set AI_DEFAULT_PROVIDER=openai, AI_DEFAULT_PROVIDER=deepseek or AI_DEFAULT_PROVIDER=google (the runtime-supported families).',
         mode,
       };
     }
 
     const runtime = runtimeExecutionReady(env, runtimeMode, { aiEnabled });
-    if (strict && !runtime.ok) {
+    if (strict && !runtime.ok && !runtime.providers.includes('mock')) {
+      // No production AI provider is configured. This is a DEGRADED state, NOT
+      // a blocked one: authentication, onboarding and the AI Providers
+      // management screen work fully without an AI credential. Every AI-backed
+      // feature honestly abstains until a real provider key is configured.
       return {
         id: 'ai-configuration',
         label: 'AI configuration',
-        status: 'MISCONFIGURED',
-        required: true,
-        detail: 'No production AI provider is configured.',
-        why: `${runtime.reason} Production must never silently serve the deterministic mock.`,
+        status: 'DEGRADED',
+        required: false,
+        detail: 'No production AI provider is configured — AI execution is NOT READY.',
+        why: `${runtime.reason} Authentication is unaffected; production never silently serves the deterministic mock.`,
         continues:
-          'The web server can start, but every AI-backed feature will abstain/fail at runtime.',
+          'The service runs: sign-in, Google OAuth, onboarding and the AI Providers screen work. AI execution starts once a real provider key is set.',
         howToFix:
-          'Set AI_OPENAI_API_KEY or AI_DEEPSEEK_API_KEY (or, for a non-production-like environment, set AI_ENABLE_MOCK=true explicitly).',
+          'Set AI_OPENAI_API_KEY, AI_GOOGLE_API_KEY or AI_DEEPSEEK_API_KEY (or, for a non-production-like environment, set AI_ENABLE_MOCK=true explicitly).',
         mode,
       };
     }
@@ -325,7 +332,7 @@ export class PreflightEngine {
         id: 'ai-configuration',
         label: 'AI configuration',
         status: mockOnly ? 'DEGRADED' : 'READY',
-        required: true,
+        required: false,
         detail: mockOnly
           ? 'Deterministic mock provider explicitly enabled (AI_ENABLE_MOCK=true).'
           : 'A real AI provider key is configured (runtime registry).',
@@ -496,27 +503,32 @@ export class PreflightEngine {
 
   private checkProviderRegistry(mode: PreflightMode): PreflightCheck {
     const { env } = this.options.environment;
-    const strict = STRICT_MODES.has(mode);
     const aiEnabled = env.FF_AI_ASSISTANT_ENABLED !== 'false';
     const runtimeMode = toRuntimeMode(mode);
     const runtime = runtimeExecutionReady(env, runtimeMode, { aiEnabled });
     const states = readProviderRuntimeState(env, runtimeMode, { aiEnabled });
     const registered = states.filter((s) => s.registered);
     const ok = runtime.ok;
+    // Context-aware: a missing AI provider key means NO provider is registered
+    // (AI execution not ready) — this is DEGRADED, never a startup block.
+    // Authentication, onboarding and the AI Providers screen all work; AI
+    // features honestly abstain until a real key is configured. The provider
+    // registry check therefore never hard-blocks production on AI credentials.
     return {
       id: 'provider-registry',
       label: 'Provider registry',
-      status: ok ? 'READY' : 'BLOCKED',
-      required: strict,
+      status: ok ? 'READY' : 'DEGRADED',
+      required: false,
       detail: ok
         ? registered.length > 0
           ? `Runtime providers registered: ${registered.map((s) => `${s.family} (${s.status})`).join(', ')}.`
           : 'No provider registered (AI disabled).'
-        : 'No runtime provider would be registered.',
+        : 'No runtime provider would be registered — AI execution not ready.',
       why: 'registerPlatformProviders registers real adapters only when their runtime keys are present and, in development (or explicit production opt-in), the deterministic mock. Production with no key and no explicit mock never registers a provider.',
-      continues: 'Requests that need AI would fail with "no provider available".',
+      continues:
+        'Requests that need AI would fail with "no provider available"; authentication is unaffected.',
       howToFix:
-        'Set AI_OPENAI_API_KEY or AI_DEEPSEEK_API_KEY, or enable the deterministic mock explicitly with AI_ENABLE_MOCK=true in a non-production-like environment.',
+        'Set AI_OPENAI_API_KEY, AI_GOOGLE_API_KEY or AI_DEEPSEEK_API_KEY, or enable the deterministic mock explicitly with AI_ENABLE_MOCK=true in a non-production-like environment.',
       mode,
     };
   }

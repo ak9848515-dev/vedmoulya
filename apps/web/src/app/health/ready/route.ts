@@ -36,6 +36,8 @@
 //   - No credentials, tokens, API keys, or connection strings
 //   - Safe metadata only (latency, status, uptime)
 //   - No authentication required (this IS the readiness gate)
+//   - Error messages must not leak infrastructure config (env var names,
+//     connection strings, Redis/DB URLs, or internal details)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextResponse } from 'next/server';
@@ -63,6 +65,30 @@ async function ensureGateway(): Promise<void> {
     // Gateway construction failure — readiness will reflect this via the
     // database health probe below.
   }
+}
+
+/**
+ * Sanitize a database error message for client-facing responses.
+ * Strips env var names, connection strings, and infrastructure details
+ * while preserving actionable status information.
+ */
+function sanitizeDbError(error: string | undefined): string | undefined {
+  if (!error) return undefined;
+  // Collapse common infrastructure errors into safe, generic messages
+  if (/REDIS_URL|redis/i.test(error)) {
+    return 'Required infrastructure not configured';
+  }
+  if (/IDENTITY_DATABASE_URL|DATABASE_URL|database/i.test(error)) {
+    return 'Database connection unavailable';
+  }
+  if (/connection refused|ECONNREFUSED|ETIMEDOUT/i.test(error)) {
+    return 'Database unreachable';
+  }
+  if (/password authentication failed/i.test(error)) {
+    return 'Database authentication failed';
+  }
+  // For any other error, return a safe generic message
+  return 'Database health check failed';
 }
 
 export async function GET(): Promise<NextResponse> {
@@ -106,7 +132,13 @@ export async function GET(): Promise<NextResponse> {
     uptime: Date.now() - startupTime,
     checks: {
       gateway,
-      database: { status: dbStatus, latencyMs: dbLatencyMs, error: dbError },
+      database: {
+        status: dbStatus,
+        latencyMs: dbLatencyMs,
+        // SECURITY — sanitize error messages to never expose infrastructure
+        // config (env var names, connection strings, Redis/DB URLs) to clients.
+        error: isStrict ? sanitizeDbError(dbError) : dbError,
+      },
     },
   };
 

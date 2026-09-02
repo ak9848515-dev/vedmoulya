@@ -157,18 +157,20 @@ export function loadConfiguration(): Configuration {
         : process.env.GOOGLE_REDIRECT_URI?.trim() || undefined,
     },
     ai: {
-      // AI provider keys (PH-001/T2): the default provider's key is required in
-      // production/staging when the AI assistant is enabled; any key that IS set
-      // must be a real secret (no placeholders, no localhost).
-      // EPIC-019: anthropic/google keys remain OPTIONAL because those families
-      // have no runtime adapter (catalog-only); a set key is still validated as
-      // a real secret, but it never satisfies the production AI gate.
+      // AI provider keys are AI-EXECUTION configuration, never authentication
+      // prerequisites. Authentication (sign-in, sign-up, Google OAuth, session
+      // creation, onboarding) must initialize without any AI credential, so
+      // every AI key is OPTIONAL here. A key that IS set must still be a real
+      // secret (no placeholders, no localhost) — fail-fast on weak values is
+      // unchanged. The AI execution gate (validateProductionAIConfig + the
+      // provider runtime registry) separately enforces "a real provider must be
+      // configured before AI execution" without ever blocking authentication.
       openAiKey: requireProdSecret('AI_OPENAI_API_KEY', {
-        required: aiEnabled && defaultProvider === 'openai',
+        required: false,
         minLength: 32,
         example: 'sk-...',
         reason:
-          'Set AI_OPENAI_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
+          'AI_OPENAI_API_KEY is AI-execution configuration (OpenAI adapter registration). It is never required to authenticate.',
       }),
       anthropicKey: requireProdSecret('AI_ANTHROPIC_API_KEY', {
         required: false,
@@ -185,11 +187,11 @@ export function loadConfiguration(): Configuration {
           'Google Gemini is a runtime provider (SPRINT-049 — GoogleGeminiProvider via the Vercel AI SDK). Set AI_GOOGLE_API_KEY to register it; optional unless AI_DEFAULT_PROVIDER=google. Separate from Google OAuth.',
       }),
       deepseekKey: requireProdSecret('AI_DEEPSEEK_API_KEY', {
-        required: aiEnabled && defaultProvider === 'deepseek',
+        required: false,
         minLength: 32,
         example: 'sk-...',
         reason:
-          'Set AI_DEEPSEEK_API_KEY (or change AI_DEFAULT_PROVIDER / disable AI) when NODE_ENV=production.',
+          'AI_DEEPSEEK_API_KEY is AI-execution configuration (DeepSeek adapter registration). It is never required to authenticate.',
       }),
       defaultProvider,
       defaultProviderSupported: defaultProviderCheck.ok,

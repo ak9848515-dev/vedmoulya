@@ -1,8 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VedMoulya — Production AI Configuration Validation Tests
-// AI-RUNTIME-002 C-07 — production must fail fast on missing mandatory AI
-// configuration; development/test may use safe deterministic doubles; the
-// mock is NEVER silently used in production.
+// AI-RUNTIME-002 C-07 — CONTEXT-AWARE (auth decoupling): AI credentials are
+// AI-EXECUTION configuration, never an authentication prerequisite. Missing
+// optional AI configuration is REPORTED truthfully ({ ok: false, errors }) —
+// never thrown — so the gateway can construct and authentication works with
+// zero AI keys. The ONLY hard-fail is a genuine misconfiguration
+// (AI_DEFAULT_PROVIDER naming a catalog-only/invalid family). Development/
+// test may use safe deterministic doubles; the mock is NEVER silently used in
+// production.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, it, expect } from 'vitest';
@@ -50,14 +55,19 @@ describe('validateProductionAIConfig (C-07)', () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it('fails fast in production when the AI provider key and mock are both absent', () => {
+  it('reports AI execution NOT READY (no throw) when the AI provider key and mock are both absent', () => {
     cleanEnv();
     process.env.NODE_ENV = 'production';
     process.env.IDENTITY_DATABASE_URL = 'postgres://db:5432/vedmoulya';
     process.env.AI_TOOL_ALLOWLIST = 'echo,calculator';
-    expect(() => validateProductionAIConfig()).toThrow(
-      /A real AI provider key is required in production.*AI_OPENAI_API_KEY.*or AI_DEEPSEEK_API_KEY/i,
-    );
+    // CONTEXT-AWARE (auth decoupling): a missing OPTIONAL AI credential is a
+    // truthful reported state, never an exception — the gateway must be able
+    // to construct and authentication must work with zero AI keys.
+    expect(() => validateProductionAIConfig()).not.toThrow();
+    const result = validateProductionAIConfig();
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/No AI provider key is configured in production/i);
+    expect(result.errors.join(' ')).toMatch(/AI_OPENAI_API_KEY.*AI_GOOGLE_API_KEY/is);
   });
 
   it('accepts a DeepSeek key as the real production AI provider', () => {
@@ -105,22 +115,26 @@ describe('validateProductionAIConfig (C-07)', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('fails fast when the RAG database URL is missing in production', () => {
+  it('reports the missing RAG database URL as a truthful error (no throw — infra is validated by the config layer)', () => {
     cleanEnv();
     process.env.NODE_ENV = 'production';
     process.env.AI_OPENAI_API_KEY = 'sk-abcdefghijklmnopqrstuvwxyz123456';
     process.env.AI_TOOL_ALLOWLIST = 'echo,calculator';
-    expect(() => validateProductionAIConfig()).toThrow(
-      /IDENTITY_DATABASE_URL.*required in production/i,
-    );
+    expect(() => validateProductionAIConfig()).not.toThrow();
+    const result = validateProductionAIConfig();
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/IDENTITY_DATABASE_URL.*required in production/i);
   });
 
-  it('fails fast when the tool allowlist is not explicitly configured in production', () => {
+  it('reports an unconfigured tool allowlist as a truthful error (no throw — safe default deny-all)', () => {
     cleanEnv();
     process.env.NODE_ENV = 'production';
     process.env.AI_OPENAI_API_KEY = 'sk-abcdefghijklmnopqrstuvwxyz123456';
     process.env.IDENTITY_DATABASE_URL = 'postgres://db:5432/vedmoulya';
-    expect(() => validateProductionAIConfig()).toThrow(/AI_TOOL_ALLOWLIST/);
+    expect(() => validateProductionAIConfig()).not.toThrow();
+    const result = validateProductionAIConfig();
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/AI_TOOL_ALLOWLIST/);
   });
 
   it('reports the full configuration state snapshot', () => {
@@ -188,13 +202,17 @@ describe('validateProductionAIConfig — EPIC-019 provider truth', () => {
     expect(() => validateProductionAIConfig()).toThrow(/AI_DEFAULT_PROVIDER/);
   });
 
-  it('an Anthropic key alone does not satisfy the production AI gate', () => {
+  it('an Anthropic key alone does not satisfy the production AI gate (reported, never thrown)', () => {
     cleanEnv();
     fullProdEnv();
     process.env.AI_ANTHROPIC_API_KEY = 'sk-ant-abcdefghijklmnopqrstuvwxyz1234567890';
-    expect(() => validateProductionAIConfig()).toThrow(
-      /A real AI provider key is required in production/i,
-    );
+    // CONTEXT-AWARE (auth decoupling): a catalog-only key never counts as an
+    // execution path — reported truthfully as NOT READY, but it is a missing
+    // OPTIONAL credential, not a misconfiguration: no exception, auth works.
+    expect(() => validateProductionAIConfig()).not.toThrow();
+    const result = validateProductionAIConfig();
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/No AI provider key is configured in production/i);
   });
 
   it('accepts AI_DEFAULT_PROVIDER=deepseek with a configured DeepSeek key', () => {

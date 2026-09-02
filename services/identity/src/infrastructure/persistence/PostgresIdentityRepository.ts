@@ -136,6 +136,14 @@ export class PostgresIdentityRepository extends BaseRepository implements Identi
     return row ? this.rowToUser(row) : null;
   }
 
+  /** Find a user by their linked Google subject id (null when none) */
+  async findByGoogleId(googleId: string): Promise<User | null> {
+    const db = getDatabase();
+    const rows = await db.select().from(users).where(eq(users.googleId, googleId)).limit(1);
+    const row = rows[0];
+    return row ? this.rowToUser(row) : null;
+  }
+
   /** Save a new user (insert) */
   async save(user: User): Promise<void> {
     const db = getDatabase();
@@ -278,6 +286,8 @@ export class PostgresIdentityRepository extends BaseRepository implements Identi
       statusChangedAt: row.statusChangedAt ?? undefined,
       passwordHash: row.passwordHash,
       entityStatus: row.entityStatus as 'active' | 'inactive' | 'archived' | 'deleted',
+      googleId: row.googleId ?? null,
+      authProvider: (row.authProvider as 'email' | 'google' | undefined) ?? 'email',
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });
@@ -319,6 +329,8 @@ export class PostgresIdentityRepository extends BaseRepository implements Identi
       statusReason: user.status.reason ?? null,
       statusChangedAt: user.status.changedAt,
       entityStatus: user.entityStatus,
+      googleId: user.googleId,
+      authProvider: user.authProvider,
       passwordHash: user.passwordHash || '',
       passwordUpdatedAt: user.updatedAt,
       createdAt: user.createdAt,

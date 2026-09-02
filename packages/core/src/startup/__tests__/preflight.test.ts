@@ -105,7 +105,7 @@ describe('PreflightEngine — production mode', () => {
     expect(findCheck(report, 'production-build').status).toBe('READY');
   });
 
-  it('missing AI key blocks production (no silent mock) and provides the fix', () => {
+  it('missing AI key is DEGRADED — auth stays available, no silent mock (context-aware)', () => {
     const report = run(
       makeEnvironment({
         mode: 'production',
@@ -118,12 +118,21 @@ describe('PreflightEngine — production mode', () => {
         productionBuildExists: () => true,
       }),
     );
-    expect(report.blocked).toBe(true);
+    // CONTEXT-AWARE (auth decoupling): AI credentials are AI-EXECUTION
+    // configuration, never an authentication prerequisite. The service starts,
+    // authentication/sign-up/Google OAuth work, and every AI-backed feature
+    // honestly abstains until a real provider key is configured. Production
+    // still never silently serves the deterministic mock.
+    expect(report.blocked).toBe(false);
+    expect(report.ready).toBe(true);
     const ai = findCheck(report, 'ai-configuration');
-    expect(ai.status).toBe('MISCONFIGURED');
-    expect(ai.required).toBe(true);
+    expect(ai.status).toBe('DEGRADED');
+    expect(ai.required).toBe(false);
+    expect(ai.detail).toMatch(/NOT READY/i);
     expect(ai.howToFix).toContain('AI_OPENAI_API_KEY');
-    expect(findCheck(report, 'provider-registry').status).toBe('BLOCKED');
+    const registry = findCheck(report, 'provider-registry');
+    expect(registry.status).toBe('DEGRADED');
+    expect(registry.required).toBe(false);
   });
 
   it('AI_DEEPSEEK_API_KEY is accepted as a real production provider (READY, AI_DEFAULT_PROVIDER=deepseek)', () => {
@@ -258,7 +267,7 @@ describe('PreflightEngine — required flags per mode (from the actual report)',
     expect(required).toEqual(['authentication', 'environment']);
   });
 
-  it('production requires every startup dependency including docker', () => {
+  it('production requires every infrastructure dependency — AI checks are context-aware, never auth prerequisites', () => {
     const report = run(
       makeEnvironment({
         mode: 'production',
@@ -277,16 +286,18 @@ describe('PreflightEngine — required flags per mode (from the actual report)',
       'authentication',
       'database',
       'redis',
-      'ai-configuration',
-      'provider-registry',
       'production-build',
       'docker',
     ]) {
       expect(findCheck(report, id).required).toBe(true);
     }
+    // CONTEXT-AWARE (auth decoupling) — AI checks report truthfully but never
+    // gate startup: authentication must initialize without any AI credential.
+    expect(findCheck(report, 'ai-configuration').required).toBe(false);
+    expect(findCheck(report, 'provider-registry').required).toBe(false);
   });
 
-  it('missing DeepSeek key with AI_DEFAULT_PROVIDER=deepseek blocks production (no silent mock)', () => {
+  it('missing DeepSeek key with AI_DEFAULT_PROVIDER=deepseek is DEGRADED — service runs, AI abstains', () => {
     const report = run(
       makeEnvironment({
         mode: 'production',
@@ -299,10 +310,16 @@ describe('PreflightEngine — required flags per mode (from the actual report)',
         productionBuildExists: () => true,
       }),
     );
-    expect(report.blocked).toBe(true);
-    expect(findCheck(report, 'ai-configuration').status).toBe('MISCONFIGURED');
-    expect(findCheck(report, 'ai-configuration').howToFix).toContain('AI_DEEPSEEK_API_KEY');
-    expect(findCheck(report, 'provider-registry').status).toBe('BLOCKED');
+    // CONTEXT-AWARE (auth decoupling): the declared default names a real
+    // runtime family, but its credential is absent — AI execution is honestly
+    // NOT READY (DEGRADED) while authentication and the rest of the service
+    // keep working. No silent mock: nothing is registered.
+    expect(report.blocked).toBe(false);
+    const ai = findCheck(report, 'ai-configuration');
+    expect(ai.status).toBe('DEGRADED');
+    expect(ai.required).toBe(false);
+    expect(ai.howToFix).toContain('AI_DEEPSEEK_API_KEY');
+    expect(findCheck(report, 'provider-registry').status).toBe('DEGRADED');
   });
 });
 
@@ -395,7 +412,7 @@ describe('PreflightEngine — --skip-docker softening (startup continues DEGRADE
     }
   });
 
-  it('--skip-docker softens REACHABILITY only — build, AI key and store-URL checks stay hard', () => {
+  it('--skip-docker softens REACHABILITY only — build and store-URL checks stay hard (AI degrades, never blocks)', () => {
     const report = new PreflightEngine({
       environment: makeEnvironment({
         mode: 'production',
@@ -407,7 +424,10 @@ describe('PreflightEngine — --skip-docker softening (startup continues DEGRADE
     }).run();
     expect(report.blocked).toBe(true);
     expect(findCheck(report, 'production-build').status).toBe('BLOCKED');
-    expect(findCheck(report, 'ai-configuration').status).toBe('MISCONFIGURED');
+    // CONTEXT-AWARE (auth decoupling): an absent AI key is DEGRADED (required:
+    // false), never a blocker — it must not add to report.blocked.
+    expect(findCheck(report, 'ai-configuration').status).toBe('DEGRADED');
+    expect(findCheck(report, 'ai-configuration').required).toBe(false);
     expect(findCheck(report, 'database').status).toBe('MISCONFIGURED');
     // Softened infra checks are never required — they must not add blockers.
     expect(findCheck(report, 'docker').required).toBe(false);
@@ -531,7 +551,7 @@ describe('PreflightEngine — EPIC-019 provider truth scenarios', () => {
     expect(report.blocked).toBe(true);
   });
 
-  it('an anthropic key ALONE never satisfies production AI (catalog only)', () => {
+  it('an anthropic key ALONE never satisfies production AI (catalog only) — DEGRADED, never blocking', () => {
     const report = run(
       makeEnvironment({
         mode: 'production',
@@ -540,9 +560,14 @@ describe('PreflightEngine — EPIC-019 provider truth scenarios', () => {
         productionBuildExists: () => true,
       }),
     );
-    expect(findCheck(report, 'ai-configuration').status).toBe('MISCONFIGURED');
-    expect(findCheck(report, 'provider-registry').status).toBe('BLOCKED');
-    expect(report.blocked).toBe(true);
+    // CONTEXT-AWARE (auth decoupling): a catalog-only key never counts as an
+    // execution path (truthful DEGRADED, nothing registered), but it is a
+    // missing OPTIONAL credential — not a startup blocker. Authentication
+    // stays fully available.
+    expect(findCheck(report, 'ai-configuration').status).toBe('DEGRADED');
+    expect(findCheck(report, 'ai-configuration').required).toBe(false);
+    expect(findCheck(report, 'provider-registry').status).toBe('DEGRADED');
+    expect(report.blocked).toBe(false);
   });
 
   it('configured DeepSeek as the declared default is READY in production', () => {
@@ -562,7 +587,7 @@ describe('PreflightEngine — EPIC-019 provider truth scenarios', () => {
     expect(report.ready).toBe(true);
   });
 
-  it('production with NO real provider and NO mock opt-in stays blocked (no silent mock)', () => {
+  it('production with NO real provider and NO mock opt-in never registers a provider (no silent mock) — service still runs', () => {
     const report = run(
       makeEnvironment({
         mode: 'production',
@@ -571,8 +596,18 @@ describe('PreflightEngine — EPIC-019 provider truth scenarios', () => {
         productionBuildExists: () => true,
       }),
     );
-    expect(findCheck(report, 'ai-configuration').status).toBe('MISCONFIGURED');
-    expect(findCheck(report, 'provider-registry').status).toBe('BLOCKED');
-    expect(report.blocked).toBe(true);
+    // CONTEXT-AWARE (auth decoupling): with zero AI credentials the provider
+    // registry stays EMPTY (production never silently serves the deterministic
+    // mock) and AI execution is truthfully NOT READY — but this is a missing
+    // optional credential, not a misconfiguration: authentication and account
+    // management remain fully available.
+    expect(findCheck(report, 'ai-configuration').status).toBe('DEGRADED');
+    expect(findCheck(report, 'ai-configuration').required).toBe(false);
+    expect(findCheck(report, 'provider-registry').status).toBe('DEGRADED');
+    expect(findCheck(report, 'provider-registry').detail).toMatch(
+      /No runtime provider would be registered/,
+    );
+    expect(report.blocked).toBe(false);
+    expect(report.ready).toBe(true);
   });
 });

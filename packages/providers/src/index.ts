@@ -129,10 +129,17 @@ export type {
 export {
   DEFAULT_BUDGET_POLICY,
   DEFAULT_MONTHLY_TOKEN_BUDGET,
+  DEFAULT_PRIMARY_BRAIN_PROVIDER_ID,
   defaultProviderPreferences,
 } from './types/preferences-types.js';
 export type { ProviderPreferencesStore } from './domain/preferences/ProviderPreferencesStore.js';
-export { ProviderPreferencesService } from './application/ProviderPreferencesService.js';
+export {
+  MANDATORY_PROVIDER_ERROR,
+  PRIMARY_BRAIN_DISABLE_BLOCKED_ERROR,
+  PRIMARY_BRAIN_DISABLED_ERROR,
+  ProviderPreferencesService,
+  describeProviderSwitch,
+} from './application/ProviderPreferencesService.js';
 export type { ProviderPreferencesResult } from './application/ProviderPreferencesService.js';
 export { runWithProviderUser, currentProviderUser } from './application/request-context.js';
 

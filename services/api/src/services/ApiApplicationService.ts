@@ -902,7 +902,15 @@ export class ApiApplicationService {
     //    user's enabled providers. In-memory store is the hermetic default;
     //    production can inject a Postgres-backed store via options.
     const preferencesStore = new InMemoryProviderPreferencesStore();
-    this.preferencesService = new ProviderPreferencesService(preferencesStore);
+    // MANDATORY-PROVIDER INVARIANT (server-enforced): the preferences
+    // service validates every enable/disable/primary-brain change against
+    // the SINGLE platform catalog (EI-002) so an account can never reach
+    // zero enabled providers or a disabled Primary Brain. The catalog
+    // getter is lazy — this.providers is finalized right below.
+    this.preferencesService = new ProviderPreferencesService(preferencesStore, async () => {
+      const marketplace = await this.providers.getMarketplace();
+      return (marketplace.data?.providers ?? []).map((p) => p.id);
+    });
 
     // ── EPIC-012B — Provider Intelligence cache ─────────────────────
     //    Bounded in-memory cache of refresh results (profiles + staleness).

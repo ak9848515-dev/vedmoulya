@@ -25,6 +25,8 @@ import {
   Wallet,
   TrendingUp,
   ArrowRight,
+  Star,
+  AlertCircle,
 } from 'lucide-react';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
@@ -428,6 +430,9 @@ function ProviderExperienceView({
   const setEnabledMutation = useSetProviderEnabled();
   const setPrefsMutation = useSetProviderPreferences();
   const [updatingProvider, setUpdatingProvider] = useState<string | null>(null);
+  // MANDATORY-PROVIDER INVARIANT (PART 8) — the server refuses unsafe
+  // enable/disable transitions; its reason is surfaced here verbatim.
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   // EPIC-019 — runtime truth per family (CONFIGURED / NOT_CONFIGURED /
   // UNSUPPORTED_RUNTIME / MOCK / DISABLED / ERROR) from the same registry the
@@ -441,10 +446,13 @@ function ProviderExperienceView({
       setUpdatingProvider(providerId);
       try {
         await setEnabledMutation.mutateAsync({ userId, providerId, enabled });
+        setToggleError(null);
         // Re-fetch to update the view.
         void refetch();
-      } catch {
-        // Error handled by mutation.
+      } catch (error) {
+        // Server-enforced invariant (e.g. "VedMoulya requires at least one
+        // active AI provider.") or a transient failure — show the reason.
+        setToggleError(error instanceof Error ? error.message : 'Unable to update provider.');
       } finally {
         setUpdatingProvider(null);
       }
@@ -460,9 +468,29 @@ function ProviderExperienceView({
           preferredProviderId: modelId ? providerId : null,
           preferredModelId: modelId ?? null,
         });
+        setToggleError(null);
         void refetch();
-      } catch {
-        // Error handled by mutation.
+      } catch (error) {
+        setToggleError(error instanceof Error ? error.message : 'Unable to update preferences.');
+      }
+    },
+    [userId, setPrefsMutation, refetch],
+  );
+
+  // PART 8 — change Primary Brain. The server enforces that the new Primary
+  // Brain must be enabled; an action on a disabled provider is refused.
+  const handleSetPrimaryBrain = useCallback(
+    async (providerId: string) => {
+      try {
+        await setPrefsMutation.mutateAsync({
+          userId,
+          preferredProviderId: providerId,
+          preferredModelId: null,
+        });
+        setToggleError(null);
+        void refetch();
+      } catch (error) {
+        setToggleError(error instanceof Error ? error.message : 'Unable to set Primary Brain.');
       }
     },
     [userId, setPrefsMutation, refetch],
@@ -489,7 +517,7 @@ function ProviderExperienceView({
     );
   }
 
-  const { providers, usage } = data;
+  const { providers, usage, preferences } = data;
 
   return (
     <div className="space-y-4">
@@ -502,6 +530,17 @@ function ProviderExperienceView({
         aiCalls={usage.aiCalls}
         onClick={onUsageClick}
       />
+
+      {/* ── Server-enforced invariant reason (PART 8) ──────────────────── */}
+      {toggleError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5 dark:border-[#92400E] dark:bg-[#451A03]"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#B45309] dark:text-[#FBBF24]" />
+          <p className="text-[13px] text-[#92400E] dark:text-[#FCD34D]">{toggleError}</p>
+        </div>
+      )}
 
       {/* ── Provider rows ──────────────────────────────────────────────── */}
       <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] overflow-hidden">
@@ -572,6 +611,25 @@ function ProviderExperienceView({
                     <span className="text-[11px] text-[#94A3B8]">
                       {FAMILY_LABELS[provider.family] ?? provider.family}
                     </span>
+                    {/* PART 7 — Primary Brain indicator (user state, never a
+                        global default). Assigned automatically to Google
+                        Gemini for new accounts; changeable here. */}
+                    {preferences.preferredProviderId === provider.providerId ? (
+                      <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-[#FFFBEB] px-2 py-0.5 text-[10px] font-semibold text-[#B45309] dark:bg-[#422006] dark:text-[#FBBF24]">
+                        <Star className="h-3 w-3" aria-hidden="true" />
+                        Primary Brain
+                      </span>
+                    ) : provider.enabled && !catalogOnly ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleSetPrimaryBrain(provider.providerId)}
+                        disabled={updatingProvider === provider.providerId}
+                        className="ml-1.5 rounded-full bg-[#EFF6FF] px-2 py-0.5 text-[10px] font-semibold text-[#2B5FD9] hover:bg-[#DBEAFE] dark:bg-[#1E3A8A]/30 dark:text-[#6B8FEF] transition-colors"
+                        title="Set as Primary Brain"
+                      >
+                        Set as Primary
+                      </button>
+                    ) : null}
                     {runtime && (
                       <RuntimeTruthBadge status={runtime.status} reason={runtime.reason} />
                     )}
@@ -597,14 +655,18 @@ function ProviderExperienceView({
                 <AvailabilityIndicator availability={provider.availability} />
               </div>
 
-              {/* Enable/Disable toggle — disabled for catalog-only families
-                  (no runtime adapter exists; enabling would be a lie). */}
+              {/* Enable/Disable toggle — the server-enforced mandatory-
+                  provider invariant disables the switch when flipping it
+                  would leave the account with zero enabled providers or a
+                  disabled Primary Brain; the reason is shown as the tooltip
+                  (and catalog-only families can never be enabled at all). */}
               <div
                 className="flex items-center justify-end"
                 title={
-                  catalogOnly
+                  provider.switchDisabledReason ??
+                  (catalogOnly
                     ? 'Catalog only — no runtime adapter exists for this provider.'
-                    : undefined
+                    : undefined)
                 }
               >
                 <Switch
@@ -612,7 +674,11 @@ function ProviderExperienceView({
                   onCheckedChange={(checked) => {
                     void handleToggle(provider.providerId, checked);
                   }}
-                  disabled={updatingProvider === provider.providerId || catalogOnly}
+                  disabled={
+                    updatingProvider === provider.providerId ||
+                    catalogOnly ||
+                    Boolean(provider.switchDisabledReason)
+                  }
                   aria-label={`${provider.enabled ? 'Disable' : 'Enable'} ${provider.name}`}
                 />
               </div>

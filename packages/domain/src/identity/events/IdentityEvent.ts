@@ -14,6 +14,7 @@ export type IdentityEventType =
   | 'identity.user.preferences.updated'
   | 'identity.user.email.changed'
   | 'identity.user.email.verified'
+  | 'identity.user.google.linked'
   | 'identity.user.settings.updated'
   | 'identity.user.logged_in'
   | 'identity.user.logged_out'

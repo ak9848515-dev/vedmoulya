@@ -133,3 +133,79 @@ describe('ProviderPreferencesService — enable/disable switch', () => {
     expect(defaultProviderPreferences('user-b').userId).toBe('user-b');
   });
 });
+
+// MANDATORY-PROVIDER INVARIANT (Part 8) + Gemini auto-Primary Brain (Part 6)
+// These tests supply a catalog so the server-enforced invariants are evaluated.
+const CATALOG = ['google', 'openai', 'deepseek'];
+const svcCatalog = (store = new InMemoryProviderPreferencesStore()): ProviderPreferencesService =>
+  new ProviderPreferencesService(store, async () => [...CATALOG]);
+
+describe('ProviderPreferencesService — Gemini auto Primary Brain (Part 6)', () => {
+  it('every new account defaults to Google Gemini as Primary Brain', async () => {
+    const prefs = await svcCatalog().getPreferences('u1');
+    expect(prefs.data?.preferredProviderId).toBe('google');
+    expect(prefs.data?.disabledProviderIds).toEqual([]);
+    expect(defaultProviderPreferences('u1').preferredProviderId).toBe('google');
+  });
+
+  it('the catalog default IS a real registered provider (enables the invariant)', () => {
+    expect(CATALOG).toContain('google');
+  });
+});
+
+describe('ProviderPreferencesService — mandatory one-provider invariant (Part 8)', () => {
+  it('cannot disable the only enabled provider', async () => {
+    const store = new InMemoryProviderPreferencesStore();
+    const service = svcCatalog(store);
+    // Defaults: all enabled, Primary = google. Disabling google leaves only
+    // openai/deepseek enabled — that's allowed (invariant: >=1 enabled). The
+    // LAST enabled provider is what must be protected. Disable openai+deepseek
+    // first so google is the sole enabler, then try to disable google.
+    await service.setProviderEnabled('u1', 'openai', false);
+    await service.setProviderEnabled('u1', 'deepseek', false);
+    const attempt = await service.setProviderEnabled('u1', 'google', false);
+    expect(attempt.success).toBe(false);
+    expect(attempt.error).toMatch(/at least one active AI provider/i);
+    expect(await service.isProviderEnabled('u1', 'google')).toBe(true);
+  });
+
+  it('cannot disable the current Primary Brain while it remains enabled-only', async () => {
+    const store = new InMemoryProviderPreferencesStore();
+    const service = svcCatalog(store);
+    // google is Primary Brain (default) and currently the only "enabled" provider
+    // in the sense that disabling it would make the brain disabled.
+    const attempt = await service.setProviderEnabled('u1', 'google', false);
+    expect(attempt.success).toBe(false);
+    expect(attempt.error).toMatch(/Primary Brain/i);
+  });
+
+  it('can disable the Primary Brain only after moving Primary Brain elsewhere (enabled)', async () => {
+    const store = new InMemoryProviderPreferencesStore();
+    const service = svcCatalog(store);
+    // Move Primary Brain to another enabled provider first.
+    const moved = await service.updatePreferences('u1', { preferredProviderId: 'openai' });
+    expect(moved.success).toBe(true);
+    // Now disabling google is allowed (it is no longer the effective brain).
+    const attempt = await service.setProviderEnabled('u1', 'google', false);
+    expect(attempt.success).toBe(true);
+    expect(await service.isProviderEnabled('u1', 'google')).toBe(false);
+  });
+
+  it('cannot set Primary Brain to a disabled provider', async () => {
+    const store = new InMemoryProviderPreferencesStore();
+    const service = svcCatalog(store);
+    // Disable openai first.
+    await service.setProviderEnabled('u1', 'openai', false);
+    const attempt = await service.updatePreferences('u1', { preferredProviderId: 'openai' });
+    expect(attempt.success).toBe(false);
+    expect(attempt.error).toMatch(/primary brain must be an enabled provider/i);
+  });
+
+  it('changing the Primary Brain persists and survives reload', async () => {
+    const store = new InMemoryProviderPreferencesStore();
+    const service = svcCatalog(store);
+    await service.updatePreferences('u1', { preferredProviderId: 'deepseek' });
+    const reloaded = await service.getPreferences('u1');
+    expect(reloaded.data?.preferredProviderId).toBe('deepseek');
+  });
+});

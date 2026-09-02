@@ -65,6 +65,10 @@ export interface UserReconstructionParams {
   entityStatus: EntityStatus;
   passwordHash?: string;
   role?: string;
+  /** Linked Google subject id (null/undefined when the account has no link). */
+  googleId?: string | null;
+  /** How this account authenticates ('email' password or 'google' OAuth). */
+  authProvider?: 'email' | 'google';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -173,6 +177,8 @@ export class UserFactory {
       passwordHash: params.passwordHash,
       role: params.role ? Role.from(params.role) : undefined,
       entityStatus: params.entityStatus,
+      googleId: params.googleId ?? null,
+      authProvider: params.authProvider,
       createdAt: params.createdAt,
       updatedAt: params.updatedAt,
     });

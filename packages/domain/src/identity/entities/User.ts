@@ -31,6 +31,8 @@ export class User {
   private _updatedAt: Date;
   private readonly _events: IdentityEvent[] = [];
   private readonly _passwordHash: string;
+  private _googleId: string | null;
+  private _authProvider: 'email' | 'google';
 
   constructor(props: {
     id: UserId;
@@ -44,6 +46,8 @@ export class User {
     entityStatus?: EntityStatus;
     createdAt?: Date;
     updatedAt?: Date;
+    googleId?: string | null;
+    authProvider?: 'email' | 'google';
   }) {
     this._id = props.id;
     this._email = props.email;
@@ -56,6 +60,8 @@ export class User {
     this._entityStatus = props.entityStatus ?? 'active';
     this._createdAt = props.createdAt ?? new Date();
     this._updatedAt = props.updatedAt ?? new Date();
+    this._googleId = props.googleId ?? null;
+    this._authProvider = props.authProvider ?? (props.googleId ? 'google' : 'email');
   }
 
   // ── Getters ─────────────────────────────────────────────────────────────
@@ -92,6 +98,18 @@ export class User {
   }
   get updatedAt(): Date {
     return this._updatedAt;
+  }
+  /** The linked Google subject id (null when the account has no Google link). */
+  get googleId(): string | null {
+    return this._googleId;
+  }
+  /** How this account authenticates: 'email' (password) or 'google' (OAuth). */
+  get authProvider(): 'email' | 'google' {
+    return this._authProvider;
+  }
+  /** True when a Google identity is linked to this account. */
+  hasGoogleIdentity(): boolean {
+    return this._googleId !== null;
   }
 
   /** Drain and return all pending domain events */
@@ -207,6 +225,29 @@ export class User {
   recordLogin(): void {
     this._events.push({
       type: 'identity.user.logged_in',
+      userId: this._id,
+      timestamp: new Date(),
+      data: {},
+    });
+  }
+
+  /**
+   * Securely link a Google identity to this account (account linking).
+   * The caller (AuthService) owns the ownership proof: linking happens ONLY
+   * after Google has verified the profile email and the account is not
+   * already linked to a DIFFERENT Google subject. Idempotent for re-linking
+   * the same identity; refuses a second, different Google identity.
+   */
+  linkGoogleIdentity(googleId: string): void {
+    if (this._googleId === googleId) return;
+    if (this._googleId !== null) {
+      throw new Error('Account is already linked to a different Google identity');
+    }
+    this._googleId = googleId;
+    this._authProvider = 'google';
+    this._updatedAt = new Date();
+    this._events.push({
+      type: 'identity.user.google.linked',
       userId: this._id,
       timestamp: new Date(),
       data: {},

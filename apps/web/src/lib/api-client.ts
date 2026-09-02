@@ -144,6 +144,8 @@ interface ProviderExperienceViewDTO {
     models: Array<{ id: string; name: string; capabilities: string[] }>;
     availability: 'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE' | 'LOCAL' | 'UNKNOWN';
     enabled: boolean;
+    /** Present when the mandatory-provider invariant forbids a switch flip. */
+    switchDisabledReason?: string;
     resourceType: string;
     freeToUse: boolean;
     health: { status: string; score: number; latencyMs: number; quotaUsedPercent: number };

@@ -21,6 +21,13 @@ export type BudgetPolicy = 'never_paid' | 'ask_before_paid' | 'allow_within_budg
 
 export const DEFAULT_BUDGET_POLICY: BudgetPolicy = 'ask_before_paid';
 
+/**
+ * The initial Primary Brain for every completed VedMoulya account:
+ * Google Gemini (the `google` provider in the platform catalog).
+ * User/domain state — NOT the runtime AI_DEFAULT_PROVIDER.
+ */
+export const DEFAULT_PRIMARY_BRAIN_PROVIDER_ID = 'google';
+
 /** Default monthly token budget used for the aggregate usage indicator. */
 export const DEFAULT_MONTHLY_TOKEN_BUDGET = 1_000_000;
 
@@ -68,6 +75,12 @@ export function defaultProviderPreferences(userId: string): ProviderPreferences 
   return {
     userId,
     disabledProviderIds: [],
+    // PRIMARY BRAIN DEFAULT (context-aware onboarding): every VedMoulya
+    // account starts with Google Gemini as its Primary Brain — assigned
+    // automatically by the domain layer, never through a setup screen. This
+    // is USER state (persisted with the record on first write); it must never
+    // be confused with the runtime/platform AI_DEFAULT_PROVIDER.
+    preferredProviderId: DEFAULT_PRIMARY_BRAIN_PROVIDER_ID,
     budgetPolicy: DEFAULT_BUDGET_POLICY,
     budgets: { monthlyTokenBudget: DEFAULT_MONTHLY_TOKEN_BUDGET },
     updatedAt: new Date().toISOString(),

@@ -115,6 +115,14 @@ export class InMemoryIdentityRepository implements IdentityRepository {
     return null;
   }
 
+  /** Find a user by their linked Google subject id (null when none). */
+  async findByGoogleId(googleId: string): Promise<User | null> {
+    for (const user of this.users.values()) {
+      if (user.googleId === googleId) return user;
+    }
+    return null;
+  }
+
   async save(user: User): Promise<void> {
     this.users.set(entityId(user), user);
   }

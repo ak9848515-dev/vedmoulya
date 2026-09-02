@@ -1,13 +1,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VedMoulya — API Gateway: Production AI Configuration Validation
-// AI-RUNTIME-002 C-07 — production must explicitly configure every
-// environment-dependent AI runtime setting and FAIL FAST on missing
-// mandatory configuration. Development/test may use safe deterministic
-// doubles; production must NEVER silently serve dev mocks.
+// AI-RUNTIME-002 C-07 — the AI EXECUTION configuration surface.
 //
-// This module validates the AI runtime configuration surface at gateway
-// startup. It never reads secrets itself — it only checks presence/policy
-// and lets the @vedmoulya/core secret validator enforce strength.
+// CONTEXT-AWARE (auth decoupling): authentication and the gateway's service
+// construction must NEVER be blocked solely because an AI provider credential
+// is absent. This module therefore:
+//   1. HARD-FAILS only on genuine AI misconfiguration (AI_DEFAULT_PROVIDER
+//      naming a catalog-only family that has no runtime adapter);
+//   2. REPORTS a truthful AI execution state (ok/errors) for missing optional
+//      AI credentials and tuning — the service starts, authentication works,
+//      and every AI-backed feature abstains/fails at runtime with the honest
+//      "no provider configured" state. Production NEVER silently serves the
+//      deterministic mock (registerPlatformProviders enforces that).
+//
+// It never reads secrets itself — it only checks presence/policy and lets the
+// @vedmoulya/core secret validator enforce strength.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -24,6 +31,8 @@ export interface ProductionAIConfigState {
   openAiKeyPresent: boolean;
   /** DeepSeek key present AND runtime-adapter supported. */
   deepSeekKeyPresent: boolean;
+  /** Google Gemini key present AND runtime-adapter supported (SPRINT-049). */
+  googleKeyPresent: boolean;
   /** AI_DEFAULT_PROVIDER value (default 'openai'). */
   defaultProvider: string;
   /** AI_DEFAULT_PROVIDER names a family with a real adapter (EPIC-019). */
@@ -64,12 +73,14 @@ export function readProductionAIConfigState(): ProductionAIConfigState {
   const states = readProviderRuntimeState(process.env, runtimeMode);
   const openAi = states.find((s) => s.family === 'openai');
   const deepSeek = states.find((s) => s.family === 'deepseek');
+  const google = states.find((s) => s.family === 'google');
   const defaultProviderCheck = validateDefaultProvider(process.env, runtimeMode);
   return {
     env,
     strict,
     openAiKeyPresent: openAi?.status === 'CONFIGURED',
     deepSeekKeyPresent: deepSeek?.status === 'CONFIGURED',
+    googleKeyPresent: google?.status === 'CONFIGURED',
     defaultProvider: (process.env.AI_DEFAULT_PROVIDER ?? 'openai').trim(),
     defaultProviderSupported: defaultProviderCheck.ok,
     mockExplicitlyEnabled: process.env.AI_ENABLE_MOCK === 'true',
@@ -92,9 +103,18 @@ export interface ProductionAIValidationResult {
 }
 
 /**
- * Fail-fast validation of the mandatory production AI configuration.
- * Throws EnvironmentError with every missing/invalid setting when strict.
- * Never throws in development/test (safe deterministic doubles allowed).
+ * Context-aware validation of the production AI execution surface.
+ *
+ * HARD FAIL (throws EnvironmentError in production/staging):
+ *   - AI_DEFAULT_PROVIDER names a catalog-only family (no runtime adapter).
+ *     This is a genuine misconfiguration that would produce confusing runtime
+ *     failures — it is never an auth prerequisite.
+ *
+ * ADVISORY (returned in `errors`, service still constructs — auth unaffected):
+ *   - No AI provider key configured → AI execution NOT READY (truthful state).
+ *   - Recommended token budgets / provider timeout / tool allowlist absent.
+ *
+ * Development/test never validates strictly (safe deterministic doubles).
  */
 export function validateProductionAIConfig(): ProductionAIValidationResult {
   const state = readProductionAIConfigState();
@@ -105,24 +125,35 @@ export function validateProductionAIConfig(): ProductionAIValidationResult {
   }
 
   // 0. EPIC-019 — AI_DEFAULT_PROVIDER must name a family that actually has a
-  //    runtime adapter. A catalog-only default (anthropic/google/openrouter/
-  //    ollama) is a hard error: it would pass config validation and then fail
-  //    at runtime with "no provider registered".
+  //    runtime adapter. A catalog-only default (anthropic/openrouter/ollama)
+  //    is a hard error: it would pass config validation and then fail at
+  //    runtime with "no provider registered". This is the ONLY hard-fail —
+  //    it is a misconfiguration, never a missing optional credential.
   if (!state.defaultProviderSupported) {
     errors.push(
       `AI_DEFAULT_PROVIDER="${state.defaultProvider}" is not available at runtime ` +
-        '(catalog-only family — no ProviderAdapter exists). Choose AI_DEFAULT_PROVIDER=openai or deepseek.',
+        '(catalog-only family — no ProviderAdapter exists). Choose AI_DEFAULT_PROVIDER=openai, deepseek or google.',
     );
+    const err = new EnvironmentError(['AI configuration']);
+    err.message = `Production AI configuration is invalid (fail-fast). ${errors.join(' ')}`;
+    throw err;
   }
 
-  // 1. AI provider + credentials: the SDK-backed OpenAI / DeepSeek providers
-  //    are the execution paths; production must have at least one real
-  //    provider key or explicitly enable the mock (never silently).
-  if (!state.openAiKeyPresent && !state.deepSeekKeyPresent && !state.mockExplicitlyEnabled) {
+  // 1. AI provider credentials: OpenAI / Google Gemini / DeepSeek are the
+  //    runtime execution paths. Absent keys mean AI execution is NOT READY —
+  //    reported truthfully, NEVER blocking authentication or the AI Providers
+  //    management screen. Production still never silently serves the mock
+  //    (registerPlatformProviders enforces AI_ENABLE_MOCK=true explicitly).
+  if (
+    !state.openAiKeyPresent &&
+    !state.deepSeekKeyPresent &&
+    !state.googleKeyPresent &&
+    !state.mockExplicitlyEnabled
+  ) {
     errors.push(
-      'A real AI provider key is required in production: AI_OPENAI_API_KEY (or OPENAI_API_KEY) ' +
-        'or AI_DEEPSEEK_API_KEY. To use the deterministic mock in a non-production-like ' +
-        'environment, set AI_ENABLE_MOCK=true explicitly.',
+      'No AI provider key is configured in production — AI execution is NOT READY. ' +
+        'Set AI_OPENAI_API_KEY, AI_GOOGLE_API_KEY or AI_DEEPSEEK_API_KEY to enable AI execution. ' +
+        'Authentication and account management remain fully available without it.',
     );
   }
 
@@ -160,11 +191,5 @@ export function validateProductionAIConfig(): ProductionAIValidationResult {
     );
   }
 
-  if (errors.length > 0) {
-    const err = new EnvironmentError(['AI configuration']);
-    err.message = `Production AI configuration is incomplete (fail-fast). ${errors.join(' ')}`;
-    throw err;
-  }
-
-  return { ok: true, errors };
+  return { ok: errors.length === 0, errors };
 }

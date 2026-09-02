@@ -15,6 +15,9 @@ export interface IdentityRepository {
   /** Find a user by their email address */
   findByEmail(email: Email): Promise<User | null>;
 
+  /** Find a user by their linked Google subject id (null when none) */
+  findByGoogleId(googleId: string): Promise<User | null>;
+
   /** Save a new user (insert) */
   save(user: User): Promise<void>;
 
