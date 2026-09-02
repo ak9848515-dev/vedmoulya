@@ -276,7 +276,7 @@ export default function SignUpPage(): React.JSX.Element {
                 </p>
               )}
               <Button
-                variant="outline"
+                variant="secondary"
                 size="lg"
                 fullWidth
                 loading={googleSubmitting}
@@ -414,7 +414,7 @@ export default function SignUpPage(): React.JSX.Element {
               </div>
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="lg"
                 fullWidth
                 loading={googleSubmitting}
