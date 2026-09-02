@@ -74,6 +74,10 @@ import {
   InMemoryExecutionStrategyRepository,
   createCatalogStrategies,
 } from '@vedmoulya/execution-strategy';
+import { InMemoryBrainRepository } from '@vedmoulya/enterprise-brain';
+import { InMemoryLearningRepository } from '@vedmoulya/learning-intelligence';
+import { InMemoryKnowledgeRepository as InMemoryKnowledgeIntelligenceRepository } from '@vedmoulya/knowledge-intelligence';
+import { InMemoryGoalRepository, InMemoryTaskRepository } from '@vedmoulya/goals';
 import {
   createProductionMemoryRepository,
   createProductionDecisionRepository,
@@ -355,8 +359,18 @@ describe('Gateway engine services against injected repositories', () => {
 
   it('captures and retrieves an Enterprise Memory (EI-010) through the wired service', async () => {
     const repos = createInMemoryRepositories();
+    // EI-010 capture runs enrichWithEngines() which consults brain, learning,
+    // knowledge, and goals. Every engine must use an in-memory repository so
+    // the test stays hermetic and never touches Postgres.
     const svc = new ApiApplicationService({
       memoryIntelligenceRepository: repos.memoryIntelligence,
+      brainRepository: new InMemoryBrainRepository(),
+      learningRepository: new InMemoryLearningRepository(),
+      knowledgeIntelligenceRepository: new InMemoryKnowledgeIntelligenceRepository(),
+      goalRepositories: {
+        goals: new InMemoryGoalRepository(),
+        tasks: new InMemoryTaskRepository(),
+      },
     });
 
     const captured = await svc.memoryIntelligence.capture({
