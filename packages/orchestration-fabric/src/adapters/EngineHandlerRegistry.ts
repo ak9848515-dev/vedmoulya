@@ -16,7 +16,7 @@
 // a work type — it only knows the handler contract.
 // ──────────────────────────────────────────────────────────────────
 
-import type { WorkItemHandler } from '../domain/OrchestratorService.js';
+import type { WorkItemHandler, WorkItemResult } from '../domain/OrchestratorService.js';
 
 /**
  * Registry of engine handlers keyed by work type.
@@ -77,7 +77,7 @@ export class EngineHandlerRegistry {
   createDelegateHandler(): WorkItemHandler {
     return {
       supportedWorkTypes: this.getRegisteredTypes() as WorkItemHandler['supportedWorkTypes'],
-      execute: async (workItem) => {
+      execute: async (workItem): Promise<WorkItemResult> => {
         const handler = this.get(workItem.workType);
         if (!handler) {
           throw new Error(

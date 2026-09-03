@@ -213,11 +213,13 @@ export class ConcurrencyController {
   getSnapshot(): ConcurrencySnapshot {
     const activeByPolicy: Record<string, number> = {};
     for (const [policy, count] of this.activeByPolicy) {
+      // eslint-disable-next-line security/detect-object-injection
       activeByPolicy[policy] = count;
     }
 
     const activeByUser: Record<string, number> = {};
     for (const [user, count] of this.activeByUser) {
+      // eslint-disable-next-line security/detect-object-injection
       if (count > 0) activeByUser[user] = count;
     }
 

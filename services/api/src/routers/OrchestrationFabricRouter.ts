@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type -- tRPC router procedures have complex inferred return types */
 // ─────────────────────────────────────────────────────────────────────────────
 // VedMoulya — API Gateway: Orchestration Fabric Router
 // SPRINT-093 — Exposes the orchestration fabric through tRPC

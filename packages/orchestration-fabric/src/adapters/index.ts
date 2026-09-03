@@ -18,7 +18,7 @@ export function createEngineAdapter(
 ): WorkItemHandler {
   return {
     supportedWorkTypes: supportedTypes as WorkItemHandler['supportedWorkTypes'],
-    execute: async (workItem: WorkItem) => {
+    execute: async (workItem: WorkItem): Promise<WorkItemResult> => {
       const startTime = Date.now();
       try {
         const result = await fn(workItem);

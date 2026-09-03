@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "node scripts/run-next.mjs build",
+    "start": "node scripts/run-next.mjs start",
     "lint": "next lint",
     "clean": "rm -rf .next",
     "storybook": "storybook dev -p 6006",

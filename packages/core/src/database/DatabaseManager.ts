@@ -116,6 +116,7 @@ function redactUrl(url: string): string {
 }
 
 function envInt(name: string, fallback: number): number {
+  // eslint-disable-next-line security/detect-object-injection
   const raw = process.env[name];
   if (!raw || raw.trim() === '') return fallback;
   const n = Number.parseInt(raw, 10);
@@ -196,9 +197,11 @@ function trackQueries(pool: ManagedPool): postgres.Sql {
   };
 
   return new Proxy(pool.rawSql, {
+    // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
     apply(target, thisArg, args) {
       return run(() => Reflect.apply(target as (...a: unknown[]) => unknown, thisArg, args));
     },
+    // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
     get(target, prop, receiver) {
       const value: unknown = Reflect.get(target, prop, receiver);
       if (typeof value === 'function' && QUERY_METHODS.has(String(prop))) {
@@ -298,6 +301,7 @@ class SharedDatabaseManager implements DatabaseManager {
   getPoolCount(): number {
     return this.pools.size;
   }
+
   getStats(): DatabaseManagerSnapshot {
     const pools: DatabasePoolStats[] = [];
     for (const pool of this.pools.values()) {
