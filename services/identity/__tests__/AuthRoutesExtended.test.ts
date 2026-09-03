@@ -59,6 +59,26 @@ describe('AuthRoutes — Google OAuth browser navigation', () => {
     expect(html).toContain('abc123def456');
   });
 
+  it('HTML callback persists a Zustand-compatible envelope containing state', async () => {
+    // Regression: the callback must write the FULL parsed persist object `s`
+    // (which carries the `state` key the Zustand store hydrates from), never
+    // the inner `s.state` — a bare inner object hydrates to an empty session
+    // and bounces the just-authenticated user back to /login.
+    const res = await router.request('/google/callback?code=abc123def456&state=s1', {
+      headers: { accept: 'text/html' },
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    // The persisted value must be the top-level `s` object (the envelope),
+    // NOT `s.state` (the inner payload without the persist wrapper). The
+    // trailing `)` closes the setItem call, `}` closes the try block.
+    expect(html).toContain(`JSON.stringify(s))}`);
+    expect(html).not.toContain(`JSON.stringify(s.state))}`);
+    // The envelope must carry the `state` key so HydratableEnvelope.state is
+    // defined for the Zustand persist middleware (persist reads .state).
+    expect(html).toContain(`s.state={accessToken:t.accessToken`);
+  });
+
   it('GET /google/callback with JSON Accept and code delegates to signInWithGoogle', async () => {
     const res = await router.request('/google/callback?code=abc123def456&state=s1', {
       headers: { accept: 'application/json' },
