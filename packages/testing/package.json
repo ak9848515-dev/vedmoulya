@@ -14,10 +14,10 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@vedmoulya/core": "*",
-    "@faker-js/faker": "^9.0.0"
+    "@vedmoulya/core": "*"
   },
   "devDependencies": {
+    "@faker-js/faker": "^9.0.0",
     "typescript": "^5.6.0"
   }
 }
