@@ -18,8 +18,10 @@ import {
   AuthService,
   authRouteConfig,
   createAuthRouter,
+  createVerificationEmailSender,
   IdentityEventPublisher,
   createVerificationTokenStore,
+  LogVerificationEmailSender,
   type VerificationTokenStore,
 } from '@vedmoulya/identity';
 import { createProductionIdentityRepository, awaitAllEngineEnsureTables } from '@vedmoulya/api';
@@ -85,8 +87,20 @@ export async function getAuthApp(): Promise<Hono> {
       }
     ).ensureTable?.();
     const eventPublisher = new IdentityEventPublisher(new InMemoryEventBus());
+    // SPRINT-098B — createVerificationEmailSender() throws when SMTP is not
+    // configured (production defaults to SMTP mode). The auth app is decoupled
+    // from the full gateway and must not require SMTP to initialise. Fall back
+    // to LogVerificationEmailSender so sign-up/auth endpoints work; verification
+    // emails are logged server-side until SMTP is configured.
+    let emailSender;
+    try {
+      emailSender = createVerificationEmailSender();
+    } catch {
+      emailSender = new LogVerificationEmailSender();
+    }
     const authService = new AuthService(repository, eventPublisher, {
       verificationTokenStore,
+      emailSender,
     });
     authApp = new Hono()
       .use(`${authRouteConfig.basePath}/*`, createAuthRateLimitMiddleware())
