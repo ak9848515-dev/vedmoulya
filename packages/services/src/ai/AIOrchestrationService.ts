@@ -16,6 +16,7 @@ import {
   fallbackRule,
   retryLimitRule,
   ProviderId,
+  CAPABILITY_TYPES,
 } from '@vedmoulya/ai';
 import type {
   AIResponse,
@@ -38,6 +39,7 @@ import type {
   ExecutionStrategyPort,
   ProviderSelectionExplanation,
   RagRetrievalPort,
+  HealthFeedbackPort,
   TokenOptimizationResult,
   EvidenceAssessment,
   EvidenceItem,
@@ -58,6 +60,14 @@ import type {
 } from './AIDTO.js';
 
 // Provider adapter interface (implemented in services/orchestrator)
+//
+// MODEL EXECUTION CONTRACT (Phase B):
+//   `modelId` is the advisor-selected model the runtime WANTS executed. An
+//   adapter MUST execute that model when it supports it; when it cannot, it
+//   MUST throw an explicit unsupported-model error so the runtime's existing
+//   fallback logic moves to the next candidate. It MUST NOT silently execute
+//   a different model while pretending the requested one ran — the response
+//   `model` field (actual) is what the trace records.
 export interface ProviderAdapter {
   name: string;
   family: string;
@@ -68,11 +78,15 @@ export interface ProviderAdapter {
     messages: Array<{ role: string; content: string }>;
     model: string;
     maxTokens?: number;
+    /** Advisor-selected model id — execute it when supported. */
+    modelId?: string;
   }): Promise<AIResponse>;
   stream?(request: {
     messages: Array<{ role: string; content: string }>;
     model: string;
     maxTokens?: number;
+    /** Advisor-selected model id — execute it when supported. */
+    modelId?: string;
   }): AsyncIterable<unknown>;
   /**
    * Schema-validated structured output (AI-RUNTIME-002). Optional: adapters
@@ -84,7 +98,22 @@ export interface ProviderAdapter {
     model: string;
     maxTokens?: number;
     schema: Record<string, unknown>;
+    /** Advisor-selected model id — execute it when supported. */
+    modelId?: string;
   }): Promise<AIResponse>;
+}
+
+/**
+ * Advisor-selected routing intent (Phase B). The advisor picks a provider +
+ * model; this intent is threaded to the execution layer so the SELECTED
+ * model actually reaches the adapter. Absent (cold start / no advisor) the
+ * execution layer uses each adapter's configured default — unchanged.
+ */
+export interface RoutingIntent {
+  /** Task capability (recorded on execution spans for capability evidence). */
+  capability?: string;
+  /** Provider id (adapter name) → advisor-selected model id. */
+  modelByProvider: Map<string, string>;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -127,6 +156,10 @@ export interface AIOrchestrationOptions {
   evidenceEvaluator?: EvidenceEvaluator;
   /** AI observability (AI-RUNTIME-002 C-03). Defaults to NOOP. */
   observability?: AIObservability;
+  /** Real-time execution health feedback (Capability Intelligence). Each
+   *  execution outcome is reported; the advisor reads the resulting bounded
+   *  health on later decisions. Absent → no feedback (unchanged behavior). */
+  healthFeedback?: HealthFeedbackPort;
 }
 
 export class AIOrchestrationService extends BaseService {
@@ -147,6 +180,7 @@ export class AIOrchestrationService extends BaseService {
   private rag: RagRetrievalPort | undefined;
   private readonly evidenceEvaluator: EvidenceEvaluator;
   private readonly observability: AIObservability;
+  private healthFeedback: HealthFeedbackPort | undefined;
   private advisor: ProviderRoutingAdvisor | undefined;
 
   constructor(options: AIOrchestrationOptions = {}) {
@@ -164,6 +198,7 @@ export class AIOrchestrationService extends BaseService {
     this.rag = options.rag;
     this.evidenceEvaluator = options.evidenceEvaluator ?? new EvidenceEvaluator();
     this.observability = options.observability ?? new AIObservability();
+    this.healthFeedback = options.healthFeedback;
     this.rebuildAdvisor();
   }
 
@@ -176,11 +211,15 @@ export class AIOrchestrationService extends BaseService {
     providerIntelligence?: ProviderIntelligencePort;
     executionStrategy?: ExecutionStrategyPort;
     rag?: RagRetrievalPort;
+    healthFeedback?: HealthFeedbackPort;
   }): void {
     this.providerIntelligence = options.providerIntelligence ?? this.providerIntelligence;
     this.executionStrategy = options.executionStrategy ?? this.executionStrategy;
     if (options.rag !== undefined) {
       this.rag = options.rag;
+    }
+    if (options.healthFeedback !== undefined) {
+      this.healthFeedback = options.healthFeedback;
     }
     this.rebuildAdvisor();
   }
@@ -243,6 +282,7 @@ export class AIOrchestrationService extends BaseService {
   private buildCacheKey(request: OrchestrateRequestDTO): string {
     const canonical = JSON.stringify({
       capability: request.capability,
+      requiredCapabilities: request.requiredCapabilities ?? null,
       userInput: request.userInput,
       qualityTier: request.qualityTier,
       systemPrompt: request.context?.systemPrompt ?? null,
@@ -319,6 +359,33 @@ export class AIOrchestrationService extends BaseService {
     if (message.includes('timeout') || message.includes('timed out')) {
       return 'timeout';
     }
+    // An adapter that cannot execute the advisor-selected model fails
+    // EXPLICITLY (Phase B): non-retryable, so existing fallback logic moves
+    // to the next candidate instead of retrying a model the provider lacks.
+    if (
+      message.includes('unsupported model') ||
+      message.includes('does not support model') ||
+      message.includes('model not supported') ||
+      message.includes('model not found')
+    ) {
+      return 'unsupported_model';
+    }
+    // Authentication/credential failures (Capability Intelligence): a
+    // broken key is non-retryable (retryable lists are allowlists) so the
+    // runtime falls back to the next provider, and execution health marks
+    // the provider ineligible until configuration is repaired. Only explicit
+    // credential signals map here — a bare 403 (quota/policy) is NOT assumed
+    // to be an auth failure.
+    if (
+      message.includes('401') ||
+      message.includes('unauthorized') ||
+      message.includes('invalid api key') ||
+      message.includes('incorrect api key') ||
+      message.includes('api key required') ||
+      message.includes('authentication failed')
+    ) {
+      return 'authentication_error';
+    }
     // Match 5xx provider status codes precisely (e.g. "api error: 503") plus
     // transport-level failures. Avoids broad substring false positives.
     if (
@@ -334,6 +401,49 @@ export class AIOrchestrationService extends BaseService {
     return 'internal_error';
   }
 
+  /**
+   * Normalize + validate the DTO's authoritative task capability
+   * requirements. Returns undefined when the caller supplied none (the task
+   * requires exactly its routing capability — cold-start behavior).
+   */
+  private normalizeRequiredCapabilities(
+    request: OrchestrateRequestDTO,
+  ): CapabilityType[] | undefined {
+    const caps = request.requiredCapabilities;
+    if (!caps || caps.length === 0) return undefined;
+    const seen = new Set<string>();
+    const out: CapabilityType[] = [];
+    for (const capability of caps) {
+      if (!CAPABILITY_TYPES.includes(capability)) {
+        throw new ValidationError(`Unsupported required capability: ${capability}`);
+      }
+      if (!seen.has(capability)) {
+        seen.add(capability);
+        out.push(capability);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Report one real execution outcome to the health feedback port
+   * (fire-and-forget; the port implementation never awaits/throws).
+   */
+  private recordExecutionHealth(outcome: {
+    providerId: string;
+    modelId?: string;
+    ok: boolean;
+    failureReason?: string;
+    latencyMs?: number;
+  }): void {
+    if (!this.healthFeedback) return;
+    try {
+      this.healthFeedback.recordExecution(outcome);
+    } catch {
+      // Health feedback must never break an AI request.
+    }
+  }
+
   // ── Core Orchestration ───────────────────────────────────────────────────
 
   async orchestrate(request: OrchestrateRequestDTO): Promise<OrchestrateResponseDTO> {
@@ -346,6 +456,10 @@ export class AIOrchestrationService extends BaseService {
     );
     this.logger.info('Orchestrating request', { requestId, capability: request.capability });
     this.metrics.recordRequest();
+
+    // Capability Intelligence: validate the authoritative task requirements
+    // BEFORE cache lookup or any execution (invalid values must never run).
+    const requiredCapabilities = this.normalizeRequiredCapabilities(request);
 
     // Evidence-First: groundingRequired without a RAG query is a programming
     // error — the runtime cannot ground an answer it never retrieves.
@@ -529,10 +643,13 @@ export class AIOrchestrationService extends BaseService {
     const selectionSpan = this.observability.startSpan('ai.model_selection', requestId);
     let candidates = this.selectCandidates(request.capability, request.qualityTier);
     let providerSelection: ProviderSelectionDTO | undefined;
+    // Phase B — the advisor's selected model must REACH actual execution.
+    const routingIntent: RoutingIntent = { modelByProvider: new Map() };
     if (this.advisor) {
       try {
         const explanation = await this.advisor.decide({
           capability: request.capability,
+          requiredCapabilities,
           estimatedInputTokens,
           requestedOutputTokens: request.constraints?.maxOutputTokens,
         });
@@ -540,7 +657,21 @@ export class AIOrchestrationService extends BaseService {
         this.metrics.recordProviderSelection(explanation.selected.providerId);
         selectionSpan.setAttribute('selected_provider', explanation.selected.providerId);
         selectionSpan.setAttribute('selected_model', explanation.selected.modelId);
+        if (explanation.requiredCapabilities.length > 1) {
+          selectionSpan.setAttribute(
+            'required_capabilities',
+            explanation.requiredCapabilities.join(','),
+          );
+        }
         candidates = this.orderCandidatesByAdvisor(candidates, explanation);
+        // Thread the advisor-selected model (primary + fallbacks) to execution.
+        routingIntent.modelByProvider.set(
+          explanation.selected.providerId,
+          explanation.selected.modelId,
+        );
+        explanation.fallback.forEach((fallback) => {
+          routingIntent.modelByProvider.set(fallback.providerId, fallback.modelId);
+        });
       } catch (error) {
         // Advisor failure is non-fatal: deterministic registration order.
         this.logger.warn('Provider advisor failed; using registration order', {
@@ -554,13 +685,20 @@ export class AIOrchestrationService extends BaseService {
 
     // 5. Execute — schema-validated structured output when requested.
     const response = request.structuredSchema
-      ? await this.executeStructured(candidates, messages, request, aiRequest, requestId)
+      ? await this.executeStructured(candidates, messages, request, aiRequest, requestId, {
+          capability: request.capability,
+          modelByProvider: routingIntent.modelByProvider,
+        })
       : await this.executeWithRetryAndFallback(
           candidates,
           messages,
           request.constraints?.maxOutputTokens,
           aiRequest,
           requestId,
+          {
+            capability: request.capability,
+            modelByProvider: routingIntent.modelByProvider,
+          },
         );
 
     // 6. Cache the successful response (never for RAG/grounding-required runs)
@@ -613,6 +751,10 @@ export class AIOrchestrationService extends BaseService {
         'groundingRequired is set but no ragQuery was supplied: grounding-required tasks must retrieve evidence.',
       );
     }
+
+    // Capability Intelligence: validate the authoritative task requirements
+    // before any execution (same rule as orchestrate).
+    const requiredCapabilities = this.normalizeRequiredCapabilities(request);
 
     emit({ type: 'status', stage: 'thinking' });
     emit({ type: 'status', stage: 'preparing_context' });
@@ -753,6 +895,31 @@ export class AIOrchestrationService extends BaseService {
     }
     optimizationSpan.end();
     const candidates = this.selectCandidates(request.capability, request.qualityTier);
+    // Phase B — stream the advisor-selected model when the advisor is wired.
+    const routingIntent: RoutingIntent = { modelByProvider: new Map() };
+    if (this.advisor) {
+      try {
+        const explanation = await this.advisor.decide({
+          capability: request.capability,
+          requiredCapabilities,
+          estimatedInputTokens: TokenEstimationService.estimateMessagesTokens(messages),
+          requestedOutputTokens: request.constraints?.maxOutputTokens,
+        });
+        routingIntent.modelByProvider.set(
+          explanation.selected.providerId,
+          explanation.selected.modelId,
+        );
+        explanation.fallback.forEach((fallback) => {
+          routingIntent.modelByProvider.set(fallback.providerId, fallback.modelId);
+        });
+      } catch (error) {
+        // Advisor failure is non-fatal: deterministic registration order.
+        this.logger.warn('Provider advisor failed for stream; using registration order', {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     emit({ type: 'status', stage: 'selecting_model' });
 
     let final: AIResponse;
@@ -761,10 +928,17 @@ export class AIOrchestrationService extends BaseService {
     // used for timeouts/usage inside the generator body).
     const streamFn = streamingProvider?.stream?.bind(streamingProvider);
     if (streamingProvider && streamFn) {
+      const requestedModel = routingIntent.modelByProvider.get(streamingProvider.name);
       const streamSpan = this.observability.startSpan(
         'ai.provider_execution',
         requestId,
-        { provider: streamingProvider.name, mode: 'stream' },
+        {
+          provider: streamingProvider.name,
+          mode: 'stream',
+          ...(requestedModel ? { requested_model: requestedModel } : {}),
+          // capability is required on OrchestrateRequestDTO — always recorded.
+          capability: request.capability,
+        },
         { userId: request.userId },
       );
       emit({ type: 'status', stage: 'streaming' });
@@ -774,6 +948,7 @@ export class AIOrchestrationService extends BaseService {
           messages,
           model: streamingProvider.name,
           maxTokens: request.constraints?.maxOutputTokens,
+          modelId: requestedModel,
         })) {
           const c = chunk as {
             type?: string;
@@ -793,8 +968,19 @@ export class AIOrchestrationService extends BaseService {
         streamSpan.setAttribute('status', 'success');
         streamSpan.setAttribute('output_tokens', TokenEstimationService.estimateTokens(text));
         streamSpan.end();
+        this.recordExecutionHealth({
+          providerId: streamingProvider.name,
+          modelId: requestedModel,
+          ok: true,
+        });
       } catch (error) {
         streamSpan.end('error', error instanceof Error ? error.message : String(error));
+        this.recordExecutionHealth({
+          providerId: streamingProvider.name,
+          modelId: requestedModel,
+          ok: false,
+          failureReason: this.classifyFailure(error),
+        });
         runSpan.end('error', error instanceof Error ? error.message : String(error));
         emit({ type: 'error', data: { message: 'streaming failed' } });
         throw error;
@@ -812,6 +998,10 @@ export class AIOrchestrationService extends BaseService {
         request.constraints?.maxOutputTokens,
         aiRequest,
         requestId,
+        {
+          capability: request.capability,
+          modelByProvider: routingIntent.modelByProvider,
+        },
       );
       emit({ type: 'content', stage: 'streaming', content: final.content });
     }
@@ -845,6 +1035,7 @@ export class AIOrchestrationService extends BaseService {
     request: OrchestrateRequestDTO,
     aiRequest: AIRequest,
     requestId?: string,
+    intent?: RoutingIntent,
   ): Promise<AIResponse> {
     const schema = request.structuredSchema ?? {};
     let lastError: Error | undefined;
@@ -857,12 +1048,22 @@ export class AIOrchestrationService extends BaseService {
         aiRequest.fallback(providerId);
       }
 
+      // Phase B — the advisor-selected model for THIS provider reaches the
+      // adapter; when the adapter cannot execute it, it fails explicitly and
+      // the existing retry/fallback rules move to the next candidate.
+      const requestedModel = intent?.modelByProvider.get(provider.name);
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         aiRequest.startExecution();
         const executionSpan = this.observability.startSpan(
           'ai.provider_execution',
           requestId ?? 'unknown',
-          { provider: provider.name, mode: 'structured', attempt },
+          {
+            provider: provider.name,
+            mode: 'structured',
+            attempt,
+            ...(requestedModel ? { requested_model: requestedModel } : {}),
+            ...(intent?.capability ? { capability: intent.capability } : {}),
+          },
           { userId: request.userId },
         );
         try {
@@ -872,11 +1073,13 @@ export class AIOrchestrationService extends BaseService {
                 model: provider.name,
                 maxTokens: request.constraints?.maxOutputTokens,
                 schema,
+                modelId: requestedModel,
               })
             : await provider.execute({
                 messages,
                 model: provider.name,
                 maxTokens: request.constraints?.maxOutputTokens,
+                modelId: requestedModel,
               });
 
           const validationSpan = this.observability.startSpan(
@@ -892,7 +1095,10 @@ export class AIOrchestrationService extends BaseService {
             throw new Error(`Structured output validation failed: ${validation.errors.join('; ')}`);
           }
 
+          // The ACTUAL executed model (from the adapter response) is what the
+          // trace records — never the intended model as if it executed.
           executionSpan.setAttribute('status', 'success');
+          executionSpan.setAttribute('model', response.model);
           executionSpan.setAttribute('input_tokens', response.tokenUsage.input);
           executionSpan.setAttribute('output_tokens', response.tokenUsage.output);
           executionSpan.setAttribute('cost', response.cost);
@@ -907,6 +1113,12 @@ export class AIOrchestrationService extends BaseService {
             attempt: aiRequest.attempts,
             latency: response.latency,
           });
+          this.recordExecutionHealth({
+            providerId: provider.name,
+            modelId: response.model,
+            ok: true,
+            latencyMs: response.latency,
+          });
           return response;
         } catch (error) {
           lastError = error as Error;
@@ -915,6 +1127,12 @@ export class AIOrchestrationService extends BaseService {
           executionSpan.setAttribute('status', 'error');
           executionSpan.setAttribute('error_reason', reason);
           executionSpan.end('error', lastError.message);
+          this.recordExecutionHealth({
+            providerId: provider.name,
+            modelId: requestedModel,
+            ok: false,
+            failureReason: reason,
+          });
           if (attempt < MAX_RETRIES) {
             const retrySpan = this.observability.startSpan(
               'ai.retry',
@@ -952,6 +1170,7 @@ export class AIOrchestrationService extends BaseService {
    */
   async explainSelection(input: {
     capability: CapabilityType;
+    requiredCapabilities?: CapabilityType[];
     estimatedInputTokens?: number;
     requestedOutputTokens?: number;
   }): Promise<ProviderSelectionDTO> {
@@ -960,6 +1179,11 @@ export class AIOrchestrationService extends BaseService {
     }
     const explanation = await this.advisor.decide({
       capability: input.capability,
+      // Validate against CAPABILITY_TYPES (same rule as orchestrate) so an
+      // invalid requirement is rejected, never silently ignored.
+      requiredCapabilities: this.normalizeRequiredCapabilities(
+        input as unknown as OrchestrateRequestDTO,
+      ),
       estimatedInputTokens: input.estimatedInputTokens ?? 1_000,
       requestedOutputTokens: input.requestedOutputTokens,
     });
@@ -1315,6 +1539,7 @@ export class AIOrchestrationService extends BaseService {
     maxTokens: number | undefined,
     aiRequest: AIRequest,
     requestId?: string,
+    intent?: RoutingIntent,
   ): Promise<AIResponse> {
     let lastError: Error | undefined;
 
@@ -1328,6 +1553,10 @@ export class AIOrchestrationService extends BaseService {
         aiRequest.fallback(providerId);
       }
 
+      // Phase B — the advisor-selected model for THIS provider reaches the
+      // adapter; when the adapter cannot execute it, it fails explicitly and
+      // the existing retry/fallback rules move to the next candidate.
+      const requestedModel = intent?.modelByProvider.get(provider.name);
       // Per-provider retry loop. Retry budget is capped by the AI domain
       // rules (AIRequest.isRetryable() / retryLimitRule allow attempts < 3).
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -1335,12 +1564,26 @@ export class AIOrchestrationService extends BaseService {
         const executionSpan = this.observability.startSpan(
           'ai.provider_execution',
           requestId ?? 'unknown',
-          { provider: provider.name, attempt, mode: 'text' },
+          {
+            provider: provider.name,
+            attempt,
+            mode: 'text',
+            ...(requestedModel ? { requested_model: requestedModel } : {}),
+            ...(intent?.capability ? { capability: intent.capability } : {}),
+          },
           { userId: requestId ? this.requestUser(aiRequest) : undefined },
         );
         try {
-          const response = await provider.execute({ messages, model: provider.name, maxTokens });
+          const response = await provider.execute({
+            messages,
+            model: provider.name,
+            maxTokens,
+            modelId: requestedModel,
+          });
+          // The ACTUAL executed model (from the adapter response) is what the
+          // trace records — never the intended model as if it executed.
           executionSpan.setAttribute('status', 'success');
+          executionSpan.setAttribute('model', response.model);
           executionSpan.setAttribute('input_tokens', response.tokenUsage.input);
           executionSpan.setAttribute('output_tokens', response.tokenUsage.output);
           executionSpan.setAttribute('cost', response.cost);
@@ -1357,6 +1600,13 @@ export class AIOrchestrationService extends BaseService {
             attempt: aiRequest.attempts,
             latency: response.latency,
           });
+          // Real-time health feedback: the ACTUAL executed model succeeded.
+          this.recordExecutionHealth({
+            providerId: provider.name,
+            modelId: response.model,
+            ok: true,
+            latencyMs: response.latency,
+          });
           return response;
         } catch (error) {
           lastError = error as Error;
@@ -1365,6 +1615,15 @@ export class AIOrchestrationService extends BaseService {
           executionSpan.setAttribute('error_reason', reason);
           executionSpan.end('error', lastError.message);
           aiRequest.fail(reason, lastError.message);
+          // Real-time health feedback: the attempted model failed with a
+          // classified reason (model-scoped when the attempted model is
+          // known, provider-scoped otherwise).
+          this.recordExecutionHealth({
+            providerId: provider.name,
+            modelId: requestedModel,
+            ok: false,
+            failureReason: reason,
+          });
 
           if (reason === 'rate_limited') {
             this.metrics.recordRateLimit();

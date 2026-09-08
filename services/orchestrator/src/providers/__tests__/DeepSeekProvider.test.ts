@@ -288,4 +288,16 @@ describe('DeepSeekProvider', () => {
       vi.useRealTimers();
     }
   });
+
+  it('Phase B: executes the advisor-selected modelId through the SDK', async () => {
+    const provider = new DeepSeekProvider('sk-test');
+    await provider.execute({
+      messages: MESSAGES,
+      model: 'deepseek',
+      maxTokens: 64,
+      modelId: 'deepseek-reasoner',
+    });
+    const call = generateTextMock.mock.calls[0][0] as { model: { modelId: string } };
+    expect(call.model.modelId).toBe('deepseek-reasoner');
+  });
 });

@@ -127,7 +127,16 @@ export function evidenceForPattern(pattern: GoalPattern, _goal: string): string 
 export interface TaskTemplate {
   title: string;
   description: string;
+  /** Primary/routing capability of this step. */
   capability: CapabilityType;
+  /**
+   * Optional ADDITIONAL hard capability requirements for this step (always
+   * CapabilityType values; the primary `capability` is implied). E.g. the
+   * ABAP correction step is `coding` but genuinely also requires
+   * `reasoning` — both must reach the routing advisor. Omitted → the step
+   * requires exactly its primary capability.
+   */
+  requiredCapabilities?: CapabilityType[];
   phase: LoopTask['phase'];
   /** Prompt template with {goal} and {evidence} placeholders. */
   prompt: string;
@@ -202,6 +211,10 @@ export function templatesForPattern(pattern: GoalPattern): TaskTemplate[] {
           title: 'Generate a correction',
           description: 'Produce corrected ABAP code implementing the fix.',
           capability: 'coding',
+          // Producing the correct fix reasons over the root-cause analysis, so
+          // routing must require BOTH coding and reasoning — matching the
+          // abap-debugger goal's own authoritative capability set.
+          requiredCapabilities: ['coding', 'reasoning'],
           phase: 'produce',
           prompt:
             'Goal: {goal}\n\nAnalysis: {analysis}\n\nGenerate the corrected ABAP code. Return the corrected code and a short explanation of each change.',

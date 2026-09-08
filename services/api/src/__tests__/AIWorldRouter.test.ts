@@ -220,4 +220,11 @@ describe('aiWorld namespace (EPIC-012C)', () => {
       code: 'FORBIDDEN',
     });
   });
+
+  it('getItem returns null data for an unknown item id (not a failure)', async () => {
+    const caller = router.createCaller(ctx('aw-6'));
+    const detail = await caller.aiWorld.getItem({ userId: 'aw-6', itemId: 'does-not-exist' });
+    expect(detail.success).toBe(true);
+    expect(detail.data).toBeNull();
+  });
 });

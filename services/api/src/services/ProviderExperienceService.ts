@@ -24,6 +24,8 @@ import { defaultProviderPreferences } from '@vedmoulya/providers';
 import { ModelSelectionIntelligence } from '@vedmoulya/services';
 import type { CostLedger, CostLedgerSnapshot } from '../observability/CostLedger.js';
 import type { TraceStore } from '@vedmoulya/core';
+import { openaiOrgUsageProbe, openaiOrgWindow } from './ProviderUsageIngestor.js';
+import type { OpenAIOrgModelUsage, OpenAIOrgPeriod } from './ProviderUsageIngestor.js';
 
 // ── View model types ────────────────────────────────────────────────────────
 
@@ -161,14 +163,45 @@ function deriveAvailability(
   return 'AVAILABLE';
 }
 
+/** OpenAI org usage view (surfaced in the usage details view). */
+export interface OpenAIOrgUsageViewPayload {
+  /** True when real OpenAI-reported usage was retrieved for this period. */
+  available: boolean;
+  period: OpenAIOrgPeriod;
+  /** Human-readable explanation when `available` is false (never fabricated). */
+  message: string;
+  rows: OpenAIOrgModelUsage[];
+  totals: { inputTokens: number; cachedInputTokens: number; outputTokens: number };
+  /** True when the endpoint signalled more pages than this single read. */
+  hasMore?: boolean;
+}
+
+const EMPTY_ORG_TOTALS = {
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+} as const;
+
+/** Injectable seams for the OpenAI org usage read (tests inject these). */
+export interface ProviderExperienceServiceOptions {
+  openaiOrgEnv?: Record<string, string | undefined>;
+  openaiOrgFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+  openaiOrgNow?: () => Date;
+}
+
 export class ProviderExperienceService {
+  private readonly options: ProviderExperienceServiceOptions;
+
   constructor(
     private readonly providers: ProviderApplicationService,
     private readonly preferences: ProviderPreferencesService,
     private readonly modelSelection: ModelSelectionIntelligence,
     private readonly ledger: CostLedger,
     private readonly traceStore: TraceStore,
-  ) {}
+    options: ProviderExperienceServiceOptions = {},
+  ) {
+    this.options = options;
+  }
 
   /** The AI Providers screen view model (Phase 4). */
   async getOverview(userId: string): Promise<ProviderExperienceResult<ProviderExperienceView>> {
@@ -255,6 +288,64 @@ export class ProviderExperienceService {
     };
   }
 
+  /**
+   * OpenAI ORGANIZATION account usage per model for a REAL period (Today /
+   * This week / This month). This is OpenAI-reported usage of the platform's
+   * own organization key — distinct from VedMoulya's measured per-user
+   * ledger. It requires an Organization admin-scope API key; without one the
+   * payload is available:false with an honest message. Never fabricated.
+   */
+  async getOpenAIOrgUsage(
+    period: OpenAIOrgPeriod,
+  ): Promise<ProviderExperienceResult<OpenAIOrgUsageViewPayload>> {
+    const env = this.options.openaiOrgEnv ?? process.env;
+    // Key NAMES must stay in sync with PROVIDER_RUNTIME_DESCRIPTORS (openai).
+    const key =
+      ['AI_OPENAI_API_KEY', 'OPENAI_API_KEY'].find((name) => {
+        const value = env[name];
+        return value !== undefined && value.trim() !== '';
+      }) ?? null;
+    const unavailable = (message: string): ProviderExperienceResult<OpenAIOrgUsageViewPayload> => ({
+      success: true,
+      data: {
+        available: false,
+        period,
+        message,
+        rows: [],
+        totals: { ...EMPTY_ORG_TOTALS },
+      },
+    });
+    if (!key) {
+      return unavailable('No OpenAI API key is configured — organization usage is unavailable.');
+    }
+    const apiKey = (env[key] ?? '').trim();
+    const now = this.options.openaiOrgNow ? this.options.openaiOrgNow() : new Date();
+    const fetchImpl =
+      this.options.openaiOrgFetch ??
+      ((input: string, init?: RequestInit): Promise<Response> => fetch(input, init));
+    try {
+      const result = await openaiOrgUsageProbe(apiKey, fetchImpl, openaiOrgWindow(period, now));
+      if (!result.ok) {
+        return unavailable(result.error ?? 'OpenAI organization usage is unavailable.');
+      }
+      return {
+        success: true,
+        data: {
+          available: true,
+          period,
+          message: 'Reported by OpenAI for your organization account.',
+          rows: result.rows,
+          totals: result.totals,
+          hasMore: result.hasMore,
+        },
+      };
+    } catch (error) {
+      return unavailable(
+        error instanceof Error ? error.message : 'OpenAI organization usage is unavailable.',
+      );
+    }
+  }
+
   /** User preferences (owner-scoped). */
   async getPreferences(userId: string): Promise<ProviderExperienceResult<ProviderPreferences>> {
     return this.preferences.getPreferences(userId);
@@ -285,6 +376,8 @@ export class ProviderExperienceService {
     userId: string,
     input: {
       capability: string;
+      /** Authoritative task capability requirements (CapabilityType taxonomy). */
+      requiredCapabilities?: string[];
       estimatedInputTokens?: number;
       requestedOutputTokens?: number;
       precision?: 'standard' | 'high';
@@ -299,6 +392,7 @@ export class ProviderExperienceService {
     try {
       const result = await this.modelSelection.decide({
         capability: input.capability,
+        requiredCapabilities: input.requiredCapabilities,
         estimatedInputTokens: input.estimatedInputTokens ?? 4000,
         requestedOutputTokens: input.requestedOutputTokens,
         precision: input.precision,

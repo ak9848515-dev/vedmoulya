@@ -1401,6 +1401,18 @@ describe('NotificationRouter', () => {
     expect(result.success).toBe(false);
     expect(result.error.code).toBe('INTERNAL_ERROR');
   });
+
+  it('list returns an empty array when the dashboard has no data', async () => {
+    const emptyDashboard = createMockDashboard() as never;
+    vi.spyOn(emptyDashboard, 'getDashboard' as never).mockResolvedValue({
+      success: true,
+      data: null,
+    });
+    const router = createNotificationRouter(emptyDashboard);
+    const result = await router.list({ userId: 'test-user' }, testCtx);
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual([]);
+  });
 });
 
 // ── Configuration Router ────────────────────────────────────────────────────

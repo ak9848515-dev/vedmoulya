@@ -72,7 +72,7 @@ export function fromServiceResult<T>(result: {
   error?: string;
   latency?: number;
 }): ApiResponse<T> {
-  if (result.success && result.data) {
+  if (result.success && result.data !== undefined) {
     return successResponse(result.data, result.latency);
   }
 

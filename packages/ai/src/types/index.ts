@@ -200,6 +200,13 @@ export type FailureReason =
   | 'quality_below_threshold'
   | 'budget_exceeded'
   | 'context_window_exceeded'
+  | 'unsupported_model'
+  // Capability Intelligence — authentication/credential failures are a
+  // DISTINCT routing consequence: non-retryable (see AIRules retryable
+  // allowlists) so the runtime falls back to the next provider instead of
+  // hammering a broken credential, and execution-health marks the provider
+  // ineligible until configuration is repaired (it is never auto-disabled).
+  | 'authentication_error'
   | 'internal_error';
 
 export interface RetryPolicy {

@@ -13,6 +13,91 @@ export interface ProviderModelIntelligence {
   contextWindow: number;
   maxOutputTokens: number;
   streaming: boolean;
+  /**
+   * Model-level capabilities from the SINGLE provider registry (authoritative
+   * catalog, same CapabilityType taxonomy as provider capabilities). A model
+   * may support FEWER capabilities than its provider — routing must evaluate
+   * provider + actual model, never provider alone. Absent when the registry
+   * declared none: treated as UNKNOWN (conservative — never excluded on an
+   * absent list, only on an explicit lack).
+   */
+  capabilities?: string[];
+}
+
+/**
+ * Runtime execution health (Capability Intelligence — real-time feedback).
+ * Separate from MEASURED EVIDENCE by design:
+ *   HEALTH  = "what is happening recently?" (short recency window, bounded)
+ *   EVIDENCE = "how has this historically performed?" (RoutingEvidenceService)
+ * Both reach the advisor, but never as one opaque number.
+ */
+export type RuntimeHealthVerdict = 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'UNKNOWN';
+
+export interface RuntimeExecutionHealth {
+  /** Narrowest measured scope: 'provider' or 'provider_model'. */
+  scope: 'provider' | 'provider_model';
+  verdict: RuntimeHealthVerdict;
+  /** Raw outcome count retained in the bounded window. */
+  sampleCount: number;
+  /** Recency-weighted success rate 0..1 over the window. */
+  weightedSuccessRate?: number;
+  /** Consecutive failures at the end of the window (0 = last event ok). */
+  consecutiveFailures: number;
+  /** Window failure reason tallies — never merged into one number. */
+  timeoutCount: number;
+  rateLimitCount: number;
+  authFailureCount: number;
+  unsupportedCount: number;
+  /** ISO timestamps of the last outcome in the window. */
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  /** Reason for the current verdict (human-readable, e.g. auth failure). */
+  detail?: string;
+}
+
+/**
+ * Measured execution evidence (routing feedback). Consumed by the advisor
+ * ONLY with progressive influence — see MEASURED_* weights. Everything here
+ * is MEASURED from real executions; static/estimated signals are separate
+ * fields (benchmarkScore, averageLatencyMs, costPer1K*) and are never
+ * silently replaced — measured data augments them when confidence exists.
+ */
+export interface ProviderMeasuredEvidence {
+  /** Raw execution sample count. */
+  sampleCount: number;
+  /** Recency-weighted sample count (drives confidence/influence). */
+  effectiveSampleCount: number;
+  /** Weighted success rate 0..1. */
+  successRate?: number;
+  /** Weighted failure rate 0..1. */
+  failureRate?: number;
+  /** Median latency ms over recorded executions. */
+  p50LatencyMs?: number;
+  /** p95 latency ms over recorded executions. */
+  p95LatencyMs?: number;
+  /** Weighted share of executions classified as timeout. */
+  timeoutRate?: number;
+  /** Weighted share of executions classified as rate-limited. */
+  rateLimitRate?: number;
+  /** Weighted average tokens per execution. */
+  averageTokensPerCall?: number;
+  /** Weighted average input tokens per execution. */
+  averageInputTokens?: number;
+  /** Weighted average output tokens per execution. */
+  averageOutputTokens?: number;
+  /** Weighted average total tokens per execution. */
+  averageTotalTokens?: number;
+  /** Weighted average cost USD per execution. */
+  averageCostUsd?: number;
+  /** Failures within the recent window (raw count). */
+  recentFailureCount?: number;
+  confidence: 'INSUFFICIENT' | 'LOW_CONFIDENCE' | 'MEASURED';
+  /** 0..1 progressive influence ramp (0 when INSUFFICIENT). */
+  influence: number;
+  /** Dimension this evidence was measured for (provider/model/capability). */
+  dimension?: 'provider' | 'provider_model' | 'provider_model_capability';
+  /** Always MEASURED — never static/estimated. */
+  provenance: 'MEASURED';
 }
 
 export interface ProviderCandidateIntelligence {
@@ -36,6 +121,17 @@ export interface ProviderCandidateIntelligence {
   freeToUse?: boolean;
   /** Model ids known unavailable/deprecated — excluded from selection. */
   unavailableModelIds?: string[];
+  // ── Routing evidence (Phases G/H) — real measured history, when it exists.
+  //    Absent in cold start → the advisor behaves exactly as before.
+  measured?: ProviderMeasuredEvidence;
+  // ── Real-time execution health (Capability Intelligence) — bounded, recent,
+  //    recoverable feedback from actual outcomes. UNKNOWN when the tracker has
+  //    no window data → advisor behaves exactly as before (Gemini cold start).
+  runtimeHealth?: RuntimeExecutionHealth;
+  /** Models the runtime tracker knows are failing at MODEL scope (e.g.
+   *  unsupported or model-level unavailable) — excluded from selection while
+   *  the provider itself stays eligible. Never derived from provider health. */
+  runtimeUnavailableModelIds?: string[];
 }
 
 export interface ProviderIntelligencePort {
@@ -52,6 +148,9 @@ export interface ExecutionStrategyPort {
 
 export interface ProviderSelectionExplanation {
   capability: string;
+  /** Authoritative task capability requirements (CapabilityType taxonomy).
+   *  Defaults to [capability] when the caller supplied none. */
+  requiredCapabilities: string[];
   selected: {
     providerId: string;
     modelId: string;
@@ -79,6 +178,22 @@ const WEIGHTS = {
   health: 0.15,
 } as const;
 
+// ── Measured-evidence weights (Phase G/H) ────────────────────────────────
+// These are ADDITIVE and BOUNDED: measured data augments the existing
+// deterministic weights instead of replacing them, and its influence is
+// scaled by `evidence.influence` (0..1, progressive — see the evidence
+// service). With zero evidence the terms contribute exactly 0, so cold
+// start behaves identically to the previous advisor.
+
+/** Max score contribution from measured reliability (success rate). */
+const MEASURED_RELIABILITY_WEIGHT = 0.12;
+/** Max penalty from measured recent failures. */
+const MEASURED_RECENT_FAILURE_WEIGHT = 0.06;
+/** Max penalty from measured rate-limit / timeout frequency. */
+const MEASURED_DEGRADATION_WEIGHT = 0.06;
+/** Minimum success rate below which measured reliability drags the score. */
+const MEASURED_SUCCESS_FLOOR = 0.9;
+
 export class ProviderRoutingAdvisor {
   constructor(
     private readonly providerIntelligence: ProviderIntelligencePort,
@@ -92,6 +207,10 @@ export class ProviderRoutingAdvisor {
    */
   async decide(input: {
     capability: string;
+    /** Authoritative task capability requirements (existing CapabilityType
+     *  taxonomy). When omitted the task requires exactly its routing
+     *  capability — cold-start behavior is unchanged. */
+    requiredCapabilities?: string[];
     estimatedInputTokens: number;
     requestedOutputTokens?: number;
   }): Promise<ProviderSelectionExplanation> {
@@ -100,32 +219,88 @@ export class ProviderRoutingAdvisor {
       this.executionStrategy.getRoutingContext(),
     ]);
 
+    // The task capability requirements. The routing capability is always
+    // required (candidates were fetched against it); caller-supplied extra
+    // requirements gate provider AND model eligibility below.
+    const requiredCapabilities = [
+      input.capability,
+      ...(input.requiredCapabilities ?? []).filter((c) => c !== input.capability),
+    ];
+
     const estimatedCost = this.estimateCost(input, candidates, routing.strategy);
 
     const scored = candidates.map((candidate) => {
       const reasons: string[] = [];
       let score = 0;
 
-      // Health gate: unhealthy providers are excluded unless nothing is healthy.
-      if (!candidate.healthy) {
+      // ── Health gate (registry + real-time execution health) ────────────
+      // UNAVAILABLE runtime verdict folds into the existing unhealthy gate
+      // (excluded only while a healthy alternative exists — never an
+      // auto-disable). DEGRADED applies a bounded soft penalty instead.
+      const runtimeHealth = candidate.runtimeHealth;
+      if (!candidate.healthy || runtimeHealth?.verdict === 'UNAVAILABLE') {
         reasons.push('provider health check failing');
+        if (runtimeHealth?.detail) reasons.push(runtimeHealth.detail);
         score -= 1;
       } else {
         score += WEIGHTS.health * 1;
         reasons.push('provider health acceptable');
+        if (runtimeHealth?.verdict === 'DEGRADED') {
+          score -= 0.08;
+          reasons.push('provider degraded by recent execution failures');
+        }
       }
 
-      // Capability compatibility.
-      if (!candidate.capabilities.includes(input.capability)) {
-        reasons.push('capability not supported');
+      // ── Capability compatibility (HARD gate on required capabilities) ──
+      // Provider level first: every required capability must be declared at
+      // the provider level. Model level second: at least one model must
+      // support every required capability (provider capability ≠ model
+      // capability — an embedding model inside a vision-capable provider is
+      // never eligible for a vision task).
+      const missingProviderCapabilities = requiredCapabilities.filter(
+        (c) => !candidate.capabilities.includes(c),
+      );
+      // A candidate cannot serve when EVERY model explicitly declares
+      // capabilities and NO model supports all of them. Models with no
+      // declared capability list are UNKNOWN → conservative, never excluded
+      // on an absent list (sparse metadata cannot break cold-start routing).
+      const declaresAll = candidate.models.every(
+        (m) => m.capabilities !== undefined && m.capabilities.length > 0,
+      );
+      const noCapableModel =
+        declaresAll &&
+        candidate.models.length > 0 &&
+        !candidate.models.some((m) =>
+          requiredCapabilities.every((c) => (m.capabilities ?? []).includes(c)),
+        );
+      if (missingProviderCapabilities.length > 0 || noCapableModel) {
+        reasons.push(
+          `required capability${missingProviderCapabilities.length > 0 ? ` ${missingProviderCapabilities.join(', ')}` : ''} not supported${noCapableModel && missingProviderCapabilities.length === 0 ? ' by any model' : ''}`,
+        );
         score -= 1;
       } else {
         reasons.push('capability compatible');
         score += WEIGHTS.benchmark * (candidate.benchmarkScore / 100);
+        // Models that explicitly lack a required capability are excluded from
+        // model selection even though the provider qualifies (informational).
+        const excludedByCapability = candidate.models.filter((m) => {
+          const caps = m.capabilities;
+          return (
+            caps !== undefined &&
+            caps.length > 0 &&
+            !requiredCapabilities.every((c) => caps.includes(c))
+          );
+        });
+        if (excludedByCapability.length > 0) {
+          reasons.push(
+            `${excludedByCapability.length} model(s) excluded: do not support all required capabilities`,
+          );
+        }
       }
 
-      // Context window sufficiency.
-      const model = this.pickModel(candidate, input.estimatedInputTokens);
+      // Context window sufficiency (only among models that support the
+      // required capabilities and are not runtime-unavailable).
+      const model = this.pickModel(candidate, input.estimatedInputTokens, requiredCapabilities);
       if (!model) {
         reasons.push('no model with sufficient context window');
         score -= 0.5;
@@ -155,9 +330,52 @@ export class ProviderRoutingAdvisor {
       // fitting provider wins latency-first routing.
       const latencyWeight =
         routing.strategy === 'latency-first' ? WEIGHTS.latency * 4 : WEIGHTS.latency;
-      const latencyFactor = Math.max(0, 1 - candidate.averageLatencyMs / 10_000);
+      // Measured latency (Phase G): when real evidence exists, prefer the
+      // measured median over the static registry latency signal. Influence is
+      // scaled so a single fast run cannot override the catalog.
+      const measured = candidate.measured;
+      const measuredLatency =
+        measured && measured.confidence !== 'INSUFFICIENT' && measured.p50LatencyMs !== undefined
+          ? measured.p50LatencyMs
+          : undefined;
+      const latencyMs = measuredLatency ?? candidate.averageLatencyMs;
+      const latencyFactor = Math.max(0, 1 - latencyMs / 10_000);
       score += latencyWeight * latencyFactor;
-      reasons.push('expected latency acceptable');
+      reasons.push(
+        measuredLatency !== undefined
+          ? `measured p50 latency ${Math.round(measuredLatency)}ms`
+          : 'expected latency acceptable',
+      );
+
+      // Measured reliability (Phase G/H) — bounded + influence-scaled.
+      if (measured && measured.confidence !== 'INSUFFICIENT' && measured.influence > 0) {
+        const reliability =
+          measured.successRate !== undefined
+            ? Math.max(0, measured.successRate - MEASURED_SUCCESS_FLOOR) /
+              (1 - MEASURED_SUCCESS_FLOOR) // 0 at 90%, 1 at 100%
+            : 0;
+        score += MEASURED_RELIABILITY_WEIGHT * reliability * measured.influence;
+        reasons.push(
+          `measured reliability ${measured.successRate !== undefined ? Math.round(measured.successRate * 100) : '?'}% over ${measured.sampleCount} executions`,
+        );
+        if ((measured.recentFailureCount ?? 0) > 0) {
+          const penalty = Math.min(
+            MEASURED_RECENT_FAILURE_WEIGHT,
+            ((measured.recentFailureCount ?? 0) / 10) * MEASURED_RECENT_FAILURE_WEIGHT,
+          );
+          score -= penalty * measured.influence;
+          reasons.push(
+            `${measured.recentFailureCount} recent failure(s) weigh against this provider`,
+          );
+        }
+        const degradation =
+          ((measured.timeoutRate ?? 0) + (measured.rateLimitRate ?? 0)) *
+          MEASURED_DEGRADATION_WEIGHT;
+        if (degradation > 0) {
+          score -= Math.min(MEASURED_DEGRADATION_WEIGHT, degradation) * measured.influence;
+          reasons.push('measured timeouts/rate-limits weigh against this provider');
+        }
+      }
 
       // Strategy preference.
       if (routing.strategy === 'cost-first') {
@@ -215,6 +433,7 @@ export class ProviderRoutingAdvisor {
 
     return {
       capability: input.capability,
+      requiredCapabilities,
       selected: {
         providerId: selected.candidate.providerId,
         modelId: selected.model?.id ?? selected.candidate.models[0]?.id ?? '',
@@ -234,19 +453,39 @@ export class ProviderRoutingAdvisor {
     };
   }
 
-  /** Pick the best model for the candidate that fits the token budget. */
+  /**
+   * Pick the best model for the candidate: it must support EVERY required
+   * capability (model-level, explicit only) and fit the token budget, and
+   * must not be runtime-unavailable or lifecycle-deprecated.
+   */
   private pickModel(
     candidate: ProviderCandidateIntelligence,
     estimatedInputTokens: number,
+    requiredCapabilities: string[],
   ): ProviderModelIntelligence | undefined {
     // EPIC-012B — models the intelligence layer knows are unavailable or
     // deprecated are never selected, even when they fit the budget.
-    const unavailable = new Set(candidate.unavailableModelIds ?? []);
+    const unavailable = new Set([
+      ...(candidate.unavailableModelIds ?? []),
+      ...(candidate.runtimeUnavailableModelIds ?? []),
+    ]);
     const models = candidate.models
       .filter((m) => !unavailable.has(m.id))
+      .filter((m) => this.modelSupportsAll(m, requiredCapabilities))
       .filter((m) => m.contextWindow >= estimatedInputTokens + 512)
       .sort((a, b) => b.contextWindow - a.contextWindow);
     return models[0];
+  }
+
+  /**
+   * Model-level capability check. A model with NO declared capability list is
+   * UNKNOWN — treated as compatible (an absent list never excludes; only an
+   * explicit lack does, so sparse registry metadata cannot break routing).
+   */
+  private modelSupportsAll(model: ProviderModelIntelligence, required: string[]): boolean {
+    const caps = model.capabilities;
+    if (caps === undefined || caps.length === 0) return true;
+    return required.every((c) => caps.includes(c));
   }
 
   private providerCost(

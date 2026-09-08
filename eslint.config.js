@@ -18,7 +18,7 @@ export default tseslint.config(
             '*.config.mjs',
             'vitest.workspace.ts',
             'tests/vitest.setup.ts',
-          'packages/*/vitest.config.ts',
+            'packages/*/vitest.config.ts',
             'apps/web/scripts/*.mjs',
             'packages/*/coverage-analyze.mjs',
             'packages/services/src/*.js',
@@ -158,6 +158,23 @@ export default tseslint.config(
   // is required for interface conformance (same rationale as above).
   {
     files: ['packages/brain/src/infrastructure/InMemory*.ts'],
+    rules: {
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
+  // BLD-022 mission-runtime adapters implement ASYNC port/store contracts
+  // (MissionStore/CheckpointStore/RepositoryInspectionPort/VerificationPort/
+  // FailureClassificationPort) whose bodies are synchronous by design — the
+  // frozen mission-controller ports return Promises, so `async` is required
+  // for interface conformance even though these bodies never await (same
+  // rationale as the InMemory*Repository / InMemory*.ts overrides above).
+  {
+    files: [
+      'packages/mission-runtime/src/persistence/PostgresMissionStores.ts',
+      'packages/mission-runtime/src/adapters/FsRepositoryInspector.ts',
+      'packages/mission-runtime/src/adapters/MissionFailureClassifierAdapter.ts',
+      'packages/mission-runtime/src/adapters/PlanningExecutionPorts.ts',
+    ],
     rules: {
       '@typescript-eslint/require-await': 'off',
     },
@@ -312,6 +329,33 @@ export default tseslint.config(
       // where i is a bounded loop index over an owner-scoped typed array —
       // never user-controlled, same rationale as InMemoryContinuousStores.
       'packages/ecosystem/src/application/WorkflowExecutionService.ts',
+      // Autonomous Planning Intelligence (SPRINT-1): plan-proposal.ts is the
+      // UNTRUSTED-input parsing boundary. Its only computed writes are
+      // `values[key] = object[key]` where `key` is drawn from the parser's
+      // own closed whitelist (pickKeys), and `argumentsValue[key] = value`
+      // where `key` comes from Object.entries() over an object already
+      // validated as a plain object with ≤20 keys — keys are never used as
+      // prototype/property names beyond defensive own-key checks, and every
+      // value flows into the frozen AgentPlan contract where the execution
+      // engine re-validates. strict + noUncheckedIndexedAccess keeps reads
+      // null-safe (same proven pattern as ToolRuntime.sanitizePayload).
+      'packages/planning/src/domain/plan-proposal.ts',
+      // Adaptive Agent Loop: these domain files index typed Records keyed by
+      // the plan's OWN validated stepIds (stepStatus/revisedInstructions/
+      // stepAttempts/verification lookups) or by bounded loop indices over
+      // engine-owned arrays — the keys come from the READY plan handed over
+      // by the frozen planning boundary (already validated + readiness-gated),
+      // never from raw user input. strict + noUncheckedIndexedAccess keeps
+      // every read null-safe (same proven closed-key pattern as the frozen
+      // AgentExecutionEngine and the loop-engine exemptions above).
+      'packages/adaptive-loop/src/domain/adaptive-engine.ts',
+      'packages/adaptive-loop/src/domain/adaptive-context.ts',
+      'packages/adaptive-loop/src/domain/loop-guard.ts',
+      // Execution Memory: memory-conflicts.ts indexes explicitOverrides — a
+      // caller-supplied Record<string,string> of EXPLICIT current requests
+      // (runtime truth), never attacker-controlled object shapes; the lookup
+      // only ever reads values to compare against the preference subject.
+      'packages/execution-memory/src/domain/memory-conflicts.ts',
     ],
     rules: {
       'security/detect-object-injection': 'off',
@@ -396,6 +440,7 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/.next/**',
       '**/coverage/**',
+      '**/coverage-analyze.mjs',
       '**/__tests__/**',
       '**/*.test.ts',
       '**/*.test.tsx',

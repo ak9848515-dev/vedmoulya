@@ -26,6 +26,7 @@ import { createExecutionBridgeRouter } from '../routers/ExecutionBridgeRouter.js
 import { createContextRouter } from '../routers/ContextRouter.js';
 import { createExecutionStrategyRouter } from '../routers/ExecutionStrategyRouter.js';
 import { createOrchestratorRouter } from '../routers/OrchestratorRouter.js';
+import { createMissionRouter } from '../routers/MissionRouter.js';
 import { createFabricOrchestratorRouter } from '../routers/OrchestrationFabricRouter.js';
 import { createGoalsRouter } from '../routers/GoalsRouter.js';
 import { createIntelligenceRouter } from '../routers/IntelligenceRouter.js';
@@ -35,6 +36,7 @@ import { createKnowledgeRouter } from '../routers/KnowledgeRouter.js';
 import { createMemoryIntelligenceRouter } from '../routers/MemoryIntelligenceRouter.js';
 import { createOSRouter } from '../routers/OSRouter.js';
 import { createAIRouter } from '../routers/AIRouter.js';
+import { createPlanningRouter } from '../routers/PlanningRouter.js';
 import { createRagRouter } from '../routers/RagRouter.js';
 import { createLoopRouter } from '../routers/LoopRouter.js';
 import { createFactoryRouter } from '../routers/FactoryRouter.js';
@@ -684,6 +686,40 @@ const strategyEstimateInput = z.object({
   maxTokens: z.number().int().min(0).optional(),
   maxCostUsd: z.number().min(0).optional(),
   maxLatencyMs: z.number().int().min(0).optional(),
+});
+
+// ── Autonomous Planning Intelligence schemas (BLD-017A) matching packages/planning ──
+
+const planningConstraintInput = z.object({
+  autonomyLevel: z.enum(['ASSISTED', 'SUPERVISED', 'CONTROLLED_AUTONOMOUS']).optional(),
+  budget: z
+    .object({
+      maxAttemptsPerStep: z.number().int().min(1).max(10).optional(),
+      maxRevisionsPerStep: z.number().int().min(0).max(5).optional(),
+      maxToolCalls: z.number().int().min(0).optional(),
+      maxTokens: z.number().int().min(0).optional(),
+      maxCostUsd: z.number().min(0).optional(),
+      maxLatencyMs: z.number().int().min(0).optional(),
+    })
+    .optional(),
+  maxSteps: z.number().int().min(1).max(50).optional(),
+  allowedTools: z.array(z.string().min(1).max(80)).optional(),
+  grantedPermissionClasses: z.array(z.enum(['READ', 'WRITE', 'EXECUTE', 'DELETE'])).optional(),
+  requireVerification: z.boolean().optional(),
+  recovery: z
+    .object({
+      maxAttempts: z.number().int().min(1).max(3).optional(),
+      maxRevisions: z.number().int().min(0).max(2).optional(),
+    })
+    .optional(),
+});
+
+const planningGenerateInput = z.object({
+  userId: z.string().min(1),
+  goal: z.string().min(3).max(2000),
+  context: z.string().max(8000).optional(),
+  constraints: planningConstraintInput.optional(),
+  mode: z.enum(['deterministic', 'ai']).optional(),
 });
 
 // ── Execution Orchestrator enums (EPIC-004 / EI-005) matching packages/orchestrator ──
@@ -1789,6 +1825,9 @@ const sectionRefresh = z.object({
 const aiOrchestrateInput = z.object({
   userId: z.string().min(1),
   capability: capabilityAIFeatureEnum,
+  // Capability Intelligence: authoritative task requirements (CapabilityType
+  // taxonomy only). Optional — omitted callers require exactly `capability`.
+  requiredCapabilities: z.array(capabilityAIFeatureEnum).min(1).max(8).optional(),
   userInput: z.string().min(1).max(8000),
   qualityTier: providerQualityTierEnum,
   conversationId: z.string().max(200).optional(),
@@ -1849,6 +1888,7 @@ const aiStreamInput = aiOrchestrateInput;
 const aiExplainSelectionInput = z.object({
   userId: z.string().min(1),
   capability: capabilityAIFeatureEnum,
+  requiredCapabilities: z.array(capabilityAIFeatureEnum).min(1).max(8).optional(),
   estimatedInputTokens: z.number().int().min(1).max(1000000).optional(),
   requestedOutputTokens: z.number().int().min(1).max(64000).optional(),
 });
@@ -3542,6 +3582,22 @@ export function createAppRouter(services: ApiApplicationService) {
             ctx,
           ),
         ),
+      // OpenAI ORGANIZATION usage per model (real Today/This-week/This-month
+      // windows from /v1/organization/usage/completions; requires an org
+      // admin-scope key; unavailable states are honest, never fabricated).
+      getOpenAIOrgUsage: standardProcedure
+        .input(
+          z.object({
+            userId: z.string().min(1),
+            period: z.enum(['today', 'week', 'month']),
+          }),
+        )
+        .query(({ input, ctx }) =>
+          createProvidersRouter(services.providers, services.providerExperience).getOpenAIOrgUsage(
+            input,
+            ctx,
+          ),
+        ),
       explainModelSelection: standardProcedure
         .input(providerExplainSelectionInput)
         .mutation(({ input, ctx }) =>
@@ -4894,7 +4950,15 @@ export function createAppRouter(services: ApiApplicationService) {
         // The service always returns a status (honest inactive default before
         // the cadence driver binds; live status after) — one source of truth.
         createSchedulerRouter(services.aiWorldScheduler, () =>
-          services.schedulerRuntimeStatus(),
+          typeof services.schedulerRuntimeStatus === 'function'
+            ? services.schedulerRuntimeStatus()
+            : {
+                active: false,
+                reason: 'not_started' as const,
+                maxUsersPerTick: 0,
+                refreshIntelligenceEnabled: false,
+                proactiveRefreshEnabled: false,
+              },
         ).getRuntimeStatus(input, ctx),
       ),
       listSchedules: standardProcedure
@@ -5229,6 +5293,24 @@ export function createAppRouter(services: ApiApplicationService) {
       explainSelection: standardProcedure
         .input(aiExplainSelectionInput)
         .query(({ input, ctx }) => createAIRouter(services.ai).explainSelection(input, ctx)),
+    }),
+
+    // ── Autonomous Planning Intelligence (BLD-017A) ──────────────────────────
+    //    The planner PROPOSES (GOAL → UNDERSTANDING → PLAN → VALIDATION →
+    //    READINESS); the frozen AgentExecutionService EXECUTES — only READY
+    //    plans are handed over, and the executor re-validates + enforces the
+    //    security/approval/budget chain. AI mode goes through the SAME frozen
+    //    AI runtime (routing + health/evidence + cost), never provider SDKs.
+    //    heavy tier: planAndExecute may hit the runtime per step.
+    planning: router({
+      plan: heavyProcedure
+        .input(planningGenerateInput)
+        .mutation(({ input, ctx }) => createPlanningRouter(services.planning).plan(input, ctx)),
+      planAndExecute: heavyProcedure
+        .input(planningGenerateInput)
+        .mutation(({ input, ctx }) =>
+          createPlanningRouter(services.planning).planAndExecute(input, ctx),
+        ),
     }),
 
     // ── Enterprise RAG Platform (EPIC-005 / AI-RUNTIME-002) ──────────────────
@@ -6368,6 +6450,63 @@ export function createAppRouter(services: ApiApplicationService) {
           const orchRouter = createFabricOrchestratorRouter(services.orchestrator);
           return orchRouter.getEvents(input, ctx);
         }),
+    }),
+
+    // ── BLD-024 — Mission Control ─────────────────────────────────────
+    //    Thin transport over MissionService → MissionRuntimeApi. The
+    //    autonomous execution loop lives in the frozen MissionController —
+    //    never in route handlers. `start`/`resume` intentionally run the
+    //    loop to completion (the controller caps iterations and stops at
+    //    PAUSED/BLOCKED/WAITING states); the UI observes via `status`.
+    mission: router({
+      createAndRun: heavyProcedure
+        .input(
+          z.object({
+            userId: z.string().min(1),
+            title: z.string().min(3).max(200),
+            objective: z.string().min(3).max(2000),
+            workspace: z.string().max(500).optional(),
+            initialObjectives: z.array(z.string().min(3).max(2000)).max(50).optional(),
+            maxObjectives: z.number().int().min(1).max(100).optional(),
+            maxCostUsd: z.number().min(0).optional(),
+            maxTokens: z.number().int().min(0).optional(),
+            maxRuntimeMs: z.number().int().min(0).optional(),
+            autonomyLevel: z.enum(['ASSISTED', 'SUPERVISED', 'CONTROLLED_AUTONOMOUS']).optional(),
+          }),
+        )
+        .mutation(({ input }) => createMissionRouter(services.mission).createAndRun(input)),
+
+      start: heavyProcedure
+        .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
+        .mutation(({ input }) => createMissionRouter(services.mission).start(input)),
+
+      status: standardProcedure
+        .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
+        .query(({ input }) => createMissionRouter(services.mission).status(input)),
+
+      pause: standardProcedure
+        .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
+        .mutation(({ input }) => createMissionRouter(services.mission).pause(input)),
+
+      resume: heavyProcedure
+        .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
+        .mutation(({ input }) => createMissionRouter(services.mission).resume(input)),
+
+      cancel: standardProcedure
+        .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
+        .mutation(({ input }) => createMissionRouter(services.mission).cancel(input)),
+
+      approve: standardProcedure
+        .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
+        .mutation(({ input }) => createMissionRouter(services.mission).approve(input)),
+
+      reject: standardProcedure
+        .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
+        .mutation(({ input }) => createMissionRouter(services.mission).reject(input)),
+
+      history: standardProcedure
+        .input(z.object({ userId: z.string().min(1) }))
+        .query(({ input }) => createMissionRouter(services.mission).history(input)),
     }),
   });
 }

@@ -46,7 +46,16 @@ export interface StepExecutorPort {
   execute(params: {
     stepId: string;
     instruction: string;
+    /** Primary/routing capability of the step (requiredCapabilities[0]). */
     capability: CapabilityType;
+    /**
+     * ALL authoritative hard capability requirements of the step. Forwarded
+     * in FULL to the AI runtime so routing gates on every requirement — the
+     * executor must never collapse [coding, reasoning] into [coding].
+     * Optional for legacy executor implementations (they keep routing on the
+     * primary capability only).
+     */
+    requiredCapabilities?: CapabilityType[];
     userId: string;
     allowedTools: string[];
   }): Promise<{
@@ -552,6 +561,10 @@ export class WorkflowExecutionService {
           stepId: step.id,
           instruction,
           capability: primaryCapability,
+          // Forward the step's FULL requirement set (never [0] only): the
+          // AI runtime validates against CAPABILITY_TYPES and hard-gates
+          // routing on every capability the step requires.
+          requiredCapabilities: [...new Set(step.requiredCapabilities)],
           userId: execution.ownerId,
           allowedTools: step.allowedTools,
         });

@@ -1,0 +1,38 @@
+# K3 experiment / vendored C project — NOT part of the VedMoulya monorepo.
+# It carries its own Python venv, build output, and third_party tree and must
+# never be swept by the workspace's prettier --check "**/*.{ts,tsx,json,md,yaml}".
+kimi-k3-in-c/
+k3-tiny-runtime/
+k3-tiny-state.bin/
+.venv-k3/
+venv/
+venv-k3/
+
+# Generated coverage artifacts (per-workspace `coverage/` and repo-root coverage)
+coverage/
+.nyc_output/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+storybook-static/
+apps/web/out/
+
+# Dependency stores / lock caches
+node_modules/
+pnpm-store/
+.npm/
+
+# Test / telemetry scratch
+playwright-report/
+test-results/
+*.log
+*.log.*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

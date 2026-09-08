@@ -17,6 +17,7 @@
   "dependencies": {
     "@trpc/server": "^11.18.0",
     "ioredis": "^5.6.0",
+    "@vedmoulya/agent-execution": "*",
     "@vedmoulya/app-factory": "*",
     "@vedmoulya/capabilities": "*",
     "@vedmoulya/content-agency": "*",
@@ -43,6 +44,7 @@
     "@vedmoulya/learning-intelligence": "*",
     "@vedmoulya/live-intelligence-bridge": "*",
     "@vedmoulya/loop-engine": "*",
+    "@vedmoulya/mission-runtime": "*",
     "@vedmoulya/enterprise-brain": "*",
     "@vedmoulya/brain": "*",
     "@vedmoulya/ecosystem": "*",
@@ -50,6 +52,7 @@
     "@vedmoulya/knowledge-intelligence": "*",
     "@vedmoulya/memory-intelligence": "*",
     "@vedmoulya/os-intelligence": "*",
+    "@vedmoulya/planning": "*",
     "@vedmoulya/memory": "*",
     "@vedmoulya/context-fabric": "*",
     "@vedmoulya/orchestrator": "*",

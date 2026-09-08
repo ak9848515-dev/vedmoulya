@@ -43,11 +43,28 @@ export class MockProvider implements ProviderAdapter {
     });
   }
 
+  // The mock's registry model id (catalog id 'mock-1' aliases the same
+  // fixed model) — the ONLY model this adapter can execute.
+  private readonly supportedModelIds = ['mock-v1', 'mock-1'];
+
   execute(request: {
     messages: Array<{ role: string; content: string }>;
     model: string;
     maxTokens?: number;
+    modelId?: string;
   }): Promise<AIResponse> {
+    // Phase B — explicit unsupported state: the mock is a FIXED-model
+    // adapter. It must never silently pretend a different model executed.
+    // NOTE: `request.model` is the runtime's provider-name placeholder, NOT
+    // a real model selection — only an explicit advisor `modelId` is a model
+    // request. Absent one, the mock executes its own fixed model (unchanged).
+    if (request.modelId !== undefined && !this.supportedModelIds.includes(request.modelId)) {
+      return Promise.reject(
+        new Error(
+          `Mock provider does not support model "${request.modelId}" (fixed model: mock-v1)`,
+        ),
+      );
+    }
     const lastMessage = request.messages[request.messages.length - 1];
     const input = lastMessage?.content ?? '';
 

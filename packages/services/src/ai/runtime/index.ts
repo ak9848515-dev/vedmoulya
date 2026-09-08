@@ -10,9 +10,35 @@ export type {
   ProviderIntelligencePort,
   ProviderCandidateIntelligence,
   ProviderModelIntelligence,
+  ProviderMeasuredEvidence,
   ExecutionStrategyPort,
   ProviderSelectionExplanation,
+  RuntimeExecutionHealth,
+  RuntimeHealthVerdict,
 } from './ProviderRoutingAdvisor.js';
+
+/**
+ * Real-time execution health feedback port (Capability Intelligence). The
+ * runtime reports EVERY execution outcome (success or classified failure)
+ * through this port; the gateway implementation (ExecutionHealthService)
+ * keeps bounded, recency-decayed provider/model health that the advisor
+ * reads on the next decision. Absent → the runtime simply skips feedback.
+ */
+export interface HealthFeedbackPort {
+  /** Record one execution outcome (fire-and-forget, never awaited by the runtime). */
+  recordExecution(outcome: {
+    providerId: string;
+    /** Actual executed model id when known (omitted → provider-scope only). */
+    modelId?: string;
+    ok: boolean;
+    /** Classified FailureReason when !ok. */
+    failureReason?: string;
+    /** Outcome latency in ms when known. */
+    latencyMs?: number;
+    /** Epoch ms of the outcome. Default Date.now(). */
+    at?: number;
+  }): void;
+}
 
 export { ModelSelectionIntelligence } from './ModelSelectionIntelligence.js';
 export type {

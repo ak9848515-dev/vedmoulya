@@ -602,6 +602,13 @@ export class LoopEngine {
     return {
       taskId: task.taskId,
       capability: task.capability,
+      // Forward the task's full authoritative requirement set (primary +
+      // any additional template-declared capabilities) so the AI runtime can
+      // hard-gate routing on every requirement — never reduced to [0].
+      requiredCapabilities:
+        task.requiredCapabilities !== undefined && task.requiredCapabilities.length > 0
+          ? task.requiredCapabilities
+          : [task.capability],
       qualityTier: task.qualityTier,
       userInput: prompt,
       systemPrompt:

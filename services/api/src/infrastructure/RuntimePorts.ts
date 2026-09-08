@@ -15,8 +15,36 @@ import type {
   ExecutionStrategyPort,
   ProviderCandidateIntelligence,
   ProviderIntelligencePort,
+  ProviderMeasuredEvidence,
   RagRetrievalPort,
+  RuntimeExecutionHealth,
 } from '@vedmoulya/services';
+
+/**
+ * Optional measured-evidence source (Phase G wiring). When provided, each
+ * candidate carries REAL measured history (reliability/latency/tokens/cost)
+ * from the RoutingEvidenceService; absent in cold start the candidates are
+ * exactly as before (static registry metadata only).
+ */
+export interface RoutingEvidenceSource {
+  bestEvidence(
+    providerId: string,
+    modelId?: string,
+    capability?: string,
+  ): ProviderMeasuredEvidence | undefined;
+}
+
+/**
+ * Real-time execution health source (Capability Intelligence). The gateway's
+ * ExecutionHealthService implements this shape: bounded, recency-decayed
+ * verdicts from ACTUAL execution outcomes. Absent → candidates carry exactly
+ * the registry health they carried before this epic.
+ */
+export interface RuntimeHealthSource {
+  getProviderHealth(providerId: string): RuntimeExecutionHealth | undefined;
+  getModelHealth(providerId: string, modelId: string): RuntimeExecutionHealth | undefined;
+  listUnavailableModelIds(providerId: string): string[];
+}
 
 /**
  * EI-002 adapter: live provider candidates for a capability, including model
@@ -32,6 +60,8 @@ import type {
 export function createProviderIntelligencePort(
   providers: ProviderApplicationService,
   intelligenceStore?: ProviderIntelligenceStore,
+  evidence?: RoutingEvidenceSource,
+  runtimeHealth?: RuntimeHealthSource,
 ): ProviderIntelligencePort {
   return {
     getCandidates: async (capability: string): Promise<ProviderCandidateIntelligence[]> => {
@@ -59,16 +89,36 @@ export function createProviderIntelligencePort(
                 .filter(([, status]) => status === 'unavailable' || status === 'deprecated')
                 .map(([modelId]) => modelId)
             : [];
+          // Phase G — real measured history when it exists (per provider;
+          // model/capability dimensions refine inside the evidence service).
+          // Absent in cold start → the advisor sees exactly the static
+          // metadata it saw before this epic.
+          const measured = evidence ? evidence.bestEvidence(provider.id) : undefined;
+          // Capability Intelligence — real-time execution health (bounded,
+          // recoverable). An UNAVAILABLE runtime verdict folds into the
+          // registry `healthy` gate ONLY for routing eligibility (excluded
+          // while a healthy alternative exists — never an auto-disable); the
+          // full verdict detail is attached for the advisor + observability.
+          const runtimeProviderHealth = runtimeHealth?.getProviderHealth(provider.id);
+          const registryHealthy =
+            provider.health.status === 'healthy' && provider.lifecycleStatus === 'active';
+          const healthy = registryHealthy && runtimeProviderHealth?.verdict !== 'UNAVAILABLE';
+          const runtimeUnavailableModelIds = runtimeHealth?.listUnavailableModelIds(provider.id);
           return {
             providerId: provider.id,
             family: provider.family,
             capabilities: provider.capabilities,
-            healthy: provider.health.status === 'healthy' && provider.lifecycleStatus === 'active',
+            healthy,
             models: provider.models.map((model) => ({
               id: model.id,
               contextWindow: model.contextLength,
               maxOutputTokens: model.maxOutputTokens,
               streaming: model.streaming,
+              // Model-level capabilities from the single provider registry:
+              // provider capability ≠ model capability, so routing can gate
+              // on the ACTUAL model (a vision provider may host non-vision
+              // models). Absent → the advisor treats the model as UNKNOWN.
+              capabilities: model.capabilities,
             })),
             // All pricing/latency/quality fields are required on the registry DTO.
             benchmarkScore: provider.bestQuality,
@@ -80,6 +130,18 @@ export function createProviderIntelligencePort(
             resourceType: classification.resourceType,
             freeToUse: classification.freeToUse,
             unavailableModelIds: unavailableModelIds.length > 0 ? unavailableModelIds : undefined,
+            // Measured execution evidence — NEVER static/estimated.
+            ...(measured ? { measured } : {}),
+            // Real-time execution health — attached only when the tracker has
+            // an actual verdict (UNKNOWN/cold start carries nothing).
+            ...(runtimeProviderHealth && runtimeProviderHealth.verdict !== 'UNKNOWN'
+              ? { runtimeHealth: runtimeProviderHealth }
+              : {}),
+            // Models the runtime tracker currently excludes (model-scope
+            // failures / declared unsupported) — provider stays eligible.
+            ...(runtimeUnavailableModelIds && runtimeUnavailableModelIds.length > 0
+              ? { runtimeUnavailableModelIds }
+              : {}),
           };
         }),
       );

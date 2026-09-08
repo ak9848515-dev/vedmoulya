@@ -615,6 +615,36 @@ export function useProviderUsageDetail(userId: string) {
   return { ...q, data: unwrap<ProviderUsageDetailDTO>(q.data) };
 }
 
+// ── OpenAI ORGANIZATION usage per model (real periods) ─────────────────────
+// OpenAI-reported usage of the platform's own organization key from
+// /v1/organization/usage/completions, with REAL Today / This week / This month
+// UTC windows. Requires an Organization admin-scope API key; without one the
+// payload is available:false with an honest reason — never fabricated.
+
+export type OpenAIOrgPeriod = 'today' | 'week' | 'month';
+
+interface OpenAIOrgUsageDTO {
+  available: boolean;
+  period: OpenAIOrgPeriod;
+  message: string;
+  rows: Array<{
+    model: string;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+  }>;
+  totals: { inputTokens: number; cachedInputTokens: number; outputTokens: number };
+  hasMore?: boolean;
+}
+
+export function useOpenAIOrgUsage(userId: string, period: OpenAIOrgPeriod) {
+  const q = api.providers.getOpenAIOrgUsage.useQuery(
+    { userId, period },
+    { enabled: Boolean(userId) },
+  );
+  return { ...q, data: unwrap<OpenAIOrgUsageDTO>(q.data) };
+}
+
 export function useExplainModelSelection() {
   const mutation = api.providers.explainModelSelection.useMutation();
   return {
@@ -3953,6 +3983,187 @@ export function useExperienceRefine() {
   return {
     ...mutation,
     data: unwrap<import('@vedmoulya/experience').ExperienceRefineDTO>(mutation.data),
+    mutateAsync: guardMutation(mutation.mutateAsync),
+  };
+}
+
+// ── BLD-024 — Mission Control Hooks (Autonomous Builder) ───────────────────
+
+export interface MissionObjectiveView {
+  objectiveId: string;
+  title: string;
+  state: string;
+  reason: string;
+  evidence: string[];
+  failureReason?: string;
+  verifiedAt?: string;
+  verificationMethod?: string;
+  retryCount: number;
+}
+
+export interface MissionCheckpointView {
+  checkpointId: string;
+  objectiveId: string;
+  state: string;
+  completedWork: string[];
+  remainingWork: string[];
+  failures: string[];
+  timestamp: string;
+}
+
+export interface MissionActivityEvent {
+  id: string;
+  at: string;
+  kind: string;
+  message: string;
+}
+
+export interface MissionStatusView {
+  missionId: string;
+  userId: string;
+  title: string;
+  objective: string;
+  state: string;
+  outcome?: string;
+  outcomeReason?: string;
+  mode?: string;
+  workspace?: string;
+  autonomyLevel: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  currentObjective?: MissionObjectiveView;
+  objectives: MissionObjectiveView[];
+  checkpoints: MissionCheckpointView[];
+  budgetUsage: {
+    objectivesCompleted: number;
+    objectivesFailed: number;
+    actionsExecuted: number;
+    toolCallsExecuted: number;
+    retriesConsumed: number;
+    tokensConsumed: number;
+    costUsdConsumed: number;
+  };
+  budgetRemaining: {
+    objectives: number;
+    actions: number;
+    runtimeMs: number;
+    tokens: number;
+    costUsd: number;
+  };
+  provider?: string;
+  model?: string;
+  attempts?: number;
+  revisions?: number;
+  activity: MissionActivityEvent[];
+  loopRunning: boolean;
+}
+
+export interface MissionHistoryEntry {
+  missionId: string;
+  title: string;
+  objective: string;
+  state: string;
+  outcome?: string;
+  outcomeReason?: string;
+  createdAt: string;
+  finishedAt?: string;
+  verifiedObjectives: number;
+  totalObjectives: number;
+  lastCheckpoint?: MissionCheckpointView;
+}
+
+/** Mission status; polled while RUNNING (5s), stopped at terminal states. */
+export function useMissionStatus(userId: string, missionId: string | null) {
+  const q = api.mission.status.useQuery(
+    { userId, missionId: missionId ?? '' },
+    {
+      enabled: Boolean(userId) && Boolean(missionId),
+      refetchInterval: (query) => {
+        const view = unwrap<MissionStatusView>(query.state.data);
+        if (!view) return false;
+        const terminal = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(view.state);
+        const waiting = [
+          'WAITING_FOR_PROVIDER',
+          'WAITING_FOR_APPROVAL',
+          'PAUSED',
+          'BLOCKED',
+        ].includes(view.state);
+        if (terminal) return false; // stop polling after completion
+        // RUNNING → 5s; waiting/holds → 15s (no aggressive polling).
+        return waiting ? 15_000 : 5_000;
+      },
+    },
+  );
+  return { ...q, data: unwrap<MissionStatusView>(q.data) };
+}
+
+export function useMissionHistory(userId: string) {
+  const q = api.mission.history.useQuery({ userId }, { enabled: Boolean(userId) });
+  return { ...q, data: unwrap<MissionHistoryEntry[]>(q.data) };
+}
+
+/** CREATE + START + run the existing autonomous loop (idempotent per mission). */
+export function useMissionCreateAndRun() {
+  const mutation = api.mission.createAndRun.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<MissionStatusView>(mutation.data),
+    mutateAsync: guardMutation(mutation.mutateAsync),
+  };
+}
+
+export function useMissionStart() {
+  const mutation = api.mission.start.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<MissionStatusView>(mutation.data),
+    mutateAsync: guardMutation(mutation.mutateAsync),
+  };
+}
+
+export function useMissionPause() {
+  const mutation = api.mission.pause.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<MissionStatusView>(mutation.data),
+    mutateAsync: guardMutation(mutation.mutateAsync),
+  };
+}
+
+export function useMissionResume() {
+  const mutation = api.mission.resume.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<MissionStatusView>(mutation.data),
+    mutateAsync: guardMutation(mutation.mutateAsync),
+  };
+}
+
+export function useMissionCancel() {
+  const mutation = api.mission.cancel.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<MissionStatusView>(mutation.data),
+    mutateAsync: guardMutation(mutation.mutateAsync),
+  };
+}
+
+export function useMissionApprove() {
+  const mutation = api.mission.approve.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<MissionStatusView>(mutation.data),
+    mutateAsync: guardMutation(mutation.mutateAsync),
+  };
+}
+
+export function useMissionReject() {
+  const mutation = api.mission.reject.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<MissionStatusView>(mutation.data),
     mutateAsync: guardMutation(mutation.mutateAsync),
   };
 }

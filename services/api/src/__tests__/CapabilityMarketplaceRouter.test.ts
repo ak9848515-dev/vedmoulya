@@ -245,4 +245,11 @@ describe('capability namespace (EPIC-013)', () => {
       code: 'FORBIDDEN',
     });
   });
+
+  it('getPlan returns null data for an unknown plan id (not a failure)', async () => {
+    const caller = router.createCaller(ctx('cap-5'));
+    const read = await caller.capability.getPlan({ userId: 'cap-5', planId: 'does-not-exist' });
+    expect(read.success).toBe(true);
+    expect(read.data).toBeNull();
+  });
 });

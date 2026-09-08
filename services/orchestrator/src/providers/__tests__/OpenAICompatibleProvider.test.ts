@@ -173,4 +173,16 @@ describe('OpenAICompatibleProvider', () => {
       'connection reset',
     );
   });
+
+  it('Phase B: executes the advisor-selected modelId through the SDK', async () => {
+    const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom');
+    await provider.execute({
+      messages: MESSAGES,
+      model: 'custom',
+      maxTokens: 64,
+      modelId: 'custom-reasoner',
+    });
+    const call = generateTextMock.mock.calls[0][0] as { model: { modelId: string } };
+    expect(call.model.modelId).toBe('custom-reasoner');
+  });
 });

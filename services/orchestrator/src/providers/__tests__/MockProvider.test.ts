@@ -72,4 +72,30 @@ describe('MockProvider', () => {
     });
     expect(response.content).toBe('Mock response to: "..."');
   });
+
+  it('Phase B: executes an advisor-selected supported model id', async () => {
+    const response = await new MockProvider().execute({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'mock',
+      modelId: 'mock-v1',
+    });
+    expect(response.model).toBe('mock-v1');
+  });
+
+  it('Phase B: rejects an unsupported advisor modelId explicitly (never silently swaps)', async () => {
+    await expect(
+      new MockProvider().execute({
+        messages: [{ role: 'user', content: 'hi' }],
+        model: 'mock',
+        modelId: 'gpt-4o',
+      }),
+    ).rejects.toThrow('does not support model');
+    // `request.model` is the runtime's provider-name placeholder, not a real
+    // model — absent an explicit modelId the mock executes its fixed model.
+    const response = await new MockProvider().execute({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'mock',
+    });
+    expect(response.model).toBe('mock-v1');
+  });
 });

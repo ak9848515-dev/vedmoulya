@@ -12,6 +12,7 @@ import { VercelAIProvider } from './providers/VercelAIProvider.js';
 import { DeepSeekProvider } from './providers/DeepSeekProvider.js';
 import { GoogleGeminiProvider } from './providers/GoogleGeminiProvider.js';
 import { OpenAICompatibleProvider } from './providers/OpenAICompatibleProvider.js';
+import { OllamaProvider } from './providers/OllamaProvider.js';
 import { OpenAIEmbeddingProvider } from './providers/OpenAIEmbeddingProvider.js';
 
 // ── Service Configuration ──────────────────────────────────────────────────
@@ -22,6 +23,8 @@ export interface OrchestratorConfig {
     anthropic?: { apiKey: string };
     google?: { apiKey: string };
     deepseek?: { apiKey: string };
+    /** BLD-022 — Ollama local provider (same ProviderAdapter contract). */
+    ollama?: { baseUrl: string; model?: string };
     /** SPRINT-049 — custom (user-defined) providers to register dynamically. */
     custom?: Array<{
       id: string;
@@ -62,6 +65,8 @@ export { VercelAIProvider } from './providers/VercelAIProvider.js';
 export { DeepSeekProvider } from './providers/DeepSeekProvider.js';
 export { GoogleGeminiProvider } from './providers/GoogleGeminiProvider.js';
 export { OpenAICompatibleProvider } from './providers/OpenAICompatibleProvider.js';
+export { OllamaProvider } from './providers/OllamaProvider.js';
+export type { OllamaProviderOptions } from './providers/OllamaProvider.js';
 export { OpenAIEmbeddingProvider } from './providers/OpenAIEmbeddingProvider.js';
 export { AIMetrics } from './observability/AIMetrics.js';
 
@@ -120,6 +125,16 @@ export function resolveGoogleKey(): string | undefined {
   return process.env.AI_GOOGLE_API_KEY?.trim() || undefined;
 }
 
+/**
+ * BLD-022 — resolve the Ollama base URL from the canonical environment
+ * variable (`AI_OLLAMA_BASE_URL`). Ollama participates through the SAME
+ * ProviderAdapter contract as every cloud provider (health, capability
+ * gates, routing, retry/fallback, evidence) — no special execution path.
+ */
+export function resolveOllamaBaseUrl(): string | undefined {
+  return process.env.AI_OLLAMA_BASE_URL?.trim() || undefined;
+}
+
 export function registerPlatformProviders(
   orchestrator: AIOrchestrationService,
   config?: Partial<OrchestratorConfig>,
@@ -170,6 +185,18 @@ export function registerPlatformProviders(
     // (@ai-sdk/google — createGoogleGenerativeAI). The Google AI Studio API key
     // is a SEPARATE credential from Google OAuth credentials.
     orchestrator.registerProvider(new GoogleGeminiProvider(googleKey));
+  }
+  // BLD-022 — Ollama local provider: registered when a base URL is configured.
+  // Routed, health-checked, retried and fallen back EXACTLY like every other
+  // provider through the shared AIOrchestrationService — no special path.
+  const ollamaBaseUrl = providers?.ollama?.baseUrl ?? resolveOllamaBaseUrl();
+  if (ollamaBaseUrl) {
+    orchestrator.registerProvider(
+      new OllamaProvider({
+        baseUrl: ollamaBaseUrl,
+        model: providers?.ollama?.model ?? (process.env.AI_OLLAMA_MODEL?.trim() || undefined),
+      }),
+    );
   }
   // SPRINT-049 — register dynamically-configured custom providers.
   // Each custom provider gets an OpenAICompatibleProvider adapter that

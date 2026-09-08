@@ -4,7 +4,7 @@
 // BLD-016A — API Gateway & Platform Services
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { ExecutionTraceProvider } from '@vedmoulya/core';
+import { ExecutionTraceProvider, logger } from '@vedmoulya/core';
 import { OrchestratorService as OrchestratorServiceFabric } from '@vedmoulya/orchestration-fabric';
 import type { TelemetryPort } from '@vedmoulya/core';
 import {
@@ -176,6 +176,12 @@ import { OperatorGate, AuditTrail } from '../observability/OpsAudit.js';
 // (tool boundary). The top-level services barrel re-exports only a subset of
 // the runtime — the loop tool port consumes the registry directly.
 import { ToolRegistry, registerSafeTools } from '@vedmoulya/services/ai/runtime/ToolRuntime';
+import {
+  AgentExecutionService,
+  AIOrchestrationAgentPort,
+  ToolRegistryAgentPort,
+} from '@vedmoulya/agent-execution';
+import { AIOrchestrationPlannerPort, PlanningApplicationService } from '@vedmoulya/planning';
 import type { MemoryRepository as MemoryIntelligenceRepository } from '@vedmoulya/memory-intelligence';
 import type {
   IdentityRepository,
@@ -194,6 +200,8 @@ import {
   createRagRetrievalPort,
 } from '../infrastructure/RuntimePorts.js';
 import { ProviderExperienceService } from './ProviderExperienceService.js';
+import { RoutingEvidenceService } from './RoutingEvidenceService.js';
+import { ExecutionHealthService } from './ExecutionHealthService.js';
 import { ModelSelectionIntelligence } from '@vedmoulya/services';
 import { validateProductionAIConfig } from '../infrastructure/ProductionAIConfig.js';
 import { resolvePersistenceBundle } from '../infrastructure/PersistenceStores.js';
@@ -209,6 +217,7 @@ import {
 import type { SpeechToTextPort, TextToSpeechPort } from '@vedmoulya/voice';
 import { createVoiceBrainPort, createVoiceAnswerPort } from '../infrastructure/VoiceBridgePorts.js';
 import { ProactiveIntelligenceService } from '@vedmoulya/proactive';
+import { MissionService } from './MissionService.js';
 import { ActiveIntelligenceControlPlane } from '@vedmoulya/control-plane';
 import { WorldModelService } from '@vedmoulya/world-model';
 import {
@@ -269,6 +278,7 @@ import {
   createProductionProviderRepository,
   createProductionRagRepository,
   awaitAllEngineEnsureTables,
+  createEISql,
 } from '../infrastructure/ProductionRepositories.js';
 
 // ── ApiApplicationService ───────────────────────────────────────────────────
@@ -468,6 +478,11 @@ export interface ApiApplicationServiceOptions {
    * overrides for tests or alternate persistence.
    */
   persistence?: PersistenceStoreOverrides;
+  /**
+   * BLD-024 — Mission Service overrides (tests). When omitted the service
+   * composes the real MissionRuntime lazily on first mission request.
+   */
+  mission?: MissionService;
 }
 
 /**
@@ -493,6 +508,15 @@ export class ApiApplicationService {
   readonly execution: ExecutionApplicationService;
   readonly knowledge: KnowledgeApplicationService;
   readonly ai: AIOrchestrationService;
+
+  // ── Autonomous Planning Intelligence (BLD-017A) ────────────────────────
+  //    The planner PROPOSES (GOAL → UNDERSTANDING → PLAN → VALIDATION →
+  //    READINESS); the frozen AgentExecutionService EXECUTES. Only READY
+  //    plans are handed over. Proposals flow through the SAME frozen AI
+  //    runtime (AIOrchestrationPlannerPort) and tools through the same
+  //    frozen ToolRuntime security chain (ToolRegistryAgentPort) — never
+  //    provider SDKs, never a second registry.
+  readonly planning: PlanningApplicationService;
 
   // ── Domain Module Services ────────────────────────────────────────────────
   readonly dashboard: DashboardApplicationService;
@@ -656,6 +680,9 @@ export class ApiApplicationService {
 
   // ── Integration Layer ─────────────────────────────────────────────────────
   readonly lifeOS: LifeOSApplicationService;
+
+  // ── BLD-024 — Mission Control (thin boundary over the MissionRuntime) ────
+  readonly mission: MissionService;
 
   // ── Infrastructure Health (PH-002/T3 follow-up) ────────────────────────────
   readonly infrastructureHealth: InfrastructureHealthProbe;
@@ -964,12 +991,47 @@ export class ApiApplicationService {
       telemetry,
     });
 
+    // ── Routing Evidence (Phases C–K) ─────────────────────────────────
+    //    Real measured execution history (reliability/latency/tokens/cost)
+    //    derived from the SAME trace store CostLedger reads. Purely a query
+    //    service — never writes, never duplicates the ledger. It feeds the
+    //    advisor candidates below so routing can weigh measured evidence
+    //    once real samples exist; cold start carries none and behaves
+    //    exactly as before.
+    const routingEvidence = new RoutingEvidenceService({
+      store: this.traceProvider.getStore(),
+    });
+
+    // ── Real-time execution health (Capability Intelligence) ───────────
+    //    Bounded, recency-decayed provider/model health derived from ACTUAL
+    //    execution outcomes reported by the AI runtime through the health
+    //    feedback port. Verdicts are consumed by the routing candidates below
+    //    (immediate) AND throttled into the existing provider health store
+    //    (durable, honest registry state). Never changes configuration, never
+    //    disables a provider, never touches credentials.
+    const executionHealth = new ExecutionHealthService({
+      persist: async (providerId, sample): Promise<void> => {
+        // Persistence is best-effort: a missing provider (e.g. a runtime
+        // adapter without a registry entry in hermetic tests) is silently
+        // skipped — health feedback never breaks execution or routing.
+        await this.providers.recordHealthSample(providerId, {
+          ...sample,
+          checkedAt: new Date().toISOString(),
+        });
+      },
+    });
+
     // ── EPIC-012A — Model Selection Intelligence ───────────────────────
     //    A thin layer over the frozen ProviderRoutingAdvisor (Phase 12–16).
     //    Constructed with the same provider + execution strategy ports the
     //    AI runtime uses — never duplicates routing.
     this.modelSelection = new ModelSelectionIntelligence(
-      createProviderIntelligencePort(this.providers, intelligenceStore),
+      createProviderIntelligencePort(
+        this.providers,
+        intelligenceStore,
+        routingEvidence,
+        executionHealth,
+      ),
       createExecutionStrategyPort(this.executionStrategy),
     );
 
@@ -979,9 +1041,15 @@ export class ApiApplicationService {
     //    knowledge through the RAG port — consuming the real application
     //    services, never duplicating them.
     this.ai.configureIntelligence({
-      providerIntelligence: createProviderIntelligencePort(this.providers, intelligenceStore),
+      providerIntelligence: createProviderIntelligencePort(
+        this.providers,
+        intelligenceStore,
+        routingEvidence,
+        executionHealth,
+      ),
       executionStrategy: createExecutionStrategyPort(this.executionStrategy),
       rag: createRagRetrievalPort(this.rag),
+      healthFeedback: executionHealth,
     });
 
     // ── Create the Enterprise Execution Orchestrator (EPIC-004 / EI-005) ────
@@ -1222,6 +1290,29 @@ export class ApiApplicationService {
       store: options.requirementSessionStore ?? createProductionRequirementSessionStore(),
       enrichment: options.requirementEnrichment ?? createRequirementEnrichmentPort(this.ai),
       telemetry,
+    });
+
+    // ── Create the Autonomous Planning Intelligence layer (BLD-017A) ─────
+    //    The planner PROPOSES plans; the frozen AgentExecutionService is
+    //    authoritative for what may actually execute. Every AI call (plan
+    //    proposals + step execution) flows through the SAME frozen
+    //    AIOrchestrationService (ProviderRoutingAdvisor → RoutingEvidence-
+    //    Service + ExecutionHealthService → capability gates → retry/
+    //    fallback → CostLedger), and every tool selection is gated by the
+    //    SAME frozen ToolRuntime security chain (allowlist + capability +
+    //    schema + rate limit + audit). The planner and the executor share
+    //    ONE authoritative tool port (single registry instance). No
+    //    provider SDKs, no second tool registry, no routing bypass.
+    const agentToolPort = createAgentToolPort();
+    this.planning = new PlanningApplicationService({
+      ai: new AIOrchestrationPlannerPort(this.ai),
+      toolRegistry: agentToolPort,
+      executor: new AgentExecutionService({
+        ai: new AIOrchestrationAgentPort(this.ai),
+        tools: agentToolPort,
+        toolRegistry: agentToolPort,
+      }),
+      clock: new SystemClock(),
     });
 
     // ── Create the Experience Intelligence layer (EPIC-010) ─────────────
@@ -1993,6 +2084,7 @@ export class ApiApplicationService {
         stepId: string;
         instruction: string;
         capability: string;
+        requiredCapabilities?: string[];
         userId: string;
         allowedTools: string[];
       }): Promise<{
@@ -2011,6 +2103,14 @@ export class ApiApplicationService {
             userInput: params.instruction,
             userId: params.userId,
             capability: params.capability as import('@vedmoulya/ai').CapabilityType,
+            // Forward the workflow step's FULL requirement set — the runtime
+            // hard-gates provider/model capability on every requirement.
+            ...(params.requiredCapabilities && params.requiredCapabilities.length > 0
+              ? {
+                  requiredCapabilities:
+                    params.requiredCapabilities as import('@vedmoulya/ai').CapabilityType[],
+                }
+              : {}),
             qualityTier: 'standard',
           });
           return {
@@ -2187,6 +2287,71 @@ export class ApiApplicationService {
       this.knowledge,
       this.ai,
     );
+
+    // ── BLD-024 — Mission Control ─────────────────────────────────────
+    //    The thin application boundary over the PROVEN MissionRuntime
+    //    (BLD-022/023). Composition is lazy — the runtime (and its
+    //    providers) are built on the first mission request, never at boot.
+    //    Durable Postgres mission stores are used when a database is
+    //    configured; dev/test default to in-memory. No autonomous-loop
+    //    logic lives here — the frozen MissionControllerService runs it.
+    this.mission =
+      options.mission ??
+      new MissionService({
+        workspaceRoot: process.env.MISSION_WORKSPACE_ROOT?.trim() || undefined,
+        sql: this.hasDatabase() ? createEISql('vedmoulya-missions') : undefined,
+        requireDurablePersistence: this.isProductionEnvironment(),
+      });
+
+    // BLD-025 §1 — Discover-and-recover: on process boot, inspect persisted
+    // missions that were interrupted (RUNNING, WAITING_FOR_APPROVAL,
+    // WAITING_FOR_PROVIDER, and other recoverable non-terminal states) and
+    // safely resume each from its persisted checkpoint. State-based recovery
+    // — never re-running a previous JavaScript promise. Fire-and-forget:
+    // the constructor cannot be async, so recovery runs after construction.
+    // Best-effort: a database outage at boot means no recovery (the runtime
+    // continues from empty — the next RUN creates a fresh mission).
+    if (this.hasDatabase()) {
+      this.recoverActiveMissionsOnBoot().catch((error: unknown) => {
+        logger.warn('ApiApplicationService: mission recovery failed on boot', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+  }
+
+  /**
+   * BLD-025 §1 — Discover-and-recover: fire-and-forget recovery of active
+   * missions on process boot. Runs after construction (constructor cannot be
+   * async). Safe to call multiple times — only one recovery pass per mission.
+   */
+  private async recoverActiveMissionsOnBoot(): Promise<void> {
+    try {
+      const { recovered } = await this.mission.recoverAllActive();
+      if (recovered > 0) {
+        logger.info('ApiApplicationService: recovered active missions on boot', {
+          recovered,
+        });
+      }
+    } catch {
+      // Non-fatal: a database outage at boot degrades to empty — the
+      // runtime continues from empty and the next RUN creates a fresh
+      // mission. Recovery durability is exactly what is lost here.
+      logger.warn('ApiApplicationService: mission recovery skipped — database unreachable on boot');
+    }
+  }
+
+  /** True when a database connection is configured for this environment. */
+  private hasDatabase(): boolean {
+    return Boolean(
+      process.env.DATABASE_URL?.trim() ||
+      process.env.POSTGRES_URL?.trim() ||
+      process.env.NEON_DATABASE_URL?.trim(),
+    );
+  }
+
+  private isProductionEnvironment(): boolean {
+    return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
   }
 
   /**
@@ -2228,6 +2393,24 @@ function createLoopToolPort(): LoopEnginePorts['tools'] {
   });
   registerSafeTools(registry);
   return new ToolRegistryToolPort(registry);
+}
+
+/**
+ * Build the authoritative agent tool port (BLD-017A): the SAME frozen
+ * ToolRuntime security chain the loop/factory reuse (allowlist → capability
+ * → schema validation → rate limit → audit). Registered tools are the safe
+ * built-ins only (echo, current_time, calculator); the platform allowlist
+ * honours AI_TOOL_ALLOWLIST when configured (empty = tools disabled by
+ * default). Shared by the planner (selection/readiness) and the frozen
+ * AgentExecutionService (execution) — one registry instance, no bypass.
+ */
+function createAgentToolPort(): ToolRegistryAgentPort {
+  const registry = new ToolRegistry({
+    allowlist: parseToolAllowlist(),
+    grantedCapabilities: ['reasoning', 'calculation', 'productivity'],
+  });
+  registerSafeTools(registry);
+  return new ToolRegistryAgentPort(registry);
 }
 
 /** Parse AI_TOOL_ALLOWLIST ("echo,calculator") — empty/absent = deny-all. */

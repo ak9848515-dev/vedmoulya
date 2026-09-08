@@ -252,6 +252,14 @@ export interface PlanStep {
   title: string;
   /** Which capability this step needs. */
   capability: CapabilityId;
+  /**
+   * ALL hard capability requirements for this step (CapabilityId taxonomy).
+   * Always includes `capability`; additional entries (e.g. a correction step
+   * that is CODING and also requires REASONING) are forwarded to the AI
+   * runtime so routing gates on every requirement. Omitted (legacy plan
+   * authors) → the requirement set is exactly [capability].
+   */
+  requiredCapabilities?: CapabilityId[];
   /** What this step produces (plain language). */
   purpose: string;
   /** Candidates that can perform this step (best first). */

@@ -116,6 +116,8 @@ jobs:
         run: npm run loop:benchmark
       - name: Requirements benchmark
         run: npm run requirements:benchmark
+      - name: Planning benchmark (BLD-017A deterministic + AI mode latency/cost)
+        run: npm run planning:benchmark
       - name: Intelligence benchmark (EPIC-015)
         run: npm run intelligence:benchmark
       - name: Execution benchmark
@@ -172,7 +174,7 @@ jobs:
         id: codeql-analyze
         uses: github/codeql-action/analyze@v3
         with:
-          upload: "never"
+          upload: 'never'
       - name: Upload SARIF to Code Scanning
         uses: github/codeql-action/upload-sarif@v3
         id: upload-sarif
@@ -197,7 +199,7 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - name: Accessibility audit
-        run: npm run test:a11y || true
+        run: npm run test:a11y
 
   # ── Gate 5: Performance ───────────────────────────────────────────────────
   performance:
@@ -212,7 +214,7 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - name: Lighthouse audit
-        run: npm run test:performance || true
+        run: npm run test:performance
 
   # ── Build ─────────────────────────────────────────────────────────────────
   build:

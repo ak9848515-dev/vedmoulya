@@ -13,6 +13,7 @@ import type { SidebarGroup } from '@vedmoulya/ui';
 
 export type NavSectionId =
   | 'dashboard'
+  | 'autonomous-builder'
   | 'career'
   | 'learning'
   | 'business'
@@ -112,6 +113,14 @@ export function buildSidebarGroups(
           active: activeSection === 'dashboard',
           onClick: (): void => {
             onNavigate('dashboard');
+          },
+        },
+        {
+          id: 'autonomous-builder',
+          label: 'Autonomous Builder',
+          active: activeSection === 'autonomous-builder',
+          onClick: (): void => {
+            onNavigate('autonomous-builder');
           },
         },
         {

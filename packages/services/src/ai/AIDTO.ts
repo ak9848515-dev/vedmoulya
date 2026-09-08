@@ -54,6 +54,15 @@ export interface OrchestrateRequestDTO {
   structuredSchema?: Record<string, unknown>;
   /** Explicitly enable the EI-003 input-optimization pipeline. */
   enableOptimization?: boolean;
+  /**
+   * Authoritative task capability requirements (Capability Intelligence).
+   * Optional: when omitted the task requires exactly its routing `capability`
+   * (cold-start behavior unchanged). When supplied, every listed capability
+   * acts as a HARD routing gate — providers/models that cannot support ALL of
+   * them are ineligible. Values must come from the existing CapabilityType
+   * taxonomy; never inferred from free text here.
+   */
+  requiredCapabilities?: CapabilityType[];
 }
 
 // ── Response DTOs ──────────────────────────────────────────────────────────

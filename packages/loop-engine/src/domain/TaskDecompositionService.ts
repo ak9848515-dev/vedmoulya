@@ -181,11 +181,18 @@ export class TaskDecompositionService {
   ): LoopTask {
     const requirement = spec.evidenceRequirements[0];
     const id = `task-${index + 1}`;
+    // The task requirement set = the primary capability + any additional
+    // hard requirements the template declares (deduped, taxonomy-only).
+    const requiredCapabilities = [
+      template.capability,
+      ...(template.requiredCapabilities ?? []).filter((c) => c !== template.capability),
+    ];
     return {
       taskId: id,
       title: template.title,
       description: template.description,
       capability: template.capability,
+      requiredCapabilities,
       qualityTier: template.qualityTier,
       dependencies,
       parallelEligible: template.parallelEligible === true,

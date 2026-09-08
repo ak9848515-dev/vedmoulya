@@ -253,4 +253,16 @@ describe('VercelAIProvider', () => {
       vi.useRealTimers();
     }
   });
+
+  it('Phase B: executes the advisor-selected modelId through the SDK', async () => {
+    const provider = new VercelAIProvider('sk-test');
+    await provider.execute({
+      messages: MESSAGES,
+      model: 'openai',
+      maxTokens: 64,
+      modelId: 'gpt-4o',
+    });
+    const call = generateTextMock.mock.calls[0][0] as { model: { modelId: string } };
+    expect(call.model.modelId).toBe('gpt-4o');
+  });
 });

@@ -154,4 +154,22 @@ describe('OpenAIProvider', () => {
       provider.execute({ messages: [{ role: 'user', content: 'hi' }], model: 'gpt-4o' }),
     ).rejects.toThrow('OpenAI request timed out after 15ms');
   });
+
+  it('Phase B: posts the advisor-selected modelId in the chat request', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => OPENAI_CHAT_RESPONSE });
+    vi.stubGlobal('fetch', mockFetch);
+    await new OpenAIProvider('sk-test').execute({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'gpt-4o',
+      modelId: 'gpt-4o-mini',
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/chat/completions',
+      expect.objectContaining({
+        body: expect.stringContaining('"model":"gpt-4o-mini"'),
+      }),
+    );
+  });
 });

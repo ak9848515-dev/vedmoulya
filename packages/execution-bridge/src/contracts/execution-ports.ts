@@ -24,6 +24,15 @@ export interface StepExecutionInput {
   capability: string;
   /** Mapped runtime capability (@vedmoulya/ai CapabilityType). */
   runtimeCapability: string;
+  /**
+   * ALL hard runtime capability requirements of the step (mapped
+   * @vedmoulya/ai CapabilityType strings), always including `runtimeCapability`
+   * when present. Forwarded to the AI runtime so routing gates on every
+   * requirement — a plan step that is CODING AND also requires REASONING
+   * sends ['coding','reasoning'], never just ['coding']. Omitted (legacy plan
+   * steps) → the runtime requires exactly [runtimeCapability].
+   */
+  requiredCapabilities?: string[];
   /** The step instruction composed from title + purpose. */
   instruction: string;
   userId: string;

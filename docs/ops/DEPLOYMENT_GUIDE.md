@@ -6,13 +6,12 @@
 
 ## Deployment Targets
 
-| Component         | Target                                | Notes                       |
-| ----------------- | ------------------------------------- | --------------------------- |
-| Web App (Life OS) | Vercel (static + serverless)          | Next.js 15 build            |
-| API Gateway       | Railway / VPS (Node.js service)       | tRPC gateway inside Next.js |
-| Database          | Railway / Managed PG (PostgreSQL 16+) | Per-service databases       |
-| Cache             | Railway / Upstash (Redis 7+)          | `REDIS_URL`                 |
-| File storage      | Vercel Blob / S3                      | Object storage              |
+| Component         | Target                                | Notes                 |
+| ----------------- | ------------------------------------- | --------------------- |
+| Web App (Life OS) | Vercel (static + serverless)          | Next.js 15 build      |
+| Database          | Railway / Managed PG (PostgreSQL 16+) | Per-service databases |
+| Cache             | Railway / Upstash (Redis 7+)          | `REDIS_URL`           |
+| File storage      | Vercel Blob / S3                      | Object storage        |
 
 ## Prerequisites
 
@@ -28,11 +27,11 @@
 2. **Migrate** — run each service's migrations against its database
    (PostgreSQL 16+, one database per service).
 3. **Deploy web** — push `apps/web` build output to the web host (Vercel).
-4. **Deploy services** — start each service container/process with the
-   production environment.
+4. **Deploy web** — deploy the Next.js application; its server-side route
+   handlers host the tRPC gateway and consume the workspace services.
 5. **Verify** — health endpoints:
-   - `GET /health` on the gateway and each service → `status: ok`.
-   - `GET /api/trpc/health.liveness` (gateway).
+   - `GET /health/live` → process liveness.
+   - `GET /health/ready` → dependency readiness.
 6. **Monitor** — confirm metrics flowing to Prometheus/Grafana
    (observability profile) and that no fail-fast startup errors appear in
    service logs.
@@ -41,8 +40,6 @@
 
 ```bash
 docker build -f apps/web/Dockerfile -t vedmoulya/web:latest .
-docker build -f services/api/Dockerfile -t vedmoulya/api:latest .
-# per-service Dockerfiles live next to each service
 ```
 
 `docker-compose.yml` defines the local stack (postgres, redis, optional

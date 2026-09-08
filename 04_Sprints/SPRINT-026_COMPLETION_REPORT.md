@@ -1,5 +1,14 @@
 # SPRINT-026 — Completion Report
 
+> **Current-state addendum (2026-09-08):** This document is retained as the
+> historical Sprint-026 audit record. Its point-in-time counts and its
+> SPRINT-027…030 roadmap are not a current release certification. A later
+> closure verification recorded 826 test files / 10,529 tests passing, a
+> passing typecheck and build, lint passing with 44 warnings, and 8 remaining
+> dependency vulnerabilities (3 high). Mission-runtime real-provider,
+> real-Postgres process-restart, and multi-process lease acceptance remain
+> unproven. See the current closure report for release status.
+
 > **Sprint:** SPRINT-026 — Voice Intelligence + Complete-System Architecture Audit
 > **Date:** 2026-08-13
 > **Type:** Audit + Architecture sprint (no product features shipped by design)

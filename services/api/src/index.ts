@@ -148,6 +148,18 @@ export { createRequirementsRouter } from './routers/RequirementsRouter.js';
 export type { RequirementsHandlers } from './routers/RequirementsRouter.js';
 export { createHealthRouter, type PlatformHealth } from './routers/HealthRouter.js';
 
+export { createMissionRouter } from './routers/MissionRouter.js';
+export type { MissionHandlers, MissionServiceLike } from './routers/MissionRouter.js';
+export { MissionService } from './services/MissionService.js';
+export type {
+  MissionServiceOptions,
+  MissionStatusView,
+  MissionObjectiveView,
+  MissionCheckpointView,
+  MissionActivityEvent,
+  CreateMissionInputView,
+} from './services/MissionService.js';
+
 // ── Middleware ───────────────────────────────────────────────────────────────
 
 export {

@@ -602,6 +602,43 @@ describe('AIOrchestrationService runtime (AI-RUNTIME-002)', () => {
       expect(names).toContain('ai.stream_run');
       expect(names).toContain('ai.provider_execution');
     });
+
+    it('Phase 12 security: never leaks credentials into execution spans', async () => {
+      const exporter = new TestAIObservabilityExporter();
+      const svc = new AIOrchestrationService({
+        observability: new AIObservability({ exporter, emitUserTenantCorrelation: true }),
+      });
+      const SECRET = 'sk-AIzaSy-SUPER-SECRET-KEY-abcdef0123456789';
+      svc.registerProvider(
+        mockAdapter('mock', {
+          execute: async () => {
+            throw new Error(`provider auth failed with ${SECRET}`);
+          },
+        } as Partial<ProviderAdapter>),
+      );
+      await expect(
+        svc.orchestrate({
+          capability: 'reasoning',
+          userInput: 'Trigger a failing call',
+          qualityTier: 'standard',
+        }),
+      ).rejects.toThrow();
+
+      const serialized = JSON.stringify(
+        exporter.spans.map((s) => ({ name: s.name, attributes: s.attributes, error: s.error })),
+      );
+      // The credential never lands in span attributes or error messages.
+      expect(serialized).not.toContain('SUPER-SECRET');
+      // Model/capability/requested_model attributes are structured ids only.
+      for (const span of exporter.spans) {
+        for (const key of ['model', 'requested_model', 'capability'] as const) {
+          const value = span.attributes[key];
+          if (value !== undefined) {
+            expect(String(value)).not.toMatch(/sk-|AIzaSy|Bearer\s+/i);
+          }
+        }
+      }
+    });
   });
 
   it('streams through a native async-iterable provider stream', async () => {
@@ -628,5 +665,302 @@ describe('AIOrchestrationService runtime (AI-RUNTIME-002)', () => {
     expect(run.events.some((e) => e.type === 'done')).toBe(true);
     expect(run.final.content).toBe('Hello world');
     expect(run.final.provider).toBe('streamer');
+  });
+
+  // ── Phase B: advisor-selected model reaches ACTUAL execution ────────────
+
+  it('executes the advisor-selected model and records the actual model on the span', async () => {
+    const exporter = new TestAIObservabilityExporter();
+    const intelligence: ProviderIntelligencePort = {
+      getCandidates: async () => [
+        candidate({
+          providerId: 'mock',
+          models: [
+            {
+              id: 'advisor-picked-model',
+              contextWindow: 128000,
+              maxOutputTokens: 4096,
+              streaming: true,
+            },
+          ],
+        }),
+      ],
+    };
+    const strategy: ExecutionStrategyPort = {
+      getRoutingContext: async () => ({ strategy: 'balanced' as const }),
+    };
+    const execute = vi.fn(async ({ modelId }: { modelId?: string }) =>
+      mockResponse('model-ran', { provider: 'mock', model: modelId ?? 'mock-model' }),
+    );
+    const svc = new AIOrchestrationService({
+      providerIntelligence: intelligence,
+      executionStrategy: strategy,
+      observability: new AIObservability({ exporter }),
+    });
+    svc.registerProvider(mockAdapter('mock', { execute } as Partial<ProviderAdapter>));
+
+    const result = await svc.orchestrate({
+      capability: 'reasoning',
+      userInput: 'Run with the selected model',
+      qualityTier: 'standard',
+    });
+
+    // The advisor-selected model reached the adapter, not the adapter's own
+    // fixed default.
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect((execute.mock.calls[0]?.[0] as { modelId?: string }).modelId).toBe(
+      'advisor-picked-model',
+    );
+    expect(result.providerSelection?.selected.modelId).toBe('advisor-picked-model');
+    const execSpan = exporter.spans.find((s) => s.name === 'ai.provider_execution');
+    // requested_model = the intent; model = what actually executed (identical
+    // here because the adapter honored it).
+    expect(execSpan?.attributes.requested_model).toBe('advisor-picked-model');
+    expect(execSpan?.attributes.model).toBe('advisor-picked-model');
+    expect(execSpan?.attributes.capability).toBe('reasoning');
+  });
+
+  it('records the ACTUAL executed model even when it differs from the intent', async () => {
+    const exporter = new TestAIObservabilityExporter();
+    const intelligence: ProviderIntelligencePort = {
+      getCandidates: async () => [
+        candidate({
+          providerId: 'mock',
+          models: [
+            {
+              id: 'requested-model',
+              contextWindow: 128000,
+              maxOutputTokens: 4096,
+              streaming: true,
+            },
+          ],
+        }),
+      ],
+    };
+    const strategy: ExecutionStrategyPort = {
+      getRoutingContext: async () => ({ strategy: 'balanced' as const }),
+    };
+    // Adapter that silently runs its own model and reports it truthfully.
+    const svc = new AIOrchestrationService({
+      providerIntelligence: intelligence,
+      executionStrategy: strategy,
+      observability: new AIObservability({ exporter }),
+    });
+    svc.registerProvider(
+      mockAdapter('mock', {
+        execute: async () =>
+          mockResponse('ran-default', { provider: 'mock', model: 'actual-default' }),
+      } as Partial<ProviderAdapter>),
+    );
+
+    await svc.orchestrate({
+      capability: 'reasoning',
+      userInput: 'Trace the real model',
+      qualityTier: 'standard',
+    });
+    const execSpan = exporter.spans.find((s) => s.name === 'ai.provider_execution');
+    // requested_model = intent, model = actual — never conflated.
+    expect(execSpan?.attributes.requested_model).toBe('requested-model');
+    expect(execSpan?.attributes.model).toBe('actual-default');
+    expect(execSpan?.attributes.model).not.toBe(execSpan?.attributes.requested_model);
+  });
+
+  it('unsupported-model failures fall back to the next candidate that can execute', async () => {
+    const exporter = new TestAIObservabilityExporter();
+    const intelligence: ProviderIntelligencePort = {
+      getCandidates: async () => [
+        candidate({ providerId: 'rigid', benchmarkScore: 95 }),
+        candidate({ providerId: 'flexible', benchmarkScore: 90 }),
+      ],
+    };
+    const strategy: ExecutionStrategyPort = {
+      getRoutingContext: async () => ({ strategy: 'balanced' as const }),
+    };
+    const svc = new AIOrchestrationService({
+      providerIntelligence: intelligence,
+      executionStrategy: strategy,
+      observability: new AIObservability({ exporter }),
+      retryBaseDelayMs: 1,
+    });
+    const rigid = mockAdapter('rigid', {
+      execute: async () => {
+        throw new Error('Adapter rigid does not support model "x".');
+      },
+    } as Partial<ProviderAdapter>);
+    const flexible = mockAdapter('flexible', {
+      execute: async () =>
+        mockResponse('flexible handled it', { provider: 'flexible', model: 'flexible-model' }),
+    } as Partial<ProviderAdapter>);
+    svc.registerProvider(rigid);
+    svc.registerProvider(flexible);
+
+    const result = await svc.orchestrate({
+      capability: 'reasoning',
+      userInput: 'Fall through to a capable provider',
+      qualityTier: 'standard',
+    });
+
+    expect(result.provider).toBe('flexible');
+    const names = exporter.spans.map((s) => s.name);
+    expect(names).toContain('ai.fallback');
+    const failed = exporter.spans.find(
+      (s) => s.name === 'ai.provider_execution' && s.attributes.provider === 'rigid',
+    );
+    expect(failed?.attributes.error_reason).toBe('unsupported_model');
+    // No retry span for a non-retryable unsupported-model failure.
+    expect(
+      exporter.spans.some((s) => s.name === 'ai.retry' && s.attributes.provider === 'rigid'),
+    ).toBe(false);
+    const fallbackExec = exporter.spans.find(
+      (s) => s.name === 'ai.provider_execution' && s.attributes.provider === 'flexible',
+    );
+    expect(fallbackExec?.attributes.model).toBe('flexible-model');
+  });
+
+  it('cold start (no advisor) preserves each adapter default model', async () => {
+    const exporter = new TestAIObservabilityExporter();
+    const execute = vi.fn(async () =>
+      mockResponse('default', { provider: 'mock', model: 'mock-model' }),
+    );
+    const svc = new AIOrchestrationService({
+      observability: new AIObservability({ exporter }),
+    });
+    svc.registerProvider(mockAdapter('mock', { execute } as Partial<ProviderAdapter>));
+
+    await svc.orchestrate({
+      capability: 'reasoning',
+      userInput: 'Default path',
+      qualityTier: 'standard',
+    });
+
+    // No advisor → no routing intent → the adapter's own model id runs.
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect((execute.mock.calls[0]?.[0] as { modelId?: string }).modelId).toBeUndefined();
+    const execSpan = exporter.spans.find((s) => s.name === 'ai.provider_execution');
+    expect(execSpan?.attributes.requested_model).toBeUndefined();
+    expect(execSpan?.attributes.model).toBe('mock-model');
+  });
+});
+
+describe('AIOrchestrationService — capability intelligence + health feedback', () => {
+  it('rejects an unsupported required capability before any execution', async () => {
+    const execute = vi.fn(async () => mockResponse('should not run'));
+    const svc = new AIOrchestrationService({ retryBaseDelayMs: 1 });
+    svc.registerProvider(mockAdapter('mock', { execute } as Partial<ProviderAdapter>));
+    await expect(
+      svc.orchestrate({
+        capability: 'reasoning',
+        requiredCapabilities: ['not-a-real-capability'],
+        userInput: 'x',
+        qualityTier: 'standard',
+      }),
+    ).rejects.toThrow(/Unsupported required capability/);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('hard-gates routing on required capabilities beyond the routing capability', async () => {
+    const adapterA = mockAdapter('mock', {
+      capabilities: ['reasoning', 'coding'],
+    });
+    const adapterB = mockAdapter('mock2', {
+      capabilities: ['reasoning', 'coding'],
+      execute: async () => mockResponse('from mock2', { provider: 'mock2' }),
+    });
+    const intelligence: ProviderIntelligencePort = {
+      getCandidates: async () => [
+        // mock lacks the required 'coding' capability at PROVIDER level → excluded.
+        candidate({ providerId: 'mock', capabilities: ['reasoning'] }),
+        candidate({ providerId: 'mock2', capabilities: ['reasoning', 'coding'] }),
+      ],
+    };
+    const strategy: ExecutionStrategyPort = {
+      getRoutingContext: async () => ({ strategy: 'balanced' as const }),
+    };
+    const svc = new AIOrchestrationService({
+      providerIntelligence: intelligence,
+      executionStrategy: strategy,
+      retryBaseDelayMs: 1,
+    });
+    svc.registerProvider(adapterA);
+    svc.registerProvider(adapterB);
+    const result = await svc.orchestrate({
+      capability: 'reasoning',
+      requiredCapabilities: ['coding'],
+      userInput: 'gate on coding',
+      qualityTier: 'standard',
+    });
+    // The provider without the required capability is not selected; mock2 ran.
+    expect(result.provider).toBe('mock2');
+    expect(result.content).toBe('from mock2');
+  });
+
+  it('reports every execution outcome to the health feedback port', async () => {
+    const recordExecution = vi.fn();
+    const execute = vi.fn(async () =>
+      mockResponse('ok', { provider: 'mock', model: 'mock-model', latency: 7 }),
+    );
+    const svc = new AIOrchestrationService({
+      retryBaseDelayMs: 1,
+      healthFeedback: { recordExecution } as never,
+    });
+    svc.registerProvider(mockAdapter('mock', { execute } as Partial<ProviderAdapter>));
+    await svc.orchestrate({
+      capability: 'reasoning',
+      userInput: 'healthy run',
+      qualityTier: 'standard',
+    });
+    expect(recordExecution).toHaveBeenCalledTimes(1);
+    expect(recordExecution).toHaveBeenCalledWith({
+      providerId: 'mock',
+      modelId: 'mock-model',
+      ok: true,
+      latencyMs: 7,
+    });
+  });
+
+  it('reports the attempted model on a classified failure (unsupported → fallback)', async () => {
+    const recordExecution = vi.fn();
+    const execute = vi.fn(async () => {
+      throw new Error('provider does not support model advisor-picked-model');
+    });
+    const intelligence: ProviderIntelligencePort = {
+      getCandidates: async () => [
+        candidate({
+          providerId: 'mock',
+          models: [
+            {
+              id: 'advisor-picked-model',
+              contextWindow: 128000,
+              maxOutputTokens: 4096,
+              streaming: true,
+            },
+          ],
+        }),
+      ],
+    };
+    const strategy: ExecutionStrategyPort = {
+      getRoutingContext: async () => ({ strategy: 'balanced' as const }),
+    };
+    const svc = new AIOrchestrationService({
+      providerIntelligence: intelligence,
+      executionStrategy: strategy,
+      retryBaseDelayMs: 1,
+      healthFeedback: { recordExecution } as never,
+    });
+    svc.registerProvider(mockAdapter('mock', { execute } as Partial<ProviderAdapter>));
+    await expect(
+      svc.orchestrate({
+        capability: 'reasoning',
+        userInput: 'unsupported model run',
+        qualityTier: 'standard',
+      }),
+    ).rejects.toThrow(/does not support model/);
+    expect(recordExecution).toHaveBeenCalledTimes(1);
+    expect(recordExecution).toHaveBeenCalledWith({
+      providerId: 'mock',
+      modelId: 'advisor-picked-model',
+      ok: false,
+      failureReason: 'unsupported_model',
+    });
   });
 });

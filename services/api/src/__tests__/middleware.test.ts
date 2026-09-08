@@ -82,6 +82,14 @@ describe('toGatewayError', () => {
     expect(result.code).toBe('INTERNAL_ERROR');
     expect(result.message).toBe('Default message');
   });
+
+  it('maps TRPCError INTERNAL_SERVER_ERROR to INTERNAL_ERROR', () => {
+    const error = new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'db down' });
+    const result = toGatewayError(error, 'Something went wrong');
+    expect(result.code).toBe('INTERNAL_ERROR');
+    expect(result.message).toBe('Something went wrong');
+    expect(result.statusCode).toBe(500);
+  });
 });
 
 describe('notFound', () => {

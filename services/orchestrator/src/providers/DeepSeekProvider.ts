@@ -139,14 +139,17 @@ export class DeepSeekProvider implements ProviderAdapter {
     messages: Array<{ role: string; content: string }>;
     model: string;
     maxTokens?: number;
+    modelId?: string;
   }): Promise<AIResponse> {
     const startedAt = Date.now();
     const { abortSignal, timeoutTimer } = this.createTimeout();
 
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
+      // Phase B — execute the advisor-selected model when supplied; otherwise
+      // fall back to this adapter's configured default.
       const result = await generateText({
-        model: this.client()(this.modelId),
+        model: this.client()(request.modelId ?? this.modelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
@@ -209,6 +212,7 @@ export class DeepSeekProvider implements ProviderAdapter {
     model: string;
     maxTokens?: number;
     schema: Record<string, unknown>;
+    modelId?: string;
   }): Promise<AIResponse> {
     const startedAt = Date.now();
     const { abortSignal, timeoutTimer } = this.createTimeout();
@@ -216,7 +220,7 @@ export class DeepSeekProvider implements ProviderAdapter {
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
       const result = await generateText({
-        model: this.client()(this.structuredModelId),
+        model: this.client()(request.modelId ?? this.structuredModelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
@@ -278,6 +282,7 @@ export class DeepSeekProvider implements ProviderAdapter {
     messages: Array<{ role: string; content: string }>;
     model: string;
     maxTokens?: number;
+    modelId?: string;
   }): AsyncIterable<unknown> {
     const startedAt = Date.now();
     const { abortSignal, timeoutTimer } = this.createTimeout();
@@ -285,7 +290,7 @@ export class DeepSeekProvider implements ProviderAdapter {
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
       const result = streamText({
-        model: this.client()(this.modelId),
+        model: this.client()(request.modelId ?? this.modelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,

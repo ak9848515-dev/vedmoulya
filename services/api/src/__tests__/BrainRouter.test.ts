@@ -721,4 +721,12 @@ describe('brain.* EPIC-020 — Outcome & Revenue layer (daily priorities + satis
       code: 'FORBIDDEN',
     });
   });
+
+  it('dailyPriorities defaults to a limit of 5 when no limit is supplied', async () => {
+    const { services } = makeOutcomeServices();
+    const caller = createAppRouter(services).createCaller(outcomeCtx);
+    const priorities = await caller.brain.dailyPriorities({ userId: outcomeCtx.userId });
+    expect(priorities.success).toBe(true);
+    expect((priorities.data ?? []).length).toBeLessThanOrEqual(5);
+  });
 });

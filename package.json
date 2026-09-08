@@ -51,6 +51,8 @@
     "seed:ei": "npx tsx scripts/seed-ei.ts",
     "ai:smoke": "npx tsx scripts/ai-smoke.ts",
     "ai:smoke:live": "npx tsx scripts/ai-live-smoke.ts",
+    "bld023:live": "npx tsx scripts/bld023-live-acceptance.ts",
+    "mission:live:restart": "npx tsx scripts/live-restart-acceptance.ts",
     "rag:eval": "npx tsx scripts/rag-evaluate.ts",
     "ai:benchmark": "npx tsx scripts/token-benchmark.ts",
     "outdated": "npm outdated",
@@ -59,6 +61,7 @@
     "rag:pg:verify": "npx tsx scripts/rag-live-verify.ts",
     "rag:calibrate": "npx tsx scripts/rag-calibrate.ts",
     "provider:calibrate": "npx tsx scripts/provider-calibrate.ts",
+    "provider:usage:ingest": "npx tsx scripts/provider-usage-ingest.ts",
     "accuracy:evaluate": "npx tsx scripts/accuracy-evaluate.ts",
     "matrix:realworld": "npx tsx scripts/realworld-matrix.ts",
     "loop:benchmark": "npx tsx scripts/loop-benchmark.ts",
@@ -75,11 +78,13 @@
     "outcome:journey:benchmark": "npx tsx scripts/outcome-journey-benchmark.ts",
     "runtime:verification:benchmark": "npx tsx scripts/runtime-verification-benchmark.ts",
     "learning:benchmark": "npx tsx scripts/learning-benchmark.ts",
-    "benchmarks": "npm run experience:benchmark && npm run factory:benchmark && npm run loop:benchmark && npm run requirements:benchmark && npm run execution:benchmark && npm run brain:benchmark && npm run intelligence:benchmark && npm run bridge:benchmark && npm run ai-world:scheduler:benchmark && npm run continuous:intelligence:benchmark && npm run outcome:intelligence:benchmark && npm run outcome:journey:benchmark && npm run runtime:verification:benchmark && npm run learning:benchmark && npm run production:benchmark && npm run quality:gates:verify",
+    "benchmarks": "npm run experience:benchmark && npm run factory:benchmark && npm run loop:benchmark && npm run requirements:benchmark && npm run planning:benchmark && npm run execution:benchmark && npm run brain:benchmark && npm run intelligence:benchmark && npm run bridge:benchmark && npm run ai-world:scheduler:benchmark && npm run continuous:intelligence:benchmark && npm run outcome:intelligence:benchmark && npm run outcome:journey:benchmark && npm run runtime:verification:benchmark && npm run learning:benchmark && npm run production:benchmark && npm run quality:gates:verify",
     "ai:production:verify": "npx tsx scripts/ai-production-verify.ts",
     "ai:critique:verify": "npx tsx scripts/ai-critique-verify.ts",
     "production:benchmark": "npx tsx scripts/production-benchmark.ts",
-    "quality:gates:verify": "npx tsx scripts/quality-gates-verify.ts"
+    "quality:gates:verify": "npx tsx scripts/quality-gates-verify.ts",
+    "planning:demo": "npx tsx scripts/planning-demo.ts",
+    "planning:benchmark": "npx tsx scripts/planning-benchmark.ts"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -91,7 +96,7 @@
     ]
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=22.0.0",
     "npm": ">=10.0.0"
   },
   "devDependencies": {
@@ -123,5 +128,8 @@
     "sharp": "^0.35.0",
     "fast-uri": "^3.1.5",
     "vite": "6.4.3"
+  },
+  "dependencies": {
+    "@openrouter/sdk": "^1.2.107"
   }
 }

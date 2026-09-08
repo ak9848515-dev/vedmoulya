@@ -223,4 +223,13 @@ describe('requirements.* lifecycle routes (EPIC-009)', () => {
     const own = await router.get({ userId: 'u1', sessionId }, ctx);
     expect(own.data?.sessionId).toBe(sessionId);
   });
+
+  it('handoffToFactory throws when no factory is wired (guarded, not a silent no-op)', async () => {
+    const router = createRequirementsRouter(createRequirementsService());
+    const started = await router.start({ userId: 'u1', idea: 'Build a restaurant app.' }, ctx);
+    const sessionId = started.data?.sessionId ?? '';
+    await expect(router.handoffToFactory({ userId: 'u1', sessionId }, ctx)).rejects.toThrow(
+      'the application factory is not available for handoff',
+    );
+  });
 });

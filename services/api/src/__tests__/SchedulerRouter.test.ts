@@ -331,3 +331,18 @@ describe('aiWorldScheduler namespace (EPIC-018)', () => {
     expect(bRuns.data as unknown[]).toHaveLength(0);
   });
 });
+
+describe('aiWorldScheduler — runtime status without a bound driver', () => {
+  it('getRuntimeStatus reports inactive when no runtime driver is wired', async () => {
+    const bareServices = {
+      aiWorldScheduler: makeSchedulerService(),
+    } as unknown as ApiApplicationService;
+    const bareRouter = createAppRouter(bareServices);
+    const caller = bareRouter.createCaller(ctx('s-bare'));
+    const result = await caller.aiWorldScheduler.getRuntimeStatus({ userId: 's-bare' });
+    expect(result.success).toBe(true);
+    const data = result.data as { active: boolean; reason: string };
+    expect(data.active).toBe(false);
+    expect(data.reason).toBe('not_started');
+  });
+});

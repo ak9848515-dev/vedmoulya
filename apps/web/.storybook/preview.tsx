@@ -7,7 +7,7 @@ import type { Preview } from '@storybook/react';
 import React from 'react';
 
 // Import app styles (Tailwind + design tokens)
-import '../src/styles/globals.css';
+import '../src/app/globals.css';
 
 // ── Theme Decorator ────────────────────────────────────────────────────────
 

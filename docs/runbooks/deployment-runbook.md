@@ -11,20 +11,20 @@
 
 ## Overview
 
-This runbook documents the standard production deployment process for the VedMoulya platform. The platform consists of a Next.js web application (Life OS) and a Node.js API gateway, deployed as a monorepo.
+This runbook documents the standard production deployment process for the VedMoulya platform. The platform is a Next.js web application (Life OS) whose server-side route handlers host the tRPC gateway and consume the workspace packages.
 
 ### Architecture
 
 ```
 ┌────────────┐     ┌────────────┐     ┌────────────┐
-│  Browser   │────▶│  Next.js   │────▶│  tRPC API  │
-│  (Client)  │     │  (App)     │     │  Gateway   │
+│  Browser   │────▶│  Next.js / tRPC gateway  │
+│  (Client)  │     │  (App + server routes)   │
 └────────────┘     └────────────┘     └────────────┘
-                           │                  │
-                           ▼                  ▼
+                           │
+                           ▼
                     ┌────────────┐     ┌────────────┐
                     │  .next/    │     │  Services  │
-                    │  Static    │     │  (Engine)  │
+                    │  Server    │     │  (Engine)  │
                     └────────────┘     └────────────┘
 ```
 
@@ -33,7 +33,6 @@ This runbook documents the standard production deployment process for the VedMou
 | Component       | Platform             | Type                          |
 | --------------- | -------------------- | ----------------------------- |
 | Web Application | Vercel               | Static + Serverless Functions |
-| API Gateway     | Railway / VPS        | Node.js Service               |
 | Database        | Railway / Managed PG | PostgreSQL 16+                |
 | Cache           | Railway / Upstash    | Redis 7+                      |
 | File Storage    | Vercel Blob / S3     | Object Storage                |
@@ -100,24 +99,12 @@ npx vercel deploy --prod --token=$VERCEL_TOKEN
 # Trigger release workflow via GitHub UI
 ```
 
-### Step 3: Deploy API Gateway
-
-```bash
-# Option A: Railway CLI
-railway up --service api
-
-# Option B: Docker
-docker build -t vedmoulya/api:latest -f services/api/Dockerfile .
-docker push vedmoulya/api:latest
-docker run -d --env-file .env.production vedmoulya/api:latest
-```
-
-### Step 4: Restart Services
+### Step 3: Restart the web deployment
 
 ```bash
 # After all deployments complete, restart services if needed
 # Vercel handles this automatically
-# For Railway: railway restart --service api
+# Redeploy/restart the Vercel project when using an explicit deployment.
 ```
 
 ---

@@ -1,5 +1,12 @@
 # SPRINT-026 — Test Gap Report
 
+> **Current-state addendum (2026-09-08):** The inventory below is a
+> historical Sprint-026 snapshot. The current repository verification reports
+> 826 test files and 10,529 passing tests. The mission-control gaps identified
+> later—real-provider execution, real-Postgres process restart, and
+> cross-process lease safety—remain separate unresolved acceptance gaps and
+> are not closed by the historical Sprint-026 spot checks.
+
 > **Sprint:** SPRINT-026 — Voice Intelligence + Complete-System Architecture Audit
 > **Scope:** Phase 11 (Testing Audit) + Phase 8 (Code Quality) + Phase 9 (Database/Persistence) findings
 > **Date:** 2026-08-13

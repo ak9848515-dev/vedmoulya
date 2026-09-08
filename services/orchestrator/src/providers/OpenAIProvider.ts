@@ -90,6 +90,7 @@ export class OpenAIProvider implements ProviderAdapter {
     messages: Array<{ role: string; content: string }>;
     model: string;
     maxTokens?: number;
+    modelId?: string;
   }): Promise<AIResponse> {
     const start = Date.now();
     const response = await this.fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
@@ -99,7 +100,9 @@ export class OpenAIProvider implements ProviderAdapter {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: request.model,
+        // Phase B — execute the advisor-selected model when supplied; the
+        // `model` request field is the runtime's provider-name placeholder.
+        model: request.modelId ?? request.model,
         messages: request.messages,
         max_tokens: request.maxTokens ?? 1024,
       }),

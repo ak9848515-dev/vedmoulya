@@ -71,15 +71,15 @@ export function allowMissingBuild(argv: readonly string[]): boolean {
  * One authoritative environment-file strategy (shared by every startup CLI):
  *   • development/test: root .env.local first, then apps/web/.env.local
  *     (the existing gitignored dev-secrets location) as a fallback.
- *   • production/staging: root .env.local only — production secrets come
- *     from the platform environment, never from the web dev file.
+ *   • production/staging: no local env files — production secrets must come
+ *     from the platform environment, never from developer workstations.
  * Uses the repository's built-in loader (process.loadEnvFile, no dotenv) and
  * NEVER prints values. Missing files are skipped, parse errors warn.
  */
 export function loadEnvironment(mode: PreflightMode): void {
   const envFiles =
     mode === 'production' || mode === 'staging'
-      ? [join(REPO_ROOT, '.env.local')]
+      ? []
       : [join(REPO_ROOT, '.env.local'), join(REPO_ROOT, 'apps', 'web', '.env.local')];
   const result = loadEnvFilesSafe(envFiles);
   for (const error of result.errors) {

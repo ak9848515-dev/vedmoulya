@@ -1378,6 +1378,134 @@ describe('createProviderIntelligencePort', () => {
     const candidates = await port.getCandidates('reasoning');
     expect(candidates[0]?.healthy).toBe(false);
   });
+
+  it('attaches real measured evidence when an evidence source is wired', async () => {
+    const providers = {
+      listByCapability: vi.fn(async () => ({ data: [providerDTO({ id: 'proven' })] })),
+    };
+    const measured = {
+      sampleCount: 120,
+      effectiveSampleCount: 120,
+      successRate: 0.99,
+      failureRate: 0.01,
+      p50LatencyMs: 400,
+      recentFailureCount: 1,
+      confidence: 'MEASURED' as const,
+      influence: 1,
+      dimension: 'provider' as const,
+      providerId: 'proven',
+      provenance: 'MEASURED' as const,
+    };
+    const evidence = {
+      bestEvidence: vi.fn(() => measured),
+    };
+    const port = createProviderIntelligencePort(providers as never, undefined, evidence as never);
+    const candidates = await port.getCandidates('reasoning');
+    expect(evidence.bestEvidence).toHaveBeenCalledWith('proven');
+    expect(candidates[0]?.measured).toMatchObject({
+      sampleCount: 120,
+      successRate: 0.99,
+      confidence: 'MEASURED',
+      provenance: 'MEASURED',
+    });
+  });
+
+  it('leaves measured undefined in cold start (no evidence source / no samples)', async () => {
+    const providers = {
+      listByCapability: vi.fn(async () => ({ data: [providerDTO()] })),
+    };
+    const port = createProviderIntelligencePort(providers as never);
+    const candidates = await port.getCandidates('reasoning');
+    expect(candidates[0]?.measured).toBeUndefined();
+    // An evidence source with no samples must never fabricate evidence.
+    const emptyEvidence = { bestEvidence: vi.fn(() => undefined) };
+    const port2 = createProviderIntelligencePort(
+      providers as never,
+      undefined,
+      emptyEvidence as never,
+    );
+    const candidates2 = await port2.getCandidates('reasoning');
+    expect(candidates2[0]?.measured).toBeUndefined();
+  });
+
+  it('carries model-level capabilities from the registry (provider != model)', async () => {
+    const providers = {
+      listByCapability: vi.fn(async () => ({
+        data: [
+          providerDTO({
+            models: [
+              {
+                id: 'm1',
+                contextLength: 128000,
+                maxOutputTokens: 8192,
+                streaming: true,
+                capabilities: ['reasoning', 'coding'],
+              },
+              { id: 'embed', contextLength: 2048, maxOutputTokens: 0, streaming: false },
+            ],
+          }),
+        ],
+      })),
+    };
+    const port = createProviderIntelligencePort(providers as never);
+    const candidates = await port.getCandidates('reasoning');
+    expect(candidates[0]?.models[0]?.capabilities).toEqual(['reasoning', 'coding']);
+    // A model without a declared list stays UNKNOWN (no capabilities field).
+    expect(candidates[0]?.models[1]?.capabilities).toBeUndefined();
+  });
+
+  it('folds runtime UNAVAILABLE health into eligibility and excludes model-scope failures', async () => {
+    const providers = {
+      listByCapability: vi.fn(async () => ({ data: [providerDTO()] })),
+    };
+    const runtimeHealth = {
+      getProviderHealth: vi.fn(() => ({
+        scope: 'provider' as const,
+        verdict: 'UNAVAILABLE' as const,
+        sampleCount: 30,
+        consecutiveFailures: 9,
+        timeoutCount: 9,
+        rateLimitCount: 0,
+        authFailureCount: 0,
+        unsupportedCount: 0,
+        detail: '9 consecutive execution failures (burst)',
+      })),
+      getModelHealth: vi.fn(),
+      listUnavailableModelIds: vi.fn(() => ['m1']),
+    };
+    const port = createProviderIntelligencePort(
+      providers as never,
+      undefined,
+      undefined,
+      runtimeHealth as never,
+    );
+    const candidates = await port.getCandidates('reasoning');
+    expect(candidates[0]?.healthy).toBe(false); // registry healthy but runtime says UNAVAILABLE
+    expect(candidates[0]?.runtimeHealth?.verdict).toBe('UNAVAILABLE');
+    expect(candidates[0]?.runtimeUnavailableModelIds).toEqual(['m1']);
+    expect(runtimeHealth.getProviderHealth).toHaveBeenCalledWith('p1');
+  });
+
+  it('leaves candidates untouched in cold start (no runtime health verdict)', async () => {
+    const providers = {
+      listByCapability: vi.fn(async () => ({ data: [providerDTO()] })),
+    };
+    const runtimeHealth = {
+      getProviderHealth: vi.fn(() => ({ verdict: 'UNKNOWN' })),
+      getModelHealth: vi.fn(),
+      listUnavailableModelIds: vi.fn(() => []),
+    };
+    const port = createProviderIntelligencePort(
+      providers as never,
+      undefined,
+      undefined,
+      runtimeHealth as never,
+    );
+    const candidates = await port.getCandidates('reasoning');
+    expect(candidates[0]?.healthy).toBe(true);
+    expect(candidates[0]?.runtimeHealth).toBeUndefined();
+    expect(candidates[0]?.runtimeUnavailableModelIds).toBeUndefined();
+  });
 });
 
 describe('createExecutionStrategyPort', () => {

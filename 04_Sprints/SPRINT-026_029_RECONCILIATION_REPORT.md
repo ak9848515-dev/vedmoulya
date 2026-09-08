@@ -1,5 +1,18 @@
 # SPRINT-026 → 029 — Reconciliation Report
 
+> **Current-state addendum (2026-09-08):** This reconciliation is a
+> historical record and must not be read as current production certification.
+> Current closure verification found 826 test files / 10,529 tests passing,
+> typecheck and build passing, lint passing with 44 warnings, and 8 remaining
+> dependency vulnerabilities including 3 high-severity issues. Real-provider
+> mission execution, real-Postgres process-restart recovery, and
+> cross-process lease safety remain unproven. The `services/notifications`
+> workspace is still present in the current tree, although it remains unused;
+> the historical deletion claim below is therefore not current-tree evidence.
+> The historical SPRINT-027…029
+> claims below are preserved, but current release status is governed by the
+> latest closure evidence.
+
 > **Purpose:** one chronological truth for the four-sprint arc that took VedMoulya from
 > a post-v1.0 platform to a **voice-capable, proactively intelligent** operating system.
 > Every claim below was re-verified against the working tree on 2026-08-14

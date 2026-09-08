@@ -26,14 +26,13 @@ env:
 
 # Deployment targets (see docs/ops/DEPLOYMENT_GUIDE.md):
 #   Web app (Life OS + gateway)  → Vercel
-#   API gateway image            → GHCR (consumed by Railway / VPS)
 #   Database / Redis / storage   → managed providers (Railway / Upstash / S3)
 #
 # Secrets to configure per environment (Settings → Environments → <stage>):
 #   VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID   (web deploy)
 #   WEB_URL                                          (smoke-test target)
-# Steps requiring a missing secret are skipped, so the pipeline stays green
-# until infrastructure credentials are provisioned.
+# Deployment stages fail closed when required deployment credentials or target
+# verification are missing.
 
 jobs:
   validate:
@@ -59,6 +58,7 @@ jobs:
           npm run factory:benchmark
           npm run loop:benchmark
           npm run requirements:benchmark
+          npm run planning:benchmark
           npm run execution:benchmark
           npm run brain:benchmark
           npm run intelligence:benchmark
@@ -87,7 +87,6 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write # git tag push (ga)
-      packages: write # GHCR image push (rc/ga)
     env:
       STAGE: ${{ github.event.inputs.stage }}
       WEB_URL: ${{ secrets.WEB_URL }}
@@ -101,11 +100,19 @@ jobs:
       - run: npm ci
       - run: npm run build:core
       - run: npm run build -w apps/web
+      - name: Validate deployment credentials
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -eu
+          test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN is required" >&2; exit 1; }
+          test -n "$VERCEL_ORG_ID" || { echo "VERCEL_ORG_ID is required" >&2; exit 1; }
+          test -n "$VERCEL_PROJECT_ID" || { echo "VERCEL_PROJECT_ID is required" >&2; exit 1; }
 
       # ── 1. Web app (Life OS + gateway) → Vercel ──────────────────────────
       - name: Deploy web app to Vercel
         id: deploy-vercel
-        if: env.VERCEL_TOKEN != ''
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -119,34 +126,14 @@ jobs:
           echo "Deployed URL: $URL"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      # ── 2. API gateway image → GHCR (consumed by Railway / VPS) ───────────
-      - name: Log in to GHCR
-        if: github.event.inputs.stage == 'rc' || github.event.inputs.stage == 'ga'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push API gateway image
-        if: github.event.inputs.stage == 'rc' || github.event.inputs.stage == 'ga'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/api/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}-api:latest
-            ghcr.io/${{ github.repository }}-api:${{ github.sha }}
-
-      # ── 3. Smoke test the deployed gateway ────────────────────────────────
+      # ── 2. Smoke test the deployed gateway ────────────────────────────────
       # Prefer the just-deployed URL from the Vercel step; fall back to the
       # per-environment WEB_URL secret when a deploy did not run.
       - name: Smoke test deployed gateway
         env:
           TARGET_URL: ${{ steps.deploy-vercel.outputs.url || env.WEB_URL }}
-        if: steps.deploy-vercel.outputs.url != '' || env.WEB_URL != ''
         run: |
+          test -n "$TARGET_URL" || { echo "No deployed target URL available" >&2; exit 1; }
           bash scripts/deploy/smoke-test.sh "$TARGET_URL"
 
       # ── 4. Tag the release (ga only) ──────────────────────────────────────

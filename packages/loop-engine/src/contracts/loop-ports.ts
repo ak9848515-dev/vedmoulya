@@ -16,7 +16,16 @@ import type { EvidenceState } from '@vedmoulya/services';
 
 export interface SpecialistExecutionInput {
   taskId: string;
+  /** Primary/routing capability of the task. */
   capability: CapabilityType;
+  /**
+   * ALL hard capability requirements for this task (CapabilityType taxonomy).
+   * Always includes `capability`; additional entries (e.g. an implement step
+   * that requires coding + reasoning) are forwarded to the AI runtime so the
+   * routing advisor can gate on every requirement. Omitted → the runtime
+   * requires exactly [capability].
+   */
+  requiredCapabilities?: CapabilityType[];
   qualityTier: QualityTier;
   /** The composed task prompt. */
   userInput: string;
@@ -70,6 +79,7 @@ export interface SpecialistExecutionPort {
    */
   explain?(input: {
     capability: CapabilityType;
+    requiredCapabilities?: CapabilityType[];
     estimatedInputTokens?: number;
   }): Promise<{ providerId: string; modelId: string; reasons: string[]; strategy: string }>;
 }

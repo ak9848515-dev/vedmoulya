@@ -44,6 +44,7 @@ import {
   RefreshCw,
   Radar,
   Zap,
+  Rocket,
 } from 'lucide-react';
 import { logout } from '../auth/session-manager.js';
 import { useAuthStore } from '../stores/auth-store.js';
@@ -101,6 +102,7 @@ const OllamaFirstRunDialog = dynamic(
 
 const moduleIcons: Record<string, React.ReactNode> = {
   dashboard: <LayoutDashboard className="h-5 w-5" />,
+  'autonomous-builder': <Rocket className="h-5 w-5" />,
   insights: <Lightbulb className="h-5 w-5" />,
   search: <Search className="h-5 w-5" />,
   career: <Briefcase className="h-5 w-5" />,
@@ -136,6 +138,8 @@ function routeForSection(section: NavSectionId): string | undefined {
   switch (section) {
     case 'dashboard':
       return '/';
+    case 'autonomous-builder':
+      return '/autonomous-builder';
     case 'settings':
       return '/settings';
     case 'career':

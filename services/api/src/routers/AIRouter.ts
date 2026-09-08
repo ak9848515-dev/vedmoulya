@@ -57,6 +57,7 @@ export interface AIHandlers {
     input: {
       userId: string;
       capability: string;
+      requiredCapabilities?: string[];
       estimatedInputTokens?: number;
       requestedOutputTokens?: number;
     },
@@ -82,6 +83,8 @@ export function createAIRouter(ai: AIOrchestrationService): AIHandlers {
       successResponse(
         await svc.explainSelection({
           capability: input.capability as Parameters<typeof svc.explainSelection>[0]['capability'],
+          requiredCapabilities: input.requiredCapabilities as
+            Parameters<typeof svc.explainSelection>[0]['requiredCapabilities'] | undefined,
           estimatedInputTokens: input.estimatedInputTokens,
           requestedOutputTokens: input.requestedOutputTokens,
         }),

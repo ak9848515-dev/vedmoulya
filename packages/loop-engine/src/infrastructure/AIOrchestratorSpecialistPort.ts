@@ -26,6 +26,7 @@ export class AIOrchestratorSpecialistPort implements SpecialistExecutionPort {
   async execute(input: SpecialistExecutionInput): Promise<SpecialistExecutionResult> {
     const response = await this.ai.orchestrate({
       capability: input.capability,
+      requiredCapabilities: input.requiredCapabilities,
       qualityTier: input.qualityTier,
       userInput: input.userInput,
       userId: input.userId,
@@ -51,10 +52,12 @@ export class AIOrchestratorSpecialistPort implements SpecialistExecutionPort {
   /** Phase 3 decision query: WHO should perform this task (no execution). */
   async explain(input: {
     capability: SpecialistExecutionInput['capability'];
+    requiredCapabilities?: SpecialistExecutionInput['requiredCapabilities'];
     estimatedInputTokens?: number;
   }): Promise<{ providerId: string; modelId: string; reasons: string[]; strategy: string }> {
     const explanation = await this.ai.explainSelection({
       capability: input.capability,
+      requiredCapabilities: input.requiredCapabilities,
       estimatedInputTokens: input.estimatedInputTokens ?? 1_000,
     });
     return {

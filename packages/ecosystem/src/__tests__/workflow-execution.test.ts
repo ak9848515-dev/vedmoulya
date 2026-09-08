@@ -1051,3 +1051,92 @@ describe('WorkflowExecutionService', () => {
     });
   });
 });
+
+describe('WorkflowExecutionService — capability propagation', () => {
+  let agentRegistry: AgentRegistry;
+  let workflowRegistry: WorkflowRegistry;
+  let store: InMemoryWorkflowExecutionStore;
+  let clock: ClockPort;
+  let evidence: ReturnType<typeof createMockEvidence>;
+
+  beforeEach(() => {
+    agentRegistry = new AgentRegistry();
+    workflowRegistry = new WorkflowRegistry();
+    store = new InMemoryWorkflowExecutionStore();
+    clock = createMockClock();
+    evidence = createMockEvidence();
+    agentRegistry.register(
+      Agent.create({
+        id: 'test-agent',
+        name: 'Test Agent',
+        purpose: 'Testing',
+        requiredCapabilities: ['content_generation', 'reasoning'],
+        owner: 'user-1',
+      }),
+    );
+  });
+
+  it('forwards the FULL step requirement set — never collapsed to requiredCapabilities[0]', async () => {
+    const step = createSimpleStep({
+      id: 'step-multi',
+      requiredCapabilities: ['content_generation', 'reasoning'],
+    });
+    const workflow = createSimpleWorkflow([step]);
+    workflowRegistry.register(workflow);
+
+    // Executor records every param it received.
+    const received: Array<Record<string, unknown>> = [];
+    const executor: StepExecutorPort = {
+      execute: async (params) => {
+        received.push({ ...params });
+        return { ok: true, content: 'Output', tokens: { input: 1, output: 1, total: 2 } };
+      },
+    };
+    const service = new WorkflowExecutionService({
+      agentRegistry,
+      workflowRegistry,
+      executionStore: store,
+      stepExecutor: executor,
+      stepVerifier: createMockVerifier(),
+      evidencePort: evidence,
+      clock,
+    });
+
+    const result = await service.start({ workflowId: 'test-workflow', ownerId: 'user-1' });
+    expect(result.success).toBe(true);
+    expect(received).toHaveLength(1);
+    // The primary capability remains requiredCapabilities[0] (backwards compat)…
+    expect(received[0]?.capability).toBe('content_generation');
+    // …and the FULL authoritative set reaches the executor → the AI runtime.
+    expect(received[0]?.requiredCapabilities).toEqual(['content_generation', 'reasoning']);
+  });
+
+  it('still forwards a single-capability step as one requirement', async () => {
+    const step = createSimpleStep({
+      id: 'step-single',
+      requiredCapabilities: ['reasoning'],
+    });
+    const workflow = createSimpleWorkflow([step]);
+    workflowRegistry.register(workflow);
+
+    const received: Array<Record<string, unknown>> = [];
+    const executor: StepExecutorPort = {
+      execute: async (params) => {
+        received.push({ ...params });
+        return { ok: true, content: 'Output', tokens: { input: 1, output: 1, total: 2 } };
+      },
+    };
+    const service = new WorkflowExecutionService({
+      agentRegistry,
+      workflowRegistry,
+      executionStore: store,
+      stepExecutor: executor,
+      stepVerifier: createMockVerifier(),
+      evidencePort: evidence,
+      clock,
+    });
+
+    await service.start({ workflowId: 'test-workflow', ownerId: 'user-1' });
+    expect(received[0]?.requiredCapabilities).toEqual(['reasoning']);
+  });
+});

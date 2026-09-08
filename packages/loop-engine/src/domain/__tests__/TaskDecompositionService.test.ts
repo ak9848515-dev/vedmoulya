@@ -124,3 +124,31 @@ describe('TaskDecompositionService', () => {
     );
   });
 });
+
+describe('TaskDecompositionService — requiredCapabilities propagation', () => {
+  const understanding = new GoalUnderstandingService();
+  const decomposer = new TaskDecompositionService();
+
+  it('carries the enriched multi-cap requirement on the ABAP correction step', () => {
+    const spec = understanding.derive(
+      'Build an ABAP debugger for short dumps in production SAP code.',
+    );
+    const graph = decomposer.buildGraph(spec);
+    // The 'Generate a correction' template is `coding` AND requires
+    // `reasoning` — both must survive decomposition into the LoopTask.
+    const produce = graph.tasks.find((t) => t.phase === 'produce');
+    expect(produce?.capability).toBe('coding');
+    expect(produce?.requiredCapabilities).toEqual(['coding', 'reasoning']);
+  });
+
+  it('defaults every other task requirement set to its own primary capability', () => {
+    const spec = understanding.derive(
+      'Build an ABAP debugger for short dumps in production SAP code.',
+    );
+    const graph = decomposer.buildGraph(spec);
+    for (const task of graph.tasks) {
+      expect(task.requiredCapabilities).toBeDefined();
+      expect(task.requiredCapabilities).toContain(task.capability);
+    }
+  });
+});

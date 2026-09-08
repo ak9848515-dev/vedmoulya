@@ -35,6 +35,9 @@ export type SelectionVerdict = 'approved' | 'paid_approval_required' | 'never_pa
 
 export interface ModelSelectionInput {
   capability: string;
+  /** Authoritative task capability requirements (existing CapabilityType
+   *  taxonomy). Omitted → the task requires exactly its routing capability. */
+  requiredCapabilities?: string[];
   estimatedInputTokens: number;
   requestedOutputTokens?: number;
   /** Hard precision requirement (default standard). */
@@ -170,6 +173,7 @@ export class ModelSelectionIntelligence {
 
     let explanation = await this.advisor.decide({
       capability: input.capability,
+      requiredCapabilities: input.requiredCapabilities,
       estimatedInputTokens: input.estimatedInputTokens,
       requestedOutputTokens: input.requestedOutputTokens,
     });

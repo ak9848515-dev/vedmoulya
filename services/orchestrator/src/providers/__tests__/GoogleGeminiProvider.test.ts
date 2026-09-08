@@ -320,4 +320,20 @@ describe('GoogleGeminiProvider', () => {
     });
     expect(provider['modelId']).toBe('gemini-2.5-pro');
   });
+
+  it('Phase B: executes the advisor-selected modelId through the SDK', async () => {
+    const provider = new GoogleGeminiProvider(FAKE_API_KEY);
+    await provider.execute({
+      messages: MESSAGES,
+      model: 'gemini',
+      maxTokens: 64,
+      modelId: 'gemini-2.5-pro',
+    });
+    const call = generateTextMock.mock.calls[0][0] as {
+      model: { modelId: string };
+    };
+    // The SDK model function must be invoked with the REQUESTED model, not
+    // the adapter's configured default.
+    expect(call.model.modelId).toBe('gemini-2.5-pro');
+  });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AIOrchestrationService } from '@vedmoulya/services';
 import type { ExecutionStrategyPort, ProviderIntelligencePort } from '@vedmoulya/services';
 import { MockProvider } from '@vedmoulya/orchestrator';
@@ -119,5 +119,96 @@ describe('AIOrchestratorSpecialistPort', () => {
         userId: 'u',
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('AIOrchestratorSpecialistPort — capability propagation', () => {
+  it('forwards the FULL requiredCapabilities to the runtime (never collapses to [0])', async () => {
+    const orchestrate = vi.fn(async () => ({
+      content: 'ok',
+      provider: 'mock',
+      model: 'mock-v1',
+      confidence: 0.9,
+      qualityScore: 8,
+      latency: 1,
+      cost: 0,
+      tokenUsage: { input: 1, output: 1, total: 2 },
+      validation: { passed: true, checks: [], overallScore: 8, decision: 'pass' },
+      traceId: 't',
+      routingDecision: {
+        selectedProvider: 'mock',
+        reason: 'test',
+        alternativesConsidered: [],
+        strategy: 'balanced',
+      },
+    }));
+    const explainSelection = vi.fn(async () => ({
+      capability: 'coding',
+      selected: { providerId: 'mock', modelId: 'mock-v1', reasons: [], score: 1 },
+      fallback: [],
+      candidatesConsidered: [],
+      strategy: 'balanced',
+      estimatedInputTokens: 100,
+      estimatedCost: 0,
+      evaluatedAt: new Date().toISOString(),
+    }));
+    const ai = { orchestrate, explainSelection } as unknown as AIOrchestrationService;
+    const port = new AIOrchestratorSpecialistPort(ai);
+
+    await port.execute({
+      taskId: 'task-3',
+      capability: 'coding',
+      requiredCapabilities: ['coding', 'reasoning'],
+      qualityTier: 'standard',
+      userInput: 'Implement the fix.',
+      userId: 'user-1',
+    });
+    expect(orchestrate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capability: 'coding',
+        requiredCapabilities: ['coding', 'reasoning'],
+      }),
+    );
+
+    await port.explain({ capability: 'coding', requiredCapabilities: ['coding', 'reasoning'] });
+    expect(explainSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capability: 'coding',
+        requiredCapabilities: ['coding', 'reasoning'],
+      }),
+    );
+  });
+
+  it('omits requiredCapabilities entirely for legacy single-capability tasks', async () => {
+    const orchestrate = vi.fn(async () => ({
+      content: 'ok',
+      provider: 'mock',
+      model: 'mock-v1',
+      confidence: 0.9,
+      qualityScore: 8,
+      latency: 1,
+      cost: 0,
+      tokenUsage: { input: 1, output: 1, total: 2 },
+      validation: { passed: true, checks: [], overallScore: 8, decision: 'pass' },
+      traceId: 't',
+      routingDecision: {
+        selectedProvider: 'mock',
+        reason: 'test',
+        alternativesConsidered: [],
+        strategy: 'balanced',
+      },
+    }));
+    const ai = { orchestrate } as unknown as AIOrchestrationService;
+    const port = new AIOrchestratorSpecialistPort(ai);
+    await port.execute({
+      taskId: 'task-4',
+      capability: 'reasoning',
+      qualityTier: 'standard',
+      userInput: 'Analyze.',
+      userId: 'user-1',
+    });
+    expect(orchestrate).toHaveBeenCalledWith(expect.objectContaining({ capability: 'reasoning' }));
+    const args = orchestrate.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(args.requiredCapabilities).toBeUndefined();
   });
 });

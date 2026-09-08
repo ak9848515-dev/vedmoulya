@@ -7,6 +7,7 @@
 import type { ProviderApplicationService } from '@vedmoulya/providers';
 import { readProviderRuntimeState, toRuntimeMode, validateDefaultProvider } from '@vedmoulya/core';
 import type { ProviderExperienceService } from '../services/ProviderExperienceService.js';
+import type { OpenAIOrgPeriod } from '../services/ProviderUsageIngestor.js';
 import type { TRPCContext } from '../router.js';
 import {
   fromServiceResult,
@@ -121,6 +122,10 @@ export interface ProvidersHandlers {
     _ctx: TRPCContext,
   ) => Promise<ApiResponse>;
   getUsageDetail: (input: { userId: string }, _ctx: TRPCContext) => Promise<ApiResponse>;
+  getOpenAIOrgUsage: (
+    input: { userId: string; period: OpenAIOrgPeriod },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
   explainModelSelection: (
     input: { userId: string } & Record<string, unknown>,
     _ctx: TRPCContext,
@@ -317,6 +322,8 @@ export function createProvidersRouter(
       ),
     getUsageDetail: async (input, _ctx) =>
       fromServiceResult(await experience().getUsageDetail(input.userId)),
+    getOpenAIOrgUsage: async (input, _ctx) =>
+      fromServiceResult(await experience().getOpenAIOrgUsage(input.period)),
     explainModelSelection: async (input, _ctx) =>
       fromServiceResult(
         await experience().explainModelSelection(

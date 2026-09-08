@@ -164,7 +164,16 @@ export interface LoopTask {
   taskId: string;
   title: string;
   description: string;
+  /** Primary/routing capability of this task. */
   capability: CapabilityType;
+  /**
+   * ALL hard capability requirements for this task (from the frozen
+   * CapabilityType taxonomy). Always includes `capability`; may add more
+   * (e.g. an implement step that is `coding` AND requires `reasoning`).
+   * Omitted (legacy callers / direct task construction) → the requirement
+   * set is exactly [capability].
+   */
+  requiredCapabilities?: CapabilityType[];
   qualityTier: QualityTier;
   /** TaskIds that must complete first (DAG edges). */
   dependencies: string[];

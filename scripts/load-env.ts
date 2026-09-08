@@ -9,8 +9,8 @@
 // environment with the preflight and the launched processes:
 //
 //   • development/test: root .env.local, then apps/web/.env.local (fallback)
-//   • production/staging: root .env.local only — the platform environment
-//     supplies the rest (never the web dev file)
+//   • production/staging: no local env files — the platform environment
+//     supplies production secrets
 //
 // Precedence (same as the preflight/doctor loaders): a variable ALREADY set in
 // the calling shell wins — files never override it. Only `export` lines are
@@ -50,7 +50,7 @@ function resolveMode(argv: readonly string[]): LoaderMode {
 /** Same file order as the preflight CLI — one authoritative env-file strategy. */
 function envFilesFor(mode: LoaderMode): string[] {
   return mode === 'production' || mode === 'staging'
-    ? [join(REPO_ROOT, '.env.local')]
+    ? []
     : [join(REPO_ROOT, '.env.local'), join(REPO_ROOT, 'apps', 'web', '.env.local')];
 }
 
