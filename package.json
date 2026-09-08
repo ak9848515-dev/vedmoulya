@@ -35,7 +35,7 @@
     "test": "vitest run",
     "test:run": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "node scripts/coverage-gate.mjs",
+    "test:coverage": "node scripts/coverage-gate-parallel.mjs",
     "test:e2e": "cd apps/web && npx playwright test",
     "test:a11y": "bash scripts/run-a11y.sh",
     "test:performance": "bash scripts/check-bundle-size.sh",

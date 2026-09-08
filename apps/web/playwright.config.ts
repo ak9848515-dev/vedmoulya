@@ -23,6 +23,11 @@
 
 import { defineConfig, devices } from '@playwright/test';
 
+const port =
+  process.env.A11Y_ALLOW_UI_ONLY_READINESS === 'true' ? '3100' : (process.env.A11Y_PORT ?? '3000');
+const baseURL = `http://localhost:${port}`;
+const readinessPath = process.env.A11Y_ALLOW_UI_ONLY_READINESS === 'true' ? '/' : '/health/ready';
+
 export default defineConfig({
   // ── Test Configuration ───────────────────────────────────────────────────
   testDir: './e2e',
@@ -50,8 +55,8 @@ export default defineConfig({
   //   - Performs safe SELECT 1 database probe
   //   - Does not trigger DDL or engine initialization
   webServer: {
-    command: process.env.CI ? 'npm run start' : 'npm run dev',
-    url: 'http://localhost:3000/health/ready',
+    command: process.env.CI ? `npm run start -- -p ${port}` : `npm run dev -- -p ${port}`,
+    url: `${baseURL}${readinessPath}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
@@ -62,7 +67,7 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://localhost:3000',
+        baseURL,
       },
     },
   ],
