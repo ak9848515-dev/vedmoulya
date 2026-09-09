@@ -24,7 +24,9 @@ const workspaces = ['packages', 'services']
   .sort();
 
 const batches = Array.from({ length: Math.min(concurrency, workspaces.length) }, () => []);
-workspaces.forEach((workspace, index) => batches[index % batches.length].push(workspace));
+workspaces.forEach((workspace, index) => {
+  batches[index % batches.length].push(workspace);
+});
 
 function runBatch(batch) {
   return new Promise((resolveBatch) => {
@@ -34,9 +36,16 @@ function runBatch(batch) {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    child.stdout.on('data', (chunk) => process.stdout.write(chunk));
-    child.stderr.on('data', (chunk) => process.stderr.write(chunk));
-    child.on('close', (code) => resolveBatch(code ?? 1));
+    child.stdout.on('data', (chunk) => {
+      process.stdout.write(chunk);
+    });
+
+    child.stderr.on('data', (chunk) => {
+      process.stderr.write(chunk);
+    });
+    child.on('close', (code) => {
+      resolveBatch(code ?? 1);
+    });
   });
 }
 

@@ -9,7 +9,7 @@ import type { UserRow, NewUserRow } from '../src/schema/users.js';
 
 describe('users schema', () => {
   it('defines the users table with the expected name', () => {
-    const table = users as unknown as { [Symbol.for('drizzle:Name')]: string };
+    const table = users as unknown as Record<symbol, unknown>;
     expect(table[Symbol.for('drizzle:Name')]).toBe('users');
   });
 
@@ -73,12 +73,9 @@ describe('users schema', () => {
   });
 
   it('exposes the table name and columns via drizzle introspection symbols', () => {
-    const table = users as unknown as {
-      [Symbol.for('drizzle:Name')]: string;
-      [Symbol.for('drizzle:Columns')]: Record<string, { name: string }>;
-    };
+    const table = users as unknown as Record<symbol, unknown>;
     expect(table[Symbol.for('drizzle:Name')]).toBe('users');
-    const cols = table[Symbol.for('drizzle:Columns')];
+    const cols = table[Symbol.for('drizzle:Columns')] as Record<string, { name: string }>;
     expect(Object.keys(cols)).toEqual(
       expect.arrayContaining([
         'id',

@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { MousePointer } from 'lucide-react';
 import type { RadarSpatialEntry, RadarCategory } from '../../lib/spatial/radar-mappings.js';
 import {

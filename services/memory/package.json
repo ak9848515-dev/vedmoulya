@@ -20,12 +20,12 @@
     "@vedmoulya/domain": "*",
     "@vedmoulya/services": "*",
     "drizzle-orm": "^0.45.0",
-    "hono": "^4.13.0",
+    "hono": "^4.13.5",
     "postgres": "^3.4.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

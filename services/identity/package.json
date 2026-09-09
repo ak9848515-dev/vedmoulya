@@ -22,9 +22,9 @@
     "@vedmoulya/services": "*",
     "bcrypt": "^6.0.0",
     "drizzle-orm": "^0.45.0",
-    "hono": "^4.13.0",
+    "hono": "^4.13.5",
     "jose": "^5.9.0",
-    "nodemailer": "^9.0.5",
+    "nodemailer": "^9.1.1",
     "postgres": "^3.4.0",
     "zod": "^3.24.0"
   },
@@ -34,6 +34,6 @@
     "@vitejs/plugin-react": "^4.3.0",
     "jsdom": "^25.0.0",
     "typescript": "^5.6.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

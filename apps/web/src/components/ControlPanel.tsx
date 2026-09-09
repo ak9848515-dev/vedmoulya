@@ -14,7 +14,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ShieldAlert, ShieldCheck, SlidersHorizontal, Sun } from 'lucide-react';
 import { api } from '../lib/trpc.js';
 import { useAuthStore } from '../stores/auth-store.js';

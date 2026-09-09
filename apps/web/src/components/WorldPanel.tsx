@@ -13,7 +13,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Briefcase, Globe, Layers, LineChart, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api } from '../lib/trpc.js';
 import { useAuthStore } from '../stores/auth-store.js';

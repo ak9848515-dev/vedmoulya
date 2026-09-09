@@ -42,7 +42,7 @@ export interface MissionServiceLike {
 }
 
 export function createMissionRouter(missionService: MissionServiceLike): MissionHandlers {
-  const toMissionView = (mission: Mission) =>
+  const toMissionView = (mission: Mission): ApiResponse =>
     successResponse({
       missionId: mission.missionId,
       userId: mission.userId,
@@ -77,7 +77,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
   };
 
   return {
-    createAndRun: async (input) => {
+    createAndRun: async (input): Promise<ApiResponse> => {
       try {
         const {
           userId,
@@ -120,7 +120,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
       }
     },
 
-    start: async (input) => {
+    start: async (input): Promise<ApiResponse> => {
       try {
         const mission = await missionService.startAutonomousLoop(input.userId, input.missionId);
         return toMissionView(mission);
@@ -129,7 +129,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
       }
     },
 
-    status: async (input) => {
+    status: async (input): Promise<ApiResponse> => {
       try {
         const view = await missionService.getStatus(input.userId, input.missionId);
         return successResponse(view);
@@ -138,7 +138,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
       }
     },
 
-    pause: async (input) => {
+    pause: async (input): Promise<ApiResponse> => {
       try {
         const mission = await missionService.pause(input.userId, input.missionId);
         return toMissionView(mission);
@@ -147,7 +147,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
       }
     },
 
-    resume: async (input) => {
+    resume: async (input): Promise<ApiResponse> => {
       try {
         const mission = await missionService.resumeAutonomousLoop(input.userId, input.missionId);
         return toMissionView(mission);
@@ -156,7 +156,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
       }
     },
 
-    cancel: async (input) => {
+    cancel: async (input): Promise<ApiResponse> => {
       try {
         const mission = await missionService.cancel(input.userId, input.missionId);
         return toMissionView(mission);
@@ -165,7 +165,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
       }
     },
 
-    approve: async (input) => {
+    approve: async (input): Promise<ApiResponse> => {
       try {
         const mission = await missionService.approve(input.userId, input.missionId);
         return toMissionView(mission);
@@ -174,7 +174,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
       }
     },
 
-    reject: async (input) => {
+    reject: async (input): Promise<ApiResponse> => {
       try {
         const mission = await missionService.reject(input.userId, input.missionId);
         return toMissionView(mission);
@@ -183,7 +183,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
       }
     },
 
-    history: async (input) => {
+    history: async (input): Promise<ApiResponse> => {
       try {
         const summaries = await missionService.listMissionSummaries(input.userId);
         return successResponse(summaries);

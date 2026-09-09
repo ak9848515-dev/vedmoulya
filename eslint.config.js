@@ -179,6 +179,30 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
     },
   },
+  // BLD-022 mission-runtime filesystem adapters (FsRepositoryInspector,
+  // RuntimeGitSafetyAdapter, WorkspaceTools) perform bounded, read-only
+  // or workspace-jailed filesystem operations. Every path is resolved
+  // against the operator-configured workspace root and jail-checked before
+  // any fs call — the `detect-non-literal-fs-filename` heuristic cannot
+  // distinguish these safe operations from genuinely dangerous dynamic
+  // paths. Similarly, GovernedToolRegistry and MissionFailureClassifierAdapter
+  // index typed Records over closed string-literal unions (tool permission
+  // classes, failure classification keys) — never raw user input; the
+  // `detect-object-injection` heuristic produces false positives here.
+  // The security rules stay enabled everywhere else.
+  {
+    files: [
+      'packages/mission-runtime/src/adapters/FsRepositoryInspector.ts',
+      'packages/mission-runtime/src/adapters/RuntimeGitSafetyAdapter.ts',
+      'packages/mission-runtime/src/adapters/WorkspaceTools.ts',
+      'packages/mission-runtime/src/adapters/GovernedToolRegistry.ts',
+      'packages/mission-runtime/src/adapters/MissionFailureClassifierAdapter.ts',
+    ],
+    rules: {
+      'security/detect-non-literal-fs-filename': 'off',
+      'security/detect-object-injection': 'off',
+    },
+  },
   // security/detect-object-injection is a heuristic that flags ANY computed
   // member access (obj[key]). These files only index typed records with keys
   // drawn from closed string-literal unions (e.g. TRANSITIONS[from] where

@@ -10,13 +10,6 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  // Vitest 4's rolldown transform uses oxc options. The Next.js tsconfig uses
-  // `jsx: preserve`, so we explicitly request the `automatic` JSX runtime —
-  // otherwise JSX in component tests stays unparsed and import-analysis fails.
-  // (No @vitejs/plugin-react here: under rolldown-vite its esbuild/jsx config
-  // is ignored and only triggers deprecation warnings — oxc handles the JSX
-  // transform natively.)
-  oxc: { jsx: { runtime: 'automatic' } },
   test: {
     // MOB-001/002: auth, stores and lib modules are DOM-free logic (node env);
     // tests that need a browser (mobile-nav persistence, dashboard cache,
