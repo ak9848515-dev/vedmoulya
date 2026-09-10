@@ -187,10 +187,19 @@ jobs:
           echo '::warning::CodeQL analysis completed successfully, but SARIF upload is unavailable because GitHub Code Scanning is not enabled/available for this repository.'
 
   # ── Gate 4: Accessibility ─────────────────────────────────────────────────
+  # Release a11y gate: the REAL production application (production build →
+  # `next start` → six routes → structural assertions). The build and the
+  # Playwright browser install are explicit steps — mirroring the proven G8
+  # e2e job — so a build failure is attributable to its own step instead of
+  # failing opaquely inside scripts/run-a11y.sh (G4 failed this way on
+  # run 103: the job died inside the script's hidden build and no a11y
+  # assertion was ever evaluated). The 20-minute ceiling bounds npm ci +
+  # production build + chromium install + the audit itself; it does not
+  # weaken any gate (CI Result requires needs.a11y.result == "success").
   a11y:
     name: 'G4: Accessibility'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -198,14 +207,33 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
+      - name: Build web app (production)
+        run: npm run build -w apps/web
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
       - name: Accessibility audit
         run: npm run test:a11y
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a11y-playwright-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
 
   # ── Gate 5: Performance ───────────────────────────────────────────────────
+  # Bundle-size gate over the REAL production build. check-bundle-size.sh
+  # requires apps/web/.next and fails closed when it is missing — the job
+  # must therefore build apps/web itself before measuring (previously the
+  # job only ran `npm ci` and failed with "Build directory not found" after
+  # 23s on every fresh CI checkout — see run 103). The 15-minute ceiling
+  # bounds npm ci + production build + the bundle check; CI Result requires
+  # needs.performance.result == "success".
   performance:
     name: 'G5: Performance'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -213,7 +241,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
-      - name: Lighthouse audit
+      - name: Build web app (production)
+        run: npm run build -w apps/web
+      - name: Bundle size check
         run: npm run test:performance
 
   # ── Build ─────────────────────────────────────────────────────────────────
@@ -450,9 +480,14 @@ jobs:
           echo "Benchmarks: ${{ needs.benchmarks.result }}"
           echo "Build: ${{ needs.build.result }}"
           echo "E2E: ${{ needs.e2e.result }}"
+          # Fail closed on EVERY gate: a11y and performance are release gates
+          # (G4/G5) and MUST be part of this condition — omitting them would
+          # let a green "CI Result" job print success while a gate failed.
           if [ "${{ needs.quality.result }}" = "success" ] && \
              [ "${{ needs.test.result }}" = "success" ] && \
              [ "${{ needs.security.result }}" = "success" ] && \
+             [ "${{ needs.a11y.result }}" = "success" ] && \
+             [ "${{ needs.performance.result }}" = "success" ] && \
              [ "${{ needs.benchmarks.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
              [ "${{ needs.e2e.result }}" = "success" ]; then

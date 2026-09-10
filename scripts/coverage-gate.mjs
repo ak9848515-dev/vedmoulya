@@ -43,7 +43,9 @@ function findWorkspaces() {
   return dirs.sort();
 }
 
-/** Run vitest coverage inside a workspace directory so its thresholds apply. */
+/** Resolve the vitest CLI entry point from node_modules. */
+const vitestEntry = join(root, 'node_modules', 'vitest', 'vitest.mjs');
+
 /** True when the workspace produced a coverage report with any measured files. */
 function hasCoverageData(ws) {
   const file = join(root, ws, 'coverage', 'coverage-final.json');
@@ -55,6 +57,7 @@ function hasCoverageData(ws) {
   }
 }
 
+/** Run vitest coverage inside a workspace directory so its thresholds apply. */
 function runWorkspaceCoverage(ws) {
   const cwd = join(root, ws);
   // Remove any previous coverage output so the noData check and the merged
@@ -65,18 +68,21 @@ function runWorkspaceCoverage(ws) {
   // instead of potentially walking up to the root vitest.config.ts (which has
   // test.projects and triggers workspace mode that suppresses per-workspace
   // coverage output).
+  //
+  // We invoke vitest through node directly (process.execPath + vitest.mjs)
+  // with shell:false. Previous npx+shell:true passed each argument through
+  // /bin/sh (Linux) or cmd.exe (Windows), which concatenated them unsafely
+  // (Node.js DEP0190). On Linux CI this caused vitest to resolve the root
+  // vitest.config.ts instead of the workspace-local one, entering workspace
+  // mode where per-workspace coverage output is suppressed.
   const configPath = join(cwd, 'vitest.config.ts');
-  const cmd = 'npx';
-  const args = ['vitest', 'run', '--coverage', '--config', configPath];
+  const cmd = process.execPath;
+  const args = [vitestEntry, 'run', '--coverage', '--config', configPath];
   const result = spawnSync(cmd, args, {
     cwd,
     encoding: 'utf8',
     timeout: 600_000,
-    // shell:true on every platform so the string command is parsed correctly
-    // (with shell:false on POSIX the whole string is treated as one executable).
-    shell: true,
-    // Coverage output (text + json + html) can exceed the 1 MiB default.
-    maxBuffer: 16 * 1024 * 1024,
+    shell: false,
   });
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
   const thresholdErrors = (output.match(/ERROR: Coverage[^\n]*/g) ?? []).map((l) => l.trim());
@@ -109,7 +115,7 @@ function runWorkspaceCoverage(ws) {
     console.error(`process.platform: ${process.platform}`);
     console.error(`process.version: ${process.version}`);
     console.error(`npm version: ${npmVersion}`);
-    console.error(`Vitest command: ${cmd} ${args.join(' ')}`);
+    console.error(`Vitest command: ${cmd} ${args.map(a => a.includes(' ') ? JSON.stringify(a) : a).join(' ')}`);
     console.error(`Vitest exit status: ${String(result.status)}`);
     console.error(`Vitest signal: ${String(result.signal)}`);
     console.error('');
