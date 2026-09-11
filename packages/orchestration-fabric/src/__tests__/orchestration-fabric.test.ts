@@ -36,6 +36,11 @@ import type {
 } from '../types/work-item.js';
 import type { WorkItemHandler } from '../domain/OrchestratorService.js';
 import { WORK_PRIORITIES } from '../types/work-item.js';
+import {
+  createEngineAdapter,
+  exportMetricsToCore,
+  ProviderHealthBridge,
+} from '../adapters/index.js';
 
 // ── Test Helpers ──────────────────────────────────────────────────────────
 
@@ -663,7 +668,7 @@ describe('TEST 8: Provider failure triggers bounded fallback', () => {
 
 describe('TEST 9: Cancellation propagates', () => {
   it('should cancel a work item and propagate to dependents', () => {
-    const orchestrator = new OrchestratorService({ tickIntervalMs: 10000 });
+    const orchestrator = new OrchestratorService({ tickIntervalMs: 10000, maxItemsPerTick: 1 });
 
     const item1 = orchestrator.submitWork(createTestWorkItem({ description: 'Task 1' }));
     const item2 = orchestrator.submitWork(
@@ -1360,5 +1365,380 @@ describe('TEST 15: Performance — Maximum safe parallelism', () => {
     };
     const gate = concurrency.gate(moreItem);
     expect(gate.canDispatch).toBe(true);
+  });
+});
+
+function createEdgeWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
+  const now = new Date().toISOString();
+  return {
+    id: `edge-${Math.random().toString(36).slice(2)}`,
+    correlationId: 'edge-correlation',
+    workType: 'maintenance',
+    priority: 'maintenance',
+    description: 'edge case',
+    status: 'queued',
+    ownerUserId: 'edge-user',
+    dependencies: [],
+    resources: { requiresDatabase: false, resourceProfile: 'cpu_bound', timeoutMs: 1000 },
+    retryPolicy: { maxRetries: 0, baseDelayMs: 1, maxDelayMs: 10, jitterFactor: 0 },
+    attempts: 0,
+    createdAt: now,
+    updatedAt: now,
+    metadata: {},
+    ...overrides,
+  };
+}
+
+describe('Focused failure, lifecycle, and adapter behavior', () => {
+  it('records engine adapter success and failure while always completing latency accounting', async () => {
+    const success = createEngineAdapter('edge', ['maintenance'], async () => ({
+      success: true,
+      summary: 'done',
+      costUsd: 0,
+      tokensUsed: 1,
+      latencyMs: 1,
+      executedByEngineId: 'edge',
+      completedAt: new Date().toISOString(),
+    }));
+    await expect(success.execute(createEdgeWorkItem())).resolves.toMatchObject({ success: true });
+
+    const failure = createEngineAdapter('edge-failure', ['maintenance'], async () => {
+      throw new Error('engine unavailable');
+    });
+    await expect(failure.execute(createEdgeWorkItem())).rejects.toThrow('engine unavailable');
+  });
+
+  it('classifies provider health across healthy, degraded, and unhealthy observations', () => {
+    const bridge = new ProviderHealthBridge();
+    bridge.recordObservation('fast', { latencyMs: 10, success: true });
+    bridge.recordObservation('slow', { latencyMs: 1000, success: true });
+    bridge.recordObservation('slow', { latencyMs: 1000, success: false });
+    bridge.recordObservation('bad', { latencyMs: 10000, success: false });
+    bridge.recordObservation('mixed', { latencyMs: 100, success: true });
+    bridge.recordObservation('mixed', { latencyMs: 100, success: false });
+
+    expect(bridge.getHealth('fast')?.status).toBe('healthy');
+    expect(bridge.getHealth('slow')?.status).toBe('degraded');
+    expect(bridge.getHealth('mixed')?.failedRequests).toBe(1);
+    expect(bridge.getHealth('bad')?.status).toBe('unhealthy');
+    expect(bridge.getAllHealth()).toHaveLength(4);
+    expect(bridge.getHealth('missing')).toBeUndefined();
+  });
+
+  it('exports a complete metrics snapshot without dropping fields', () => {
+    expect(() =>
+      exportMetricsToCore({
+        queue: { depth: 2, dropRate: 1 },
+        execution: {
+          activeCount: 1,
+          completedPerMinute: 2,
+          failedPerMinute: 1,
+          averageLatencyMs: 10,
+          successRate: 0.66,
+        },
+        peakConcurrency: 3,
+        totalProcessed: 4,
+      }),
+    ).not.toThrow();
+  });
+
+  it('handles no-handler, permanent failure, retry, and expiration paths', async () => {
+    const noHandler = new OrchestratorService({ tickIntervalMs: 10000 });
+    const missing = noHandler.submitWork(createTestWorkItem({ workType: 'maintenance' }));
+    await noHandler.tick();
+    expect(noHandler.getWorkItem(missing!.id)?.error?.code).toBe('NO_HANDLER');
+
+    const failed = new OrchestratorService({ tickIntervalMs: 10000 });
+    failed.registerHandler({
+      supportedWorkTypes: ['maintenance'],
+      execute: async () => {
+        throw new Error('permanent');
+      },
+    });
+    const failedItem = failed.submitWork(
+      createTestWorkItem({
+        workType: 'maintenance',
+        retryPolicy: { maxRetries: 0, baseDelayMs: 1, maxDelayMs: 1, jitterFactor: 0 },
+      }),
+    );
+    await failed.tick();
+    expect(failed.getWorkItem(failedItem!.id)?.status).toBe('failed');
+
+    let attempts = 0;
+    const retrying = new OrchestratorService({ tickIntervalMs: 10000 });
+    retrying.registerHandler({
+      supportedWorkTypes: ['maintenance'],
+      execute: async () => {
+        attempts++;
+        if (attempts === 1) throw new Error('temporary');
+        return {
+          success: true,
+          summary: 'recovered',
+          costUsd: 0,
+          tokensUsed: 0,
+          latencyMs: 1,
+          executedByEngineId: 'test-engine',
+          completedAt: new Date().toISOString(),
+        };
+      },
+    });
+    const retryItem = retrying.submitWork(
+      createTestWorkItem({
+        workType: 'maintenance',
+        retryPolicy: { maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0, jitterFactor: 0 },
+      }),
+    );
+    await retrying.tick();
+    expect(retrying.getWorkItem(retryItem!.id)?.status).toBe('retrying');
+    await retrying.tick();
+    expect(retrying.getWorkItem(retryItem!.id)?.status).toBe('completed');
+
+    const expired = new OrchestratorService({ tickIntervalMs: 10000 });
+    const expiredItem = expired.submitWork(
+      createTestWorkItem({ expiresAtMs: -1, workType: 'maintenance' }),
+    );
+    await expired.tick();
+    expect(expired.getWorkItem(expiredItem!.id)?.status).toBe('expired');
+  });
+
+  it('supports lifecycle, queries, metrics, and owner-scoped cancellation', async () => {
+    const orchestrator = new OrchestratorService({ tickIntervalMs: 10000 });
+    orchestrator.start();
+    orchestrator.start();
+    orchestrator.stop();
+    orchestrator.stop();
+    const first = orchestrator.submitWork(createTestWorkItem({ ownerUserId: 'owner-a' }));
+    const second = orchestrator.submitWork(
+      createTestWorkItem({ ownerUserId: 'owner-b', idempotencyKey: 'same' }),
+    );
+    const duplicate = orchestrator.submitWork(
+      createTestWorkItem({ ownerUserId: 'owner-b', idempotencyKey: 'same' }),
+    );
+    expect(duplicate?.id).toBe(second?.id);
+    expect(orchestrator.getWorkItemsByOwner('owner-b')).toHaveLength(1);
+    expect(orchestrator.getWorkItemsByStatus('queued')).toHaveLength(2);
+    expect(orchestrator.cancelWork('missing', 'owner-a', 'absent')).toBe(false);
+    expect(orchestrator.cancelWork(first!.id, 'owner-a', 'stop')).toBe(true);
+    expect(orchestrator.getMetrics().execution.successRate).toBe(1);
+    expect(orchestrator.getEvents(1)).toHaveLength(1);
+  });
+
+  it('queues dependent work after its upstream handler completes', async () => {
+    const orchestrator = new OrchestratorService({ tickIntervalMs: 10000, maxItemsPerTick: 1 });
+    orchestrator.registerHandler(createMockHandler(['maintenance']));
+    const upstream = orchestrator.submitWork(createTestWorkItem({ workType: 'maintenance' }));
+    const downstream = orchestrator.submitWork(
+      createTestWorkItem({ workType: 'maintenance', dependencies: [upstream!.id] }),
+    );
+    await orchestrator.tick();
+    expect(orchestrator.getWorkItem(upstream!.id)?.status).toBe('completed');
+    expect(orchestrator.getWorkItem(downstream!.id)?.status).toBe('queued');
+    await orchestrator.tick();
+    expect(orchestrator.getWorkItem(downstream!.id)?.status).toBe('completed');
+  });
+});
+
+describe('Focused scheduler and concurrency edge behavior', () => {
+  it('drops lower priority work, expires items, promotes fairly, and peeks safely', () => {
+    const scheduler = new PriorityScheduler({ maxCapacity: 1, fairnessPromotionThreshold: 1 });
+    const low = createEdgeWorkItem({ id: 'low', priority: 'maintenance' });
+    const high = createEdgeWorkItem({ id: 'high', priority: 'interactive' });
+    expect(scheduler.enqueue(low)).toBe(true);
+    expect(scheduler.enqueue(high)).toBe(true);
+    expect(scheduler.getState().totalDropped).toBe(1);
+    expect(scheduler.peek(0)).toEqual([]);
+
+    const expired = createEdgeWorkItem({
+      id: 'expired',
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    const expiring = new PriorityScheduler();
+    expiring.enqueue(expired);
+    expect(expiring.dequeue().expired).toEqual(['expired']);
+
+    const fair = new PriorityScheduler({ fairnessPromotionThreshold: 1 });
+    const waiting = createEdgeWorkItem({ id: 'waiting' });
+    fair.enqueue(waiting);
+    const result = fair.dequeue(0);
+    expect(result.promoted).toEqual(['waiting']);
+    expect(fair.clear()).toBeUndefined();
+    expect(fair.isEmpty).toBe(true);
+  });
+
+  it('rejects equal-priority overflow and skips non-runnable entries', () => {
+    const scheduler = new PriorityScheduler({ maxCapacity: 1 });
+    expect(scheduler.enqueue(createEdgeWorkItem({ id: 'first' }))).toBe(true);
+    expect(scheduler.enqueue(createEdgeWorkItem({ id: 'second' }))).toBe(false);
+
+    const statuses = new PriorityScheduler();
+    for (const status of ['running', 'completed', 'failed', 'cancelled'] as const) {
+      statuses.enqueue(createEdgeWorkItem({ id: status, status }));
+    }
+    expect(statuses.peek(10)).toEqual([]);
+    expect(statuses.dequeue(10).dequeued).toEqual([]);
+    expect(statuses.remove('absent')).toBe(false);
+  });
+
+  it('covers unknown policies, provider saturation, waits, and inactive completion', () => {
+    const controller = new ConcurrencyController();
+    const custom = createEdgeWorkItem({ workType: 'custom' });
+    expect(controller.gate(custom).canDispatch).toBe(true);
+    controller.recordWait(20);
+    expect(controller.getSnapshot().averageWaitTimeMs).toBe(20);
+    controller.complete(custom);
+
+    const ai = createEdgeWorkItem({
+      id: 'ai',
+      workType: 'ai_inference',
+      resources: {
+        requiresDatabase: false,
+        resourceProfile: 'ai_bound',
+        timeoutMs: 1000,
+        aiCapability: 'text',
+        preferredProviders: ['provider-a'],
+      },
+    });
+    controller.updateProviderLimits({
+      providerName: 'provider-a',
+      maxConcurrent: 10,
+      maxPerMinute: 100,
+      currentActive: 10,
+      currentPerMinute: 10,
+      saturationThreshold: 0.8,
+      isSaturated: false,
+    });
+    expect(controller.gate(ai).canDispatch).toBe(false);
+    expect(controller.gate(ai).reason).toContain('saturated');
+  });
+});
+
+describe('Focused graph and provider routing behavior', () => {
+  it('validates self loops, additional edges, missing stores, and completion readiness', () => {
+    const graphService = new DependencyGraphService();
+    const a = createEdgeWorkItem({ id: 'a', status: 'completed' });
+    const b = createEdgeWorkItem({ id: 'b', dependencies: ['a'] });
+    const graph = graphService.buildGraph({
+      workItems: [a, b],
+      additionalEdges: [{ from: 'a', to: 'missing', type: 'dependency' }],
+    });
+    expect(graph.validation.valid).toBe(true);
+    expect(
+      graphService.getReadyWorkItems(
+        graph,
+        new Map([
+          ['a', a],
+          ['b', b],
+        ]),
+      ).readyItems,
+    ).toHaveLength(1);
+    expect(graphService.onWorkItemCompleted(graph, 'missing', new Map())).toEqual([]);
+
+    const selfLoop = createEdgeWorkItem({ id: 'self', dependencies: ['self'] });
+    const invalid = graphService.buildGraph({ workItems: [selfLoop] });
+    expect(invalid.validation.valid).toBe(false);
+    expect(invalid.validation.checks.find((check) => check.name === 'no_self_loops')?.passed).toBe(
+      false,
+    );
+  });
+
+  it('propagates dependency completion only when every upstream item is complete', () => {
+    const graphService = new DependencyGraphService();
+    const a = createEdgeWorkItem({ id: 'a', status: 'completed' });
+    const b = createEdgeWorkItem({ id: 'b', status: 'pending' });
+    const c = createEdgeWorkItem({ id: 'c', status: 'pending', dependencies: ['a', 'b'] });
+    const graph = graphService.buildGraph({ workItems: [a, b, c] });
+    const store = new Map([
+      ['a', a],
+      ['b', b],
+      ['c', c],
+    ]);
+    expect(graphService.onWorkItemCompleted(graph, 'a', store)).toEqual([]);
+    b.status = 'completed';
+    expect(graphService.onWorkItemCompleted(graph, 'b', store)).toEqual([c]);
+    c.status = 'cancelled';
+    expect(graphService.onWorkItemCompleted(graph, 'b', store)).toEqual([]);
+  });
+
+  it('handles graph filtering, valid extra edges, and missing dependency records', () => {
+    const graphService = new DependencyGraphService();
+    const empty = graphService.buildGraph({ workItems: [] });
+    expect(empty.rootNodes).toEqual([]);
+    expect(empty.executionOrder).toEqual([]);
+    const root = createEdgeWorkItem({ id: 'root', status: 'pending' });
+    const skipped = createEdgeWorkItem({ id: 'skipped', status: 'failed' });
+    const leaf = createEdgeWorkItem({ id: 'leaf', status: 'pending', dependencies: ['root'] });
+    const external = createEdgeWorkItem({ id: 'external', dependencies: ['unlisted'] });
+    const graph = graphService.buildGraph({
+      workItems: [root, skipped, leaf, external],
+      additionalEdges: [{ from: 'root', to: 'skipped', type: 'dependency' }],
+    });
+    const ready = graphService.getReadyWorkItems(
+      graph,
+      new Map([
+        ['root', root],
+        ['skipped', skipped],
+        ['leaf', leaf],
+      ]),
+    );
+    expect(ready.readyItems.map((item) => item.id)).toEqual(['root']);
+    expect(ready.waitingItems).toEqual([{ workItemId: 'leaf', waitingFor: ['root'] }]);
+    expect(graphService.getReadyWorkItems(graph, new Map([['root', root]])).readyItems).toEqual([
+      root,
+    ]);
+
+    const downstream = graphService.onWorkItemCompleted(
+      graph,
+      'root',
+      new Map([
+        ['root', { ...root, status: 'completed' }],
+        ['leaf', leaf],
+      ]),
+    );
+    expect(downstream).toEqual([leaf]);
+  });
+
+  it('records routing failures and explains fallback candidates', () => {
+    const router = new ProviderRouter({ enableCostOptimization: false });
+    router.registerProvider({ name: 'bare', capabilities: [] });
+    router.registerProvider({
+      name: 'preferred',
+      capabilities: ['text'],
+      models: ['model-a'],
+      averageLatencyMs: 3000,
+    });
+    router.registerProvider({ name: 'fallback', capabilities: ['text'], averageLatencyMs: 1 });
+    const item = createEdgeWorkItem({
+      id: 'route',
+      workType: 'ai_inference',
+      resources: {
+        requiresDatabase: false,
+        resourceProfile: 'ai_bound',
+        timeoutMs: 1000,
+        aiCapability: 'text',
+        preferredProviders: ['preferred'],
+      },
+    });
+    const selection = router.selectProvider(item);
+    expect(selection).not.toBeNull();
+    router.recordFailure('route', selection!.selectedProvider, 'timeout');
+    expect(router.getRoutingDecisions(1)[0].usedFallback).toBe(true);
+    expect(router.getRegisteredProviders()).toEqual(['bare', 'preferred', 'fallback']);
+    expect(router.getProviderHealth('preferred')).toBeDefined();
+
+    router.updateHealth({
+      providerName: 'preferred',
+      status: 'healthy',
+      score: 0.7,
+      lastLatencyMs: 3000,
+      errorRate: 0.1,
+      successRate: 0.9,
+      totalRequests: 10,
+      failedRequests: 1,
+      lastCheckedAt: new Date().toISOString(),
+    });
+    const saturated = router.selectProvider(item);
+    expect(
+      saturated?.alternatives.some((candidate) => candidate.unavailabilityReason === 'saturated'),
+    ).toBe(true);
   });
 });

@@ -3,7 +3,7 @@
 // EPIC-003 / SPRINT AC-001 — AI Content Agency Foundation
 // ──────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { ContentAgencyApplicationService } from '../ContentAgencyApplicationService.js';
 import { InMemoryContentAgencyRepository } from '../InMemoryContentAgencyRepository.js';
@@ -272,6 +272,20 @@ describe('ContentAgencyApplicationService — workflow & approval', () => {
 });
 
 describe('ContentAgencyApplicationService — calendar, invoices, analytics, delivery', () => {
+  // Pin the clock to 2026-09-01 so the seeded 2026-09-10 / 2026-09-15 schedule
+  // dates stay in the future whenever the suite runs. getDashboard classifies
+  // upcoming content against Date.now(), so a real wall clock eventually drifts
+  // past the seeded dates and breaks the assertions. Only `Date` is faked so
+  // async flows keep working; real timers are restored after each test.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   async function seedTwo() {
     const { svc } = makeService();
     const client = await svc.createClient(USER, clientInput);
