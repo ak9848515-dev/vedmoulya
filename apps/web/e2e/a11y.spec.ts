@@ -65,7 +65,14 @@ test.describe('Accessibility: Page Structure', () => {
 
     test(`${route.name} has no empty or broken interactive elements`, async ({ page }) => {
       await page.goto(route.path);
-      await page.waitForLoadState('networkidle');
+
+      // SPRINT-088 — networkidle is unusable on the authenticated shell: the
+      // dashboard polls health/cadence endpoints continuously, so the network
+      // never goes idle and the wait exhausted the test timeout. Wait on the
+      // structural invariant instead (a heading exists on authenticated pages,
+      // their error/empty states, and the /login fallback), then on hydration
+      // below.
+      await expect(page.locator('h1, h2, h3').first()).toBeAttached();
 
       // SPRINT-082: During SSR streaming and early hydration, Next.js App
       // Router <Link> components may briefly render <a> elements without
@@ -124,7 +131,10 @@ test.describe('Accessibility: Reduced Motion', () => {
     // Emulate prefers-reduced-motion
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(BASE_URL);
-    await page.waitForLoadState('networkidle');
+
+    // SPRINT-088 — wait on the structural invariant rather than networkidle
+    // (the dashboard's background polling means the network never goes idle).
+    await expect(page.locator('main, [role="main"]').first()).toBeAttached();
 
     // Verify the page renders correctly
     const body = page.locator('body');

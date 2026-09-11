@@ -93,7 +93,13 @@ export default function LoginPage(): React.JSX.Element {
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-[#1E4AA8] via-[#2B5FD9] to-[#5B8AEB] px-4 py-10">
+    // <main> landmark — this full-screen auth route renders WITHOUT the
+    // AppShell chrome (AppShell bypasses its layout for /login), so without
+    // this landmark screen-reader users landing here (expired session →
+    // SignInRedirect) get a page with no main region, violating the same
+    // page-structure invariant the a11y release gate enforces on every other
+    // route.
+    <main className="relative min-h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-[#1E4AA8] via-[#2B5FD9] to-[#5B8AEB] px-4 py-10">
       {/* Ambient glow */}
       <div
         className="absolute inset-0 opacity-15"
@@ -242,6 +248,6 @@ export default function LoginPage(): React.JSX.Element {
           )}
         </div>
       </div>
-    </div>
+    </main>
   );
 }
