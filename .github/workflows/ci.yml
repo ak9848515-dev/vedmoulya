@@ -207,6 +207,48 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
+      # G4 (a11y) runs the REAL production application (`next start`, built from
+      # apps/web), which boots @vedmoulya/api. The API awaits deferred DB
+      # ensureTable() promises against the CI PostgreSQL. The workflow's
+      # IDENTITY_DATABASE_URL and engine *_DATABASE_URL variables deliberately
+      # point at db.ci.internal (a non-localhost, fail-fast-accepted hostname),
+      # but the a11y job previously provisioned nothing, so db.ci.internal was
+      # unreachable and the API could not complete its table init. Mirror the
+      # proven G8 (e2e) provisioning below: start the repo-standard Postgres 16
+      # and Redis 7 containers, alias the CI hostnames to loopback in /etc/hosts,
+      # then gate on a real readiness check (pg_isready, bounded, with no
+      # arbitrary sleep) so schema init succeeds before the server starts.
+      - name: Start CI database + cache (PostgreSQL 16 + Redis 7)
+        run: |
+          docker run --rm -d --name ci-postgres \
+            -e POSTGRES_USER=ci \
+            -e POSTGRES_PASSWORD=ci \
+            -e POSTGRES_DB=vedmoulya_ci \
+            -p 5432:5432 \
+            pgvector/pgvector:pg16
+          docker run --rm -d --name ci-redis \
+            -p 6379:6379 \
+            redis:7-alpine
+      - name: Map CI hostnames to loopback
+        run: |
+          echo '127.0.0.1 db.ci.internal redis.ci.internal' | sudo tee -a /etc/hosts
+      - name: Wait for CI infrastructure readiness
+        run: |
+          ready=0
+          for i in $(seq 1 60); do
+            pg_line=$(docker exec ci-postgres pg_isready -U ci -d vedmoulya_ci 2>/dev/null || true)
+            redis_pong=$(docker exec ci-redis redis-cli ping 2>/dev/null || true)
+            if printf '%s' "$pg_line" | grep -q 'accepting connections' && [ "$redis_pong" = "PONG" ]; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            echo 'CI infrastructure (PostgreSQL/Redis) did not become ready within 60s' >&2
+            exit 1
+          fi
+          echo 'CI infrastructure ready (PostgreSQL + Redis)'
       - name: Build web app (production)
         run: npm run build -w apps/web
       - name: Install Playwright browsers
