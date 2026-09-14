@@ -90,7 +90,7 @@ describe('Configuration', () => {
   it('loads default configuration', () => {
     expect(config.app.name).toBe('vedmoulya');
     expect(config.app.env).toBe('test');
-    expect(config.app.logLevel).toBe('debug');
+    expect(config.app.logLevel).toBe('error');
   });
 
   it('has all required config sections', () => {
