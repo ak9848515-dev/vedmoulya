@@ -24,15 +24,16 @@
 ## Steps
 
 1. **Build** — `npm ci && npm run build:core && npm run build`.
-2. **Migrate** — run each service's migrations against its database
-   (PostgreSQL 16+, one database per service).
-3. **Deploy web** — push `apps/web` build output to the web host (Vercel).
-4. **Deploy web** — deploy the Next.js application; its server-side route
-   handlers host the tRPC gateway and consume the workspace services.
-5. **Verify** — health endpoints:
+2. **Database** — provision PostgreSQL 16+ (one database per service).
+   Repositories apply their own idempotent DDL at startup; verify the tables
+   exist in the target database before the first request.
+3. **Deploy web** — deploy the Next.js application to the web host (Vercel);
+   its server-side route handlers host the tRPC gateway and consume the
+   workspace services.
+4. **Verify** — health endpoints:
    - `GET /health/live` → process liveness.
    - `GET /health/ready` → dependency readiness.
-6. **Monitor** — confirm metrics flowing to Prometheus/Grafana
+5. **Monitor** — confirm metrics flowing to Prometheus/Grafana
    (observability profile) and that no fail-fast startup errors appear in
    service logs.
 

@@ -21,6 +21,8 @@ import type {
 import { PlanningApplicationService } from '@vedmoulya/planning';
 import type {
   ExecutionPort,
+  FailureContext,
+  LearningContext,
   MissionObjective,
   PlanningPort,
   VerificationPort,
@@ -75,14 +77,26 @@ export class MissionPlanningAdapter implements PlanningPort {
     private readonly options: { userId?: string } = {},
   ) {}
 
+  /**
+   * AUTONOMY-02 + AUTONOMY-06 — the planner's advisory context. The
+   * AUTONOMY-02 failure context (WHY the previous attempt failed) and the
+   * AUTONOMY-06 bounded verified learning are folded into the planning
+   * package's `context` field as bounded advisory text. The planner still
+   * validates capabilities/tools/permissions/verification/budgets through
+   * its frozen pipeline — this text can never widen authority.
+   */
   async createPlan(
     goal: string,
-    _requiredCapabilities: string[],
-    _constraints: string[],
+    requiredCapabilities: string[],
+    constraints: string[],
+    failureContext?: FailureContext,
+    learning?: LearningContext,
   ): Promise<AgentPlan> {
+    const context = buildPlanningContext(constraints, failureContext, learning);
     const result = await this.planning.generatePlan({
       userId: this.options.userId,
       goal: sanitizePlanningGoal(goal),
+      ...(context !== undefined ? { context } : {}),
       mode: 'deterministic',
       constraints: {
         maxSteps: 8,
@@ -95,6 +109,47 @@ export class MissionPlanningAdapter implements PlanningPort {
       result.readiness.blockedReasons.join('; ') || 'plan generation produced no plan';
     throw new Error(`Plan blocked: ${reasons}`);
   }
+}
+
+/** Bounded advisory context passed to the frozen planning pass. */
+const MAX_CONTEXT_CHARS = 2_000;
+
+function buildPlanningContext(
+  constraints: string[],
+  failureContext?: FailureContext,
+  learning?: LearningContext,
+): string | undefined {
+  const lines: string[] = [];
+  for (const constraint of constraints.slice(0, 8)) {
+    lines.push(`constraint: ${constraint}`);
+  }
+  if (failureContext) {
+    lines.push(
+      `[failure-context] previous attempt failed with ${failureContext.failureClass} (${failureContext.suggestedAction}): ${failureContext.reason}`,
+    );
+    for (const item of failureContext.evidence.slice(0, 5)) {
+      lines.push(`[failure-context] evidence: ${item}`);
+    }
+    if (failureContext.executionError) {
+      lines.push(`[failure-context] previous error: ${failureContext.executionError}`);
+    }
+    if (failureContext.verificationResult) {
+      lines.push(
+        `[failure-context] previous verification: verified=${String(failureContext.verificationResult.verified)} (${failureContext.verificationResult.method})`,
+      );
+    }
+    lines.push('[failure-context] advisory only — current repository state stays authoritative');
+  }
+  if (learning && learning.text.length > 0) {
+    lines.push(`[learning][advisory] verified historical guidance (never authority):`);
+    lines.push(learning.text);
+  }
+  if (lines.length === 0) return undefined;
+  let text = lines.join('\n');
+  if (text.length > MAX_CONTEXT_CHARS) {
+    text = `${text.slice(0, MAX_CONTEXT_CHARS)}…`;
+  }
+  return text;
 }
 
 /**

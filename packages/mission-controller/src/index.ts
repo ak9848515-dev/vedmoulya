@@ -48,6 +48,9 @@ export { DevelopmentObjectiveSelector } from './domain/development-objective-sel
 export { GitSafetyPolicy, classifyGitOperation } from './domain/git-safety-policy.js';
 export { SimpleGoalUnderstanding } from './domain/goal-understanding.js';
 export { SimpleProviderAvailability } from './domain/provider-availability.js';
+// AUTONOMY-02 — failure context for objective revision/replanning.
+export { createFailureContext } from './domain/failure-context.js';
+export type { FailureContext } from './types/mission-types.js';
 
 // Application
 export { MissionControllerService } from './application/MissionControllerService.js';
@@ -73,6 +76,10 @@ export type {
   GitSafetyPort,
   GoalUnderstandingPort,
   IdGeneratorPort,
+  LearningContext,
+  LearningEvidenceItem,
+  LearningQuery,
+  LearningRetrievalPort,
   MissionStore,
   ObjectiveSelectionPort,
   PlanningPort,

@@ -21,6 +21,10 @@ import { ExperienceOptimizationService } from '@vedmoulya/experience-optimizatio
 import type {
   ExecutionMemoryPort,
   ExperienceOptimizationPort,
+  LearningContext,
+  LearningEvidenceItem,
+  LearningQuery,
+  LearningRetrievalPort,
 } from '@vedmoulya/mission-controller';
 import type { RunRegistry } from './PlanningExecutionPorts.js';
 
@@ -36,12 +40,86 @@ export class MissionExecutionMemoryAdapter implements ExecutionMemoryPort {
     outcome: { success: boolean; verified?: boolean; output?: string; evidence: string[] },
   ): Promise<void> {
     if (!outcome.success || outcome.verified !== true) return;
+    await this.ingestObjectiveRun(missionId, objectiveId);
+  }
+
+  /**
+   * AUTONOMY-06 — failed objective executions are learning evidence too.
+   * The failed run is ingested through the SAME frozen learning cycle, which
+   * deterministically derives negative signals (GOAL_FAILED / FAILED_PLAN /
+   * TOOL_FAILURE / RECOVERY_FAILURE) from the run's actual outcome. Advisory:
+   * recording never throws and never alters recovery semantics or budgets.
+   */
+  async recordFailedOutcome(
+    missionId: string,
+    objectiveId: string,
+    _failure: { failureClass: string; reason: string; evidence: string[] },
+  ): Promise<void> {
+    try {
+      await this.ingestObjectiveRun(missionId, objectiveId);
+    } catch {
+      // Learning evidence recording must never break a mission.
+    }
+  }
+
+  /** Shared ingest over the REAL sanitized run for this objective. */
+  private async ingestObjectiveRun(missionId: string, objectiveId: string): Promise<void> {
     const run = this.runs.forObjective(missionId, objectiveId);
     if (!run) return;
     try {
       await this.memory.ingestRun(run);
     } catch {
       // Learning evidence recording must never break a mission.
+    }
+  }
+}
+
+/**
+ * AUTONOMY-06 — advisory learning retrieval over the EXISTING frozen
+ * execution-memory service (retrieveForDecision). Bounded output (≤5 items,
+ * compact evidence block), conflict-filtered against current runtime truth
+ * (a tool that is currently unavailable can never be recommended by memory).
+ * Retrieval is GUIDANCE for planning/diagnosis/repair ranking — it can never
+ * bypass ToolRuntime, permissions, command catalog, budgets or verification.
+ */
+export class MissionLearningRetrievalAdapter implements LearningRetrievalPort {
+  constructor(
+    private readonly memory: ExecutionMemoryService,
+    private readonly options: { availableTools?: () => string[] } = {},
+  ) {}
+
+  async relevantLearning(query: LearningQuery): Promise<LearningContext> {
+    try {
+      const block = await this.memory.retrieveForDecision(
+        {
+          tools: query.tools,
+          capabilities: query.capabilities as import('@vedmoulya/ai').CapabilityType[],
+          categories: [
+            'RECOVERY_PATTERN',
+            'TOOL_RELIABILITY',
+            'PLAN_PATTERN',
+            'TASK_PATTERN',
+            'EXECUTION_PATTERN',
+          ],
+          limit: Math.min(Math.max(query.limit ?? 5, 1), 5),
+        },
+        { availableTools: this.options.availableTools?.() },
+      );
+      const items: LearningEvidenceItem[] = block.evidence.map((e) => ({
+        category: e.category,
+        scope: e.scope,
+        subject: e.subject,
+        predicate: e.predicate,
+        value: e.value,
+        confidenceLevel: e.confidenceLevel,
+        sampleCount: e.sampleCount,
+        successCount: e.successCount,
+        failureCount: e.failureCount,
+      }));
+      return { items, text: block.text };
+    } catch {
+      // Advisory retrieval must never break planning.
+      return { items: [], text: '' };
     }
   }
 }

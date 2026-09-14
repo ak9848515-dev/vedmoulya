@@ -68,6 +68,7 @@ import {
   createGovernedToolRegistry,
 } from '../adapters/GovernedToolRegistry.js';
 import { WorkspaceRootBinding, type WorkspaceToolOptions } from '../adapters/WorkspaceTools.js';
+import type { CommandExecutionToolOptions } from '../adapters/CommandExecutionTool.js';
 import {
   AgentExecutionAdapter,
   MissionPlanningAdapter,
@@ -77,6 +78,7 @@ import {
 import {
   MissionExecutionMemoryAdapter,
   MissionExperienceOptimizationAdapter,
+  MissionLearningRetrievalAdapter,
 } from '../adapters/MemoryOptimizationPorts.js';
 import { createWorkspaceFileTemplate } from '../adapters/WorkspaceDevTemplate.js';
 import { createOrchestratorRoutingPorts } from '../adapters/OrchestratorRoutingPorts.js';
@@ -90,6 +92,16 @@ export interface MissionRuntimeOptions {
   workspaceToolOptions?: WorkspaceToolOptions;
   /** Register workspace tools on the governed registry (default true). */
   workspaceTools?: boolean;
+  /**
+   * AUTONOMY-02 — register the governed command tool (allowlisted, path-jailed,
+   * bounded test/build command families) on the governed registry.
+   * Default true: autonomous software verification requires real test
+   * execution, and the tool is heavily constrained (fixed command catalog,
+   * mission-workspace cwd, timeout + output caps, EXECUTE permission class).
+   */
+  commandTools?: boolean;
+  /** Bounded command tool configuration (timeout / output cap / allowlist). */
+  commandToolOptions?: CommandExecutionToolOptions;
   /** Inject an existing orchestrator; otherwise a fresh one is created. */
   orchestrator?: AIOrchestrationService;
   /** Narrow orchestrator tuning (retry backoff for tests, etc.). */
@@ -149,6 +161,8 @@ export interface MissionRuntimeComponents {
     verifier: RunVerificationAdapter;
     executionMemory: MissionExecutionMemoryAdapter;
     experienceOptimization: MissionExperienceOptimizationAdapter;
+    /** AUTONOMY-06 — advisory learning retrieval over the existing memory. */
+    learning: import('@vedmoulya/mission-controller').LearningRetrievalPort;
     failureClassifier: FailureClassificationPort;
     repositoryInspector?: RepositoryInspectionPort;
     gitSafety: RuntimeGitSafetyAdapter;
@@ -176,11 +190,16 @@ export function buildMissionRuntimeComponents(
   const workspace = new WorkspaceRootBinding();
   if (options.workspaceRoot) workspace.setRoot(options.workspaceRoot);
   const includeWorkspaceTools = options.workspaceTools !== false;
+  const includeCommandTools = options.commandTools !== false;
   const toolRegistry = createGovernedToolRegistry({
     registryOptions: options.registryOptions,
     workspace:
       includeWorkspaceTools && options.workspaceRoot
         ? { binding: workspace, toolOptions: options.workspaceToolOptions }
+        : undefined,
+    command:
+      includeCommandTools && options.workspaceRoot
+        ? { toolOptions: options.commandToolOptions }
         : undefined,
   });
   const toolPort = new ClassifyingToolRegistryPort(toolRegistry);
@@ -216,6 +235,12 @@ export function buildMissionRuntimeComponents(
       memory: new ExperienceMemoryPortAdapter(memory),
       outcomes: new InMemoryRecommendationOutcomeStore(),
     });
+  // AUTONOMY-06 — advisory learning retrieval adapter over the existing
+  // memory. Runtime-truth tool availability is supplied by the governed
+  // registry so memory can never recommend an unavailable tool.
+  const learning = new MissionLearningRetrievalAdapter(memory, {
+    availableTools: () => toolRegistry.list().map((t) => t.name),
+  });
 
   // ── Mission ports over the real estate ──
   const inspector =
@@ -253,6 +278,7 @@ export function buildMissionRuntimeComponents(
       verifier: new RunVerificationAdapter(runs),
       executionMemory: new MissionExecutionMemoryAdapter(memory, runs),
       experienceOptimization: new MissionExperienceOptimizationAdapter(optimization),
+      learning,
       failureClassifier,
       repositoryInspector: inspector,
       gitSafety,
@@ -283,6 +309,7 @@ export function createMissionRuntime(options: MissionRuntimeOptions = {}): Missi
     verifier: components.ports.verifier,
     executionMemory: components.ports.executionMemory,
     experienceOptimization: components.ports.experienceOptimization,
+    learning: components.ports.learning,
     failureClassifier: components.ports.failureClassifier,
     clock: options.clock ?? new SystemClock(),
     idGenerator: options.idGenerator ?? createIdGenerator(),

@@ -43,33 +43,40 @@ This document defines the **DevOps technology stack** for VedMoulya — CI/CD, i
 ### Workflow Architecture
 
 ```yaml
-# .github/workflows/ci.yml
+# .github/workflows/ci.yml (one job per quality gate)
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
 
 jobs:
-  quality-gates:
+  quality: # G1-G2: architecture & code quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
       - run: npm ci
-      - run: npm run typecheck
       - run: npm run lint
-      - run: npm run test -- --coverage
-      - run: npm run build
-      # Gate 6: Security scan
-      - run: npm audit
-      # Gate 4: Accessibility
-      - run: npm run test:a11y
+      - run: npm run format
+      - run: npm run typecheck
 
-  deploy:
-    needs: quality-gates
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+  test: # G3: unit tests + coverage gate
     steps:
-      - run: npm run deploy # Railway + Vercel CLI
+      - run: npm run test:coverage
+
+  benchmarks: # G7: quality benchmarks
+  security: # G6: npm audit (runtime + dev)
+  a11y: # G4: Playwright structural audit
+  performance: # G5: bundle-size budget
+  build: # full workspace build
+  e2e: # G8: Playwright end-to-end
+  result: # aggregates the gates and fails the run if any gate failed
 ```
+
+Deployment is a separate, manually dispatched workflow
+(`.github/workflows/release.yml`, `workflow_dispatch`) — CI does not deploy.
 
 ### Pipeline Stages
 

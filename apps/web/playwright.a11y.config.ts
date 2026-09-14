@@ -8,10 +8,13 @@ import { defineConfig, devices } from '@playwright/test';
 // before running the six-route structural audit.
 //
 // Readiness (SPRINT-090A contract): /health/live returns 200 whenever the
-// server process is alive and never performs I/O — the deterministic
-// process-liveness probe for gates that intentionally run without database
-// infrastructure (the a11y CI job provisions none; the audited routes are
-// client-rendered and do not require it to render their structure).
+// server process is alive and never performs I/O — a deterministic
+// process-liveness probe. The a11y CI job provisions PostgreSQL + Redis
+// (mirroring the e2e job) BEFORE the server starts, so schema init
+// (ensureTable) completes before any route is audited; the /health/live
+// probe still guards the webServer startup. For local runs without database
+// infrastructure the audited routes are client-rendered, so the probe remains
+// the correct process-liveness signal.
 // Polling the base URL '/' was replaced: an HTML route is a weaker, less
 // deterministic readiness signal than the dedicated probe.
 //

@@ -152,12 +152,12 @@ policy). Full repo suite: **4,669+ tests** — see §8.
 **Pipeline** (requires JDK 17+ and Android SDK on a build machine):
 
 ```bash
-npm run mobile:build:debug    # → android/app/build/outputs/apk/debug/app-debug.apk
-npm run mobile:build:release  # → .../apk/release/app-release.apk (signed)
-npm run mobile:bundle:release # → .../bundle/release/app-release.aab (signed)
+npm run mobile:build:debug -w apps/web    # → apps/web/android/app/build/outputs/apk/debug/app-debug.apk
+npm run mobile:build:release -w apps/web  # → .../apk/release/app-release.apk (signed)
+npm run mobile:bundle:release -w apps/web # → .../bundle/release/app-release.aab (signed)
 ```
 
-`scripts/build-android.sh` runs: static web export → `cap sync android` → Gradle.
+`apps/web/scripts/build-android.sh` runs: static web export → `cap sync android` → Gradle.
 
 **Existing artifacts verified (v1.0.1, built 2026-08-02):**
 
@@ -178,15 +178,15 @@ npm run mobile:bundle:release # → .../bundle/release/app-release.aab (signed)
 
 ## 7. Remaining Risks
 
-| Risk                                                                                                  | Severity | Mitigation                                                                                          |
-| ----------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
-| No local JDK/Android SDK → new artifacts not rebuilt in this session                                  | Medium   | Pipeline + scripts ready; rebuild on a machine with Android Studio (`npm run mobile:build:release`) |
-| Release signing not re-verified with `apksigner`                                                      | Low      | Keystore config intact; verify once after rebuild                                                   |
-| Dark mode is shell + dashboard + Settings (chosen scope); legacy module-page cards keep light styling | Low      | Deliberate scope; extend `dark:` tokens to module pages later                                       |
-| Offline cache shows data up to 24 h old                                                               | Low      | TTL + visible "cached X min ago" badge + retry                                                      |
-| Google OAuth redirect URI must match backend `GOOGLE_REDIRECT_URI` in the WebView origin              | Low      | Documented in MOB-001; unchanged                                                                    |
-| Auth routes behind the in-app gateway still lack rate limiting                                        | Medium   | Ops note from MOB-001; front the gateway with a limiter before public rollout                       |
-| Double-press-to-exit window (2 s) may feel short on some devices                                      | Info     | Tune `EXIT_WINDOW_MS` in `lib/native.ts`                                                            |
+| Risk                                                                                                  | Severity | Mitigation                                                                                                      |
+| ----------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| No local JDK/Android SDK → new artifacts not rebuilt in this session                                  | Medium   | Pipeline + scripts ready; rebuild on a machine with Android Studio (`npm run mobile:build:release -w apps/web`) |
+| Release signing not re-verified with `apksigner`                                                      | Low      | Keystore config intact; verify once after rebuild                                                               |
+| Dark mode is shell + dashboard + Settings (chosen scope); legacy module-page cards keep light styling | Low      | Deliberate scope; extend `dark:` tokens to module pages later                                                   |
+| Offline cache shows data up to 24 h old                                                               | Low      | TTL + visible "cached X min ago" badge + retry                                                                  |
+| Google OAuth redirect URI must match backend `GOOGLE_REDIRECT_URI` in the WebView origin              | Low      | Documented in MOB-001; unchanged                                                                                |
+| Auth routes behind the in-app gateway still lack rate limiting                                        | Medium   | Ops note from MOB-001; front the gateway with a limiter before public rollout                                   |
+| Double-press-to-exit window (2 s) may feel short on some devices                                      | Info     | Tune `EXIT_WINDOW_MS` in `lib/native.ts`                                                                        |
 
 ---
 

@@ -28,6 +28,27 @@ export const OBJECTIVE_STATES: readonly ObjectiveState[] = [
   'SKIPPED',
 ];
 
+/** AUTONOMY-02 — Failure context for objective revision/replanning. */
+export interface FailureContext {
+  failureClass: MissionFailureClass;
+  reason: string;
+  suggestedAction: 'RETRY' | 'ALTERNATE_PROVIDER' | 'REVISE_OBJECTIVE' | 'WAIT' | 'BLOCK' | 'FAIL';
+  evidence: string[];
+  executionError?: string;
+  executionOutput?: string;
+  failedObjectiveId: string;
+  failedObjectiveTitle: string;
+  previousPlanId?: string;
+  previousGoalId?: string;
+  revisionAttempt: number;
+  failedAt: string;
+  verificationResult?: {
+    verified: boolean;
+    evidence: string[];
+    method: string;
+  };
+}
+
 export type MissionAutonomyLevel = 'ASSISTED' | 'SUPERVISED' | 'CONTROLLED_AUTONOMOUS';
 export type ComplexityEstimate = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -120,6 +141,36 @@ export interface MissionObjective {
   lease?: MissionObjectiveLease;
   createdAt: string;
   updatedAt: string;
+  /** AUTONOMY-02 — objective revision history for failure-informed replanning. */
+  revisionHistory?: ObjectiveRevision[];
+  /** AUTONOMY-02 — current revision attempt number (0 = original). */
+  revisionAttempt?: number;
+}
+
+/**
+ * AUTONOMY-02 — A single revision of an objective, created when
+ * REVISE_OBJECTIVE is triggered. Preserves traceability from the
+ * original objective through each revision.
+ */
+export interface ObjectiveRevision {
+  /** Identity of this revision. */
+  revisionId: string;
+  /** The revised objective text. */
+  revisedObjective: string;
+  /** The revised goal ID from goal understanding. */
+  revisedGoalId?: string;
+  /** The revised plan ID from planning. */
+  revisedPlanId?: string;
+  /** Failure context that triggered this revision. */
+  failureContext?: FailureContext;
+  /** When this revision was created. */
+  revisedAt: string;
+  /** Whether this revision was executed. */
+  executed: boolean;
+  /** Outcome of the revision execution. */
+  outcome?: 'VERIFIED' | 'FAILED' | 'PENDING';
+  /** Reason if the revision failed. */
+  failureReason?: string;
 }
 
 /**

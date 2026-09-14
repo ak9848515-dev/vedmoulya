@@ -31,6 +31,8 @@ import type {
   GitSafetyPort,
   GoalUnderstandingPort,
   IdGeneratorPort,
+  LearningContext,
+  LearningRetrievalPort,
   MissionStore,
   ObjectiveSelectionPort,
   PlanningPort,
@@ -40,6 +42,7 @@ import type {
   VerificationPort,
 } from '../contracts/mission-ports.js';
 import { GitSafetyPolicy } from '../domain/git-safety-policy.js';
+import { createFailureContext } from '../domain/failure-context.js';
 
 /** BLD-025 — durable objective ownership lease TTL (ms). When a persisted
  *  RUNNING objective's lease expires, recovery treats the previous owner as
@@ -90,6 +93,14 @@ export interface MissionControllerOptions {
   executionMemory: ExecutionMemoryPort;
   experienceOptimization: ExperienceOptimizationPort;
   failureClassifier: FailureClassificationPort;
+  /**
+   * AUTONOMY-06 — optional advisory learning retrieval over the existing
+   * execution memory. Relevant, bounded, verified learning is surfaced to
+   * the planner as GUIDANCE only: it can never bypass permissions, tools,
+   * budgets, verification or authoritative mission state. A retrieval
+   * failure degrades to "no learning" and never breaks the mission.
+   */
+  learning?: LearningRetrievalPort;
   clock: ClockPort;
   idGenerator: IdGeneratorPort;
   repositoryInspector?: RepositoryInspectionPort;
@@ -411,19 +422,56 @@ export class MissionControllerService {
     const attemptStartedAtMs = this.options.clock.timestampMs();
     let executionResult: ExecutionResultData | undefined;
     try {
+      // AUTONOMY-02 — Pass failure context to goal understanding when revising
+      const hasRevisionHistory = (objective.revisionHistory?.length ?? 0) > 0;
+      const latestRevision = hasRevisionHistory
+        ? (objective.revisionHistory ?? [])[(objective.revisionHistory?.length ?? 0) - 1]
+        : undefined;
+      const failureContext = latestRevision?.failureContext;
+
       const goalResult = await this.options.goalUnderstanding.understandGoal(
         objective.objective,
         mission.objective,
         mission.constraints,
+        failureContext,
       );
       objective.goalId = goalResult.goal;
 
+      // AUTONOMY-06 — retrieve bounded, relevant, advisory learning for this
+      // objective/current failure. Guidance only: the planner still validates
+      // everything through its frozen pipeline; retrieval failure degrades to
+      // "no learning" and never breaks planning.
+      let learning: LearningContext | undefined;
+      if (this.options.learning) {
+        try {
+          learning = await this.options.learning.relevantLearning({
+            objective: objective.objective,
+            failureClass: failureContext?.failureClass,
+            tools: mission.constraints.allowedTools,
+            capabilities: mission.constraints.allowedCapabilities,
+            limit: 5,
+          });
+        } catch {
+          learning = undefined; // advisory only — never blocks the mission
+        }
+      }
+
+      // AUTONOMY-02 — Pass failure context to planner when revising
+      // AUTONOMY-06 — Pass advisory learning context to the planner
       const plan = await this.options.planner.createPlan(
         goalResult.goal,
         goalResult.requiredCapabilities,
         goalResult.constraints,
+        failureContext,
+        learning,
       );
       objective.planId = plan.planId;
+
+      // Update the latest revision with the new plan/goal IDs
+      if (hasRevisionHistory && latestRevision) {
+        latestRevision.revisedGoalId = goalResult.goal;
+        latestRevision.revisedPlanId = plan.planId;
+      }
 
       executionResult = await this.options.executor.executePlan(
         plan,
@@ -576,14 +624,77 @@ export class MissionControllerService {
       objective.failureReason = failureReason;
       mission.budgetUsage.objectivesFailed++;
 
+      // AUTONOMY-06 — record the failed execution so negative learning is
+      // derived from the real run (GOAL_FAILED / FAILED_PLAN / RECOVERY_*).
+      // Advisory: recording must never alter recovery semantics or budgets.
+      try {
+        await this.options.executionMemory.recordFailedOutcome?.(
+          mission.missionId,
+          objective.objectiveId,
+          {
+            failureClass: classification.failureClass,
+            reason: classification.reason,
+            evidence: classification.evidence.slice(0, 10),
+          },
+        );
+      } catch {
+        // Learning evidence recording must never break a mission.
+      }
+
+      // AUTONOMY-02 — Failure-informed objective revision
+      // When the classifier suggests REVISE_OBJECTIVE, we enter a revision
+      // path that carries failure context into the next planning attempt,
+      // rather than a blind retry.
+      const isRevision = classification.suggestedAction === 'REVISE_OBJECTIVE';
+
       // Bounded recovery (§11/§13): retry only while BOTH the retry budget and
       // the mission-level replan budget permit it — an objective that keeps
       // failing the same way must eventually stop repeating itself.
-      if (
+      const canRecover =
         classification.recoverable &&
         objective.retryCount < objective.maxRetries &&
-        mission.budgetUsage.replansConsumed < mission.budget.maxReplans
-      ) {
+        mission.budgetUsage.replansConsumed < mission.budget.maxReplans;
+
+      if (isRevision && canRecover) {
+        // AUTONOMY-02 — REVISE_OBJECTIVE path
+        objective.retryCount++;
+        objective.revisionAttempt = (objective.revisionAttempt ?? 0) + 1;
+        mission.budgetUsage.retriesConsumed++; // Revision also counts as a retry
+        mission.budgetUsage.replansConsumed++; // Revision consumes replan budget
+
+        // Record the revision in the objective's history
+        if (!objective.revisionHistory) {
+          objective.revisionHistory = [];
+        }
+        objective.revisionHistory.push({
+          revisionId: this.options.idGenerator.generateId('rev'),
+          revisedObjective: objective.objective, // The objective text itself may be refined later
+          revisedAt: this.options.clock.now(),
+          executed: false,
+          failureContext: createFailureContext(
+            classification,
+            executionResult,
+            {
+              objectiveId: objective.objectiveId,
+              title: objective.title,
+              goalId: objective.goalId,
+              planId: objective.planId,
+            },
+            objective.goalId,
+            objective.revisionAttempt,
+            this.options.clock.now(),
+          ),
+        });
+
+        objective.state = 'PENDING';
+        objective.stateHistory.push('PENDING');
+        this.recordActivity(
+          mission,
+          'OBJECTIVE_REVISED',
+          `Objective revised (attempt ${objective.revisionAttempt}): ${objective.title} — ${classification.reason}`,
+        );
+      } else if (canRecover) {
+        // Standard retry path (RETRY, ALTERNATE_PROVIDER, etc.)
         objective.retryCount++;
         objective.state = 'PENDING';
         objective.stateHistory.push('PENDING');

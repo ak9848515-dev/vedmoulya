@@ -37,6 +37,23 @@ export {
   createWorkspaceTools,
 } from './adapters/WorkspaceTools.js';
 export type { WorkspaceToolOptions, WorkspaceTools } from './adapters/WorkspaceTools.js';
+
+// Adapters — governed, allowlisted command execution tool (AUTONOMY-02)
+export {
+  COMMAND_CATALOG,
+  COMMAND_EXECUTION_TOOL,
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  DEFAULT_MAX_OUTPUT_BYTES,
+  ExecutorCommandError,
+  createCommandExecutionTool,
+  resolveCommandSpec,
+  runGovernedProcess,
+} from './adapters/CommandExecutionTool.js';
+export type {
+  CommandExecutionResult,
+  CommandExecutionToolOptions,
+  CommandSpec,
+} from './adapters/CommandExecutionTool.js';
 export {
   ClassifyingToolRegistryPort,
   createGovernedToolRegistry,

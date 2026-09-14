@@ -1,5 +1,23 @@
 import type { AgentPlan } from '@vedmoulya/agent-execution';
-import type { Mission, ProviderStatus } from '../types/mission-types.js';
+import type {
+  Mission,
+  ProviderStatus,
+  MissionObjective,
+  MissionFailureClassification,
+} from '../types/mission-types.js';
+import type {
+  LearningRetrievalPort,
+  ObjectiveSelectionPort,
+  ProviderAvailabilityPort,
+  GoalUnderstandingPort,
+  PlanningPort,
+  ExecutionPort,
+  VerificationPort,
+  ExecutionMemoryPort,
+  ExperienceOptimizationPort,
+  FailureClassificationPort,
+} from '../contracts/mission-ports.js';
+
 import { InMemoryMissionStore } from '../infrastructure/InMemoryMissionStore.js';
 import { InMemoryCheckpointStore } from '../infrastructure/InMemoryCheckpointStore.js';
 import { SystemClock } from '../infrastructure/SystemClock.js';
@@ -28,7 +46,7 @@ export function createTestPlan(overrides?: Partial<AgentPlan>): AgentPlan {
     requiredCapabilities: ['coding'],
     estimatedCost: 0.01,
     ...overrides,
-  } as AgentPlan;
+  };
 }
 
 export function createTestMission(overrides?: Partial<Mission>): Mission {
@@ -71,7 +89,7 @@ export function createTestMission(overrides?: Partial<Mission>): Mission {
     createdAt: now,
     updatedAt: now,
     ...overrides,
-  } as Mission;
+  };
 }
 
 export function createTestProviderStatus(overrides?: Partial<ProviderStatus>): ProviderStatus {
@@ -91,12 +109,12 @@ export function createTestProviderStatus(overrides?: Partial<ProviderStatus>): P
 }
 // ── Reusable fake ports + service builder ─────────────────────────────
 
-export type FakeProviderInfo = {
+export interface FakeProviderInfo {
   providerId: string;
   modelId: string;
   capabilities: string[];
   healthy: boolean;
-};
+}
 
 export interface FakePortsOptions {
   /** Simulated execution result. */
@@ -109,23 +127,41 @@ export interface FakePortsOptions {
     userId: string;
     allowedTools?: string[];
     permissionClasses?: string[];
+    failureContext?: unknown;
+  }) => void;
+  /** Hook recording every understandGoal call. */
+  onUnderstand?: (call: {
+    objective: string;
+    missionContext: string;
+    constraints: unknown;
+    failureContext?: unknown;
   }) => void;
   /** Hook recording advisory signals requested. */
   onAdvisory?: (taskPattern: string) => void;
   /** Hook recording memory outcomes recorded. */
   onMemory?: (outcome: { success: boolean; evidence: string[] }) => void;
+  /** AUTONOMY-06 — hook recording failed-outcome learning records. */
+  onFailedMemory?: (failure: { failureClass: string; reason: string; evidence: string[] }) => void;
+  /** AUTONOMY-06 — hook recording every createPlan call (incl. learning). */
+  onPlan?: (call: {
+    goal: string;
+    failureContext?: unknown;
+    learning?: { items: Array<{ subject: string }>; text: string };
+  }) => void;
+  /** AUTONOMY-06 — optional learning retrieval port. */
+  learningPort?: LearningRetrievalPort;
 }
 
 export interface FakePorts {
-  objectiveSelector: any;
-  providerAvailability: any;
-  goalUnderstanding: any;
-  planner: any;
-  executor: any;
-  verifier: any;
-  executionMemory: any;
-  experienceOptimization: any;
-  failureClassifier: any;
+  objectiveSelector: ObjectiveSelectionPort;
+  providerAvailability: ProviderAvailabilityPort;
+  goalUnderstanding: GoalUnderstandingPort;
+  planner: PlanningPort;
+  executor: ExecutionPort;
+  verifier: VerificationPort;
+  executionMemory: ExecutionMemoryPort;
+  experienceOptimization: ExperienceOptimizationPort;
+  failureClassifier: FailureClassificationPort;
 }
 
 export function createFakePorts(options: FakePortsOptions = {}): FakePorts {
@@ -137,53 +173,66 @@ export function createFakePorts(options: FakePortsOptions = {}): FakePorts {
     providerAvailability: new SimpleProviderAvailability(),
     goalUnderstanding: new SimpleGoalUnderstanding(),
     planner: {
-      createPlan: async (
+      createPlan: (
         goal: string,
         caps: string[],
         constraints: string[],
-      ): Promise<AgentPlan> => ({
-        planId: 'plan_fake_1',
-        goalId: 'goal_fake_1',
-        objective: goal,
-        steps: [
-          {
-            stepId: 'step_1',
-            objective: goal,
-            allowedTools: ['read_file'],
-            dependencies: [],
-            actions: [
-              {
-                actionId: 'a_1',
-                kind: 'tool',
-                toolName: 'read_file',
-                arguments: { path: 'test.ts' },
+        failureContext?: unknown,
+        learning?: { items: Array<{ subject: string }>; text: string },
+      ): Promise<AgentPlan> => {
+        options.onPlan?.({ goal, failureContext, learning });
+        return Promise.resolve({
+          planId: 'plan_fake_1',
+          goalId: 'goal_fake_1',
+          objective: goal,
+          steps: [
+            {
+              stepId: 'step_1',
+              objective: goal,
+              allowedTools: ['read_file'],
+              dependencies: [],
+              actions: [
+                {
+                  actionId: 'a_1',
+                  kind: 'tool',
+                  toolName: 'read_file',
+                  arguments: { path: 'test.ts' },
+                },
+              ],
+              verificationPolicy: {
+                kind: 'command',
+                description: 'read_file succeeds',
+                command: { toolName: 'read_file', arguments: { path: 'test.ts' }, expect: 'ok' },
               },
-            ],
-            verificationPolicy: {
-              kind: 'command',
-              description: 'read_file succeeds',
-              command: { toolName: 'read_file', arguments: { path: 'test.ts' }, expect: 'ok' },
             },
+          ],
+          finalVerification: {
+            kind: 'command',
+            description: 'all steps succeeded',
+            command: { toolName: 'read_file', arguments: { path: 'test.ts' }, expect: 'ok' },
           },
-        ],
-        finalVerification: {
-          kind: 'command',
-          description: 'all steps succeeded',
-          command: { toolName: 'read_file', arguments: { path: 'test.ts' }, expect: 'ok' },
-        },
-        completionCriteria: ['objective verified'],
-      }),
+          completionCriteria: ['objective verified'],
+        });
+      },
     },
     executor: {
-      executePlan: async (
+      executePlan: (
         plan: unknown,
         userId: string,
         _budget?: unknown,
         allowedTools?: string[],
         permissionClasses?: string[],
-      ) => {
+      ): Promise<{
+        runId: string;
+        success: boolean;
+        verified: boolean;
+        output?: string;
+        error?: string;
+        failureClass?: string;
+        usage: { tokens: number; costUsd: number; latencyMs: number; toolCalls: number };
+      }> => {
         options.onExecute?.({ plan, userId, allowedTools, permissionClasses });
-        return {
+        return Promise.resolve({
           runId: 'run_fake_1',
           success: executorResult.success,
           verified: executorResult.verified,
@@ -191,42 +240,64 @@ export function createFakePorts(options: FakePortsOptions = {}): FakePorts {
           error: executorResult.error,
           failureClass: executorResult.failureClass,
           usage: { tokens: 100, costUsd: 0.001, latencyMs: 50, toolCalls: 1 },
-        };
+        });
       },
     },
     verifier: {
-      verifyObjective: async () => ({
-        verified: verifierResult.verified,
-        evidence: verifierResult.evidence,
-        method: 'test_verification',
-      }),
+      verifyObjective: (
+        _objective: MissionObjective,
+        _executionResult: { output?: string; success: boolean },
+      ): Promise<{ verified: boolean; evidence: string[]; method: string }> =>
+        Promise.resolve({
+          verified: verifierResult.verified,
+          evidence: verifierResult.evidence,
+          method: 'test_verification',
+        }),
     },
     executionMemory: {
-      recordVerifiedOutcome: async (
+      recordVerifiedOutcome: (
         _m: string,
         _o: string,
         outcome: { success: boolean; evidence: string[] },
-      ) => {
+      ): Promise<void> => {
         options.onMemory?.(outcome);
+        return Promise.resolve();
+      },
+      recordFailedOutcome: (
+        _m: string,
+        _o: string,
+        failure: { failureClass: string; reason: string; evidence: string[] },
+      ): Promise<void> => {
+        options.onFailedMemory?.(failure);
+        return Promise.resolve();
       },
     },
     experienceOptimization: {
-      getAdvisorySignal: async (taskPattern: string) => {
+      getAdvisorySignal: (
+        taskPattern: string,
+        _context: Record<string, unknown>,
+      ): Promise<{
+        recommendation?: string;
+        confidence: number;
+        evidenceCount: number;
+        reason?: string;
+      }> => {
         options.onAdvisory?.(taskPattern);
-        return {
+        return Promise.resolve({
           recommendation: 'Proceed',
           confidence: 0.8,
           evidenceCount: 10,
           reason: 'Historical evidence',
-        };
+        });
       },
     },
     failureClassifier: {
-      classify: async (
+      classify: (
         error: string,
         execResult: { failureClass?: string; usage: unknown },
         ps: ProviderStatus,
-      ) => classifyFailure(error, execResult, ps),
+      ): Promise<MissionFailureClassification> =>
+        Promise.resolve(classifyFailure(error, execResult, ps)),
     },
   };
 }
@@ -263,6 +334,7 @@ export function createTestService(options: TestServiceOptions = {}): TestService
     executionMemory: ports.executionMemory,
     experienceOptimization: ports.experienceOptimization,
     failureClassifier: ports.failureClassifier,
+    learning: options.learningPort,
     clock: new SystemClock(),
     idGenerator: createIdGenerator(),
   });

@@ -1,12 +1,17 @@
 // SPRINT-043 — dead-code discovery: files never imported by any other source file.
 // Conservative: excludes entry points (index), routes, tests, and type declarations.
+//
+// `__tests__` directories and `*.test.*` / `*.spec.*` files ARE walked, because
+// they are legitimate consumers: a module imported only by tests (e.g. the
+// gateway's hermetic `InMemoryRepositories` double) is used, not dead. They are
+// still excluded as *candidates* so the report never flags a test file itself.
 import fs from 'node:fs';
 import path from 'node:path';
 
 const files = [];
 function walk(dir) {
   for (const f of fs.readdirSync(dir)) {
-    if (['node_modules', '.next', 'dist', '__tests__', 'coverage', '.git'].includes(f)) continue;
+    if (['node_modules', '.next', 'dist', 'coverage', '.git'].includes(f)) continue;
     const p = path.join(dir, f);
     const st = fs.statSync(p);
     if (st.isDirectory()) walk(p);
@@ -55,15 +60,21 @@ for (const f of files) {
 
 const candidates = [];
 for (const f of files) {
-  const n = norm.get(f); // forward-slash normalized
-  const base = path.basename(n);
-  const isIndex = base === 'index.ts' || base === 'index.tsx';
-  const isTest = /\.(test|spec)\./.test(base);
-  const isTypes = /\.d\.ts$/.test(base);
+  const n = norm.get(f); // forward-slash normalized, extension stripped
+  const file = path.basename(f); // real filename — `n` has no extension
+  const isIndex = file === 'index.ts' || file === 'index.tsx';
+  const isTest = /\.(test|spec)\./.test(file) || n.includes('/__tests__/');
+  const isTypes = /\.d\.ts$/.test(file);
+  // Tooling-discovered, never imported by source: Storybook stories/config,
+  // Vitest setup files, and `*.config.ts` files (vitest/next/playwright/eslint)
+  // are loaded by their runners, not by module imports.
+  const isStory = /\.stories\.[tj]sx?$/.test(file) || n.includes('/.storybook/');
+  const isSetup = /\.setup\.[tj]sx?$/.test(file);
+  const isConfig = /\.config\.[tj]sx?$/.test(file);
   const isRoute =
     n.includes('/app/') &&
-    /page|layout|route|loading|error|not-found|template|head/.test(base);
-  if (isIndex || isTest || isTypes || isRoute) continue;
+    /page|layout|route|loading|error|not-found|template|head/.test(file);
+  if (isIndex || isTest || isTypes || isStory || isSetup || isConfig || isRoute) continue;
   if (!resolved.has(n)) candidates.push(f);
 }
 

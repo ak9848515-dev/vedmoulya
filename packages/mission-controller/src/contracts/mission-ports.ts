@@ -20,6 +20,7 @@ import type {
   GitOperation,
   GitSafetyClassification,
 } from '../types/mission-types.js';
+import type { FailureContext } from '../domain/failure-context.js';
 
 export type {
   ProviderStatus,
@@ -75,6 +76,7 @@ export interface GoalUnderstandingPort {
     objective: string,
     missionContext: string,
     constraints: Mission['constraints'],
+    failureContext?: FailureContext,
   ): Promise<{
     goal: string;
     requiredCapabilities: string[];
@@ -89,6 +91,9 @@ export interface PlanningPort {
     goal: string,
     requiredCapabilities: string[],
     constraints: string[],
+    failureContext?: FailureContext,
+    /** AUTONOMY-06 — bounded advisory learning (guidance, never truth). */
+    learning?: LearningContext,
   ): Promise<AgentPlan>;
 }
 
@@ -136,6 +141,59 @@ export interface ExecutionMemoryPort {
     objectiveId: string,
     outcome: { success: boolean; verified?: boolean; output?: string; evidence: string[] },
   ): Promise<void>;
+  /**
+   * AUTONOMY-06 — record a FAILED objective execution so negative learning
+   * (GOAL_FAILED / FAILED_PLAN / RECOVERY_FAILURE signals) is derived from
+   * the real run instead of only successful completions. Optional: adapters
+   * that cannot record failures may omit it (existing behavior preserved).
+   */
+  recordFailedOutcome?(
+    missionId: string,
+    objectiveId: string,
+    failure: { failureClass: string; reason: string; evidence: string[] },
+  ): Promise<void>;
+}
+
+// -- AUTONOMY-06 — Learning retrieval (advisory only) ---------------
+/** One bounded, structured learning fact (mirrors the memory evidence shape). */
+export interface LearningEvidenceItem {
+  category: string;
+  scope: string;
+  subject: string;
+  predicate: string;
+  /** Aggregated rate in [0, 1]. */
+  value: number;
+  confidenceLevel: 'INSUFFICIENT' | 'LOW' | 'MEDIUM' | 'HIGH';
+  sampleCount: number;
+  successCount: number;
+  failureCount: number;
+}
+
+/** Bounded learning context — never the whole memory store. */
+export interface LearningContext {
+  items: LearningEvidenceItem[];
+  /** Compact text block (bounded chars) for planner context. */
+  text: string;
+}
+
+export interface LearningQuery {
+  /** The objective about to be planned/executed. */
+  objective: string;
+  /** Current failure class when replanning after a failure. */
+  failureClass?: string;
+  tools?: string[];
+  capabilities?: string[];
+  /** Requested bound (adapters may clamp lower; never higher than 8). */
+  limit?: number;
+}
+
+/**
+ * AUTONOMY-06 — advisory retrieval over the EXISTING execution memory.
+ * Learning can INFORM planning/diagnosis/repair ranking; it can never
+ * bypass permissions, tools, budgets, verification or mission state.
+ */
+export interface LearningRetrievalPort {
+  relevantLearning(query: LearningQuery): Promise<LearningContext>;
 }
 
 // -- Experience Optimization Port ----------------------------------

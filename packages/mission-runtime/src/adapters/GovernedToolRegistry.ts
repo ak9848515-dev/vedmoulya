@@ -1,13 +1,14 @@
 // ──────────────────────────────────────────────────────────────────
 // VedMoulya — Mission Runtime: Governed Tool Registry + Port (BLD-022)
 //
-// Registry factory (safe built-ins + optional bounded workspace tools)
-// and the agent-side tool port with HONEST permission classification at
-// the source. The frozen ToolRegistryAgentPort classifies every shipped
-// in-memory tool as READ — correct for those tools. A workspace-WRITE
-// tool must be classified truthfully so the planning validation, engine
-// approval gates and permission checks see the real risk class. This is
-// an adapter over the SAME registry — never a second registry.
+// Registry factory (safe built-ins + optional bounded workspace tools +
+// optional governed command tool) and the agent-side tool port with HONEST
+// permission classification at the source. The frozen ToolRegistryAgentPort
+// classifies every shipped in-memory tool as READ — correct for those tools.
+// Workspace-WRITE and command-EXECUTE tools must be classified truthfully so
+// the planning validation, engine approval gates and permission checks see
+// the real risk class. This is an adapter over the SAME registry — never a
+// second registry.
 // ──────────────────────────────────────────────────────────────────
 
 import { ToolRegistry, registerSafeTools } from '@vedmoulya/services/ai/runtime/ToolRuntime';
@@ -27,10 +28,22 @@ import {
   createWorkspaceTools,
   type WorkspaceToolOptions,
 } from './WorkspaceTools.js';
+import {
+  COMMAND_EXECUTION_TOOL,
+  createCommandExecutionTool,
+  type CommandExecutionToolOptions,
+} from './CommandExecutionTool.js';
 
 const TOOL_PERMISSION_CLASSES_BY_TOOL: Record<string, ToolPermissionClass> = {
   [WORKSPACE_WRITE_TOOL]: 'WRITE',
   [WORKSPACE_READ_TOOL]: 'READ',
+  // An allowlisted, path-jailed, bounded command family is an EXECUTE risk:
+  // it runs a subprocess inside the mission workspace. It is NOT in
+  // HIGH_RISK_PERMISSION_CLASSES (DELETE/SECRETS/DEPLOYMENT), so a
+  // CONTROLLED_AUTONOMOUS run may use it without a human approval gate —
+  // exactly the intended "press Run once" verification path. Any high-risk
+  // class would force WAITING_FOR_APPROVAL and break autonomous closure.
+  [COMMAND_EXECUTION_TOOL]: 'EXECUTE',
 };
 
 export function permissionClassForTool(
@@ -45,12 +58,19 @@ export function permissionClassForTool(
 
 /**
  * Registers the safe built-in tools plus (optionally) the bounded workspace
- * tools on a governed ToolRegistry. The registry applies the FULL security
- * chain to every call — nothing here bypasses ToolRuntime.
+ * tools and the governed command tool on a governed ToolRegistry. The
+ * registry applies the FULL security chain to every call — nothing here
+ * bypasses ToolRuntime.
+ *
+ * The command tool is only registered when an operator-held workspace root
+ * exists (it needs the path jail for its working directory) AND the caller
+ * explicitly asks for it via `command`. Without it there is NO command
+ * execution surface at all — the previous (pre-AUTONOMY-02) state.
  */
 export function createGovernedToolRegistry(options: {
   registryOptions?: ToolRegistryOptions;
   workspace?: { binding: WorkspaceRootBinding; toolOptions?: WorkspaceToolOptions };
+  command?: { toolOptions?: CommandExecutionToolOptions };
 }): ToolRegistry {
   const registry = new ToolRegistry({
     grantedCapabilities: ['reasoning', 'calculation', 'knowledge', 'productivity'],
@@ -62,6 +82,9 @@ export function createGovernedToolRegistry(options: {
     const tools = createWorkspaceTools(workspace.binding, workspace.toolOptions);
     registry.register(tools.read);
     registry.register(tools.write);
+    if (options.command !== undefined) {
+      registry.register(createCommandExecutionTool(workspace.binding, options.command.toolOptions));
+    }
   }
   return registry;
 }

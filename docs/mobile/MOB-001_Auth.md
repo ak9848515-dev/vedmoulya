@@ -121,8 +121,8 @@ redirect URI (Web clients accept HTTPS URIs only; localhost is exempt):
 - Web app: `https://app.example.com/oauth2redirect`
 
 `npx cap sync android` was run once — the `@aparajita/capacitor-secure-storage`
-plugin is registered in `apps/web/android/`. Re-run `npm run build:mobile` then
-`npm run mobile:sync` whenever the native plugin set changes.
+plugin is registered in `apps/web/android/`. Re-run `npm run build:mobile -w apps/web`
+then `npm run mobile:sync -w apps/web` whenever the native plugin set changes.
 
 ---
 

@@ -61,8 +61,11 @@ clients, brands, projects, content items (+ versions, reviews), invoices, leads
 approvals), quotations, payments, documents (+ versions), portal access, ops
 notifications.
 
-**Migration flow:** run `npm run migrate` in the service (or the module's
-`initializeDatabase()`) against the target Postgres before deploying new code.
+**Migration flow:** the service ships no migration runner or `migrate` script —
+the Drizzle schema in `services/content-agency/src/schema/content-agency.ts` is
+the source of truth, and the tables must already exist in the target Postgres
+before the module's `initializeDatabase()` connects (it opens the pool and wraps
+the schema, but runs no DDL).
 
 ## 5. Validation Gates (must be green before a client goes live)
 
@@ -78,14 +81,14 @@ bash scripts/run-a11y.sh   # accessibility audit
 
 ## 6. Operating the Agency
 
-| Task                 | How                                                           |
-| -------------------- | ------------------------------------------------------------- |
-| Start Postgres/Redis | `docker compose up -d postgres redis`                         |
-| Run API gateway      | `npm run dev -w services/api` (or the service entry)          |
-| Run web app          | `npm run dev -w apps/web`                                     |
-| Observability        | Prometheus + Grafana via the `observability` compose profile  |
-| Metrics              | AI cost/tokens/latency, per-module latency, process gauges    |
-| Mobile (Android)     | `npm run mobile:build:debug` (Capacitor) — see `docs/mobile/` |
+| Task                 | How                                                                       |
+| -------------------- | ------------------------------------------------------------------------- |
+| Start Postgres/Redis | `docker compose up -d postgres redis`                                     |
+| Run API gateway      | `npm run dev -w services/api` (or the service entry)                      |
+| Run web app          | `npm run dev -w apps/web`                                                 |
+| Observability        | Prometheus + Grafana via the `observability` compose profile              |
+| Metrics              | AI cost/tokens/latency, per-module latency, process gauges                |
+| Mobile (Android)     | `npm run mobile:build:debug -w apps/web` (Capacitor) — see `docs/mobile/` |
 
 ## 7. Security Notes
 

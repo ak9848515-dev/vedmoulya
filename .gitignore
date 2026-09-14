@@ -77,7 +77,10 @@ tmp/
 _covgate.bat
 _fmt3.bat
 test.txt
-services/*/coverage-analyze.mjs
+# Local scratch: ad-hoc coverage branch analyzer, regenerated per workspace on
+# demand. Ignored everywhere (the services/*-only pattern let one get committed
+# under packages/knowledge-intelligence).
+**/coverage-analyze.mjs
 
 # Mobile (RD-001) — build output & signing material
 apps/web/out/
