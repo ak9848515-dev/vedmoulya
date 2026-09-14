@@ -32,3 +32,10 @@ delete process.env.FF_AI_ASSISTANT_ENABLED;
 delete process.env.FF_SOCIAL_LOGIN_ENABLED;
 // Platform version for the health/version endpoints and runtime info.
 process.env.APP_VERSION = '1.0.0';
+
+// Suppress verbose logging in tests. The logger defaults to 'debug' level
+// which writes every info/debug/trace call to stderr as JSON. Tests that
+// exercise logging-heavy code paths (e.g. orchestration-fabric) produce
+// enough output to stall CI. Setting LOG_LEVEL=error keeps only errors
+// visible while still allowing tests to assert error behaviour.
+process.env.LOG_LEVEL = 'error';
