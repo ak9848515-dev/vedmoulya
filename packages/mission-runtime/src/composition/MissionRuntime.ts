@@ -239,7 +239,7 @@ export function buildMissionRuntimeComponents(
   // memory. Runtime-truth tool availability is supplied by the governed
   // registry so memory can never recommend an unavailable tool.
   const learning = new MissionLearningRetrievalAdapter(memory, {
-    availableTools: () => toolRegistry.list().map((t) => t.name),
+    availableTools: (): string[] => toolRegistry.list().map((t) => t.name),
   });
 
   // ── Mission ports over the real estate ──

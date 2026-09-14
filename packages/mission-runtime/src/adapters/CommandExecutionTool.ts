@@ -198,7 +198,7 @@ export async function runGovernedProcess(
   // Remove timedOut flag; timeout will set exitCode to 124 directly
   // const timedOut = false; // removed
 
-  let exitCode: number | null = null;
+  let exitCode = 1;
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
   const stdoutCap = { size: 0, truncated: false };
@@ -247,7 +247,7 @@ export async function runGovernedProcess(
     settled?.();
   });
   child.on('exit', (code: number | null): void => {
-    exitCode = code;
+    exitCode = code ?? 1;
     settled?.();
   });
 
@@ -270,7 +270,7 @@ export async function runGovernedProcess(
   const outBuf = Buffer.concat(stdout);
   const errBuf = Buffer.concat(stderr);
   // Determine final exit code (fallback to 1 if not set)
-  const finalExitCode: number = exitCode ?? 1;
+  const finalExitCode: number = exitCode;
   // Determine success based on final exit code
   const success = finalExitCode === 0;
   // Determine timedOut flag from final exit code
