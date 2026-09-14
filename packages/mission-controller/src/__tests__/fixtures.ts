@@ -36,14 +36,16 @@ export function createTestPlan(overrides?: Partial<AgentPlan>): AgentPlan {
     steps: [
       {
         stepId: 'step_1',
-        order: 0,
-        action: { type: 'tool_call', tool: 'read_file', arguments: { path: 'test.ts' } },
-        verification: { type: 'tool_success' },
+        objective: 'Test step',
+        actions: [
+          { actionId: 'action_1', kind: 'tool', toolName: 'read_file', arguments: { path: 'test.ts' } },
+        ],
+        allowedTools: [],
         dependencies: [],
       },
     ],
-    verification: { type: 'all_steps_succeed' },
-    requiredCapabilities: ['coding'],
+    finalVerification: { kind: 'rule', description: 'All steps must succeed', checks: [] },
+
     estimatedCost: 0.01,
     ...overrides,
   };

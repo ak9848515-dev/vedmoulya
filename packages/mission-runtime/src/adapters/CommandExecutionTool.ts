@@ -269,8 +269,8 @@ export async function runGovernedProcess(
 
   const outBuf = Buffer.concat(stdout);
   const errBuf = Buffer.concat(stderr);
-  // Determine final exit code (exitCode should always be set at this point)
-  const finalExitCode = exitCode as number;
+  // Determine final exit code (fallback to 1 if not set)
+  const finalExitCode: number = exitCode ?? 1;
   // Determine success based on final exit code
   const success = finalExitCode === 0;
   // Determine timedOut flag from final exit code
