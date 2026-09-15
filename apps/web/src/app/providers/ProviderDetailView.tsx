@@ -11,6 +11,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { isSimpleProviderPreset, providerPreset } from '@vedmoulya/shared';
 import { Loading, Switch, EmptyState } from '@vedmoulya/ui';
 import {
   Cpu,
@@ -27,6 +28,8 @@ import {
   CircleDollarSign,
   ShieldCheck,
   Activity,
+  Settings2,
+  ChevronLeft,
 } from 'lucide-react';
 import {
   useProvider,
@@ -37,6 +40,7 @@ import {
   useSetProviderPreferences,
 } from '../../lib/api-client.js';
 import { ModelSelector, type ModelOption } from './ModelSelector.js';
+import { SimpleProviderConfig } from './SimpleProviderConfig.js';
 
 // ── Lifecycle status presentation (never colour-only) ────────────────────────
 
@@ -205,6 +209,13 @@ export function ProviderDetailView({
   const setEnabledMutation = useSetProviderEnabled();
   const setPrefsMutation = useSetProviderPreferences();
   const [refreshing, setRefreshing] = useState(false);
+  // FINAL-02 — Simple / Advanced mode toggle for known preset providers.
+  // Simple mode is the default for google/openai/anthropic/deepseek/ollama;
+  // Advanced (the existing detail sections) is always reachable via toggle.
+  const canUseSimple =
+    isSimpleProviderPreset(provider?.family ?? providerId) &&
+    providerPreset(provider?.family ?? providerId).simpleModeSupported;
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Enabled by default — a provider is ON until the user explicitly disables
   // it (matches the main providers screen's experience view).
@@ -357,240 +368,282 @@ export function ProviderDetailView({
         </div>
       </div>
 
-      {/* Connection + selected model */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
-            Connection status
-          </span>
-          <div className="mt-2 flex items-center gap-2">
-            <span
-              className={`w-2 h-2 rounded-full ${provider.health.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}`}
-            />
-            <span className="text-[14px] font-medium text-[#111827] dark:text-[#F8FAFC] capitalize">
-              {provider.health.status}
-            </span>
-            <span className="text-[12px] text-[#94A3B8]">
-              · {Math.round(provider.health.healthScore * 100)}% health
-            </span>
-          </div>
+      {/* ── FINAL-02: Simple mode (default for preset providers) ───────────── */}
+      {canUseSimple && !showAdvanced ? (
+        <div className="space-y-4">
+          <SimpleProviderConfig
+            userId={userId}
+            presetId={provider.family}
+            variant="panel"
+            onConfigured={() => {
+              void refetchStatus();
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setShowAdvanced(true);
+            }}
+            className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            Advanced configuration
+          </button>
         </div>
-        <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
-            Selected model
-          </span>
-          <div className="mt-2">
-            <ModelSelector
-              models={models}
-              selectedModelId={selectedModelId}
-              onSelect={(modelId) => {
-                void handleModelSelect(modelId);
-              }}
-              providerName={provider.name}
-              enabled={enabled}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Intelligence verification + last verified + refresh */}
-      <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4">
-        <div className="flex flex-col md:flex-row md:items-center gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <Brain className="h-4 w-4 text-[#2B5FD9] shrink-0" />
-            <span className="text-[13px] font-semibold text-[#374151] dark:text-[#E2E8F0]">
-              Model intelligence
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-[12px] text-[#64748B] dark:text-[#94A3B8] md:ml-auto flex-wrap">
-            <span className="inline-flex items-center gap-1.5">
-              <Gauge className="h-3.5 w-3.5" />
-              Verified {timeAgo(staleness.lastVerifiedAt)}
-              {staleness.isStale && (
-                <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Update available
-                </span>
-              )}
-            </span>
+      ) : (
+        <>
+          {canUseSimple ? (
             <button
+              type="button"
               onClick={() => {
-                void handleRefresh();
+                setShowAdvanced(false);
               }}
-              disabled={refreshing}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EFF4FE] dark:bg-[#1E3A8A]/40 text-[12px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:bg-[#DFEAFD] dark:hover:bg-[#1E3A8A]/70 transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              {refreshing ? 'Updating...' : 'Update intelligence'}
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Back to Simple mode
             </button>
-          </div>
-        </div>
-        <p className={`mt-2 text-[12px] ${verification.tone}`}>{verification.description}</p>
-        {!status.record.discovery.discovered && (
-          <p className="mt-1 text-[11px] text-[#94A3B8]">{status.record.discovery.message}</p>
-        )}
-        {status.record.delta.addedModels.length > 0 && (
-          <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
-            {status.record.delta.addedModels.length} new model(s) discovered on the last refresh.
-          </p>
-        )}
-        {status.record.delta.removedModels.length > 0 && (
-          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-            {status.record.delta.removedModels.length} model(s) no longer listed — marked
-            unavailable, your selection is preserved.
-          </p>
-        )}
-      </div>
-
-      {/* Models */}
-      <DisclosureSection
-        title="Models & capabilities"
-        icon={<Database className="h-4 w-4 text-[#2B5FD9]" />}
-        defaultOpen
-      >
-        <div className="space-y-2">
-          {profile.models.map((m) => {
-            const lifecycle = lifecycleConfig(m.lifecycleStatus.value ?? 'unknown');
-            return (
-              <div
-                key={m.modelId}
-                className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 px-3 py-2.5 rounded-lg bg-[#F8FAFC] dark:bg-[#0F172A]"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-medium text-[#111827] dark:text-[#F8FAFC] truncate">
-                      {m.name}
-                    </span>
-                    <span className="inline-flex items-center gap-1.5 text-[11px]">
-                      <span className={`w-1.5 h-1.5 rounded-full ${lifecycle.dot}`} />
-                      <span className={lifecycle.text}>{lifecycle.label}</span>
-                    </span>
-                  </div>
-                  {(m.capabilities.value?.length ?? 0) > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {(m.capabilities.value ?? []).slice(0, 5).map((cap) => (
-                        <span
-                          key={cap}
-                          className="px-1.5 py-0.5 rounded bg-[#EFF4FE] dark:bg-[#1E3A8A]/40 text-[10px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF]"
-                        >
-                          {cap}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-4 text-[11px] text-[#64748B] dark:text-[#94A3B8] md:shrink-0">
-                  <span title="Context window">Context {fmtTokens(m.contextWindow.value)}</span>
-                  <span title="Max output">Out {fmtTokens(m.maxOutputTokens.value)}</span>
-                  <span title="Input price per 1M tokens">
-                    ${m.priceInputPer1M.value?.toFixed(2) ?? '—'}/1M in
-                  </span>
-                  <span title="Output price per 1M tokens">
-                    ${m.priceOutputPer1M.value?.toFixed(2) ?? '—'}/1M out
-                  </span>
-                </div>
+          ) : null}
+          {/* Connection + selected model */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
+                Connection status
+              </span>
+              <div className="mt-2 flex items-center gap-2">
+                <span
+                  className={`w-2 h-2 rounded-full ${provider.health.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                />
+                <span className="text-[14px] font-medium text-[#111827] dark:text-[#F8FAFC] capitalize">
+                  {provider.health.status}
+                </span>
+                <span className="text-[12px] text-[#94A3B8]">
+                  · {Math.round(provider.health.healthScore * 100)}% health
+                </span>
               </div>
-            );
-          })}
-          {profile.models.length === 0 && (
-            <EmptyState
-              icon={<Database className="h-8 w-8" />}
-              title="No models discovered"
-              description="Run “Update intelligence” after connecting the provider."
-            />
-          )}
-        </div>
-      </DisclosureSection>
+            </div>
+            <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
+                Selected model
+              </span>
+              <div className="mt-2">
+                <ModelSelector
+                  models={models}
+                  selectedModelId={selectedModelId}
+                  onSelect={(modelId) => {
+                    void handleModelSelect(modelId);
+                  }}
+                  providerName={provider.name}
+                  enabled={enabled}
+                />
+              </div>
+            </div>
+          </div>
 
-      {/* Usage & quota */}
-      <DisclosureSection
-        title="Usage & quota"
-        icon={<Activity className="h-4 w-4 text-[#2B5FD9]" />}
-      >
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
-          <div>
-            <span className="text-[#94A3B8]">Quota used</span>
-            <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-              {provider.health.quotaUsedPercent}%
-            </p>
+          {/* Intelligence verification + last verified + refresh */}
+          <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4">
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Brain className="h-4 w-4 text-[#2B5FD9] shrink-0" />
+                <span className="text-[13px] font-semibold text-[#374151] dark:text-[#E2E8F0]">
+                  Model intelligence
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-[12px] text-[#64748B] dark:text-[#94A3B8] md:ml-auto flex-wrap">
+                <span className="inline-flex items-center gap-1.5">
+                  <Gauge className="h-3.5 w-3.5" />
+                  Verified {timeAgo(staleness.lastVerifiedAt)}
+                  {staleness.isStale && (
+                    <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Update available
+                    </span>
+                  )}
+                </span>
+                <button
+                  onClick={() => {
+                    void handleRefresh();
+                  }}
+                  disabled={refreshing}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EFF4FE] dark:bg-[#1E3A8A]/40 text-[12px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:bg-[#DFEAFD] dark:hover:bg-[#1E3A8A]/70 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                  {refreshing ? 'Updating...' : 'Update intelligence'}
+                </button>
+              </div>
+            </div>
+            <p className={`mt-2 text-[12px] ${verification.tone}`}>{verification.description}</p>
+            {!status.record.discovery.discovered && (
+              <p className="mt-1 text-[11px] text-[#94A3B8]">{status.record.discovery.message}</p>
+            )}
+            {status.record.delta.addedModels.length > 0 && (
+              <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                {status.record.delta.addedModels.length} new model(s) discovered on the last
+                refresh.
+              </p>
+            )}
+            {status.record.delta.removedModels.length > 0 && (
+              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                {status.record.delta.removedModels.length} model(s) no longer listed — marked
+                unavailable, your selection is preserved.
+              </p>
+            )}
           </div>
-          <div>
-            <span className="text-[#94A3B8]">Requests / min</span>
-            <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-              {provider.requestsPerMinute}
-            </p>
-          </div>
-          <div>
-            <span className="text-[#94A3B8]">Tokens / min</span>
-            <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-              {fmtTokens(provider.tokensPerMinute)}
-            </p>
-          </div>
-          <div>
-            <span className="text-[#94A3B8]">Rate limit remaining</span>
-            <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-              {provider.health.rateLimitRemaining}
-            </p>
-          </div>
-        </div>
-      </DisclosureSection>
 
-      {/* Pricing & limits */}
-      <DisclosureSection
-        title="Pricing & limits"
-        icon={<CircleDollarSign className="h-4 w-4 text-[#2B5FD9]" />}
-      >
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
-          <div>
-            <span className="text-[#94A3B8]">Input / 1M tokens</span>
-            <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-              ${provider.inputPerMillionTokens.toFixed(2)}
-            </p>
-          </div>
-          <div>
-            <span className="text-[#94A3B8]">Output / 1M tokens</span>
-            <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-              ${provider.outputPerMillionTokens.toFixed(2)}
-            </p>
-          </div>
-          <div>
-            <span className="text-[#94A3B8]">P95 latency</span>
-            <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">{provider.p95Ms} ms</p>
-          </div>
-          <div>
-            <span className="text-[#94A3B8]">Availability</span>
-            <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-              {(provider.availability * 100).toFixed(1)}%
-            </p>
-          </div>
-        </div>
-      </DisclosureSection>
+          {/* Models */}
+          <DisclosureSection
+            title="Models & capabilities"
+            icon={<Database className="h-4 w-4 text-[#2B5FD9]" />}
+            defaultOpen
+          >
+            <div className="space-y-2">
+              {profile.models.map((m) => {
+                const lifecycle = lifecycleConfig(m.lifecycleStatus.value ?? 'unknown');
+                return (
+                  <div
+                    key={m.modelId}
+                    className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 px-3 py-2.5 rounded-lg bg-[#F8FAFC] dark:bg-[#0F172A]"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] font-medium text-[#111827] dark:text-[#F8FAFC] truncate">
+                          {m.name}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 text-[11px]">
+                          <span className={`w-1.5 h-1.5 rounded-full ${lifecycle.dot}`} />
+                          <span className={lifecycle.text}>{lifecycle.label}</span>
+                        </span>
+                      </div>
+                      {(m.capabilities.value?.length ?? 0) > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(m.capabilities.value ?? []).slice(0, 5).map((cap) => (
+                            <span
+                              key={cap}
+                              className="px-1.5 py-0.5 rounded bg-[#EFF4FE] dark:bg-[#1E3A8A]/40 text-[10px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF]"
+                            >
+                              {cap}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4 text-[11px] text-[#64748B] dark:text-[#94A3B8] md:shrink-0">
+                      <span title="Context window">Context {fmtTokens(m.contextWindow.value)}</span>
+                      <span title="Max output">Out {fmtTokens(m.maxOutputTokens.value)}</span>
+                      <span title="Input price per 1M tokens">
+                        ${m.priceInputPer1M.value?.toFixed(2) ?? '—'}/1M in
+                      </span>
+                      <span title="Output price per 1M tokens">
+                        ${m.priceOutputPer1M.value?.toFixed(2) ?? '—'}/1M out
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+              {profile.models.length === 0 && (
+                <EmptyState
+                  icon={<Database className="h-8 w-8" />}
+                  title="No models discovered"
+                  description="Run “Update intelligence” after connecting the provider."
+                />
+              )}
+            </div>
+          </DisclosureSection>
 
-      {/* Diagnostics (provenance — only when requested) */}
-      <DisclosureSection
-        title="Advanced diagnostics"
-        icon={<Activity className="h-4 w-4 text-[#94A3B8]" />}
-      >
-        <div className="space-y-3 text-[12px]">
-          <div>
-            <span className="text-[#94A3B8]">Derived from</span>
-            <p className="text-[#374151] dark:text-[#E2E8F0]">{profile.derivedFrom}</p>
-          </div>
-          <div>
-            <span className="text-[#94A3B8]">Coverage</span>
-            <p className="text-[#374151] dark:text-[#E2E8F0]">
-              {profile.coverage.knownPropertyCount} known · {profile.coverage.unknownPropertyCount}{' '}
-              unknown across {profile.coverage.modelCount} models
-            </p>
-          </div>
-          <div>
-            <span className="text-[#94A3B8]">Refresh policy</span>
-            <p className="text-[#374151] dark:text-[#E2E8F0]">
-              Stale after {Math.round(status.record.refreshPolicy.maxAgeMs / 3_600_000)} hours
-            </p>
-          </div>
-        </div>
-      </DisclosureSection>
+          {/* Usage & quota */}
+          <DisclosureSection
+            title="Usage & quota"
+            icon={<Activity className="h-4 w-4 text-[#2B5FD9]" />}
+          >
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
+              <div>
+                <span className="text-[#94A3B8]">Quota used</span>
+                <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
+                  {provider.health.quotaUsedPercent}%
+                </p>
+              </div>
+              <div>
+                <span className="text-[#94A3B8]">Requests / min</span>
+                <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
+                  {provider.requestsPerMinute}
+                </p>
+              </div>
+              <div>
+                <span className="text-[#94A3B8]">Tokens / min</span>
+                <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
+                  {fmtTokens(provider.tokensPerMinute)}
+                </p>
+              </div>
+              <div>
+                <span className="text-[#94A3B8]">Rate limit remaining</span>
+                <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
+                  {provider.health.rateLimitRemaining}
+                </p>
+              </div>
+            </div>
+          </DisclosureSection>
+
+          {/* Pricing & limits */}
+          <DisclosureSection
+            title="Pricing & limits"
+            icon={<CircleDollarSign className="h-4 w-4 text-[#2B5FD9]" />}
+          >
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
+              <div>
+                <span className="text-[#94A3B8]">Input / 1M tokens</span>
+                <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
+                  ${provider.inputPerMillionTokens.toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <span className="text-[#94A3B8]">Output / 1M tokens</span>
+                <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
+                  ${provider.outputPerMillionTokens.toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <span className="text-[#94A3B8]">P95 latency</span>
+                <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
+                  {provider.p95Ms} ms
+                </p>
+              </div>
+              <div>
+                <span className="text-[#94A3B8]">Availability</span>
+                <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
+                  {(provider.availability * 100).toFixed(1)}%
+                </p>
+              </div>
+            </div>
+          </DisclosureSection>
+
+          {/* Diagnostics (provenance — only when requested) */}
+          <DisclosureSection
+            title="Advanced diagnostics"
+            icon={<Activity className="h-4 w-4 text-[#94A3B8]" />}
+          >
+            <div className="space-y-3 text-[12px]">
+              <div>
+                <span className="text-[#94A3B8]">Derived from</span>
+                <p className="text-[#374151] dark:text-[#E2E8F0]">{profile.derivedFrom}</p>
+              </div>
+              <div>
+                <span className="text-[#94A3B8]">Coverage</span>
+                <p className="text-[#374151] dark:text-[#E2E8F0]">
+                  {profile.coverage.knownPropertyCount} known ·{' '}
+                  {profile.coverage.unknownPropertyCount} unknown across{' '}
+                  {profile.coverage.modelCount} models
+                </p>
+              </div>
+              <div>
+                <span className="text-[#94A3B8]">Refresh policy</span>
+                <p className="text-[#374151] dark:text-[#E2E8F0]">
+                  Stale after {Math.round(status.record.refreshPolicy.maxAgeMs / 3_600_000)} hours
+                </p>
+              </div>
+            </div>
+          </DisclosureSection>
+        </>
+      )}
     </div>
   );
 }

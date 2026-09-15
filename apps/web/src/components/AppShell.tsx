@@ -98,6 +98,14 @@ const OllamaFirstRunDialog = dynamic(
   },
 );
 
+const GeminiFirstRunDialog = dynamic(
+  () => import('./GeminiFirstRunDialog.js').then((mod) => ({ default: mod.GeminiFirstRunDialog })),
+  {
+    ssr: false,
+    loading: () => null,
+  },
+);
+
 // ── Module Icon Map ─────────────────────────────────────────────────────────
 
 const moduleIcons: Record<string, React.ReactNode> = {
@@ -465,6 +473,8 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
 
       {/* ── First-run "Your Private AI Option" prompt (SPRINT-048) ── */}
       <OllamaFirstRunDialog />
+      {/* ── First-login Gemini connect prompt (FINAL-02) ─────────────── */}
+      <GeminiFirstRunDialog />
 
       {/* ── Command Palette ──────────────────────────────────────────── */}
       <CommandPalette />

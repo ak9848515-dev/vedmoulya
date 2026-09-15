@@ -610,6 +610,68 @@ export function useSetProviderEnabled() {
   return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
 }
 
+// ── FINAL-02 — Friendly provider connect (Simple mode / first-login) ────────
+// Family-aware connection test + real model discovery. The API key is used
+// for the server-side probe ONLY — never persisted, never logged, never
+// echoed back (the response carries no secret material). mutateAsync returns
+// the unwrapped ProviderConnectionResultDTO (envelope stripped, business
+// failures thrown) so Simple mode can consume the typed result directly.
+
+export interface DiscoveredProviderModelDTO {
+  id: string;
+  name: string;
+}
+
+export interface ProviderConnectionResultDTO {
+  connected: boolean;
+  status: 'connected' | 'failed';
+  message: string;
+  errorKind?:
+    | 'invalid_api_key'
+    | 'unauthorized'
+    | 'unreachable'
+    | 'rate_limited'
+    | 'unavailable'
+    | 'not_found'
+    | 'bad_request'
+    | 'no_credential';
+  latencyMs?: number;
+  modelCount?: number;
+  models?: DiscoveredProviderModelDTO[];
+  testedAt: string;
+  serverManagedKey: boolean;
+  runtimeConfigured: boolean;
+  runtimeNote?: string;
+}
+
+export function useConnectProvider() {
+  const mutation = api.providers.connectProvider.useMutation();
+  return {
+    ...mutation,
+    data: unwrap<ProviderConnectionResultDTO>(mutation.data),
+    mutateAsync: async (input: {
+      userId: string;
+      family: string;
+      endpointUrl?: string;
+      apiKey?: string;
+    }): Promise<ProviderConnectionResultDTO> => {
+      // guardMutation throws on the gateway's `{ success: false }` envelope;
+      // on success the envelope's `data` IS the connection result.
+      const envelope = (await mutation.mutateAsync(input)) as {
+        success?: boolean;
+        error?: { message?: string } | null;
+        data?: unknown;
+      };
+      if (envelope.success === false) {
+        throw new Error(envelope.error?.message ?? 'Connection test failed');
+      }
+      const result = unwrap<ProviderConnectionResultDTO>(envelope);
+      if (!result) throw new Error('Connection test failed');
+      return result;
+    },
+  };
+}
+
 export function useProviderUsageDetail(userId: string) {
   const q = api.providers.getUsageDetail.useQuery({ userId }, { enabled: Boolean(userId) });
   return { ...q, data: unwrap<ProviderUsageDetailDTO>(q.data) };

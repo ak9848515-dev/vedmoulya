@@ -287,6 +287,51 @@ describe('AuthService', () => {
       expect(repo.save).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
     });
+
+    it('FIRST LOGIN (PATH B): auto-registers a verified brand-new Google user, links the identity and returns a session', async () => {
+      const repo = makeRepository();
+      // No existing identity by google id or email → the first-login signup path.
+      repo.findByEmail.mockResolvedValue(null);
+      const service = createService(repo);
+      stubGoogleProfile({
+        id: 'g-first-1',
+        email: 'brand.new@example.com',
+        verified_email: true,
+        name: 'Brand New',
+        given_name: 'Brand',
+        family_name: 'New',
+      });
+
+      const result = await service.signInWithGoogle('good-code');
+
+      // The first login SUCCEEDED and produced a session for the new user.
+      expect(result.success).toBe(true);
+      expect(typeof result.session?.userId).toBe('string');
+      expect(result.session?.userId.length).toBeGreaterThan(0);
+
+      // Exactly ONE user was persisted — the Google-first signup.
+      expect(repo.save).toHaveBeenCalledTimes(1);
+      const savedUser = repo.save.mock.calls[0][0] as {
+        id: string;
+        email: { value?: string };
+        profile: { givenName?: string; familyName?: string };
+        status: { emailVerified: boolean };
+        googleId?: string;
+      };
+      // The session belongs to the freshly created identity.
+      expect(savedUser.id).toBe(result.session?.userId);
+      expect(savedUser.email.value).toBe('brand.new@example.com');
+      expect(savedUser.profile.givenName).toBe('Brand');
+      expect(savedUser.profile.familyName).toBe('New');
+      // Google-first users are email-verified by the verified Google profile
+      // and carry the linked Google identity.
+      expect(savedUser.status.emailVerified).toBe(true);
+      expect(savedUser.googleId).toBe('g-first-1');
+
+      // The login event is published for the newly created identity.
+      expect(mockPublishLoggedIn).toHaveBeenCalledWith(result.session?.userId);
+      vi.unstubAllGlobals();
+    });
   });
 
   describe('verifySession / refreshSession', () => {

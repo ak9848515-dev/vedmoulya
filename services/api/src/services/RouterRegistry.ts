@@ -527,6 +527,16 @@ const providerSetEnabledInput = z.object({
   enabled: z.boolean(),
 });
 
+// FINAL-02 — family-aware connection test + model discovery (friendly
+// provider UX). The optional API key is used for the server-side probe ONLY
+// (never persisted, never logged); server-managed Gemini omits it.
+const providerConnectInput = z.object({
+  userId: z.string().min(1),
+  family: z.enum(['google', 'openai', 'anthropic', 'deepseek', 'ollama', 'openai-compatible']),
+  endpointUrl: z.string().max(2000).optional(),
+  apiKey: z.string().max(4096).optional(),
+});
+
 const providerExplainSelectionInput = z.object({
   userId: z.string().min(1),
   capability: capabilityAIFeatureEnum,
@@ -3537,6 +3547,16 @@ export function createAppRouter(services: ApiApplicationService) {
         )
         .mutation(({ input, ctx }) =>
           createProvidersRouter(services.providers).testConnection(input, ctx),
+        ),
+
+      // FINAL-02 — family-aware connection test + real model discovery for
+      // the friendly provider UX (Simple mode / first-login Gemini). The
+      // optional API key is used for the server-side probe only — never
+      // persisted, never logged, never echoed back.
+      connectProvider: standardProcedure
+        .input(providerConnectInput)
+        .mutation(({ input, ctx }) =>
+          createProvidersRouter(services.providers).connectProvider(input, ctx),
         ),
 
       // EPIC-012A — Provider Experience (Phases 4–6 / 12–17): owner-scoped

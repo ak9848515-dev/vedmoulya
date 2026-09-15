@@ -58,6 +58,7 @@
     "@vedmoulya/orchestrator": "*",
     "@vedmoulya/proactive": "*",
     "@vedmoulya/providers": "*",
+    "@vedmoulya/shared": "*",
     "@vedmoulya/rag": "*",
     "@vedmoulya/requirements": "*",
     "@vedmoulya/ai": "*",

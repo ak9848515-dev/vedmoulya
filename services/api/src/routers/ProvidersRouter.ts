@@ -7,6 +7,10 @@
 import type { ProviderApplicationService } from '@vedmoulya/providers';
 import { readProviderRuntimeState, toRuntimeMode, validateDefaultProvider } from '@vedmoulya/core';
 import type { ProviderExperienceService } from '../services/ProviderExperienceService.js';
+import {
+  testProviderConnection,
+  type TestableProviderFamily,
+} from '../services/ProviderConnectionTester.js';
 import type { OpenAIOrgPeriod } from '../services/ProviderUsageIngestor.js';
 import type { TRPCContext } from '../router.js';
 import {
@@ -134,6 +138,18 @@ export interface ProvidersHandlers {
   // Reports per-family state (CONFIGURED / NOT_CONFIGURED / UNSUPPORTED_RUNTIME /
   // MOCK / DISABLED / ERROR) with key NAMES only — never secret values.
   getRuntimeStatus: (input: { userId: string }, _ctx: TRPCContext) => Promise<ApiResponse>;
+  // FINAL-02 — family-aware connection test + real model discovery for the
+  // friendly provider UX (Simple mode / first-login Gemini). The API key is
+  // used for the probe only: never persisted, never logged, never echoed.
+  connectProvider: (
+    input: {
+      userId: string;
+      family: string;
+      endpointUrl?: string;
+      apiKey?: string;
+    },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
   // SPRINT-049 — test connection for custom providers.
   testConnection: (
     input: { userId: string; endpointUrl: string; apiKey: string; protocol: string },
@@ -332,11 +348,37 @@ export function createProvidersRouter(
         ),
       ),
 
+    // FINAL-02 — family-aware connection test + real model discovery for the
+    // friendly provider UX (Simple mode / first-login Gemini connect). The
+    // user-supplied API key is used for THIS probe only: it is never
+    // persisted, never logged, and never echoed back. Server-managed Gemini
+    // (no apiKey in input) uses THIS deployment's AI_GOOGLE_API_KEY key NAME
+    // only — the response carries no secret material.
+    connectProvider: async (input, _ctx): Promise<ApiResponse> => {
+      const family = input.family as TestableProviderFamily;
+      const result = await testProviderConnection({
+        family,
+        apiKey: input.apiKey || undefined,
+        endpointUrl: input.endpointUrl || undefined,
+      });
+      return successResponse(result);
+    },
+
     // SPRINT-049 — test connection for custom providers.
     // Attempts a lightweight request to the endpoint to verify reachability
     // and authentication. SECURITY: API key is server-side only.
+    // FINAL-02 — the `google-gemini` protocol is delegated to the family-aware
+    // tester (Gemini authenticates with an x-goog-api-key header, NOT a
+    // Bearer token, and exposes real model discovery via v1beta/models).
     testConnection: async (input, _ctx): Promise<ApiResponse> => {
       const { endpointUrl, apiKey, protocol } = input;
+      if (protocol === 'google-gemini') {
+        const result = await testProviderConnection({
+          family: 'google',
+          apiKey: apiKey || undefined,
+        });
+        return successResponse(result);
+      }
       if (!endpointUrl || !apiKey) {
         return successResponse({
           connected: false,
