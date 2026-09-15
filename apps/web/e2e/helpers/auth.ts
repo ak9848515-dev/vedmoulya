@@ -74,10 +74,20 @@ export async function injectSession(page: Page): Promise<void> {
       );
       // SPRINT-088B — pre-dismiss Ollama first-run prompt so the Radix Dialog
       // never opens and does not set aria-hidden on #main-content.
+      //
+      // FINAL-02 — also pre-dismiss the Gemini first-run dialog which uses
+      // the same Radix Dialog pattern. Without this, the Gemini dialog opens
+      // on first login, sets aria-hidden on #main-content, and hides ALL
+      // page headings from Playwright's accessibility tree — causing every
+      // getByRole('heading') assertion to fail.
       localStorage.setItem(
         'vedmoulya-first-run',
         JSON.stringify({
-          state: { ollamaPromptDismissed: true },
+          state: {
+            ollamaPromptDismissed: true,
+            geminiPromptDismissed: true,
+            geminiConnectDone: true,
+          },
           version: 0,
         }),
       );
