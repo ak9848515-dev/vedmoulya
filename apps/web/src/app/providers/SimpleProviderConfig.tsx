@@ -39,6 +39,7 @@ import {
   useSetProviderEnabled,
   useSetProviderPreferences,
   useProviderRuntimeStatus,
+  type ConnectProviderFamily,
   type ProviderConnectionResultDTO,
   type DiscoveredProviderModelDTO,
 } from '../../lib/api-client.js';
@@ -47,8 +48,8 @@ export interface SimpleProviderConfigProps {
   userId: string;
   /** Provider family id (google/openai/anthropic/deepseek/ollama). */
   presetId: string;
-  /** Called after Save & Enable succeeds. */
-  onConfigured?: () => void;
+  /** Called after Save & Enable succeeds. Receives the saved model name. */
+  onConfigured?: (modelName?: string) => void;
   /** Offered when Simple mode cannot configure this provider (custom). */
   onAdvanced?: () => void;
   /** Dialog embedding uses compact spacing. */
@@ -105,7 +106,7 @@ export function SimpleProviderConfig({
     try {
       const outcome: ProviderConnectionResultDTO = await connect.mutateAsync({
         userId,
-        family: preset.presetId,
+        family: preset.presetId as ConnectProviderFamily,
         ...(preset.presetId === 'google' && serverManagedAvailable && !useOwnKey
           ? {}
           : { apiKey: apiKey || undefined }),
@@ -144,7 +145,8 @@ export function SimpleProviderConfig({
         preferredModelId: modelId || null,
       });
       setSaveStage('done');
-      onConfigured?.();
+      const model = (result.models ?? []).find((m) => m.id === modelId);
+      onConfigured?.(model?.name ?? modelId);
     } catch (error) {
       setSaveStage('idle');
       setSaveError(error instanceof Error ? error.message : 'Unable to save the provider.');

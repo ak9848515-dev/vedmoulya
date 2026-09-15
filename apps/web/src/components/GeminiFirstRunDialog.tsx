@@ -32,6 +32,7 @@ export function GeminiFirstRunDialog(): React.JSX.Element {
   const dismiss = useFirstRunStore((s) => s.dismissGeminiPrompt);
   const markDone = useFirstRunStore((s) => s.markGeminiConnectDone);
   const [step, setStep] = useState<Step>('intro');
+  const [connectedModelName, setConnectedModelName] = useState<string | null>(null);
   // Local hide: closes the dialog for THIS mount once the user takes a
   // success action (persisted flags already cover future sessions).
   const [hidden, setHidden] = useState(false);
@@ -48,8 +49,9 @@ export function GeminiFirstRunDialog(): React.JSX.Element {
   // lands). Dismissing never blocks VedMoulya.
   const open = Boolean(user) && !hidden && (step === 'success' || (!dismissed && !connectDone));
 
-  const handleConfigured = (): void => {
+  const handleConfigured = (modelName?: string): void => {
     markDone();
+    setConnectedModelName(modelName ?? null);
     setStep('success');
   };
 
@@ -128,7 +130,7 @@ export function GeminiFirstRunDialog(): React.JSX.Element {
                 <button
                   type="button"
                   onClick={dismiss}
-                  className="inline-flex h-10 items-center rounded-[14px] border border-[#CBD5E1] px-4 text-[14px] font-medium text-[#374151] transition-colors hover:bg-[#F1F5F9] dark:border-[#334155] dark:text-[#E2E8F0] dark:hover:bg-[#0F172A]"
+                  className="inline-flex h-9 items-center rounded-[12px] px-3 text-[13px] font-medium text-[#94A3B8] transition-colors hover:text-[#64748B] dark:hover:text-[#CBD5E1]"
                 >
                   Not now
                 </button>
@@ -167,7 +169,7 @@ export function GeminiFirstRunDialog(): React.JSX.Element {
               <ul className="mt-4 space-y-2" data-testid="gemini-success-checklist">
                 {[
                   'Gemini connected',
-                  'Model detected',
+                  connectedModelName ? `Model detected: ${connectedModelName}` : 'Model detected',
                   'Provider enabled',
                   ...(runtimeConfigured ? ['Ready to use'] : []),
                 ].map((line) => (

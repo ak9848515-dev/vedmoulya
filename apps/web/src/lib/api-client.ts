@@ -644,6 +644,9 @@ export interface ProviderConnectionResultDTO {
   runtimeNote?: string;
 }
 
+export type ConnectProviderFamily =
+  'google' | 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'openai-compatible';
+
 export function useConnectProvider() {
   const mutation = api.providers.connectProvider.useMutation();
   return {
@@ -651,7 +654,7 @@ export function useConnectProvider() {
     data: unwrap<ProviderConnectionResultDTO>(mutation.data),
     mutateAsync: async (input: {
       userId: string;
-      family: string;
+      family: ConnectProviderFamily;
       endpointUrl?: string;
       apiKey?: string;
     }): Promise<ProviderConnectionResultDTO> => {
