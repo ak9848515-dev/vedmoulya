@@ -61,7 +61,12 @@ export {
 export { computePlanReadiness } from './domain/plan-readiness.js';
 export type { ReadinessPorts } from './domain/plan-readiness.js';
 export { READINESS_BLOCK_CODES } from './domain/plan-readiness.js';
-export { PLAN_TEMPLATES, selectTemplate } from './domain/planner-templates.js';
+export {
+  COMMAND_TOOL_NAME,
+  PLAN_TEMPLATES,
+  extractRepositoryFixTarget,
+  selectTemplate,
+} from './domain/planner-templates.js';
 export type { PlanTemplate } from './domain/planner-templates.js';
 export {
   parsePlanProposal,

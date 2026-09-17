@@ -4,10 +4,17 @@
 import { describe, expect, it } from 'vitest';
 import { ExecutionMemoryService } from '../application/ExecutionMemoryService.js';
 import { InMemoryExecutionMemoryStore } from '../infrastructure/InMemoryExecutionMemoryStore.js';
-import { MemoryIntelligenceStoreAdapter } from '../infrastructure/MemoryIntelligenceStoreAdapter.js';
+import {
+  MemoryIntelligenceStoreAdapter,
+  fromMemoryItem,
+  memoryItemIdFor,
+  toMemoryItem,
+} from '../infrastructure/MemoryIntelligenceStoreAdapter.js';
 import { InMemoryMemoryRepository } from '@vedmoulya/memory-intelligence';
 import { makeCompletedRun, makeMemoryService } from './fixtures.js';
 import { extractExecutionRecords } from '../domain/execution-record.js';
+import { buildEvidenceBlock } from '../domain/memory-retrieval.js';
+import type { MemoryEntry } from '../types/execution-memory-types.js';
 
 describe('ingest — the learning cycle', () => {
   it('ingests a completed run: records → signals → validated entries persisted', async () => {
@@ -457,5 +464,236 @@ describe('observability hooks', () => {
     // Sanitization is guaranteed by the frozen sanitizer — no secrets flow
     // through the hook either.
     void extractExecutionRecords;
+  });
+});
+
+describe('storage discipline — guards, filters, adapter mapping', () => {
+  function entry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+    return {
+      entryId: 'mem-x',
+      fingerprint: 'TOOL_RELIABILITY|TOOL|test-runner|rate|-|-',
+      category: 'TOOL_RELIABILITY',
+      scope: 'TOOL',
+      subject: 'test-runner',
+      predicate: 'verified_success_rate',
+      value: 1,
+      sampleCount: 2,
+      successCount: 2,
+      failureCount: 0,
+      verifiedCount: 2,
+      evidence: { executionIds: ['ex-1'], evidenceCount: 1 },
+      confidence: { score: 0.8, level: 'HIGH', factors: ['evidence'] },
+      recency: 1,
+      provenance: {
+        executionIds: ['ex-1'],
+        sourceType: 'execution',
+        lastExecutionId: 'ex-1',
+      },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('rejects a whitespace-only preference (a preference must carry content)', async () => {
+    const { service } = makeMemoryService();
+    await expect(
+      service.recordUserPreference({
+        userId: 'user-1',
+        subject: '   ',
+        value: 'docx',
+        source: 'user-request',
+      }),
+    ).rejects.toThrow('non-empty');
+  });
+
+  it('capability-scoped tool evidence loses to current runtime capability truth', async () => {
+    const { service } = makeMemoryService();
+    const { run, traces } = makeCompletedRun({
+      outcome: 'ACHIEVED',
+      actionTraces: [
+        { stepId: 'step-1', toolName: 'test-runner', status: 'succeeded', verdict: 'VERIFIED' },
+      ],
+    });
+    await service.ingestRun(run, traces, { knownTools: ['test-runner'] });
+
+    // The learned evidence is capability-scoped (reasoning); if that
+    // capability is not currently available the evidence cannot influence.
+    const dropped = await service.retrieve(
+      { tools: ['test-runner'], limit: 10 },
+      { availableCapabilities: ['coding'] },
+    );
+    expect(dropped.every((e) => e.category !== 'TOOL_RELIABILITY')).toBe(true);
+    const kept = await service.retrieve(
+      { tools: ['test-runner'], limit: 10 },
+      { availableCapabilities: ['reasoning'] },
+    );
+    expect(kept.some((e) => e.category === 'TOOL_RELIABILITY')).toBe(true);
+  });
+
+  it('store-level list filters are honored exactly', async () => {
+    const store = new InMemoryExecutionMemoryStore();
+    const service = new ExecutionMemoryService({ store });
+    await service.recordUserPreference({
+      userId: 'user-1',
+      subject: 'theme',
+      value: 'dark',
+      source: 'user-request',
+    });
+    const { run, traces } = makeCompletedRun({
+      outcome: 'ACHIEVED',
+      actionTraces: [
+        { stepId: 'step-1', toolName: 'test-runner', status: 'succeeded', verdict: 'VERIFIED' },
+      ],
+    });
+    await service.ingestRun(run, traces, { knownTools: ['test-runner'] });
+
+    expect((await store.list({ userId: 'user-1' })).every((e) => e.userId === 'user-1')).toBe(true);
+    expect(await store.list({ userId: 'user-2' })).toHaveLength(0);
+    expect(await store.list({ category: 'TOOL_RELIABILITY' })).toHaveLength(1);
+    expect((await store.list({ scope: 'USER' })).map((e) => e.category)).toEqual([
+      'USER_PREFERENCE',
+    ]);
+    expect((await store.list({ subject: 'test-runner' })).map((e) => e.subject)).toEqual([
+      'test-runner',
+    ]);
+    expect((await store.list({ capability: 'reasoning' })).map((e) => e.category)).toEqual([
+      'TOOL_RELIABILITY',
+    ]);
+    expect(await store.list({ capability: 'coding' })).toHaveLength(0);
+  });
+
+  it('relevance honors capability and model queries against learned evidence', async () => {
+    const { service } = makeMemoryService();
+    const { run, traces } = makeCompletedRun({
+      outcome: 'ACHIEVED',
+      actionTraces: [
+        { stepId: 'step-1', toolName: 'test-runner', status: 'succeeded', verdict: 'VERIFIED' },
+        { stepId: 'step-2', model: 'mock-1', status: 'succeeded', verdict: 'VERIFIED' },
+      ],
+    });
+    await service.ingestRun(run, traces, { knownTools: ['test-runner'] });
+
+    const byCapability = await service.retrieve({ capabilities: ['reasoning'], limit: 10 });
+    expect(byCapability.some((e) => e.category === 'TOOL_RELIABILITY')).toBe(true);
+
+    // Model-only evidence → MODEL-scoped routing signal addressed by model.
+    const byModel = await service.retrieve({ model: 'mock-1', limit: 10 });
+    const modelSignal = byModel.find((e) => e.category === 'ROUTING_SIGNAL');
+    expect(modelSignal?.subject).toBe('model:mock-1');
+    expect(modelSignal?.scope).toBe('MODEL');
+  });
+
+  it('persistence adapter: retention windows round-trip; unknown ids resolve to undefined', async () => {
+    const repository = new InMemoryMemoryRepository();
+    const store = new MemoryIntelligenceStoreAdapter(repository);
+    const windows: Array<[number | undefined, number | undefined]> = [
+      [undefined, undefined],
+      [1, 1],
+      [7, 7],
+      [30, 30],
+      [365, 365],
+    ];
+    for (const [days, expected] of windows) {
+      const e = entry({
+        entryId: `mem-${String(days ?? 'perm')}`,
+        fingerprint: `TOOL_RELIABILITY|TOOL|test-runner|rate|${String(days ?? 'perm')}|-`,
+        retentionDays: days,
+      });
+      await store.save(e);
+      const back = await store.getByFingerprint(e.fingerprint);
+      expect(back?.retentionDays).toBe(expected);
+    }
+    expect(await store.get('nope')).toBeUndefined();
+  });
+
+  it('persistence adapter: confidence bands and list filters are preserved', async () => {
+    const repository = new InMemoryMemoryRepository();
+    const store = new MemoryIntelligenceStoreAdapter(repository);
+    const bands: Array<[number, string]> = [
+      [0.8, 'HIGH'],
+      [0.6, 'MEDIUM'],
+      [0.4, 'LOW'],
+      [0.2, 'INSUFFICIENT'],
+    ];
+    for (const [score, level] of bands) {
+      const e = entry({
+        entryId: `mem-band-${String(score)}`,
+        fingerprint: `TOOL_RELIABILITY|TOOL|test-runner|rate|${String(score)}|-`,
+        confidence: { score, level: 'HIGH', factors: ['evidence'] },
+      });
+      await store.save(e);
+      // The adapter derives the persisted id from the aggregation fingerprint.
+      const back = await store.getByFingerprint(e.fingerprint);
+      // The reverse map derives the level from the score, never trusts the label.
+      expect(back?.confidence.level).toBe(level);
+    }
+
+    await store.save(
+      entry({
+        userId: 'user-1',
+        capability: 'reasoning',
+        subject: 'unique-subject',
+        fingerprint: 'TOOL_RELIABILITY|TOOL|unique-subject|rate|-|-',
+      }),
+    );
+    await store.save(
+      entry({
+        entryId: 'mem-route',
+        fingerprint: 'ROUTING_SIGNAL|PROVIDER|provider:mock|rate|-|-',
+        category: 'ROUTING_SIGNAL',
+        scope: 'PROVIDER',
+        subject: 'provider:mock',
+        capability: undefined,
+        userId: undefined,
+      }),
+    );
+    expect((await store.list({ userId: 'user-1' })).map((e) => e.subject)).toEqual([
+      'unique-subject',
+    ]);
+    expect((await store.list({ category: 'ROUTING_SIGNAL' })).map((e) => e.subject)).toEqual([
+      'provider:mock',
+    ]);
+    expect((await store.list({ scope: 'PROVIDER' })).map((e) => e.subject)).toEqual([
+      'provider:mock',
+    ]);
+    expect((await store.list({ subject: 'unique-subject' })).map((e) => e.category)).toEqual([
+      'TOOL_RELIABILITY',
+    ]);
+    expect((await store.list({ capability: 'reasoning' })).map((e) => e.userId)).toEqual([
+      'user-1',
+    ]);
+  });
+
+  it('derived persistence ids never collide on an empty fingerprint slug', () => {
+    expect(memoryItemIdFor({ fingerprint: '  --  ' })).toBe('xmem_entry');
+    expect(memoryItemIdFor({ fingerprint: 'TOOL_RELIABILITY|TOOL|test-runner' })).toMatch(
+      /^xmem_tool_reliability_tool_test/,
+    );
+    // The reverse map preserves the structured fact through the bare item.
+    const bare = fromMemoryItem(toMemoryItem(entry(), '2026-01-01T00:00:00.000Z'));
+    expect(bare.category).toBe('TOOL_RELIABILITY');
+    expect(bare.sampleCount).toBe(2);
+  });
+
+  it('evidence blocks degrade honestly with zero samples and enforce the char budget', async () => {
+    const { service } = makeMemoryService();
+    const { run, traces } = makeCompletedRun({
+      outcome: 'ACHIEVED',
+      actionTraces: [
+        { stepId: 'step-1', toolName: 'test-runner', status: 'succeeded', verdict: 'VERIFIED' },
+      ],
+    });
+    await service.ingestRun(run, traces, { knownTools: ['test-runner'] });
+    const [evidence] = await service.retrieve({ tools: ['test-runner'], limit: 1 });
+
+    // Zero samples → the rate is unknown, never fabricated.
+    const noSamples = buildEvidenceBlock([{ ...evidence, sampleCount: 0, successCount: 0 }]);
+    expect(noSamples.text).toContain('n/a');
+
+    // The char budget is enforced with an explicit truncation marker.
+    const truncated = buildEvidenceBlock([evidence], 10);
+    expect(truncated.text.length).toBeLessThanOrEqual(11);
+    expect(truncated.text.endsWith('…')).toBe(true);
   });
 });

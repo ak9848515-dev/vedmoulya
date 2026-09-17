@@ -164,3 +164,146 @@ describe('aggregation (duplicate evidence merges)', () => {
     expect(entries[0].successCount).toBe(3);
   });
 });
+
+describe('candidate building — routing subject, unknown tools, recovery strategy', () => {
+  function recordsFor(traces: Parameters<typeof makeCompletedRun>[0]['actionTraces']) {
+    const { run, traces: raw } = makeCompletedRun({ outcome: 'ACHIEVED', actionTraces: traces });
+    return {
+      records: extractExecutionRecords({ run, traces: raw }),
+      signals: extractLearningSignals(extractExecutionRecords({ run, traces: raw })),
+    };
+  }
+
+  it('routing subjects: provider-only → PROVIDER scope, model-only → MODEL scope', () => {
+    const providerOnly = recordsFor([
+      {
+        stepId: 'step-1',
+        toolName: 't1',
+        kind: 'tool',
+        provider: 'p1',
+        status: 'succeeded',
+        verdict: 'VERIFIED',
+      },
+    ]);
+    const candidatesP = buildMemoryCandidates(
+      providerOnly.signals,
+      providerOnly.records,
+      '2026-01-01T00:00:00.000Z',
+    );
+    const routingP = candidatesP.filter((c) => c.category === 'ROUTING_SIGNAL');
+    expect(routingP.map((c) => c.subject)).toContain('provider:p1');
+    expect(routingP.find((c) => c.subject === 'provider:p1')!.scope).toBe('PROVIDER');
+
+    const modelOnly = recordsFor([
+      {
+        stepId: 'step-1',
+        toolName: 't1',
+        kind: 'tool',
+        model: 'm1',
+        status: 'succeeded',
+        verdict: 'VERIFIED',
+      },
+    ]);
+    const candidatesM = buildMemoryCandidates(
+      modelOnly.signals,
+      modelOnly.records,
+      '2026-01-01T00:00:00.000Z',
+    );
+    const routingM = candidatesM.filter((c) => c.category === 'ROUTING_SIGNAL');
+    expect(routingM.map((c) => c.subject)).toContain('model:m1');
+    expect(routingM.find((c) => c.subject === 'model:m1')!.scope).toBe('MODEL');
+  });
+
+  it('a signal referencing a record without a tool name degrades to the honest unknown-tool subject', () => {
+    // buildMemoryCandidates is exported for direct composition; a caller may
+    // hand it signals whose referenced record lacks a tool name (e.g. a
+    // partial trace). The builder must never fabricate a tool identity.
+    const { run, traces } = makeCompletedRun({ outcome: 'ACHIEVED' });
+    const records = extractExecutionRecords({ run, traces });
+    const now = '2026-01-01T00:00:00.000Z';
+    const blankTool = { ...records.find((r) => r.stepId !== undefined)!, tool: undefined };
+    const candidates = buildMemoryCandidates(
+      [
+        {
+          signalId: 'sig-1',
+          kind: 'TOOL_FAILURE',
+          detail: 'failed',
+          observedAt: now,
+          executionIds: [blankTool.executionId],
+        },
+        {
+          signalId: 'sig-2',
+          kind: 'TOOL_SUCCESS',
+          detail: 'ok',
+          observedAt: now,
+          executionIds: [blankTool.executionId],
+        },
+      ],
+      records,
+      now,
+    );
+    const failures = candidates.filter((c) => c.category === 'TOOL_RELIABILITY');
+    expect(failures.map((c) => c.subject)).toContain('unknown-tool');
+    expect(failures.every((c) => c.value === 0 || c.value === 1)).toBe(true);
+  });
+
+  it('run-level recovery evidence aggregates under the default retry strategy', () => {
+    const f = recordsFor([
+      { stepId: 'step-1', toolName: 'test-runner', status: 'succeeded', verdict: 'VERIFIED' },
+    ]);
+    const candidates = buildMemoryCandidates(f.signals, f.records, '2026-01-01T00:00:00.000Z');
+    const recovery = candidates.filter((c) => c.category === 'RECOVERY_PATTERN');
+    expect(recovery.length).toBeGreaterThan(0);
+    // The run record carries no recovery strategy → the honest default.
+    expect(recovery.map((c) => c.subject)).toContain('retry');
+    expect(recovery.find((c) => c.subject === 'retry')!.successCount).toBe(1);
+  });
+});
+
+describe('aggregation merge — zero-sample and empty-provenance edges stay honest', () => {
+  it('merging zero-sample evidence never fabricates a rate or a provenance id', () => {
+    const nowMs = Date.parse('2026-01-01T00:00:00.000Z');
+    const laterMs = Date.parse('2026-01-31T00:00:00.000Z');
+    const { run, traces } = makeCompletedRun({
+      outcome: 'ACHIEVED',
+      actionTraces: [
+        { stepId: 'step-1', toolName: 'test-runner', status: 'succeeded', verdict: 'VERIFIED' },
+      ],
+    });
+    const records = extractExecutionRecords({ run, traces });
+    const signals = extractLearningSignals(records);
+    const candidates = buildMemoryCandidates(signals, records, '2026-01-01T00:00:00.000Z');
+    const tool = candidates.find((c) => c.category === 'TOOL_RELIABILITY' && c.successCount === 1)!;
+
+    // A retention window sets an absolute expiry at creation.
+    const first = mergeCandidate(undefined, tool, nowMs, '2026-01-01T00:00:00.000Z', undefined, 7);
+    expect(first.created).toBe(true);
+    expect(first.entry.expiresAt).toBeDefined();
+    expect(first.entry.retentionDays).toBe(7);
+
+    // A zero-sample candidate contributes nothing: the rate and provenance
+    // fall back to the existing entry, and recency decays instead of being
+    // artificially reinforced.
+    const empty: MemoryCandidate = {
+      ...tool,
+      candidateId: 'candidate-empty',
+      sampleCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      verifiedCount: 0,
+      value: 0.5,
+      executionIds: [],
+    };
+    const merged = mergeCandidate(first.entry, empty, laterMs, '2026-01-31T00:00:00.000Z');
+    expect(merged.created).toBe(false);
+    expect(merged.entry.sampleCount).toBe(first.entry.sampleCount);
+    expect(merged.entry.value).toBe(first.entry.value);
+    expect(merged.entry.provenance.lastExecutionId).toBe(first.entry.provenance.lastExecutionId);
+    expect(merged.entry.recency).toBeLessThan(1);
+
+    // A brand-new zero-sample entry keeps the candidate's own value.
+    const fresh = mergeCandidate(undefined, empty, nowMs, '2026-01-01T00:00:00.000Z');
+    expect(fresh.entry.value).toBe(0.5);
+    expect(fresh.entry.expiresAt).toBeUndefined();
+  });
+});

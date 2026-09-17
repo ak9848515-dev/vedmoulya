@@ -170,4 +170,94 @@ describe('memory candidate validation', () => {
     expect(rejected).toHaveLength(1);
     expect(rejected[0].reasons.join(' ')).toContain('non-negative');
   });
+
+  it('rejects userId on non-USER scoped memory (scope discipline)', () => {
+    const candidate = baseCandidate({ userId: 'someone' });
+    expect(validateMemoryCandidate(candidate, { records: [] }).join(' ')).toContain(
+      'userId is only allowed on USER-scoped memory',
+    );
+  });
+
+  it('rejects a capability outside the frozen taxonomy', () => {
+    const candidate = baseCandidate({ capability: 'quantum' as never });
+    expect(validateMemoryCandidate(candidate, { records: [] }).join(' ')).toContain(
+      'not in the frozen taxonomy',
+    );
+  });
+
+  it('rejects an empty predicate', () => {
+    const candidate = baseCandidate({ predicate: '' });
+    expect(validateMemoryCandidate(candidate, { records: [] }).join(' ')).toContain('predicate');
+  });
+
+  it('rejects provenance that exceeds the bounded evidence window', () => {
+    const candidate = baseCandidate({
+      executionIds: Array.from({ length: 501 }, (_, i) => `ex-${String(i)}`),
+    });
+    expect(validateMemoryCandidate(candidate, { records: [] }).join(' ')).toContain('exceeds 500');
+  });
+
+  it('routing evidence must trace to an actually observed provider/model entity', () => {
+    function routingFixture(subject: string): {
+      candidate: MemoryCandidate;
+      records: ReturnType<typeof baseRecords>;
+    } {
+      const { run, traces } = makeCompletedRun({
+        outcome: 'ACHIEVED',
+        actionTraces: [
+          { stepId: 'step-1', provider: 'mock', model: 'mock-1', verdict: 'VERIFIED' },
+        ],
+      });
+      const records = extractExecutionRecords({ run, traces });
+      const action = records.find((r) => r.stepId !== undefined)!;
+      return {
+        records,
+        candidate: {
+          candidateId: 'c-routing',
+          category: 'ROUTING_SIGNAL',
+          scope: 'PROVIDER',
+          subject,
+          predicate: 'verified_success_rate',
+          value: 1,
+          sampleCount: 1,
+          successCount: 1,
+          failureCount: 0,
+          verifiedCount: 1,
+          capability: undefined,
+          executionIds: [action.executionId],
+          signalKinds: ['MODEL_SUCCESS'],
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      };
+    }
+
+    // Observed provider → accepted; observed model-only subject → accepted.
+    const observed = routingFixture('provider:mock');
+    expect(
+      validateMemoryCandidate(observed.candidate, {
+        records: observed.records,
+        knownProviders: ['mock'],
+      }),
+    ).toHaveLength(0);
+    const observedModel = routingFixture('model:mock-1');
+    expect(
+      validateMemoryCandidate(observedModel.candidate, { records: observedModel.records }),
+    ).toHaveLength(0);
+
+    // A provider NOT on the known routing surface is rejected even though the
+    // execution observed it — the routing surface is the authoritative check.
+    const unknownSurface = routingFixture('provider:mock');
+    expect(
+      validateMemoryCandidate(unknownSurface.candidate, {
+        records: unknownSurface.records,
+        knownProviders: ['other-provider'],
+      }).join(' '),
+    ).toContain('not part of the known routing surface');
+
+    // An entity never observed in the evidence is fabricated → rejected.
+    const fabricated = routingFixture('provider:ghost');
+    expect(
+      validateMemoryCandidate(fabricated.candidate, { records: fabricated.records }).join(' '),
+    ).toContain('fabricated provider/model');
+  });
 });

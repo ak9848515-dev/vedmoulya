@@ -1,6 +1,7 @@
 // PHASE 24 #1–#3: execution record creation, sanitization, secret removal.
 
 import { describe, expect, it } from 'vitest';
+import type { AgentExecutionTraceRecord } from '@vedmoulya/agent-execution';
 import { extractExecutionRecords } from '../domain/execution-record.js';
 import { makeCompletedRun } from './fixtures.js';
 
@@ -87,5 +88,43 @@ describe('execution record extraction', () => {
     });
     const records = extractExecutionRecords({ run, traces });
     expect(records.find((r) => r.stepId === 'step-1')!.recoveryStrategy).toBe('alternate_tool');
+  });
+
+  it('falls back to the objective for goal text and records raw attempt/revision faithfully', () => {
+    // A whitespace goal contributes no goal text — the objective is the
+    // honest fallback (never an empty string).
+    const { run } = makeCompletedRun({ goal: '   ' });
+    // A raw action trace with attempt 2 / revision 1 and no action id: the
+    // record must preserve the real attempt numbers and the action-id
+    // fallback to the step id.
+    const traces: AgentExecutionTraceRecord[] = [
+      {
+        runId: run.runId,
+        goalId: run.goalId,
+        planId: run.planId,
+        stepId: 'step-1',
+        phase: 'action',
+        attempt: 2,
+        revision: 1,
+        kind: 'tool',
+        capability: 'coding',
+        toolName: 'test-runner',
+        status: 'failed',
+        tokensUsed: 1,
+        costUsd: 0,
+        latencyMs: 5,
+        message: '   ',
+      },
+    ];
+    const records = extractExecutionRecords({ run, traces });
+    const action = records.find((r) => r.stepId === 'step-1')!;
+    expect(action.actionId).toBeUndefined();
+    expect(action.executionId).toBe(`ex-${run.runId}-step-1-2`);
+    expect(action.fallbackUsed).toBe(true);
+    expect(action.revisions).toBe(1);
+    expect(action.verificationVerdict).toBeUndefined(); // no verification trace
+    expect(action.error).toBeUndefined(); // whitespace-only message is not evidence
+    expect(action.observedAt).toBe(records[0].observedAt); // endedAt falls back to run time
+    expect(records[0].goalText).toBe('Complete the repository task');
   });
 });

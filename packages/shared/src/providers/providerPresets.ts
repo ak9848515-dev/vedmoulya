@@ -18,7 +18,7 @@
 //     (api.openai.com/v1), DeepSeekProvider (DEEPSEEK_BASE_URL =
 //     api.deepseek.com), OllamaProvider (http://localhost:11434).
 //   - default model ids are the adapters' own defaults / catalog models
-//     (gemini-2.5-flash, gpt-4o-mini, deepseek-chat, claude-sonnet-4,
+//     (gemini-3.5-flash, gpt-4o-mini, deepseek-chat, claude-sonnet-4,
 //     llama3.2) — never fabricated ids.
 //
 // SECURITY: no secret ever belongs here — this table is metadata only.
@@ -84,7 +84,7 @@ export const PROVIDER_PRESETS: Readonly<Record<ProviderPresetId, ProviderPreset>
     defaultEndpoint: 'https://generativelanguage.googleapis.com',
     endpointUserConfigurable: false,
     modelDiscovery: 'rest_list',
-    defaultModelId: 'gemini-2.5-flash',
+    defaultModelId: 'gemini-3.5-flash',
     deployment: 'cloud',
     simpleModeSupported: true,
     docsUrl: 'https://aistudio.google.com/apikey',

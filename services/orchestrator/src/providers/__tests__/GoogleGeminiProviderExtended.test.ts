@@ -27,7 +27,7 @@ beforeEach(() => {
   generateTextMock.mockResolvedValue({
     text: 'ok',
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-    finalStep: { response: { modelId: 'gemini-2.5-flash' } },
+    finalStep: { response: { modelId: 'gemini-3.5-flash' } },
   });
   createGoogleGenerativeAIMock.mockReturnValue((model: string) => ({
     provider: 'google',
@@ -227,7 +227,7 @@ describe('GoogleGeminiProvider — generateStructured edge cases', () => {
     generateTextMock.mockResolvedValue({
       output: Promise.resolve({ result: 'ok' }),
       usage: { inputTokens: null, outputTokens: null, totalTokens: null },
-      finalStep: { response: { modelId: 'gemini-2.5-flash' } },
+      finalStep: { response: { modelId: 'gemini-3.5-flash' } },
     });
 
     const provider = new GoogleGeminiProvider(FAKE_API_KEY);
@@ -247,7 +247,7 @@ describe('GoogleGeminiProvider — execute edge cases', () => {
     generateTextMock.mockResolvedValue({
       text: 'result',
       usage: { inputTokens: null, outputTokens: null, totalTokens: null },
-      finalStep: { response: { modelId: 'gemini-2.5-flash' } },
+      finalStep: { response: { modelId: 'gemini-3.5-flash' } },
     });
 
     const provider = new GoogleGeminiProvider(FAKE_API_KEY);

@@ -22,13 +22,65 @@ import { AgentExecutionService } from '@vedmoulya/agent-execution';
 import { ExecutionMemoryService } from '../application/ExecutionMemoryService.js';
 import { InMemoryExecutionMemoryStore } from '../infrastructure/InMemoryExecutionMemoryStore.js';
 import { PlanningMemoryAdapter } from '../infrastructure/integration-adapters.js';
-import { FakeAiPort, FakeClock } from './fixtures.js';
+import {
+  FakeAiPort,
+  FakeClock,
+  FakeToolRegistry,
+  governedRepositoryToolRegistry,
+} from './fixtures.js';
 
 // Content satisfying every repository-fix verification keyword check.
 const REPO_OUTPUT =
   'repository inspection found failing tests with clear failure signals; root cause diagnosis complete; minimal fix applied; targeted tests pass and broader suite pass; final state verified. repository test fail cause fix pass verified';
 
 const GOAL = 'Analyze this repository and fix the failing tests.';
+
+/**
+ * The repository-fix plan template emits governed tool actions (FINAL-02), so
+ * the planner must be given the authoritative tool registry — exactly as the
+ * production composition root does. Planning without a registry is BLOCKED
+ * with TOOL_REGISTRY_REQUIRED by design: the planner never proposes a tool it
+ * cannot prove exists and is authorized.
+ *
+ * The repository-fix path selects tools with READ, WRITE, and EXECUTE
+ * permission classes, so the principal must be granted all three or the plan
+ * is BLOCKED with INSUFFICIENT_PERMISSION.
+ */
+const REPOSITORY_CONSTRAINTS = {
+  grantedPermissionClasses: ['READ', 'WRITE', 'EXECUTE'] as const,
+  budget: { maxToolCalls: 24 } as const,
+};
+
+function planner(): PlannerService {
+  return new PlannerService({
+    toolRegistry: governedRepositoryToolRegistry(),
+  });
+}
+
+/**
+ * A fake tool execution port that handles all governed repository tools.
+ * In tests, we simulate successful execution for all governed tools.
+ */
+class FakeGovernedToolPort implements AgentToolExecutionPort {
+  public calls: Array<{ toolName: string; arguments: Record<string, unknown> }> = [];
+  async execute(input: {
+    toolName: string;
+    arguments: Record<string, unknown>;
+  }): Promise<AgentToolActionResult> {
+    this.calls.push(input);
+    // Simulate successful execution for all governed tools
+    return {
+      ok: true,
+      denied: false,
+      outcome: `executed ${input.toolName}`,
+      artifacts: [{ name: `${input.toolName}.out`, type: 'text' }],
+      latencyMs: 1,
+    };
+  }
+  listAllowed(): string[] {
+    return GOVERNED_REPOSITORY_TOOLS.map((t) => t.toolName);
+  }
+}
 
 async function runOnce(
   clock: FakeClock,
@@ -37,12 +89,21 @@ async function runOnce(
   run: Awaited<ReturnType<AgentExecutionService['start']>>;
   traces: ReturnType<AgentExecutionService['getTrace']>;
 }> {
-  const planner = new PlannerService();
-  const { result } = await planner.generatePlan({ goal: GOAL });
+  const plannerService = planner();
+  const { result } = await plannerService.generatePlan({
+    goal: GOAL,
+    constraints: REPOSITORY_CONSTRAINTS,
+  });
   expect(result.readiness.status).toBe('READY');
   const plan = result.plan!;
 
-  const executor = new AgentExecutionService({ ai, clock });
+  const tools = new FakeGovernedToolPort();
+  const executor = new AgentExecutionService({
+    ai,
+    clock,
+    toolRegistry: governedRepositoryToolRegistry(),
+    tools,
+  });
   const run = await executor.start({ userId: 'user-1', goal: GOAL, plan });
   expect(run.outcome).toBe('ACHIEVED');
   const traces = executor.getTrace(run.runId, 'user-1');
@@ -119,12 +180,23 @@ describe('PHASE 25 — full learning cycle', () => {
     expect(evidence.every((e) => e.category !== 'TOOL_RELIABILITY')).toBe(true);
 
     // And the planning pass itself: the frozen planner never proposes a
-    // tool that is not in the registry, regardless of memory.
-    const planner = new PlannerService();
-    const { result } = await planner.generatePlan({ goal: GOAL });
-    expect(result.readiness.status).toBe('READY');
-    expect(result.plan!.steps.every((s) => s.actions.every((a) => a.kind !== 'tool'))).toBe(true);
-    expect(result.selectedTools).toEqual([]);
+    // tool that is not in the authoritative registry, regardless of memory.
+    // An EMPTY registry is the strongest form of that proof — the
+    // repository-fix template's governed tool actions become unavailable, so
+    // planning is BLOCKED with TOOL_UNAVAILABLE rather than silently
+    // emitting an unprovable tool step.
+    const barren = new PlannerService({ toolRegistry: new FakeToolRegistry([]) });
+    const { result } = await barren.generatePlan({
+      goal: GOAL,
+      constraints: REPOSITORY_CONSTRAINTS,
+    });
+    expect(result.readiness.status).toBe('BLOCKED');
+    expect(result.readiness.issues.some((r) => r.code === 'TOOL_UNAVAILABLE')).toBe(true);
+    // The plan is generated but BLOCKED — it must not be executed.
+    // The selected tools are still recorded for observability (only run_command
+    // is selected because the goal has no explicit repair target, so step-4
+    // stays AI-only).
+    expect(result.selectedTools).toEqual(['run_command']);
   });
 
   it('current explicit request and health override stale memory (Phase 19)', async () => {

@@ -7,21 +7,51 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { describe, expect, it } from 'vitest';
+import type { PlanConstraint } from '../types/planning-types.js';
 import { PlannerService } from '../domain/planner-service.js';
-import { FakeClock, FakePlannerAi, FakeToolRegistry, validProposalJson } from './fixtures.js';
+import {
+  FakeClock,
+  FakePlannerAi,
+  FakeToolRegistry,
+  governedRepositoryToolRegistry,
+  validProposalJson,
+} from './fixtures.js';
 
 const clock = new FakeClock();
+
+/**
+ * FINAL-02 — the repository-fix path selects governed tools (workspace_read,
+ * workspace_write, run_command), so a plan for it is only READY when the
+ * registry exposes those tools AND the principal holds their permission
+ * classes. Non-repository goals keep the read/write default.
+ */
+const REPOSITORY_CONSTRAINTS: PlanConstraint = {
+  grantedPermissionClasses: ['READ', 'WRITE', 'EXECUTE'],
+  // The repository-fix path executes several REAL governed tool actions, so
+  // its honest envelope is wider than the frozen 8-tool-call default.
+  budget: { maxToolCalls: 24 },
+};
 
 function planner(
   overrides: {
     ai?: FakePlannerAi;
     tools?: FakeToolRegistry;
     unroutable?: string[];
+    constraints?: PlanConstraint;
   } = {},
 ): PlannerService {
   return new PlannerService({
     ai: overrides.ai ?? new FakePlannerAi(),
     toolRegistry: overrides.tools,
+    clock,
+  });
+}
+
+/** A planner whose registry exposes the real governed repository tools. */
+function repositoryPlanner(overrides: { ai?: FakePlannerAi } = {}): PlannerService {
+  return new PlannerService({
+    ai: overrides.ai ?? new FakePlannerAi(),
+    toolRegistry: governedRepositoryToolRegistry(),
     clock,
   });
 }
@@ -41,9 +71,13 @@ describe('PlannerService — deterministic planning', () => {
   });
 
   it('2. multi-step goal → dependency DAG (repository fix template)', async () => {
-    const service = planner();
+    // FINAL-02 — the repository-fix plan performs REAL repository work
+    // through explicit governed tool actions, so it requires the governed
+    // repository tools to be exposed and their classes granted.
+    const service = repositoryPlanner();
     const { result } = await service.generatePlan({
       goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
     expect(result.plan?.steps.length).toBe(7);
     const steps = result.plan?.steps ?? [];
@@ -55,6 +89,81 @@ describe('PlannerService — deterministic planning', () => {
       expect(step.verificationPolicy).toBeDefined();
       expect(step.recoveryPolicy?.maxAttempts).toBeLessThanOrEqual(3);
     }
+    // The real work is performed by EXPLICIT governed tool actions.
+    const toolSteps = steps.filter((step) => step.actions.some((a) => a.kind === 'tool'));
+    expect(toolSteps.length).toBeGreaterThanOrEqual(3);
+    const toolNames = new Set(
+      steps.flatMap((step) =>
+        step.actions
+          .filter((a) => a.kind === 'tool')
+          .map((a) => (a as { toolName: string }).toolName),
+      ),
+    );
+    expect(toolNames.has('run_command')).toBe(true);
+    // The command steps are verified by the REAL process outcome, never by
+    // model prose: their verification policy is deterministic kind:'command'.
+    for (const step of toolSteps) {
+      expect(step.verificationPolicy?.kind).toBe('command');
+    }
+  });
+
+  it('2e. a repository-fix goal carrying an explicit repair target emits a governed write step', async () => {
+    // The goal text is the ONLY structured source of the repair target — the
+    // AI never supplies it and no model output is parsed into a tool call.
+    const service = repositoryPlanner();
+    const { result } = await service.generatePlan({
+      goal: 'Fix the failing tests in the workspace file calc.ts with the corrected add implementation',
+      constraints: REPOSITORY_CONSTRAINTS,
+    });
+    expect(result.readiness.status).toBe('READY');
+    const writeStep = result.plan?.steps.find((step) =>
+      step.actions.some((a) => a.kind === 'tool' && a.toolName === 'workspace_write'),
+    );
+    expect(writeStep).toBeDefined();
+    const writeAction = writeStep?.actions.find((a) => a.kind === 'tool');
+    expect(writeAction?.kind === 'tool' ? writeAction.arguments?.['relativePath'] : undefined).toBe(
+      'calc.ts',
+    );
+    // The repair step's write is verified by reading the file back through
+    // the governed runtime — not by an AI claim.
+    expect(writeStep?.verificationPolicy?.kind).toBe('command');
+  });
+
+  it('2b. a repository-fix plan is BLOCKED when the governed tools are unavailable (never fabricated)', async () => {
+    // A registry that does NOT expose the governed tools must block the plan
+    // — the planner can never invent a tool it cannot reach.
+    const service = new PlannerService({
+      ai: new FakePlannerAi(),
+      toolRegistry: new FakeToolRegistry([{ toolName: 'calculator', permissionClass: 'READ' }]),
+      clock,
+    });
+    const { result } = await service.generatePlan({
+      goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
+    });
+    expect(result.readiness.status).toBe('BLOCKED');
+    expect(result.issues.some((i) => i.code === 'TOOL_UNAVAILABLE')).toBe(true);
+  });
+
+  it('2c. a repository-fix plan is BLOCKED when the principal lacks the EXECUTE class (no escalation)', async () => {
+    // The tools exist, but the principal only holds READ+WRITE: selecting the
+    // command tool is a permission escalation and MUST be blocked.
+    const service = repositoryPlanner();
+    const { result } = await service.generatePlan({
+      goal: 'Analyze this repository and fix the failing tests',
+      constraints: { ...REPOSITORY_CONSTRAINTS, grantedPermissionClasses: ['READ', 'WRITE'] },
+    });
+    expect(result.readiness.status).toBe('BLOCKED');
+    expect(result.issues.some((i) => i.code === 'INSUFFICIENT_PERMISSION')).toBe(true);
+  });
+
+  it('2d. a repository-fix plan with no registry at all is BLOCKED (tools cannot be unverified)', async () => {
+    const { result } = await planner().generatePlan({
+      goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
+    });
+    expect(result.readiness.status).toBe('BLOCKED');
+    expect(result.issues.some((i) => i.code === 'TOOL_REGISTRY_REQUIRED')).toBe(true);
   });
 
   it('3. multi-capability goal preserves ALL capabilities (never reduced)', async () => {
@@ -83,9 +192,10 @@ describe('PlannerService — deterministic planning', () => {
   it('3b. uncovered inferred capabilities are recorded EXPLICITLY (never silently dropped)', async () => {
     // The repository-fix template is fixed-strategy; the goal's extra
     // summarization requirement is surfaced as a warning, not dropped.
-    const service = planner();
+    const service = repositoryPlanner();
     const { result } = await service.generatePlan({
       goal: 'Fix the failing tests and write a summary of the results',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
     expect(result.issues.some((i) => i.code === 'CAPABILITY_NOT_COVERED')).toBe(true);
     expect(result.readiness.status).toBe('READY');
@@ -326,10 +436,11 @@ describe('PlannerService — AI proposals (untrusted input)', () => {
   });
 
   it('19. planner AI failure handled honestly (fallback + recorded reason)', async () => {
-    const service = planner({ ai: new FakePlannerAi({ throwError: true }) });
+    const service = repositoryPlanner({ ai: new FakePlannerAi({ throwError: true }) });
     const { result } = await service.generatePlan({
       goal: 'Analyze this repository and fix the failing tests',
       mode: 'ai',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
     expect(result.source).toBe('ai-fallback');
     expect(result.plannerAi?.failed).toBe(true);

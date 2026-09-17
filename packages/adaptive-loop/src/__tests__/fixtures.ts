@@ -145,6 +145,32 @@ export function makeToolRegistry(tools: Record<string, FakeToolSpec>): FakeToolR
   return new FakeToolRegistry(tools);
 }
 
+// ── Governed registry fixture (FINAL-02) ──────────────────────────
+
+/**
+ * The governed tool names the repository-fix planning path genuinely selects
+ * (read → write → real command execution). The permission classes mirror the
+ * production governed classification exactly (workspace_read=READ,
+ * workspace_write=WRITE, run_command=EXECUTE — the frozen GovernedToolRegistry).
+ */
+export const GOVERNED_REPOSITORY_TOOLS: readonly {
+  toolName: string;
+  permissionClass: ToolPermissionClass;
+}[] = [
+  { toolName: 'workspace_read', permissionClass: 'READ' },
+  { toolName: 'workspace_write', permissionClass: 'WRITE' },
+  { toolName: 'run_command', permissionClass: 'EXECUTE' },
+];
+
+/** A registry exposing exactly the governed repository-development tools. */
+export function governedRepositoryToolRegistry(): FakeToolRegistry {
+  const tools: Record<string, FakeToolSpec> = {};
+  for (const tool of GOVERNED_REPOSITORY_TOOLS) {
+    tools[tool.toolName] = { permissionClass: tool.permissionClass };
+  }
+  return new FakeToolRegistry(tools);
+}
+
 // ── Scripted decision model (the model's output is UNTRUSTED) ─────
 
 export class ScriptedDecisionModel implements AgentDecisionModelPort {

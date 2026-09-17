@@ -23,9 +23,10 @@ import type {
   AgentToolExecutionPort,
   AgentToolInfo,
   AgentToolRegistryPort,
+  ToolPermissionClass,
 } from '@vedmoulya/agent-execution';
 import { PlanningApplicationService } from '@vedmoulya/planning';
-import type { PlannerAiPort, PlannerAiProposalResult } from '@vedmoulya/planning';
+import type { PlanConstraint, PlannerAiPort, PlannerAiProposalResult } from '@vedmoulya/planning';
 import { createAppRouter } from '../services/RouterRegistry.js';
 import type { ApiApplicationService } from '../services/ApiApplicationService.js';
 
@@ -155,22 +156,43 @@ class FakeStepAi implements AgentAiExecutionPort {
   }
 }
 
+/**
+ * FINAL-02 — the repository-development mission path selects EXPLICIT governed
+ * tools (workspace_read / workspace_write / run_command) with their REAL
+ * permission classes (READ / WRITE / EXECUTE). A plan for that goal is only
+ * READY when the tool registry exposes those tools AND the principal holds
+ * their classes. This fake mirrors the production governed classification
+ * (packages/mission-runtime/src/adapters/GovernedToolRegistry.ts) so the
+ * gateway test exercises the SAME validation chain the frozen validators run
+ * — never a fabricated bypass.
+ */
+const REPOSITORY_TOOL_PERMISSION_CLASSES: Record<string, ToolPermissionClass> = {
+  workspace_read: 'READ',
+  workspace_write: 'WRITE',
+  run_command: 'EXECUTE',
+};
+
 class FakeToolPort implements AgentToolExecutionPort, AgentToolRegistryPort {
   async execute(input: {
     toolName: string;
     arguments: Record<string, unknown>;
     userId?: string;
   }): Promise<AgentToolActionResult> {
+    // Deterministic success + real outcome text so the frozen command-
+    // verification policy (kind:'command', expect:'ok') marks steps VERIFIED.
     return { ok: true, denied: false, outcome: `${input.toolName} executed` };
   }
   listAllowed(): string[] {
-    return ['calculator'];
+    return Object.keys(REPOSITORY_TOOL_PERMISSION_CLASSES);
   }
   describe(toolName: string): AgentToolInfo | undefined {
-    if (toolName === 'calculator') {
-      return { toolName, permissionClass: 'EXECUTE', requiresApproval: false };
-    }
-    return undefined;
+    const permissionClass = REPOSITORY_TOOL_PERMISSION_CLASSES[toolName];
+    if (permissionClass === undefined) return undefined;
+    return {
+      toolName,
+      permissionClass,
+      requiresApproval: false,
+    };
   }
 }
 
@@ -197,6 +219,18 @@ function makeServices(): ApiApplicationService {
 
 const ctx = (userId: string) => ({ userId, email: `${userId}@vm.local`, role: 'user' });
 
+/**
+ * FINAL-02 — the repository-fix plan performs REAL repository work through
+ * governed tools (workspace_read / workspace_write / run_command), so it is
+ * only READY when the principal holds their permission classes (READ + WRITE +
+ * EXECUTE) and the registry exposes them. Mirrors the planning package's
+ * REPOSITORY_CONSTRAINTS (packages/planning/src/__tests__/planning-integration.test.ts).
+ */
+const REPOSITORY_CONSTRAINTS: PlanConstraint = {
+  grantedPermissionClasses: ['READ', 'WRITE', 'EXECUTE'],
+  budget: { maxToolCalls: 24 },
+};
+
 interface PlanResultData {
   goalId: string;
   planId: string;
@@ -217,6 +251,7 @@ describe('planning namespace (BLD-017A)', () => {
     const response = await caller.planning.plan({
       userId: 'planner-1',
       goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
     expect(response.success).toBe(true);
     const result = response.data as PlanResultData;
@@ -267,6 +302,7 @@ describe('planning namespace (BLD-017A)', () => {
     const response = await caller.planning.planAndExecute({
       userId: 'planner-4',
       goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
       mode: 'deterministic',
     });
     expect(response.success).toBe(true);

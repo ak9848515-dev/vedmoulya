@@ -144,10 +144,10 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
 
   it('adapter default model ids stay pinned to the presets (pinning contract)', () => {
     // Sources (services/orchestrator/src/providers/*): the adapters' own
-    // defaults — GoogleGeminiProvider → gemini-2.5-flash, VercelAIProvider →
+    // defaults — GoogleGeminiProvider → gemini-3.5-flash, VercelAIProvider →
     // gpt-4o-mini, DeepSeekProvider → deepseek-chat, OllamaProvider →
     // llama3.2. If an adapter default changes, update BOTH sides together.
-    expect(PROVIDER_PRESETS.google.defaultModelId).toBe('gemini-2.5-flash');
+    expect(PROVIDER_PRESETS.google.defaultModelId).toBe('gemini-3.5-flash');
     expect(PROVIDER_PRESETS.openai.defaultModelId).toBe('gpt-4o-mini');
     expect(PROVIDER_PRESETS.deepseek.defaultModelId).toBe('deepseek-chat');
     expect(PROVIDER_PRESETS.ollama.defaultModelId).toBe('llama3.2');

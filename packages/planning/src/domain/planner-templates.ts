@@ -77,7 +77,159 @@ function aiStep(
   };
 }
 
+// ── Governed tool step builders (FINAL-02) ────────────────────────
+//
+// The planning package stays provider-neutral: it never names a command
+// executor, a shell, or a permission class. It expresses a step as an
+// EXPLICIT governed tool action against a declared tool NAME, and states
+// which tool the step must be verified with — exactly the frozen
+// AgentPlanStep/AgentActionSpec contract. Whether the named tool exists,
+// which permission class it carries, and whether the principal holds that
+// class are decided downstream by the authoritative tool registry and the
+// mission constraints. A plan that names an unavailable or ungranted tool
+// is REJECTED by validation — never fabricated, never bypassed.
+//
+// Every tool step's verification is deterministic (kind:'command'): the
+// REAL tool outcome decides the verdict. Model prose can never mark a
+// command step verified.
+
+/** The governed command-execution tool name (mission runtime registers it). */
+export const COMMAND_TOOL_NAME = 'run_command';
+
+export interface GovernedToolStepInput {
+  stepId: string;
+  objective: string;
+  capability: AgentPlanStep['capability'];
+  toolName: string;
+  args?: Record<string, unknown>;
+  verification: VerificationPolicy;
+  expectedOutcome: string;
+  dependencies?: string[];
+  /** Single-action steps (default) or several ordered tool actions. */
+  extraActions?: { actionId: string; toolName: string; args: Record<string, unknown> }[];
+}
+
+/**
+ * A step whose work is performed by EXPLICIT governed tool action(s).
+ * Arguments are literal values fixed by the plan builder — the AI never
+ * supplies them, and no AI output is ever parsed into a tool call.
+ */
+function toolStep(input: GovernedToolStepInput): AgentPlanStep {
+  const actions: Extract<AgentPlanStep['actions'][number], { kind: 'tool' }>[] = [
+    {
+      actionId: `${input.stepId}-action`,
+      kind: 'tool',
+      toolName: input.toolName,
+      arguments: input.args ?? {},
+      expectedOutcome: input.expectedOutcome,
+    },
+    ...(input.extraActions ?? []).map((extra) => ({
+      actionId: extra.actionId,
+      kind: 'tool' as const,
+      toolName: extra.toolName,
+      arguments: extra.args,
+      expectedOutcome: input.expectedOutcome,
+    })),
+  ];
+  const allowedTools = [...new Set(actions.map((action) => action.toolName))];
+  return {
+    stepId: input.stepId,
+    objective: input.objective,
+    capability: input.capability,
+    allowedTools,
+    dependencies: input.dependencies ?? [],
+    actions,
+    expectedOutcome: input.expectedOutcome,
+    verificationPolicy: input.verification,
+    recoveryPolicy: BOUNDED_RECOVERY,
+  };
+}
+
+/**
+ * A step that runs the governed command tool through the frozen
+ * ToolRuntime and is verified by the REAL process outcome: `expect:'ok'`
+ * passes only when the command actually succeeded. A non-zero exit, a
+ * timeout, or a security denial can never be reported as success.
+ */
+function commandToolStep(input: {
+  stepId: string;
+  objective: string;
+  commandId: string;
+  fileArg?: string;
+  dependencies?: string[];
+}): AgentPlanStep {
+  const args: Record<string, unknown> = { command: input.commandId };
+  if (input.fileArg !== undefined) args['fileArg'] = input.fileArg;
+  return toolStep({
+    stepId: input.stepId,
+    objective: input.objective,
+    capability: 'coding',
+    toolName: COMMAND_TOOL_NAME,
+    args,
+    expectedOutcome: `command ${input.commandId} exits successfully (real process status)`,
+    dependencies: input.dependencies ?? [],
+    verification: {
+      kind: 'command',
+      description: `command ${input.commandId} must exit successfully — the REAL process exit status decides the verdict, never model output`,
+      command: { toolName: COMMAND_TOOL_NAME, arguments: args, expect: 'ok' },
+    },
+  });
+}
+
 // ── Template 1: repository fix (the canonical example) ────────────
+//
+// FINAL-02 — the repository mission path performs REAL repository work
+// through EXPLICIT governed tool actions:
+//
+//   step-1  inspect      AI (reasoning only — no repository access)
+//   step-2  identify     governed run_command (REAL failing exit status)
+//   step-3  diagnose     AI (reasoning only)
+//   step-4  repair       governed workspace_write + read-back verification
+//   step-5  targeted     governed run_command (REAL exit status must be 0)
+//   step-6  broader      governed run_command (REAL exit status must be 0)
+//   step-7  verify       AI (reasoning only)
+//
+// Nothing is parsed out of model output: every command id and every file
+// target is a literal chosen by this builder through the EXISTING
+// deterministic goal-extraction mechanism. A command step's verdict comes
+// exclusively from the real process outcome (kind:'command'); model prose
+// can never mark a test run as passed.
+//
+// When the goal carries no explicit workspace file/repair target (i.e. the
+// bounded deterministic extraction yields nothing), the repair step stays
+// AI-only — the builder never invents a file to write, and the run steps
+// still execute real commands through the governed tool.
+
+const REPAIR_TARGET_PATTERN =
+  /(?:fix|repair|update|correct)[\s\S]*?workspace file\s+([A-Za-z0-9][A-Za-z0-9._\-/]{0,80})/i;
+const REPAIR_CONTENT_PATTERN = /(?:with|containing)[\s:]+(.{3,200})$/i;
+
+/**
+ * Deterministic extraction of the repair file target a repository-fix goal
+ * may carry, e.g.:
+ *
+ *   "fix the workspace file calc.ts with the corrected content"
+ *
+ * The rule is the SAME bounded rule the mission runtime's workspace-file
+ * template uses (relative filename only — never absolute, never '..').
+ * The planning package cannot depend on the mission runtime (the runtime
+ * depends on this package), so the rule lives here with the templates.
+ * Undefined → the goal carries no explicit repair target and the repair
+ * step stays AI-only (a target is never invented).
+ */
+export function extractRepositoryFixTarget(
+  goal: string,
+): { relativePath: string; content: string } | undefined {
+  const match = REPAIR_TARGET_PATTERN.exec(goal);
+  const rawName = match?.[1];
+  if (!rawName) return undefined;
+  let relativePath = rawName.toLowerCase();
+  if (!/\.[a-z0-9]{1,10}$/.test(relativePath)) relativePath += '.md';
+  if (relativePath.includes('..') || relativePath.includes('\\')) return undefined;
+  const contentMatch = REPAIR_CONTENT_PATTERN.exec(goal);
+  const content = (contentMatch?.[1] ?? 'Repaired by the VedMoulya mission runtime.').trim();
+  return { relativePath, content: content.slice(0, 400) };
+}
 
 const REPOSITORY_FIX_PATTERN =
   /(fix|repair|resolve).*(test|build|failure)|(test|build|failure).*(fix|repair|resolve)|failing tests?/i;
@@ -85,127 +237,144 @@ const REPOSITORY_FIX_PATTERN =
 const REPOSITORY_FIX_TEMPLATE: PlanTemplate = {
   id: 'repository-fix',
   matches: (understanding) => REPOSITORY_FIX_PATTERN.test(understanding.normalizedGoal),
-  build: (understanding, planId): AgentPlan => ({
-    planId,
-    goalId: understanding.goalId,
-    objective: understanding.normalizedGoal,
-    steps: [
-      aiStep(
-        'step-1',
-        'Inspect the repository and current test state',
-        'reasoning',
-        'Inspect the repository state for the goal: {goal}. Identify the test setup, recent changes and where failures are likely. Report a concise, factual summary of what you found.',
-        rulePolicy(
-          [
-            { name: 'has-repository', kind: 'includes', text: 'repository' },
-            { name: 'has-test-context', kind: 'includes', text: 'test' },
-          ],
-          'the inspection summary must describe the repository and test context',
+  build: (understanding, planId): AgentPlan => {
+    const target = extractRepositoryFixTarget(understanding.normalizedGoal);
+    return {
+      planId,
+      goalId: understanding.goalId,
+      objective: understanding.normalizedGoal,
+      steps: [
+        aiStep(
+          'step-1',
+          'Inspect the repository and current test state',
+          'reasoning',
+          'Inspect the repository state for the goal: {goal}. Identify the test setup, recent changes and where failures are likely. Report a concise, factual summary of what you found.',
+          rulePolicy(
+            [
+              { name: 'has-repository', kind: 'includes', text: 'repository' },
+              { name: 'has-test-context', kind: 'includes', text: 'test' },
+            ],
+            'the inspection summary must describe the repository and test context',
+          ),
         ),
-      ),
-      aiStep(
-        'step-2',
-        'Identify the failing tests',
-        'reasoning',
-        'Based on the inspection of {outputOf:step-1} for the goal: {goal}. List the specific failing tests with the observed failure signals. Do not guess — only report what the inspection shows.',
-        rulePolicy(
-          [
-            { name: 'has-failure-signal', kind: 'includes', text: 'fail' },
-            { name: 'lists-tests', kind: 'minLength', length: 40 },
-          ],
-          'the failing-test list must name specific failures with evidence',
+        // REAL failure evidence: the governed command tool runs the workspace
+        // tests; a non-zero exit fails this step with the process evidence.
+        commandToolStep({
+          stepId: 'step-2',
+          objective: 'Run the test command and observe the REAL failure',
+          commandId: 'npm_test',
+          dependencies: ['step-1'],
+        }),
+        aiStep(
+          'step-3',
+          'Identify the failing tests and diagnose the root cause',
+          'reasoning',
+          'The REAL test run for the goal: {goal} failed with the observed process output in {outputOf:step-2}. Name the specific failing tests from that evidence and diagnose the root cause precisely (do not guess beyond the observed failure output).',
+          rulePolicy(
+            [
+              { name: 'has-failure-signal', kind: 'includes', text: 'fail' },
+              { name: 'has-diagnosis', kind: 'includes', text: 'cause' },
+              { name: 'diagnosis-length', kind: 'minLength', length: 60 },
+            ],
+            'the diagnosis must name the observed failing tests and a root cause',
+          ),
+          ['step-2'],
         ),
-        ['step-1'],
-      ),
-      aiStep(
-        'step-3',
-        'Diagnose the root cause',
-        'reasoning',
-        'Diagnose the root cause of the failing tests identified in {outputOf:step-2} for the goal: {goal}. Explain the cause precisely and why the current behavior produces the failure.',
-        rulePolicy(
-          [
-            { name: 'has-diagnosis', kind: 'includes', text: 'cause' },
-            { name: 'diagnosis-length', kind: 'minLength', length: 60 },
-          ],
-          'the diagnosis must name a root cause and explain the failure mechanism',
+        ...(target
+          ? [
+              // REAL repair: the governed workspace tool performs the write;
+              // verification reads the file back through the same runtime.
+              toolStep({
+                stepId: 'step-4',
+                objective: `Apply the minimal fix to ${target.relativePath} through the governed workspace tool`,
+                capability: 'coding',
+                toolName: 'workspace_write',
+                args: { relativePath: target.relativePath, content: target.content },
+                expectedOutcome: `${target.relativePath} is written with the repaired content`,
+                dependencies: ['step-3'],
+                extraActions: [
+                  {
+                    actionId: 'step-4-readback',
+                    toolName: 'workspace_read',
+                    args: { relativePath: target.relativePath },
+                  },
+                ],
+                verification: {
+                  kind: 'command',
+                  description: `${target.relativePath} must read back through the governed tool after the repair write`,
+                  command: {
+                    toolName: 'workspace_read',
+                    arguments: { relativePath: target.relativePath },
+                    expect: 'ok',
+                  },
+                },
+              }),
+            ]
+          : [
+              aiStep(
+                'step-4',
+                'Implement the minimal fix',
+                'coding',
+                'Implement the minimal fix for the root cause diagnosed in {outputOf:step-3} in service of the goal: {goal}. Prefer the smallest change that addresses the diagnosis. Do not introduce speculative changes.',
+                rulePolicy(
+                  [
+                    { name: 'has-fix', kind: 'includes', text: 'fix' },
+                    { name: 'fix-length', kind: 'minLength', length: 40 },
+                  ],
+                  'the fix must describe the change made and why it addresses the root cause',
+                ),
+                ['step-3'],
+                ['coding', 'reasoning'],
+              ),
+            ]),
+        // Targeted re-run: only a REAL successful exit status verifies.
+        commandToolStep({
+          stepId: 'step-5',
+          objective: 'Re-run the targeted test command after the repair',
+          commandId: 'npm_test',
+          dependencies: ['step-4'],
+        }),
+        commandToolStep({
+          stepId: 'step-6',
+          objective: 'Run the broader test suite to confirm no regression',
+          commandId: 'npm_test',
+          dependencies: ['step-5'],
+        }),
+        aiStep(
+          'step-7',
+          'Verify the final state',
+          'reasoning',
+          'Summarize the final repository state for the goal: {goal}. The test commands were executed by the governed runtime — the step evidence in {outputOf:step-5} and {outputOf:step-6} carries the real process exit statuses. State the final verification conclusion explicitly (state "verified" and "pass" only when the real command evidence shows successful exits).',
+          rulePolicy(
+            [
+              { name: 'has-verified', kind: 'includes', text: 'verified' },
+              { name: 'has-pass', kind: 'includes', text: 'pass' },
+              { name: 'final-length', kind: 'minLength', length: 40 },
+            ],
+            'the final verification must explicitly state that the goal is verified with passing real test runs',
+          ),
+          ['step-6'],
+          ['reasoning', 'coding'],
         ),
-        ['step-2'],
-      ),
-      aiStep(
-        'step-4',
-        'Implement the minimal fix',
-        'coding',
-        'Implement the minimal fix for the root cause from {outputOf:step-3} in service of the goal: {goal}. Prefer the smallest change that addresses the diagnosis. Do not introduce speculative changes.',
-        rulePolicy(
-          [
-            { name: 'has-fix', kind: 'includes', text: 'fix' },
-            { name: 'fix-length', kind: 'minLength', length: 40 },
-          ],
-          'the fix must describe the change made and why it addresses the root cause',
-        ),
-        ['step-3'],
-        ['coding', 'reasoning'],
-      ),
-      aiStep(
-        'step-5',
-        'Run the targeted tests',
-        'coding',
-        'Run the tests that were failing (from {outputOf:step-2}) after the fix in {outputOf:step-4}. Report the outcome truthfully — including any remaining failures.',
-        rulePolicy(
-          [
-            { name: 'has-outcome', kind: 'includes', text: 'pass' },
-            { name: 'outcome-length', kind: 'minLength', length: 30 },
-          ],
-          'the targeted-test run must report a pass outcome with the test names',
-        ),
-        ['step-4'],
-        ['coding', 'reasoning'],
-      ),
-      aiStep(
-        'step-6',
-        'Run the relevant broader tests',
-        'reasoning',
-        'Run the broader relevant test suite to ensure the fix in {outputOf:step-4} did not regress anything, for the goal: {goal}. Report pass/fail truthfully.',
-        rulePolicy(
-          [
-            { name: 'has-pass', kind: 'includes', text: 'pass' },
-            { name: 'broad-length', kind: 'minLength', length: 30 },
-          ],
-          'the broader run must report a pass outcome or explicitly list regressions',
-        ),
-        ['step-5'],
-      ),
-      aiStep(
-        'step-7',
-        'Verify the final state',
-        'reasoning',
-        'Verify the final repository state for the goal: {goal}: failing tests fixed, no new regressions, and the change minimal. State the final verification conclusion explicitly.',
-        rulePolicy(
-          [
-            { name: 'has-verified', kind: 'includes', text: 'verified' },
-            { name: 'final-length', kind: 'minLength', length: 40 },
-          ],
-          'the final verification must explicitly state that the goal is verified',
-        ),
-        ['step-6'],
-        ['reasoning', 'coding'],
-      ),
-    ],
-    finalVerification: rulePolicy(
-      [
-        { name: 'goal-verified', kind: 'includes', text: 'verified' },
-        { name: 'goal-passing', kind: 'includes', text: 'pass' },
       ],
-      'the final summary must state the goal is verified with passing tests',
-    ),
-    completionCriteria: [
-      'failing tests identified with evidence',
-      'root cause diagnosed',
-      'minimal fix implemented',
-      'targeted and broader tests pass',
-      'final state verified',
-    ],
-  }),
+      // Goal-level verification is the REAL command evidence — never the
+      // model's summary. A repository-fix goal can only be ACHIEVED when the
+      // governed test command actually exits successfully.
+      finalVerification: {
+        kind: 'command',
+        description:
+          'the workspace test command must really exit successfully — the final verdict comes from the governed process exit status, never from model output',
+        command: { toolName: COMMAND_TOOL_NAME, arguments: { command: 'npm_test' }, expect: 'ok' },
+      },
+      completionCriteria: [
+        'real test command executed through the governed tool runtime',
+        'real failing exit status observed and diagnosed',
+        'minimal fix applied through governed workspace tools',
+        'real test command re-executed and exited successfully',
+        'final repository state verified',
+      ],
+    };
+  },
 };
 
 // ── Template 2: content creation (blog/article/copy/newsletter) ────

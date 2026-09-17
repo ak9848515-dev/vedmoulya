@@ -56,8 +56,11 @@ export type {
 } from './adapters/CommandExecutionTool.js';
 export {
   ClassifyingToolRegistryPort,
+  REPOSITORY_MISSION_PERMISSION_CLASSES,
+  REPOSITORY_MISSION_TOOLS,
   createGovernedToolRegistry,
   permissionClassForTool,
+  repositoryMissionConstraints,
 } from './adapters/GovernedToolRegistry.js';
 
 // Adapters — bounded repository inspection

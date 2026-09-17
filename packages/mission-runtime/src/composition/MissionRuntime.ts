@@ -28,6 +28,7 @@
 import { AIOrchestrationService } from '@vedmoulya/services';
 import type { ToolRegistry, ToolRegistryOptions } from '@vedmoulya/services/ai/runtime/ToolRuntime';
 import { AgentExecutionService, AIOrchestrationAgentPort } from '@vedmoulya/agent-execution';
+import type { ToolPermissionClass } from '@vedmoulya/agent-execution';
 import {
   AIOrchestrationPlannerPort,
   PLAN_TEMPLATES,
@@ -66,6 +67,7 @@ import type { RuntimeGitSafetyAdapterOptions } from '../adapters/RuntimeGitSafet
 import {
   ClassifyingToolRegistryPort,
   createGovernedToolRegistry,
+  permissionClassForTool,
 } from '../adapters/GovernedToolRegistry.js';
 import { WorkspaceRootBinding, type WorkspaceToolOptions } from '../adapters/WorkspaceTools.js';
 import type { CommandExecutionToolOptions } from '../adapters/CommandExecutionTool.js';
@@ -102,6 +104,15 @@ export interface MissionRuntimeOptions {
   commandTools?: boolean;
   /** Bounded command tool configuration (timeout / output cap / allowlist). */
   commandToolOptions?: CommandExecutionToolOptions;
+  /**
+   * FINAL-02 — the permission classes this runtime's missions may use when
+   * the FROZEN planner validates a plan (the planner can never exceed them).
+   * The classes are derived from the SAME governed registry that classifies
+   * the real tools, so naming a class here never invents a capability: the
+   * plan still has to pass registry + mission-constraint enforcement.
+   * Defaults to the classes of the tools actually registered.
+   */
+  missionPermissionClasses?: ToolPermissionClass[];
   /** Inject an existing orchestrator; otherwise a fresh one is created. */
   orchestrator?: AIOrchestrationService;
   /** Narrow orchestrator tuning (retry backoff for tests, etc.). */
@@ -204,6 +215,18 @@ export function buildMissionRuntimeComponents(
   });
   const toolPort = new ClassifyingToolRegistryPort(toolRegistry);
 
+  // ── FINAL-02 — mission permission classes, derived from the REAL registry ──
+  // The planner is told exactly which permission classes this principal
+  // holds. Deriving them from the governed registry (rather than a literal)
+  // means a class is only ever reachable when a registered tool really
+  // carries it — and the mission constraint (MissionService) still decides
+  // which TOOLS are allowed for a given mission.
+  const registeredToolNames = toolRegistry.list().map((tool) => tool.name);
+  const derivedPermissionClasses: ToolPermissionClass[] = [
+    ...new Set(registeredToolNames.map((name) => permissionClassForTool(name))),
+  ];
+  const missionPermissionClasses = options.missionPermissionClasses ?? derivedPermissionClasses;
+
   // ── Planning (frozen planner + templates through its extension point) ──
   const planner = new PlannerService({
     ai: new AIOrchestrationPlannerPort(orchestrator),
@@ -273,7 +296,9 @@ export function buildMissionRuntimeComponents(
       objectiveSelector: new DevelopmentObjectiveSelector(inspector),
       providerAvailability: new OrchestratorProviderAvailability(orchestrator),
       goalUnderstanding: new SimpleGoalUnderstanding(),
-      planner: new MissionPlanningAdapter(planning),
+      planner: new MissionPlanningAdapter(planning, {
+        grantedPermissionClasses: missionPermissionClasses,
+      }),
       executor: new AgentExecutionAdapter(agent, runs),
       verifier: new RunVerificationAdapter(runs),
       executionMemory: new MissionExecutionMemoryAdapter(memory, runs),

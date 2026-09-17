@@ -57,6 +57,43 @@ export function permissionClassForTool(
 }
 
 /**
+ * FINAL-02 — the production constraint set for an autonomous
+ * repository-development mission.
+ *
+ * It grants EXACTLY the three governed tools the repository-fix path needs
+ * (read → write → real command execution) and their REAL permission
+ * classes, taken from the same classification table the governed registry
+ * uses. Nothing is widened globally: a mission that does not receive this
+ * constraint set keeps the read/write-only default, and every plan is still
+ * enforced against these constraints before execution.
+ *
+ * Command execution is 'EXECUTE' — deliberately NOT a high-risk class
+ * (HIGH_RISK_PERMISSION_CLASSES = DELETE/SECRETS/DEPLOYMENT), so the
+ * CONTROLLED_AUTONOMOUS repository path closes without a human approval
+ * gate while remaining fully governed, audited and bounded.
+ */
+export const REPOSITORY_MISSION_TOOLS: readonly string[] = [
+  WORKSPACE_READ_TOOL,
+  WORKSPACE_WRITE_TOOL,
+  COMMAND_EXECUTION_TOOL,
+];
+
+export const REPOSITORY_MISSION_PERMISSION_CLASSES: readonly ToolPermissionClass[] = [
+  ...new Set(REPOSITORY_MISSION_TOOLS.map((name) => permissionClassForTool(name))),
+];
+
+/** A fresh, mutable copy of the repository-mission constraints. */
+export function repositoryMissionConstraints(): {
+  allowedTools: string[];
+  grantedPermissionClasses: ToolPermissionClass[];
+} {
+  return {
+    allowedTools: [...REPOSITORY_MISSION_TOOLS],
+    grantedPermissionClasses: [...REPOSITORY_MISSION_PERMISSION_CLASSES],
+  };
+}
+
+/**
  * Registers the safe built-in tools plus (optionally) the bounded workspace
  * tools and the governed command tool on a governed ToolRegistry. The
  * registry applies the FULL security chain to every call — nothing here

@@ -267,3 +267,25 @@ export class FakeToolPort implements AgentToolExecutionPort {
 
 export const STANDARD_TIER: QualityTier = 'standard';
 export { validProposalJson as proposalForMultiCapability };
+
+// ── Governed registry fixture (FINAL-02) ──────────────────────────
+
+/**
+ * The governed tool names the repository-fix planning path genuinely
+ * selects (read → write → real command execution). The permission classes
+ * mirror the production governed classification exactly
+ * (workspace_read=READ, workspace_write=WRITE, run_command=EXECUTE).
+ */
+export const GOVERNED_REPOSITORY_TOOLS: readonly {
+  toolName: string;
+  permissionClass: ToolPermissionClass;
+}[] = [
+  { toolName: 'workspace_read', permissionClass: 'READ' },
+  { toolName: 'workspace_write', permissionClass: 'WRITE' },
+  { toolName: 'run_command', permissionClass: 'EXECUTE' },
+];
+
+/** A registry exposing exactly the governed repository-development tools. */
+export function governedRepositoryToolRegistry(): FakeToolRegistry {
+  return new FakeToolRegistry([...GOVERNED_REPOSITORY_TOOLS]);
+}

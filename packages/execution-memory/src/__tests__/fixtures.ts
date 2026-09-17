@@ -59,21 +59,77 @@ export class FakeAiPort implements AgentAiExecutionPort {
 
 export interface FakeToolSpec {
   permissionClass: ToolPermissionClass;
+  requiresApproval?: boolean;
   outcome?: string;
   denied?: boolean;
   error?: string;
 }
 
 export class FakeToolRegistry implements AgentToolRegistryPort {
-  constructor(private readonly tools: Record<string, FakeToolSpec> = {}) {}
+  private readonly specs = new Map<string, FakeToolSpec>();
+
+  /**
+   * Accepts either the compact record form (`{ toolName: spec }`) used by the
+   * memory fixtures, or the array form (`[{ toolName, permissionClass }]`)
+   * used by the governed repository registry below — mirroring the planning
+   * package's fixture so both suites describe the same contract.
+   */
+  constructor(
+    tools:
+      | Record<string, FakeToolSpec>
+      | Array<{
+          toolName: string;
+          permissionClass: ToolPermissionClass;
+          requiresApproval?: boolean;
+        }> = {},
+  ) {
+    if (Array.isArray(tools)) {
+      for (const tool of tools) {
+        this.specs.set(tool.toolName, {
+          permissionClass: tool.permissionClass,
+          requiresApproval: tool.requiresApproval ?? false,
+        });
+      }
+    } else {
+      for (const [toolName, spec] of Object.entries(tools)) this.specs.set(toolName, spec);
+    }
+  }
+
   listAllowed(): string[] {
-    return Object.keys(this.tools);
+    return [...this.specs.keys()];
   }
+
   describe(toolName: string): AgentToolInfo | undefined {
-    const spec = this.tools[toolName];
+    const spec = this.specs.get(toolName);
     if (spec === undefined) return undefined;
-    return { toolName, permissionClass: spec.permissionClass, requiresApproval: false };
+    return {
+      toolName,
+      permissionClass: spec.permissionClass,
+      requiresApproval: spec.requiresApproval ?? false,
+    };
   }
+}
+
+// ── Governed registry fixture (FINAL-02) ──────────────────────────
+
+/**
+ * The governed tool names the repository-fix planning path genuinely
+ * selects (read → write → real command execution). The permission classes
+ * mirror the production governed classification exactly
+ * (workspace_read=READ, workspace_write=WRITE, run_command=EXECUTE).
+ */
+export const GOVERNED_REPOSITORY_TOOLS: readonly {
+  toolName: string;
+  permissionClass: ToolPermissionClass;
+}[] = [
+  { toolName: 'workspace_read', permissionClass: 'READ' },
+  { toolName: 'workspace_write', permissionClass: 'WRITE' },
+  { toolName: 'run_command', permissionClass: 'EXECUTE' },
+];
+
+/** A registry exposing exactly the governed repository-development tools. */
+export function governedRepositoryToolRegistry(): FakeToolRegistry {
+  return new FakeToolRegistry([...GOVERNED_REPOSITORY_TOOLS]);
 }
 
 export class FakeToolPort implements AgentToolExecutionPort {

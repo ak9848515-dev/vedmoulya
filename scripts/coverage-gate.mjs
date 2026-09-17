@@ -21,7 +21,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,6 +46,14 @@ function findWorkspaces() {
 /** Resolve the vitest CLI entry point from node_modules. */
 const vitestEntry = join(root, 'node_modules', 'vitest', 'vitest.mjs');
 
+/** Move a file on the same filesystem (copy + delete). node:fs.moveSync is absent on some Node builds. */
+function moveFileSync(src, dst) {
+  const content = readFileSync(src);
+  writeFileSync(dst, content);
+  unlinkSync(src);
+}
+
+
 /** True when the workspace produced a coverage report with any measured files. */
 function hasCoverageData(ws) {
   const file = join(root, ws, 'coverage', 'coverage-final.json');
@@ -63,27 +71,58 @@ function runWorkspaceCoverage(ws) {
   // Remove any previous coverage output so the noData check and the merged
   // aggregate reflect ONLY this run — a stale coverage-final.json from an
   // earlier commit could otherwise let a zero-test workspace pass the gate.
-  rmSync(join(cwd, 'coverage'), { recursive: true, force: true });
-  // Pass --config explicitly so vitest uses the workspace-local vitest.config.ts
-  // instead of potentially walking up to the root vitest.config.ts (which has
-  // test.projects and triggers workspace mode that suppresses per-workspace
-  // coverage output).
-  //
-  // We invoke vitest through node directly (process.execPath + vitest.mjs)
-  // with shell:false. Previous npx+shell:true passed each argument through
-  // /bin/sh (Linux) or cmd.exe (Windows), which concatenated them unsafely
-  // (Node.js DEP0190). On Linux CI this caused vitest to resolve the root
-  // vitest.config.ts instead of the workspace-local one, entering workspace
-  // mode where per-workspace coverage output is suppressed.
+  const reportsBase = join(cwd, 'coverage');
+  // Isolate each session into its own coverage report directory so two
+  // concurrent gate runs over the same workspace cannot clobber each
+  // other's intermediate chunks. See the long comment above. After vitest
+  // exits we move its `coverage-final.json` into the canonical workspace
+  // `coverage/` dir and delete the temp directory.
+  const reportsTempDir = join(reportsBase, `.tmp.${process.pid}.${Date.now()}`);
+  mkdirSync(reportsTempDir, { recursive: true });
+  let result;
+  // All diagnostic variables referenced in the failure block stay in scope even
+  // when vitest fails before reaching the happy-path `try {} finally {}` cleanup.
   const configPath = join(cwd, 'vitest.config.ts');
   const cmd = process.execPath;
-  const args = [vitestEntry, 'run', '--coverage', '--config', configPath];
-  const result = spawnSync(cmd, args, {
-    cwd,
-    encoding: 'utf8',
-    timeout: 600_000,
-    shell: false,
-  });
+  const args = [
+    vitestEntry,
+    'run',
+    '--coverage',
+    '--config',
+    configPath,
+    '--coverage.reportsDirectory',
+    reportsTempDir,
+  ];
+  try {
+    // Pass --config explicitly so vitest uses the workspace-local
+    // vitest.config.ts (so its per-workspace 80% thresholds apply)
+    // instead of walking up to the root config (which has test.projects and
+    // enters workspace mode that suppresses per-workspace coverage output).
+    //
+    // We invoke vitest through process.execPath + vitest.mjs with
+    // shell:false. Previous npx+shell:true passed each argument through
+    // /bin/sh (Linux) or cmd.exe (Windows), which concatenated them
+    // unsafely (Node.js DEP0190). On Linux CI this caused vitest to resolve
+    // the root vitest.config.ts instead of the workspace-local one.
+    result = spawnSync(cmd, args, {
+      cwd,
+      encoding: 'utf8',
+      timeout: 600_000,
+      shell: false,
+    });
+    // Move vitest's `coverage-final.json` from the isolated report dir into
+    // the workspace's canonical `coverage/` so the gate's
+    // `hasCoverageData`, diagnostics, and `mergeAggregate` find it where
+    // they expect it.
+    const src = join(reportsTempDir, 'coverage-final.json');
+    if (existsSync(src)) {
+      const dst = join(reportsBase, 'coverage-final.json');
+      moveFileSync(src, dst);
+    }
+  } finally {
+    // Ensure the temp dir is removed even when vitest exits non-zero.
+    try { rmSync(reportsTempDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
   const thresholdErrors = (output.match(/ERROR: Coverage[^\n]*/g) ?? []).map((l) => l.trim());
   // A workspace with no test files (passWithNoTests) produces no coverage data
@@ -111,18 +150,18 @@ function runWorkspaceCoverage(ws) {
     console.error(`\n=== VITEST FAILURE DIAGNOSTICS: ${ws} ===`);
     console.error(`workspace: ${ws}`);
     console.error(`cwd: ${cwd}`);
-    console.error(`config path: ${configPath}`);
+    console.error(`config path: ${configPath ?? 'n/a'}`);
     console.error(`process.platform: ${process.platform}`);
     console.error(`process.version: ${process.version}`);
     console.error(`npm version: ${npmVersion}`);
-    console.error(`Vitest command: ${cmd} ${args.map(a => a.includes(' ') ? JSON.stringify(a) : a).join(' ')}`);
-    console.error(`Vitest exit status: ${String(result.status)}`);
-    console.error(`Vitest signal: ${String(result.signal)}`);
+    console.error(`Vitest command: ${(cmd ?? 'n/a')} ${(args ?? []).map(a => a.includes(' ') ? JSON.stringify(a) : a).join(' ')}`);
+    console.error(`Vitest exit status: ${String(result?.status ?? 'n/a')}`);
+    console.error(`Vitest signal: ${result?.signal ?? 'n/a'}`);
     console.error('');
     console.error('stdout:');
-    console.error(result.stdout ?? '(empty)');
+    console.error(result?.stdout ?? '(empty)');
     console.error('stderr:');
-    console.error(result.stderr ?? '(empty)');
+    console.error(result?.stderr ?? '(empty)');
     console.error('');
     console.error(`coverage directory: ${coverageDir}`);
     console.error(`coverage-final.json: ${existsSync(coverageFile) ? 'exists' : 'MISSING'}`);

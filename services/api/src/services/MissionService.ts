@@ -20,10 +20,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
-  createMissionRuntime,
-  ensureMissionPersistence,
+  COMMAND_EXECUTION_TOOL,
+  REPOSITORY_MISSION_PERMISSION_CLASSES,
   WORKSPACE_READ_TOOL,
   WORKSPACE_WRITE_TOOL,
+  createMissionRuntime,
+  ensureMissionPersistence,
 } from '@vedmoulya/mission-runtime';
 import { registerPlatformProviders } from '@vedmoulya/orchestrator';
 import type { MissionRuntime, MissionRuntimeOptions } from '@vedmoulya/mission-runtime';
@@ -142,6 +144,18 @@ export interface CreateMissionInputView {
   maxTokens?: number;
   maxRuntimeMs?: number;
   autonomyLevel?: 'ASSISTED' | 'SUPERVISED' | 'CONTROLLED_AUTONOMOUS';
+  /**
+   * FINAL-02 — grant the governed command tool (`run_command`) to this
+   * mission so a repository-development objective can execute REAL test /
+   * build commands and be verified by the REAL process exit status.
+   *
+   * Omitted → decided automatically from the mission's own objectives
+   * (a repository/test-fix objective grants it; anything else keeps the
+   * read/write-only default). Never widens anything globally: the tool, its
+   * allowlisted command catalog, the workspace jail, the budgets and the
+   * audit trail all remain in force.
+   */
+  allowCommandExecution?: boolean;
 }
 
 // ── Service options ─────────────────────────────────────────────────────────
@@ -164,6 +178,22 @@ export interface MissionServiceOptions {
 }
 
 const DEFAULT_MAX_ACTIVITY = 200;
+
+/**
+ * FINAL-02 — repository-development detection. A mission whose own objective
+ * (or an initial objective) describes fixing / repairing failing tests or a
+ * broken build performs REAL repository work, so it is granted the governed
+ * command tool. This mirrors the ordering template's own matcher — it only
+ * decides WHICH mission constraints are granted, never what a plan may do.
+ */
+const REPOSITORY_DEVELOPMENT_PATTERN =
+  /(fix|repair|resolve).*(test|build|failure)|(test|build|failure).*(fix|repair|resolve)|failing tests?/i;
+
+function isRepositoryDevelopmentMission(input: CreateMissionInputView): boolean {
+  if (input.allowCommandExecution !== undefined) return input.allowCommandExecution;
+  const goals = [input.objective, ...(input.initialObjectives ?? [])];
+  return goals.some((goal) => REPOSITORY_DEVELOPMENT_PATTERN.test(goal));
+}
 
 /**
  * BLD-024 — the operator-authorized default workspace. Missions mutate
@@ -315,10 +345,22 @@ export class MissionService {
         maxTokens: input.maxTokens,
         maxRuntimeMs: input.maxRuntimeMs,
       },
-      constraints: {
-        allowedTools: [WORKSPACE_READ_TOOL, WORKSPACE_WRITE_TOOL],
-        grantedPermissionClasses: ['READ', 'WRITE'],
-      },
+      constraints: isRepositoryDevelopmentMission(input)
+        ? {
+            // FINAL-02 — repository-development missions perform REAL
+            // repository work, so they are granted the governed command tool
+            // (`run_command`) alongside read/write. The tool stays allowlisted,
+            // path-jailed, bounded and audited; the class comes from the
+            // governed registry's own classification ('EXECUTE' — not
+            // high-risk, so the CONTROLLED_AUTONOMOUS path needs no human gate).
+            allowedTools: [WORKSPACE_READ_TOOL, WORKSPACE_WRITE_TOOL, COMMAND_EXECUTION_TOOL],
+            grantedPermissionClasses: [...REPOSITORY_MISSION_PERMISSION_CLASSES],
+          }
+        : {
+            // Non-repository missions keep the read/write-only default.
+            allowedTools: [WORKSPACE_READ_TOOL, WORKSPACE_WRITE_TOOL],
+            grantedPermissionClasses: ['READ', 'WRITE'],
+          },
       initialObjectives: input.initialObjectives,
     });
     return mission;

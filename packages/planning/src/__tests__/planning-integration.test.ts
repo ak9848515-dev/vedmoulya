@@ -20,8 +20,22 @@ import {
   FakePlannerAi,
   FakeToolPort,
   FakeToolRegistry,
+  governedRepositoryToolRegistry,
   validProposalJson,
 } from './fixtures.js';
+
+/**
+ * FINAL-02 — the repository-fix plan performs REAL repository work through
+ * governed tools, so a repository-fix stack exposes the governed repository
+ * tools and grants their classes (READ + WRITE + EXECUTE). Non-repository
+ * tests keep the read/write default implicitly (they are not affected).
+ */
+const REPOSITORY_CONSTRAINTS = {
+  grantedPermissionClasses: ['READ', 'WRITE', 'EXECUTE'] as ('READ' | 'WRITE' | 'EXECUTE')[],
+  // The repository-fix path executes several REAL governed tool actions, so
+  // its honest envelope is wider than the frozen 8-tool-call default.
+  budget: { maxToolCalls: 24 },
+};
 
 /** Content that satisfies every deterministic template rule check. */
 const ALL_PASSING_CONTENT =
@@ -33,27 +47,28 @@ function buildStack(
     content?: string;
     tools?: FakeToolRegistry;
     plannerAi?: FakePlannerAi;
+    /** Override the default governed repository registry. */
+    repositoryTools?: boolean;
   } = {},
 ) {
   const clock = new FakeClock();
+  const registry =
+    overrides.tools ??
+    (overrides.repositoryTools === false
+      ? new FakeToolRegistry([
+          { toolName: 'calculator', permissionClass: 'EXECUTE', requiresApproval: false },
+        ])
+      : governedRepositoryToolRegistry());
   const executor = new AgentExecutionService({
     ai: new FakeAiPort(overrides.content ?? ALL_PASSING_CONTENT),
     tools: new FakeToolPort(),
-    toolRegistry:
-      overrides.tools ??
-      new FakeToolRegistry([
-        { toolName: 'calculator', permissionClass: 'EXECUTE', requiresApproval: false },
-      ]),
+    toolRegistry: registry,
     clock,
   });
   const application = new PlanningApplicationService({
     executor,
     ai: overrides.plannerAi ?? new FakePlannerAi(),
-    toolRegistry:
-      overrides.tools ??
-      new FakeToolRegistry([
-        { toolName: 'calculator', permissionClass: 'EXECUTE', requiresApproval: false },
-      ]),
+    toolRegistry: registry,
     clock,
   });
   return { executor, application, clock };
@@ -65,6 +80,7 @@ describe('PlanningApplicationService — GOAL → ... → EXECUTION', () => {
     const outcome = await application.planAndExecute({
       userId: 'user-1',
       goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
 
     expect(outcome.planResult.readiness.status).toBe('READY');
@@ -79,12 +95,44 @@ describe('PlanningApplicationService — GOAL → ... → EXECUTION', () => {
     expect(run?.stepResults.every((s) => s.verified)).toBe(true);
   });
 
+  it('a repository-fix tool step really invokes the governed tool through the engine', async () => {
+    // FINAL-02 — the command steps are EXPLICIT governed tool actions, so
+    // the frozen engine executes them through the real tool port.
+    const { application } = buildStack();
+    const outcome = await application.planAndExecute({
+      userId: 'user-1',
+      goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
+    });
+    const run = outcome.execution?.run;
+    const runCommandActions = (run?.stepResults ?? []).flatMap((step) =>
+      step.actions.filter((action) => action.kind === 'tool' && action.toolName === 'run_command'),
+    );
+    // Three REAL governed command executions: initial failure observation,
+    // targeted re-run, broader re-run.
+    expect(runCommandActions.length).toBe(3);
+    // Every governed command really executed and really succeeded through the
+    // engine's tool port (the fix made the suite pass).
+    expect(runCommandActions.every((action) => action.status === 'succeeded')).toBe(true);
+    // The command steps were verified by the deterministic command check
+    // (real outcome), never by model prose.
+    const commandSteps = (run?.stepResults ?? []).filter((step) =>
+      step.actions.some((action) => action.kind === 'tool' && action.toolName === 'run_command'),
+    );
+    expect(commandSteps.length).toBe(3);
+    for (const step of commandSteps) {
+      expect(step.verification?.policyKind).toBe('command');
+      expect(step.verified).toBe(true);
+    }
+  });
+
   it('AI-assisted goal plans AND executes to ACHIEVED through the same chain', async () => {
     const { application } = buildStack();
     const outcome = await application.planAndExecute({
       userId: 'user-1',
       goal: 'Analyze this repository and fix the failing tests',
       mode: 'ai',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
 
     expect(outcome.planResult.source).toBe('ai');
@@ -101,7 +149,7 @@ describe('PlanningApplicationService — GOAL → ... → EXECUTION', () => {
     const outcome = await application.planAndExecute({
       userId: 'user-1',
       goal: 'Analyze this repository and fix the failing tests',
-      constraints: { budget: { maxCostUsd: 0.0001 } },
+      constraints: { ...REPOSITORY_CONSTRAINTS, budget: { maxCostUsd: 0.0001 } },
     });
     expect(outcome.planResult.readiness.status).toBe('BLOCKED');
     expect(outcome.execution).toBeUndefined();
@@ -174,6 +222,7 @@ describe('PlanningApplicationService — GOAL → ... → EXECUTION', () => {
       userId: 'user-1',
       goal: 'Analyze this repository and fix the failing tests',
       mode: 'ai',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
     expect(outcome.planResult.readiness.status).toBe('READY');
     const run = outcome.execution?.run;
@@ -196,6 +245,7 @@ describe('PlanningApplicationService — plan-only and no-executor paths', () =>
     const result = await application.generatePlan({
       userId: 'user-1',
       goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
 
     expect(result.plan).toBeDefined();
@@ -206,9 +256,7 @@ describe('PlanningApplicationService — plan-only and no-executor paths', () =>
   it('planAndExecute never executes when no executor is wired (plan-only service)', async () => {
     const application = new PlanningApplicationService({
       ai: new FakePlannerAi(),
-      toolRegistry: new FakeToolRegistry([
-        { toolName: 'calculator', permissionClass: 'EXECUTE', requiresApproval: false },
-      ]),
+      toolRegistry: governedRepositoryToolRegistry(),
       clock: new FakeClock(),
       // no executor
     });
@@ -216,6 +264,7 @@ describe('PlanningApplicationService — plan-only and no-executor paths', () =>
     const outcome = await application.planAndExecute({
       userId: 'user-1',
       goal: 'Analyze this repository and fix the failing tests',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
 
     expect(outcome.planResult.readiness.status).toBe('READY');

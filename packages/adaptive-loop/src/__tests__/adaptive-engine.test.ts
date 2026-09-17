@@ -19,11 +19,13 @@
 
 import { describe, expect, it } from 'vitest';
 import { PlannerService } from '@vedmoulya/planning';
+import type { PlanConstraint } from '@vedmoulya/planning';
 import type { AgentPlan } from '@vedmoulya/agent-execution';
 import {
   buildAdaptiveRun,
   FakeAiPort,
   FakeToolPort,
+  governedRepositoryToolRegistry,
   makeToolRegistry,
   ScriptedDecisionModel,
   FakePlanner,
@@ -49,11 +51,28 @@ import {
 const REPO_FIX_OUTPUT =
   'repository inspection found failing tests with clear failure signals; root cause diagnosis complete; minimal fix applied; targeted tests pass and broader suite pass; final state verified. repository test fail cause fix pass verified';
 
+/**
+ * FINAL-02 — the repository-fix plan performs REAL repository work through
+ * governed tools, so it is only READY when the principal holds their
+ * permission classes and the honest tool-call budget covers the plan's real
+ * command steps (mirrors the planning package's REPOSITORY_CONSTRAINTS).
+ */
+const REPOSITORY_CONSTRAINTS: PlanConstraint = {
+  grantedPermissionClasses: ['READ', 'WRITE', 'EXECUTE'],
+  budget: { maxToolCalls: 24 },
+};
+
 describe('PHASE 21 — full chain: goal → plan → READY → adaptive loop → ACHIEVED', () => {
   it('executes a real PlannerService READY plan to ACHIEVED with every step VERIFIED', async () => {
-    const planner = new PlannerService();
+    // FINAL-02 — the repository-fix path selects governed tools, so the plan
+    // is only READY when the registry exposes them and their permission
+    // classes are granted (the same contract the planning package enforces).
+    const planner = new PlannerService({
+      toolRegistry: governedRepositoryToolRegistry(),
+    });
     const { result, understanding } = await planner.generatePlan({
       goal: 'Analyze this repository and fix the failing tests.',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
     expect(understanding.goalId).toBeTruthy();
     expect(result.readiness.status).toBe('READY');
@@ -62,7 +81,14 @@ describe('PHASE 21 — full chain: goal → plan → READY → adaptive loop →
 
     const plan = result.plan!;
     const ai = new FakeAiPort({ content: REPO_FIX_OUTPUT });
-    const { run, engine } = buildAdaptiveRun({ plan, ai });
+    const tools = new FakeToolPort({ permissionClass: 'EXECUTE' });
+    const { run, engine } = buildAdaptiveRun({
+      plan,
+      ai,
+      tools,
+      toolRegistry: governedRepositoryToolRegistry(),
+      grantedPermissionClasses: ['READ', 'WRITE', 'EXECUTE'],
+    });
     const finished = await engine.run(run);
 
     expect(finished.outcome).toBe('ACHIEVED');
@@ -70,16 +96,27 @@ describe('PHASE 21 — full chain: goal → plan → READY → adaptive loop →
     expect(finished.terminationReason).toBe('GOAL_VERIFIED');
     expect(Object.values(finished.stepStatus).every((s) => s === 'verified')).toBe(true);
     expect(finished.usage.attempts).toBe(7);
-    expect(ai.calls.length).toBe(7);
-    // Every executed action went through the frozen AI execution port.
-    expect(finished.executedActions.every((a) => a.kind === 'AI_ACTION')).toBe(true);
+    // FINAL-02 plan shape: 4 AI steps (inspect/diagnose/repair/verify) flow
+    // through the frozen AI execution port; 3 command steps (test runs) go
+    // through the governed run_command tool — never a direct provider call.
+    expect(ai.calls.length).toBe(4);
+    expect(finished.executedActions).toHaveLength(7);
+    expect(finished.executedActions.filter((a) => a.kind === 'AI_ACTION')).toHaveLength(4);
+    expect(finished.executedActions.filter((a) => a.kind === 'TOOL_CALL')).toHaveLength(3);
     expect(finished.executedActions.every((a) => a.decisionId === 'declared')).toBe(true);
+    // Every governed command execution rides the frozen tool port.
+    expect(tools.calls.length).toBeGreaterThanOrEqual(3);
+    expect(tools.calls.every((c) => c.toolName === 'run_command')).toBe(true);
   });
 
   it('keeps the model-driven chain honest: decision → validated AI_ACTION → observation → verification → ACHIEVED', async () => {
-    const planner = new PlannerService();
+    // FINAL-02 — same governed planning contract as the deterministic test.
+    const planner = new PlannerService({
+      toolRegistry: governedRepositoryToolRegistry(),
+    });
     const { result } = await planner.generatePlan({
       goal: 'Analyze this repository and fix the failing tests.',
+      constraints: REPOSITORY_CONSTRAINTS,
     });
     expect(result.readiness.status).toBe('READY');
     const plan = result.plan!;
@@ -98,7 +135,14 @@ describe('PHASE 21 — full chain: goal → plan → READY → adaptive loop →
       CONTINUE(),
     );
     const ai = new FakeAiPort({ content: REPO_FIX_OUTPUT });
-    const { run, engine } = buildAdaptiveRun({ plan, ai, decisionModel });
+    const { run, engine } = buildAdaptiveRun({
+      plan,
+      ai,
+      tools: new FakeToolPort({ permissionClass: 'EXECUTE' }),
+      toolRegistry: governedRepositoryToolRegistry(),
+      grantedPermissionClasses: ['READ', 'WRITE', 'EXECUTE'],
+      decisionModel,
+    });
     const finished = await engine.run(run);
 
     expect(finished.outcome).toBe('ACHIEVED');

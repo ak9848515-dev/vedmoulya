@@ -43,7 +43,7 @@ beforeEach(() => {
   generateTextMock.mockResolvedValue({
     text: 'Gemini explains the workflow.',
     usage: { inputTokens: 15, outputTokens: 12, totalTokens: 27 },
-    finalStep: { response: { modelId: 'gemini-2.5-flash' } },
+    finalStep: { response: { modelId: 'gemini-3.5-flash' } },
   });
   // Default mock client: a callable that returns the model descriptor.
   createGoogleGenerativeAIMock.mockReturnValue((model: string) => ({
@@ -91,7 +91,7 @@ describe('GoogleGeminiProvider', () => {
     expect(call.abortSignal).toBeDefined();
 
     expect(response.provider).toBe('google');
-    expect(response.model).toBe('gemini-2.5-flash');
+    expect(response.model).toBe('gemini-3.5-flash');
     expect(response.content).toContain('workflow');
     expect(response.tokenUsage.input).toBe(15);
     expect(response.tokenUsage.total).toBe(27);
@@ -124,7 +124,7 @@ describe('GoogleGeminiProvider', () => {
     generateTextMock.mockResolvedValue({
       output: Promise.resolve({ ok: true }),
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      finalStep: { response: { modelId: 'gemini-2.5-flash' } },
+      finalStep: { response: { modelId: 'gemini-3.5-flash' } },
     });
     const provider = new GoogleGeminiProvider(FAKE_API_KEY);
     await provider.generateStructured({
@@ -187,7 +187,7 @@ describe('GoogleGeminiProvider', () => {
     generateTextMock.mockResolvedValue({
       output: Promise.resolve({ summary: 'ok', score: 9 }),
       usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-      finalStep: { response: { modelId: 'gemini-2.5-flash' } },
+      finalStep: { response: { modelId: 'gemini-3.5-flash' } },
     });
     const provider = new GoogleGeminiProvider(FAKE_API_KEY);
     const response = await provider.generateStructured({
@@ -245,12 +245,12 @@ describe('GoogleGeminiProvider', () => {
       modelId: 'gemini-2.5-pro',
     });
     const response = await provider.execute({ messages: MESSAGES, model: 'gemini' });
-    expect(response.model).toBe('gemini-2.5-flash');
+    expect(response.model).toBe('gemini-3.5-flash');
     // 15 input tokens at $0.01/1K + 12 output tokens at $0.02/1K = 0.00015 + 0.00024 = 0.00039.
     expect(response.cost).toBeCloseTo(0.00039, 7);
   });
 
-  it('defaults to registry-estimate pricing for gemini-2.5-flash', async () => {
+  it('defaults to registry-estimate pricing for gemini-3.5-flash', async () => {
     const provider = new GoogleGeminiProvider(FAKE_API_KEY);
     const response = await provider.execute({ messages: MESSAGES, model: 'gemini' });
     // 15 input × $0.00125/1K + 12 output × $0.01/1K = 0.00001875 + 0.00012 = 0.00013875.
@@ -309,9 +309,9 @@ describe('GoogleGeminiProvider', () => {
     expect(response.traceId).not.toContain(FAKE_API_KEY);
   });
 
-  it('defaults to gemini-2.5-flash model', () => {
+  it('defaults to gemini-3.5-flash model', () => {
     const provider = new GoogleGeminiProvider(FAKE_API_KEY);
-    expect(provider['modelId']).toBe('gemini-2.5-flash');
+    expect(provider['modelId']).toBe('gemini-3.5-flash');
   });
 
   it('accepts custom model id', () => {

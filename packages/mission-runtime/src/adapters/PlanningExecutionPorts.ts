@@ -17,6 +17,7 @@ import type {
   AgentExecutionRun,
   AgentPlan,
   AgentRunBudgetConfig,
+  ToolPermissionClass,
 } from '@vedmoulya/agent-execution';
 import { PlanningApplicationService } from '@vedmoulya/planning';
 import type {
@@ -74,7 +75,29 @@ const ZERO_USAGE = { tokens: 0, costUsd: 0, latencyMs: 0, toolCalls: 0 };
 export class MissionPlanningAdapter implements PlanningPort {
   constructor(
     private readonly planning: PlanningApplicationService,
-    private readonly options: { userId?: string } = {},
+    private readonly options: {
+      userId?: string;
+      /**
+       * FINAL-02 — the permission classes this mission principal actually
+       * holds. Supplied by the production composition from the SAME governed
+       * registry that classifies the real tools (never hard-coded here), so
+       * a plan may only select a tool whose real class the principal was
+       * granted. Defaults to READ+WRITE: without an explicit grant the
+       * planner cannot reach EXECUTE tools such as the governed command
+       * tool, and validation rejects any plan that tries.
+       */
+      grantedPermissionClasses?: readonly string[];
+      /** Bounded plan size for this principal. */
+      maxSteps?: number;
+      /**
+       * FINAL-02 — the mission's real run-budget envelope (merged over the
+       * frozen defaults). The repository-development path executes several
+       * real tool actions, which needs more than the frozen 8-tool-call
+       * default; the mission declares its honest envelope here. Every other
+       * bound (attempts, revisions, tokens, cost, latency) is preserved.
+       */
+      budget?: Partial<AgentRunBudgetConfig>;
+    } = {},
   ) {}
 
   /**
@@ -99,9 +122,23 @@ export class MissionPlanningAdapter implements PlanningPort {
       ...(context !== undefined ? { context } : {}),
       mode: 'deterministic',
       constraints: {
-        maxSteps: 8,
+        maxSteps: this.options.maxSteps ?? 8,
         autonomyLevel: 'CONTROLLED_AUTONOMOUS',
-        grantedPermissionClasses: ['READ', 'WRITE'],
+        // FINAL-02 — the repository-development path executes REAL governed
+        // tool actions (write + read-back + up to three real command runs,
+        // each with bounded retries). The frozen default envelope (8 tool
+        // calls) is honestly insufficient for that plan, so the mission
+        // declares its real envelope here. It is a bounded ceiling, not a
+        // grant: the engine still enforces it, and every other limit
+        // (attempts/revisions/tokens/cost/latency) is untouched.
+        budget: this.options.budget ?? { maxToolCalls: 24 },
+        // FINAL-02 — the granted classes come from the production principal
+        // (composition → governed registry classification), never from this
+        // adapter. A class the principal does not hold cannot be reached.
+        grantedPermissionClasses: (this.options.grantedPermissionClasses ?? [
+          'READ',
+          'WRITE',
+        ]) as ToolPermissionClass[],
       },
     });
     if (result.plan) return result.plan;

@@ -60,7 +60,7 @@ function splitInstructions(messages: Array<{ role: string; content: string }>): 
 }
 
 export interface GoogleGeminiProviderOptions {
-  /** Gemini model id for text generation. Default: gemini-2.5-flash. */
+  /** Gemini model id for text generation. Default: gemini-3.5-flash. */
   modelId?: string;
   /** Structured-output model id (defaults to modelId). */
   structuredModelId?: string;
@@ -104,7 +104,7 @@ export class GoogleGeminiProvider implements ProviderAdapter {
 
   constructor(apiKey: string, options: GoogleGeminiProviderOptions = {}) {
     this.apiKey = apiKey;
-    this.modelId = options.modelId ?? 'gemini-2.5-flash';
+    this.modelId = options.modelId ?? 'gemini-3.5-flash';
     this.structuredModelId = options.structuredModelId ?? this.modelId;
     this.timeoutMs = options.timeoutMs ?? 60_000;
     // Registry estimates: $1.25/M input, $10/M output (catalog google entry).

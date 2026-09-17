@@ -176,4 +176,45 @@ describe('learning signal extraction — verified evidence', () => {
     );
     expect(kinds(signals)).toContain('MODEL_FALLBACK_SUCCESS');
   });
+
+  it('replan evidence: replan to ACHIEVED vs replan that did not achieve', () => {
+    const succeeded = makeCompletedRun({
+      outcome: 'ACHIEVED',
+      actionTraces: [
+        { stepId: 'step-1', toolName: 'test-runner', status: 'succeeded', verdict: 'VERIFIED' },
+      ],
+    });
+    const successSignals = extractLearningSignals(
+      extractExecutionRecords({ ...succeeded, replanCount: 1 }),
+    );
+    expect(kinds(successSignals)).toContain('REPLAN_SUCCESS');
+
+    const failed = makeCompletedRun({
+      outcome: 'FAILED',
+      actionTraces: [{ stepId: 'step-1', toolName: 'test-runner', status: 'failed' }],
+    });
+    const failureSignals = extractLearningSignals(
+      extractExecutionRecords({ ...failed, replanCount: 1 }),
+    );
+    expect(kinds(failureSignals)).toContain('REPLAN_FAILURE');
+    // A replan count of zero never produces replan signals.
+    expect(kinds(extractLearningSignals(extractExecutionRecords(succeeded)))).not.toContain(
+      'REPLAN_SUCCESS',
+    );
+  });
+
+  it('real timeout vs plain failure vs model failure are distinguished', () => {
+    const signals = signalsFor({
+      outcome: 'FAILED',
+      actionTraces: [
+        { stepId: 'step-1', toolName: 'shell', kind: 'tool', status: 'failed', latencyMs: 99_999 },
+        { stepId: 'step-2', toolName: 'linter', kind: 'tool', status: 'failed', latencyMs: 5 },
+        { stepId: 'step-3', provider: 'mock', model: 'mock-1', status: 'failed' },
+      ],
+    });
+    const all = kinds(signals);
+    expect(all).toContain('TOOL_TIMEOUT');
+    expect(all).toContain('TOOL_FAILURE');
+    expect(all).toContain('MODEL_FAILURE');
+  });
 });
