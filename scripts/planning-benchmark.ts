@@ -25,8 +25,12 @@ import type {
   ProviderIntelligencePort,
 } from '@vedmoulya/services';
 import { MockProvider } from '@vedmoulya/orchestrator';
-import { ToolRegistry, registerSafeTools } from '@vedmoulya/services/ai/runtime/ToolRuntime';
-import { ToolRegistryAgentPort } from '@vedmoulya/agent-execution';
+import {
+  createGovernedToolRegistry,
+  ClassifyingToolRegistryPort,
+  WorkspaceRootBinding,
+  repositoryMissionConstraints,
+} from '@vedmoulya/mission-runtime';
 import { AIOrchestrationPlannerPort, PlannerService } from '@vedmoulya/planning';
 
 if (process.env.NODE_ENV !== 'production' && !process.env.AUTH_JWT_SECRET) {
@@ -215,12 +219,17 @@ const executionStrategy: ExecutionStrategyPort = {
 };
 ai.configureIntelligence({ providerIntelligence, executionStrategy });
 
-const registry = new ToolRegistry({
-  allowlist: ['echo', 'current_time', 'calculator'],
-  grantedCapabilities: ['reasoning', 'calculation', 'productivity'],
+// FINAL-02 — the governed registry that the repository-fix template
+// requires.  A WorkspaceRootBinding is created without a real root so
+// that the governed tools (workspace_read, workspace_write, run_command)
+// are registered on the ToolRegistry for readiness validation — they
+// will never actually be executed during the planning benchmark.
+const workspaceBinding = new WorkspaceRootBinding();
+const governedRegistry = createGovernedToolRegistry({
+  workspace: { binding: workspaceBinding },
+  command: {},
 });
-registerSafeTools(registry);
-const toolRegistry = new ToolRegistryAgentPort(registry);
+const toolRegistry = new ClassifyingToolRegistryPort(governedRegistry);
 
 const planner = new PlannerService({
   ai: new AIOrchestrationPlannerPort(ai),
@@ -234,6 +243,11 @@ interface Scenario {
   goal: string;
   expectedTemplate: string;
   minSteps: number;
+  /** Per-scenario planning constraints (mirrors the production mission
+   *  composition).  Passed to generatePlan() so that the planner's
+   *  validation pipeline sees the same permission classes and budget
+   *  the execution engine would grant. */
+  constraints?: import('@vedmoulya/planning').PlanConstraint;
 }
 
 const SCENARIOS: Scenario[] = [
@@ -242,6 +256,14 @@ const SCENARIOS: Scenario[] = [
     goal: 'Analyze this repository and fix the failing tests',
     expectedTemplate: 'repository-fix',
     minSteps: 7,
+    // FINAL-02 — the repository-fix template selects governed tools
+    // (run_command, workspace_write, workspace_read) whose permission
+    // classes are READ / WRITE / EXECUTE.  The budget is raised to
+    // accommodate the multiple command + workspace tool actions.
+    constraints: {
+      ...repositoryMissionConstraints(),
+      budget: { maxToolCalls: 24 },
+    },
   },
   {
     id: 'content',
@@ -319,7 +341,11 @@ async function main(): Promise<void> {
     let detSteps = 0;
     let detReady = 0;
     for (let i = 0; i < RUNS_PER_SCENARIO; i += 1) {
-      const { result } = await planner.generatePlan({ goal: scenario.goal, mode: 'deterministic' });
+      const { result } = await planner.generatePlan({
+        goal: scenario.goal,
+        mode: 'deterministic',
+        constraints: scenario.constraints,
+      });
       detLatencySum += result.planningLatencyMs;
       detSteps = result.plan?.steps.length ?? 0;
       if (result.readiness.status === 'READY') detReady += 1;
@@ -347,7 +373,11 @@ async function main(): Promise<void> {
     let aiReady = 0;
     let aiSteps = 0;
     for (let i = 0; i < RUNS_PER_SCENARIO; i += 1) {
-      const { result } = await planner.generatePlan({ goal: scenario.goal, mode: 'ai' });
+      const { result } = await planner.generatePlan({
+        goal: scenario.goal,
+        mode: 'ai',
+        constraints: scenario.constraints,
+      });
       aiLatencySum += result.planningLatencyMs;
       aiCostSum += result.plannerAi?.costUsd ?? 0;
       aiTokensSum += result.plannerAi?.tokens?.total ?? 0;
