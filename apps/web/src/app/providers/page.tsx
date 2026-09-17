@@ -1,21 +1,26 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VedMoulya — AI Providers
-// EPIC-012A — Premium Experience Refinement (Phases 1–6 / 17)
-// PRIMARY VIEW: premium AI Providers overview — compact operational rows
-// (provider → status → model → enable → Configure) with an inline model
-// selector. All technical configuration lives in the dedicated per-provider
-// Provider Configuration view (EPIC-012B), opened via the Configure action.
-// SECONDARY: registry tabs (marketplace/benchmarks/model registry) are behind
-// "Advanced" — never removed, just moved to progressive disclosure.
+// AI PROVIDER UX SIMPLIFICATION — "Expose decisions. Hide infrastructure."
+//
+// PRIMARY VIEWS (progressive disclosure):
+//   /providers              → AI Providers: VedMoulya's AI + Other AI, + Add AI
+//   /providers?provider=…   → Configure AI (connection, model, usage, advanced)
+//   usage detail            → measured usage & economics (from Advanced)
+//   provider details        → the existing full registry-intelligence view
+// ADVANCED (collapsed): usage & availability, plus the registry tabs
+// (providers / benchmarks / model registry) — nothing removed, just disclosed.
+//
+// Everything technical (endpoint, protocol, capability routing, fallback,
+// context, tools, orchestration) stays in the existing provider/orchestrator
+// layers; this screen only ever requests connectProvider / discoverModels /
+// setActiveProvider through the existing gateway contracts.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  Card,
   Loading,
-  Switch,
   EmptyState,
   Dialog,
   DialogContent,
@@ -37,12 +42,11 @@ import {
   FlaskConical,
   Database,
   TrendingUp,
-  Star,
   AlertCircle,
-  Settings2,
   HelpCircle,
   CheckCircle2,
   Layers,
+  Plus,
 } from 'lucide-react';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
@@ -55,9 +59,9 @@ import {
   useProviderUsageDetail,
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
-import { ModelSelector, type ModelOption } from './ModelSelector.js';
 import { ProviderDetailView } from './ProviderDetailView.js';
-import { AddProviderPanel } from './AddProviderPanel.js';
+import { ProvidersOverview } from './ProvidersOverview.js';
+import { ProviderConfigScreen } from './ProviderConfigScreen.js';
 import { OpenAIOrgUsagePanel } from './OpenAIOrgUsagePanel.js';
 import { AIBalanceWidget } from './AIBalanceWidget.js';
 import {
@@ -65,11 +69,8 @@ import {
   ReadinessLegend,
   type UsageWidgetRow,
 } from './UsageAvailabilityWidget.js';
-import {
-  providerReadiness,
-  type ProviderReadiness,
-  type ReadinessKey,
-} from './provider-readiness.js';
+import { providerReadiness, type ProviderReadiness } from './provider-readiness.js';
+import { providerIdentity } from './provider-ux.js';
 
 // ── Lazy-loaded registry tabs (progressive disclosure) ───────────────────────
 const BenchmarkDatasetsView = dynamic(
@@ -80,61 +81,6 @@ const ModelRegistryView = dynamic(
   () => import('./model-registry-view.js').then((m) => ({ default: m.default })),
   { ssr: false, loading: () => null },
 );
-
-// ── Family colors ────────────────────────────────────────────────────────────
-
-const FAMILY_COLORS: Record<string, string> = {
-  openai: 'bg-[#10A37F]/15 text-[#10A37F]',
-  anthropic: 'bg-[#D97757]/15 text-[#D97757]',
-  google: 'bg-[#4285F4]/15 text-[#4285F4]',
-  deepseek: 'bg-[#4D6BFE]/15 text-[#4D6BFE]',
-  openrouter: 'bg-[#7C3AED]/15 text-[#7C3AED]',
-  ollama: 'bg-[#64748B]/15 text-[#64748B]',
-  mock: 'bg-[#94A3B8]/15 text-[#64748B]',
-  custom: 'bg-[#F59E0B]/15 text-[#F59E0B]',
-};
-
-const FAMILY_LABELS: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  google: 'Google (Gemini)',
-  deepseek: 'DeepSeek',
-  openrouter: 'OpenRouter',
-  ollama: 'Ollama (Local)',
-  mock: 'Mock (Test)',
-  custom: 'Custom Provider',
-};
-
-// ── Readiness indicator ────────────────────────────────────────────────────
-// ONE indicator per provider (red/orange/green), derived from REAL runtime
-// state + user enable preference (see providerReadiness). Colour is never the
-// only signal — a readable label always accompanies the dot. The three colours
-// are explained once in the ReadinessLegend below the usage widget.
-
-const READINESS_TONES: Record<ReadinessKey, { dot: string; text: string }> = {
-  green: { dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
-  orange: { dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400' },
-  red: { dot: 'bg-rose-500', text: 'text-rose-600 dark:text-rose-400' },
-};
-
-function ReadinessIndicator({
-  readiness,
-  className = '',
-}: {
-  readiness: ProviderReadiness;
-  className?: string;
-}): React.JSX.Element {
-  const tone = READINESS_TONES[readiness.key];
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-[12px] ${className}`}
-      title={readiness.hint}
-    >
-      <span className={`w-2 h-2 rounded-full shrink-0 ${tone.dot}`} aria-hidden="true" />
-      <span className={`font-medium ${tone.text}`}>{readiness.label}</span>
-    </span>
-  );
-}
 
 // ── Usage formatting helpers ────────────────────────────────────────────────
 
@@ -164,7 +110,7 @@ const HOW_IT_WORKS_POINTS: Array<{ title: string; description: string }> = [
   {
     title: 'Pick a model per provider',
     description:
-      'Each provider keeps its own selected model — or “Auto” to let VedMoulya route between the models you have enabled.',
+      'Each provider keeps its own selected model — or “Automatic” to let VedMoulya route between the models you have enabled.',
   },
   {
     title: 'Independent configuration',
@@ -172,9 +118,9 @@ const HOW_IT_WORKS_POINTS: Array<{ title: string; description: string }> = [
       'Authentication and settings are configured per provider and never overwrite another provider’s configuration.',
   },
   {
-    title: 'Ready states',
+    title: 'VedMoulya handles the rest',
     description:
-      'Green means ready to use, orange means configured but turned off, red means it still needs configuration.',
+      'Connection details, capability routing, fallback and context are managed for you — there is no infrastructure to configure.',
   },
 ];
 
@@ -187,7 +133,7 @@ function HowItWorksButton(): React.JSX.Element {
         onClick={() => {
           setOpen(true);
         }}
-        className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-3 py-1.5 text-[12px] font-medium text-[#64748B] dark:text-[#94A3B8] hover:border-[#2B5FD9]/40 hover:text-[#2B5FD9] dark:hover:text-[#6B8FEF] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A] transition-colors"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-3 py-1.5 text-[12px] font-medium text-[#64748B] dark:text-[#94A3B8] hover:border-[#2B5FD9]/40 hover:text-[#2B5FD9] dark:hover:text-[#6B8FEF] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] transition-colors"
         aria-haspopup="dialog"
       >
         <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" />
@@ -243,32 +189,36 @@ function HowItWorksButton(): React.JSX.Element {
   );
 }
 
-// ── Main Page ───────────────────────────────────────────────────────────────
+// ── View routing (list / configure / details / usage) ────────────────────────
+
+type ProvidersView =
+  | { kind: 'list' }
+  | { kind: 'configure'; providerId: string }
+  | { kind: 'details'; providerId: string }
+  | { kind: 'usage' };
 
 export default function ProvidersPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
   const { setActiveSection, setBreadcrumbs } = useNavigationStore();
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [activeTab, setActiveTab] = useState('marketplace');
-  const [showUsage, setShowUsage] = useState(false);
-  // EPIC-012B — clicking a provider opens its dedicated configuration view.
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [view, setView] = useState<ProvidersView>({ kind: 'list' });
+  const [addAIOpen, setAddAIOpen] = useState(false);
 
   useEffect(() => {
     setActiveSection('providers');
     setBreadcrumbs([{ label: 'AI Providers', href: '/providers' }]);
   }, [setActiveSection, setBreadcrumbs]);
 
-  // EPIC-012C — "Configure Provider" deep link: the AI World bell/page
-  // navigates here with ?provider=<family> so the existing provider
-  // configuration view opens directly (no duplicated configuration logic).
+  // Deep link from AI World / capability marketplace: ?provider=<family>
+  // opens the existing configuration experience directly (no duplicated
+  // configuration logic). The Configure screen also recognises the OAuth
+  // return marker (?oauth=google) it sets itself.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const provider = params.get('provider');
     if (provider) {
-      setSelectedProviderId(provider);
+      setView({ kind: 'configure', providerId: provider });
     }
   }, []);
 
@@ -286,141 +236,213 @@ export default function ProvidersPage(): React.JSX.Element {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-slide-up">
+    <div className="max-w-3xl mx-auto space-y-6 animate-slide-up">
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3">
-        <div className="p-2.5 rounded-xl bg-[#EFF4FE] dark:bg-[#1E3A8A]/40">
-          <Cpu className="h-5 w-5 text-[#2B5FD9]" />
-        </div>
-        <div>
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
           <h1 className="text-[24px] md:text-[28px] font-heading font-bold text-[#111827] dark:text-[#F8FAFC]">
             AI Providers
           </h1>
-          <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">
-            Configure and manage your AI providers. Enable multiple providers and let VedMoulya
-            choose the best AI for each task.
-          </p>
+          <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">Your AI ecosystem</p>
         </div>
-        <HowItWorksButton />
+        <button
+          type="button"
+          onClick={() => {
+            setView({ kind: 'list' });
+            setAddAIOpen(true);
+          }}
+          data-testid="add-ai-button"
+          className="shrink-0 inline-flex h-10 items-center gap-2 rounded-xl bg-[#2B5FD9] px-4 text-[13px] font-medium text-white hover:bg-[#1E4AA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus-visible:ring-offset-2 transition-colors"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add AI
+        </button>
       </div>
 
-      {/* ── Main content: experience view ───────────────────────────────── */}
+      {/* ── Main content ────────────────────────────────────────────────── */}
       <ErrorBoundary section="ai-providers">
-        {showUsage ? (
+        {view.kind === 'usage' ? (
           <UsageDetailView
             userId={userId}
             onBack={() => {
-              setShowUsage(false);
+              setView({ kind: 'list' });
             }}
           />
-        ) : selectedProviderId ? (
+        ) : view.kind === 'details' ? (
           <ProviderDetailView
             userId={userId}
-            providerId={selectedProviderId}
+            providerId={view.providerId}
             onBack={() => {
-              setSelectedProviderId(null);
+              setView({ kind: 'list' });
+            }}
+          />
+        ) : view.kind === 'configure' ? (
+          <ProviderConfigLoader
+            userId={userId}
+            providerId={view.providerId}
+            onBack={() => {
+              setView({ kind: 'list' });
+            }}
+            onOpenDetails={(providerId) => {
+              setView({ kind: 'details', providerId });
             }}
           />
         ) : (
           <ProviderExperienceView
             userId={userId}
-            onUsageClick={() => {
-              setShowUsage(true);
+            addAIOpen={addAIOpen}
+            onAddAIOpenChange={setAddAIOpen}
+            onConfigure={(providerId) => {
+              setView({ kind: 'configure', providerId });
             }}
-            onProviderClick={(providerId) => {
-              setSelectedProviderId(providerId);
+            onOpenDetails={(providerId) => {
+              setView({ kind: 'details', providerId });
+            }}
+            onUsageClick={() => {
+              setView({ kind: 'usage' });
             }}
           />
         )}
       </ErrorBoundary>
-
-      {/* ── SPRINT-049: Add AI Provider (always available) ───────────── */}
-      <ErrorBoundary section="add-provider">
-        <AddProviderPanel
-          onProviderAdded={() => {
-            // Re-fetch providers to show the new custom provider.
-            window.location.reload();
-          }}
-        />
-      </ErrorBoundary>
-
-      {/* ── Advanced: Registry tabs (progressive disclosure) ────────────── */}
-      <div className="border-t border-[#E2E8F0] dark:border-[#334155] pt-4">
-        <button
-          onClick={() => {
-            setShowAdvanced(!showAdvanced);
-          }}
-          className="flex items-center gap-2 text-[13px] font-medium text-[#64748B] dark:text-[#94A3B8] hover:text-[#374151] dark:hover:text-[#E2E8F0] transition-colors"
-        >
-          {showAdvanced ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
-          Advanced — Provider Registry
-        </button>
-        {showAdvanced && (
-          <div className="mt-4">
-            <div className="flex gap-2 mb-4">
-              {[
-                { id: 'marketplace', label: 'Providers', icon: <Cpu className="h-4 w-4" /> },
-                {
-                  id: 'benchmarks',
-                  label: 'Benchmarks',
-                  icon: <FlaskConical className="h-4 w-4" />,
-                },
-                { id: 'models', label: 'Model Registry', icon: <Database className="h-4 w-4" /> },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    setActiveTab(tab.id);
-                  }}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
-                    activeTab === tab.id
-                      ? 'bg-[#2B5FD9] text-white'
-                      : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#64748B] dark:text-[#94A3B8] hover:bg-[#E2E8F0] dark:hover:bg-[#334155]'
-                  }`}
-                >
-                  {tab.icon}
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            {activeTab === 'marketplace' && (
-              <ErrorBoundary section="provider-marketplace">
-                <ProviderMarketplace userId={userId} />
-              </ErrorBoundary>
-            )}
-            {activeTab === 'benchmarks' && (
-              <ErrorBoundary section="provider-benchmarks">
-                <BenchmarkDatasetsView userId={userId} />
-              </ErrorBoundary>
-            )}
-            {activeTab === 'models' && (
-              <ErrorBoundary section="provider-model-registry">
-                <ModelRegistryView userId={userId} />
-              </ErrorBoundary>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// ── Provider Experience View (Phase 4) ───────────────────────────────────────
+// ── Configure AI loader ──────────────────────────────────────────────────────
+// Resolves the provider row + preferences from the EXISTING experience view
+// model so the configuration screen renders real registry data (never a
+// second provider source).
+// ═════════════════════════════════════════════════════════════════════════════
+
+function ProviderConfigLoader({
+  userId,
+  providerId,
+  onBack,
+  onOpenDetails,
+}: {
+  userId: string;
+  providerId: string;
+  onBack: () => void;
+  onOpenDetails: (providerId: string) => void;
+}): React.JSX.Element {
+  const { data, isLoading, isError, refetch } = useProviderExperience(userId);
+  const runtimeStatus = useProviderRuntimeStatus(userId);
+  const setEnabledMutation = useSetProviderEnabled();
+  const setPrefsMutation = useSetProviderPreferences();
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const handleToggle = useCallback(
+    (id: string, enabled: boolean) => {
+      void setEnabledMutation
+        .mutateAsync({ userId, providerId: id, enabled })
+        .then(() => {
+          setActionError(null);
+          void refetch();
+        })
+        .catch((error: unknown) => {
+          // Server-enforced domain invariant reason (e.g. "VedMoulya requires
+          // at least one active AI provider.") — surfaced verbatim.
+          setActionError(error instanceof Error ? error.message : 'Unable to update this AI.');
+        });
+    },
+    [userId, setEnabledMutation, refetch],
+  );
+
+  const handleSetPrimary = useCallback(
+    (id: string) => {
+      void setPrefsMutation
+        .mutateAsync({
+          userId,
+          preferredProviderId: id,
+          preferredModelId: null,
+        })
+        .then(() => {
+          setActionError(null);
+          void refetch();
+        })
+        .catch((error: unknown) => {
+          setActionError(error instanceof Error ? error.message : 'Unable to set the primary AI.');
+        });
+    },
+    [userId, setPrefsMutation, refetch],
+  );
+
+  if (isLoading || !data) {
+    return (
+      <div className="flex items-center justify-center h-[40vh]">
+        <Loading label="Loading this AI..." size="lg" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <EmptyState
+        icon={<Cpu className="h-8 w-8" />}
+        title="Unable to load this AI"
+        description="Please try again in a moment."
+      />
+    );
+  }
+
+  const provider = data.providers.find((entry) => entry.providerId === providerId);
+  if (!provider) {
+    return (
+      <EmptyState
+        icon={<Cpu className="h-8 w-8" />}
+        title="This AI isn't in your provider registry"
+        description="It may have been removed. Go back and choose another AI."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {actionError ? (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3.5 py-2.5 dark:border-[#92400E] dark:bg-[#451A03]"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#B45309] dark:text-[#FBBF24]" />
+          <p className="text-[13px] text-[#92400E] dark:text-[#FCD34D]">{actionError}</p>
+        </div>
+      ) : null}
+      <ProviderConfigScreen
+        userId={userId}
+        provider={provider}
+        preferences={data.preferences}
+        runtime={(runtimeStatus.data?.providers ?? []).find((p) => p.family === provider.family)}
+        onBack={onBack}
+        onOpenDetails={onOpenDetails}
+        onToggle={handleToggle}
+        onSetPrimary={handleSetPrimary}
+        onChanged={() => {
+          void refetch();
+        }}
+      />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ── Providers list + Advanced disclosure ─────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
 function ProviderExperienceView({
   userId,
+  addAIOpen,
+  onAddAIOpenChange,
+  onConfigure,
+  onOpenDetails,
   onUsageClick,
-  onProviderClick,
 }: {
   userId: string;
+  addAIOpen: boolean;
+  onAddAIOpenChange: (open: boolean) => void;
+  onConfigure: (providerId: string) => void;
+  onOpenDetails: (providerId: string) => void;
   onUsageClick: () => void;
-  onProviderClick: (providerId: string) => void;
 }): React.JSX.Element {
   const { data, isLoading, isError, refetch } = useProviderExperience(userId);
   const runtimeStatus = useProviderRuntimeStatus(userId);
@@ -430,9 +452,10 @@ function ProviderExperienceView({
   // MANDATORY-PROVIDER INVARIANT (PART 8) — the server refuses unsafe
   // enable/disable transitions; its reason is surfaced here verbatim.
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [activeTab, setActiveTab] = useState('marketplace');
   // When the experience data last arrived — drives the usage widget's honest
-  // "Updated X min ago" (this view model carries no per-provider snapshot
-  // timestamps, so the timestamp reflects when the view last refreshed).
+  // "Updated X min ago".
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const [refreshingUsage, setRefreshingUsage] = useState(false);
 
@@ -465,11 +488,9 @@ function ProviderExperienceView({
       try {
         await setEnabledMutation.mutateAsync({ userId, providerId, enabled });
         setToggleError(null);
-        // Re-fetch to update the view.
         void refetch();
       } catch (error) {
-        // Server-enforced invariant (e.g. "VedMoulya requires at least one
-        // active AI provider.") or a transient failure — show the reason.
+        // Server-enforced invariant or a transient failure — show the reason.
         setToggleError(error instanceof Error ? error.message : 'Unable to update provider.');
       } finally {
         setUpdatingProvider(null);
@@ -478,27 +499,9 @@ function ProviderExperienceView({
     [userId, setEnabledMutation, refetch],
   );
 
-  const handleModelSelect = useCallback(
-    async (providerId: string, modelId: string | undefined): Promise<void> => {
-      try {
-        await setPrefsMutation.mutateAsync({
-          userId,
-          preferredProviderId: modelId ? providerId : null,
-          preferredModelId: modelId ?? null,
-        });
-        setToggleError(null);
-        void refetch();
-      } catch (error) {
-        setToggleError(error instanceof Error ? error.message : 'Unable to update preferences.');
-      }
-    },
-    [userId, setPrefsMutation, refetch],
-  );
-
-  // PART 8 — change Primary Brain. The server enforces that the new Primary
-  // Brain must be enabled; an action on a disabled provider is refused.
   const handleSetPrimaryBrain = useCallback(
     async (providerId: string) => {
+      setUpdatingProvider(providerId);
       try {
         await setPrefsMutation.mutateAsync({
           userId,
@@ -508,7 +511,9 @@ function ProviderExperienceView({
         setToggleError(null);
         void refetch();
       } catch (error) {
-        setToggleError(error instanceof Error ? error.message : 'Unable to set Primary Brain.');
+        setToggleError(error instanceof Error ? error.message : 'Unable to set the primary AI.');
+      } finally {
+        setUpdatingProvider(null);
       }
     },
     [userId, setPrefsMutation, refetch],
@@ -517,29 +522,25 @@ function ProviderExperienceView({
   if (isLoading || !data) {
     return (
       <div className="flex items-center justify-center h-[40vh]">
-        <Loading label="Loading providers..." size="lg" />
+        <Loading label="Loading AI providers..." size="lg" />
       </div>
     );
   }
 
   if (isError) {
     return (
-      <Card variant="standard" padding="lg" className="text-center dark:bg-[#1E293B]">
-        <h2 className="text-[18px] font-heading font-semibold text-[#111827] dark:text-[#F8FAFC]">
-          Unable to load AI providers
-        </h2>
-        <p className="mt-2 text-[14px] text-[#64748B] dark:text-[#94A3B8]">
-          Please try again in a moment.
-        </p>
-      </Card>
+      <EmptyState
+        icon={<Cpu className="h-8 w-8" />}
+        title="Unable to load AI providers"
+        description="Please try again in a moment."
+      />
     );
   }
 
   const { providers, preferences } = data;
 
   // Readiness (single red/orange/green per provider) from REAL runtime state
-  // + user preference — never fabricated. The usage widget summary counts
-  // are computed from the same source.
+  // + user preference — never fabricated. Used by the advanced usage widgets.
   const readinessOf = (p: (typeof providers)[number]): ProviderReadiness =>
     providerReadiness(runtimeByFamily.get(p.family)?.status, p.enabled);
   const summary = {
@@ -547,8 +548,6 @@ function ProviderExperienceView({
     attention: providers.filter((p) => readinessOf(p).key === 'orange').length,
     notConfigured: providers.filter((p) => readinessOf(p).key === 'red').length,
   };
-  // Widget rows carry the REAL registry health quota (0 = provider reports
-  // none → the widget says "Usage unavailable", never an invented percent).
   const usageRows: UsageWidgetRow[] = providers.map((p) => {
     const runtime = runtimeByFamily.get(p.family);
     return {
@@ -561,11 +560,7 @@ function ProviderExperienceView({
     };
   });
 
-  // AI Balance — ONE aggregated number. The denominator is the REAL
-  // user-set monthly token budget (budgetConfigured checks the raw
-  // preference, so the server-side 1M fallback default is never presented
-  // as a real budget); the numerator is measured ledger usage. No provider
-  // breakdown, no fabricated balances. "View all" opens the usage detail.
+  // AI Balance — ONE aggregated number over measured ledger usage.
   const balance = {
     tokensUsed: data.usage.tokensUsed,
     tokenBudget: data.usage.tokenBudget,
@@ -573,196 +568,119 @@ function ProviderExperienceView({
   };
 
   return (
-    <div className="space-y-4">
-      {/* ── AI Balance (compact command center — one number only) ──────── */}
-      <AIBalanceWidget balance={balance} onViewAll={onUsageClick} />
-
-      {/* ── AI Usage & Availability (compact command center) ───────────── */}
-      <UsageAvailabilityWidget
-        rows={usageRows}
-        summary={summary}
-        updatedAt={fetchedAt}
-        refreshing={refreshingUsage}
-        onRefresh={() => {
-          void handleRefreshUsage();
-        }}
-        onViewDetails={onUsageClick}
-      />
-
-      {/* ── Readiness legend — the ONE indicator per provider, explained ── */}
-      <ReadinessLegend />
-
+    <div className="space-y-6">
       {/* ── Server-enforced invariant reason (PART 8) ──────────────────── */}
-      {toggleError && (
+      {toggleError ? (
         <div
           role="alert"
-          className="flex items-start gap-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5 dark:border-[#92400E] dark:bg-[#451A03]"
+          className="flex items-start gap-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3.5 py-2.5 dark:border-[#92400E] dark:bg-[#451A03]"
         >
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#B45309] dark:text-[#FBBF24]" />
           <p className="text-[13px] text-[#92400E] dark:text-[#FCD34D]">{toggleError}</p>
         </div>
-      )}
+      ) : null}
 
-      {/* ── Provider rows ──────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] overflow-hidden">
-        {/* Header */}
-        <div className="hidden md:grid grid-cols-[minmax(0,1fr)_200px_auto_auto_auto] gap-4 px-4 py-2.5 bg-[#F8FAFC] dark:bg-[#0F172A] border-b border-[#E2E8F0] dark:border-[#334155]">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
-            Provider
-          </span>
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
-            Status
-          </span>
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
-            Model
-          </span>
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
-            Enable
-          </span>
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
-            <span className="sr-only">Actions</span>
-          </span>
+      {/* ── Screen 1: VedMoulya's AI + Other AI ───────────────────────── */}
+      <ProvidersOverview
+        userId={userId}
+        providers={providers}
+        runtimeByFamily={runtimeByFamily}
+        preferences={preferences}
+        updatingProviderId={updatingProvider}
+        onConfigure={onConfigure}
+        onOpenDetails={onOpenDetails}
+        onToggle={(providerId, enabled) => {
+          void handleToggle(providerId, enabled);
+        }}
+        onSetPrimary={(providerId) => {
+          void handleSetPrimaryBrain(providerId);
+        }}
+        addAIOpen={addAIOpen}
+        onAddAIOpenChange={onAddAIOpenChange}
+      />
+
+      {/* ── Advanced: usage & availability + provider registry ─────────── */}
+      <div className="border-t border-[#E2E8F0] dark:border-[#334155] pt-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setShowAdvanced(!showAdvanced);
+            }}
+            aria-expanded={showAdvanced}
+            className="flex items-center gap-2 text-[13px] font-medium text-[#64748B] dark:text-[#94A3B8] hover:text-[#374151] dark:hover:text-[#E2E8F0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] rounded transition-colors"
+          >
+            {showAdvanced ? (
+              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            )}
+            Advanced
+          </button>
+          <HowItWorksButton />
         </div>
+        {showAdvanced ? (
+          <div className="mt-4 space-y-4">
+            {/* Usage & availability (measured usage + readiness legend) */}
+            <AIBalanceWidget balance={balance} onViewAll={onUsageClick} />
+            <UsageAvailabilityWidget
+              rows={usageRows}
+              summary={summary}
+              updatedAt={fetchedAt}
+              refreshing={refreshingUsage}
+              onRefresh={() => {
+                void handleRefreshUsage();
+              }}
+              onViewDetails={onUsageClick}
+            />
+            <ReadinessLegend />
 
-        {providers.map((provider) => {
-          const models: ModelOption[] = provider.models.map((m) => ({
-            id: m.id,
-            name: m.name,
-            // Real per-model capabilities piped from the registry intelligence
-            // layer (never hardcoded in the UI).
-            capabilities: m.capabilities,
-            status:
-              provider.availability === 'LOCAL'
-                ? ('local' as const)
-                : provider.availability === 'LIMITED'
-                  ? ('limited' as const)
-                  : provider.availability === 'UNAVAILABLE'
-                    ? ('offline' as const)
-                    : ('available' as const),
-            freeToUse: provider.freeToUse,
-          }));
-
-          // ONE readiness indicator per provider (section 15). A provider may
-          // only reach GREEN when it is truly configured AND enabled — red
-          // rows cannot be switched on from here (go Configure instead).
-          const readiness = readinessOf(provider);
-          const canToggle = readiness.key !== 'red';
-
-          return (
-            <div
-              key={provider.providerId}
-              className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-b border-[#F1F5F9] dark:border-[#334155] last:border-0 hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A] transition-colors md:grid md:grid-cols-[minmax(0,1fr)_200px_auto_auto_auto] md:gap-4"
-            >
-              {/* Provider — clicking the name opens the dedicated per-provider
-                  configuration view (EPIC-012B); Configure below does the same. */}
-              <div className="flex items-center gap-3 min-w-0 w-full md:w-auto">
+            {/* Provider registry tabs (providers / benchmarks / models) */}
+            <div className="flex flex-wrap gap-2 pt-2">
+              {[
+                { id: 'marketplace', label: 'Providers', icon: <Cpu className="h-4 w-4" /> },
+                {
+                  id: 'benchmarks',
+                  label: 'Benchmarks',
+                  icon: <FlaskConical className="h-4 w-4" />,
+                },
+                { id: 'models', label: 'Model Registry', icon: <Database className="h-4 w-4" /> },
+              ].map((tab) => (
                 <button
-                  onClick={() => {
-                    onProviderClick(provider.providerId);
-                  }}
-                  className="flex items-center gap-3 min-w-0 group text-left"
-                  aria-label={`Configure ${provider.name}`}
-                >
-                  <div
-                    className={`p-1.5 rounded-lg shrink-0 ${FAMILY_COLORS[provider.family] ?? 'bg-[#F1F5F9] text-[#64748B]'}`}
-                  >
-                    <Cpu className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <span className="text-[14px] font-medium text-[#111827] dark:text-[#F8FAFC] truncate block group-hover:text-[#2B5FD9] dark:group-hover:text-[#6B8FEF] transition-colors">
-                      {provider.name}
-                    </span>
-                    <span className="text-[11px] text-[#94A3B8]">
-                      {FAMILY_LABELS[provider.family] ?? provider.family}
-                    </span>
-                    {/* PART 7 — Primary Brain indicator (user state, never a
-                        global default). Assigned automatically to Google
-                        Gemini for new accounts; changeable here. */}
-                    {preferences.preferredProviderId === provider.providerId ? (
-                      <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-[#FFFBEB] px-2 py-0.5 text-[10px] font-semibold text-[#B45309] dark:bg-[#422006] dark:text-[#FBBF24]">
-                        <Star className="h-3 w-3" aria-hidden="true" />
-                        Primary Brain
-                      </span>
-                    ) : provider.enabled && canToggle ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleSetPrimaryBrain(provider.providerId)}
-                        disabled={updatingProvider === provider.providerId}
-                        className="ml-1.5 rounded-full bg-[#EFF6FF] px-2 py-0.5 text-[10px] font-semibold text-[#2B5FD9] hover:bg-[#DBEAFE] dark:bg-[#1E3A8A]/30 dark:text-[#6B8FEF] transition-colors"
-                        title="Set as Primary Brain"
-                      >
-                        Set as Primary
-                      </button>
-                    ) : null}
-                  </div>
-                </button>
-              </div>
-
-              {/* Status — single indicator with readable text */}
-              <div className="flex items-center shrink-0">
-                <ReadinessIndicator readiness={readiness} />
-              </div>
-
-              {/* Model selector (disabled until the provider is configured) */}
-              <div className="flex items-center shrink-0">
-                <ModelSelector
-                  models={models}
-                  selectedModelId={provider.selectedModel?.id ?? undefined}
-                  onSelect={(modelId) => {
-                    void handleModelSelect(provider.providerId, modelId);
-                  }}
-                  providerName={provider.name}
-                  enabled={provider.enabled && canToggle}
-                />
-              </div>
-
-              {/* Enable/Disable — server-enforced mandatory-provider invariant
-                  reasons are shown as the tooltip; red (not configured / no
-                  runtime) providers cannot be switched on from the overview. */}
-              <div
-                className="flex items-center shrink-0"
-                title={provider.switchDisabledReason ?? (canToggle ? undefined : readiness.hint)}
-              >
-                <Switch
-                  checked={provider.enabled && canToggle}
-                  onCheckedChange={(checked) => {
-                    void handleToggle(provider.providerId, checked);
-                  }}
-                  disabled={
-                    updatingProvider === provider.providerId ||
-                    !canToggle ||
-                    Boolean(provider.switchDisabledReason)
-                  }
-                  aria-label={`${provider.enabled ? 'Disable' : 'Enable'} ${provider.name}`}
-                />
-              </div>
-
-              {/* Configure — opens the dedicated configuration experience */}
-              <div className="ml-auto md:ml-0 shrink-0">
-                <button
+                  key={tab.id}
                   type="button"
                   onClick={() => {
-                    onProviderClick(provider.providerId);
+                    setActiveTab(tab.id);
                   }}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-2.5 py-1.5 text-[12px] font-medium text-[#374151] dark:text-[#E2E8F0] hover:border-[#2B5FD9]/40 hover:text-[#2B5FD9] dark:hover:text-[#6B8FEF] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A] transition-colors"
-                  aria-label={`Configure ${provider.name}`}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                    activeTab === tab.id
+                      ? 'bg-[#2B5FD9] text-white'
+                      : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#64748B] dark:text-[#94A3B8] hover:bg-[#E2E8F0] dark:hover:bg-[#334155]'
+                  }`}
                 >
-                  <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Configure
+                  {tab.icon}
+                  {tab.label}
                 </button>
-              </div>
+              ))}
             </div>
-          );
-        })}
+            {activeTab === 'marketplace' && (
+              <ErrorBoundary section="provider-marketplace">
+                <ProviderMarketplace userId={userId} />
+              </ErrorBoundary>
+            )}
+            {activeTab === 'benchmarks' && (
+              <ErrorBoundary section="provider-benchmarks">
+                <BenchmarkDatasetsView userId={userId} />
+              </ErrorBoundary>
+            )}
+            {activeTab === 'models' && (
+              <ErrorBoundary section="provider-model-registry">
+                <ModelRegistryView userId={userId} />
+              </ErrorBoundary>
+            )}
+          </div>
+        ) : null}
       </div>
-
-      {providers.length === 0 && (
-        <EmptyState
-          icon={<Cpu className="h-8 w-8" />}
-          title="No providers configured"
-          description="Add an AI provider to start using VedMoulya's AI capabilities."
-        />
-      )}
     </div>
   );
 }
@@ -865,7 +783,7 @@ function UsageDetailView({
             {byProvider.map((p) => (
               <div key={p.provider} className="flex items-center gap-3 text-[12px]">
                 <span className="w-28 truncate font-medium text-[#374151] dark:text-[#E2E8F0]">
-                  {p.provider}
+                  {providerIdentity(p.provider).name}
                 </span>
                 <span className="text-[#64748B] dark:text-[#94A3B8]">{p.calls} calls</span>
                 <span className="text-[#64748B] dark:text-[#94A3B8]">
@@ -944,9 +862,7 @@ function UsageDetailView({
 // ═════════════════════════════════════════════════════════════════════════════
 
 function ProviderMarketplace({ userId: _userId }: { userId: string }): React.JSX.Element {
-  // Dynamic import — React.lazy won't work in Next.js pages; use the
-  // existing marketplace code from the benchmark-view pattern.
-  // For now, show a link to the registry.
+  // The full registry inventory is available through the advanced tabs.
   return (
     <div className="text-center py-8">
       <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">

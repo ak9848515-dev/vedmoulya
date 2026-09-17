@@ -99,12 +99,22 @@ const SUPPORTED_REGISTRY_PROTOCOLS = Object.keys(PROTOCOL_TO_FAMILY);
 
 export function AddProviderPanel({
   onProviderAdded,
+  embedded = false,
+  userId: userIdProp,
+  onCancel,
 }: {
   onProviderAdded?: () => void;
+  /** Render the form directly (no trigger card, no outer Card shell) — used by
+   *  the "Add AI → Custom AI" dialog so the custom flow stays isolated. */
+  embedded?: boolean;
+  /** Owner scope; defaults to the signed-in session user. */
+  userId?: string;
+  /** Dismiss handler for the embedded form. */
+  onCancel?: () => void;
 }): React.JSX.Element {
   const { user } = useAuthStore();
-  const userId = user?.userId ?? '';
-  const [isOpen, setIsOpen] = useState(false);
+  const userId = userIdProp ?? user?.userId ?? '';
+  const [isOpen, setIsOpen] = useState(embedded);
   const [form, setForm] = useState<CustomProviderForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -247,8 +257,8 @@ export function AddProviderPanel({
     }
   }, [form, userId, registerProvider, handleClose, onProviderAdded]);
 
-  // ── Add Button (always visible) ──────────────────────────────────────
-  if (!isOpen) {
+  // ── Add Button (standalone trigger only) ─────────────────────────────
+  if (!embedded && !isOpen) {
     return (
       <button
         onClick={handleOpen}
@@ -267,41 +277,43 @@ export function AddProviderPanel({
     );
   }
 
-  // ── Form ──────────────────────────────────────────────────────────────
+  // ── Form (standalone card, or embedded inside the Add AI dialog) ──────
   return (
-    <Card variant="standard" padding="lg" className="dark:bg-[#1E293B]">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-[#EFF4FE] dark:bg-[#1E3A8A]/40">
-            <Server className="h-5 w-5 text-[#2B5FD9]" />
-          </div>
-          <div>
-            <h2 className="text-[18px] font-heading font-semibold text-[#111827] dark:text-[#F8FAFC]">
-              Add AI Provider
-            </h2>
-            <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">
-              Configure a custom AI provider endpoint
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={handleClose}
-          className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#334155] transition-colors"
-          aria-label="Close"
-        >
-          <X className="h-5 w-5 text-[#94A3B8]" />
-        </button>
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-          <p className="text-[13px] text-red-700 dark:text-red-400">{error}</p>
-        </div>
-      )}
-
-      {/* Provider Name */}
+    <Card variant="standard" padding={embedded ? 'none' : 'lg'} className="dark:bg-[#1E293B]">
       <div className="space-y-4">
+        {!embedded && (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-[#EFF4FE] dark:bg-[#1E3A8A]/40">
+                <Server className="h-5 w-5 text-[#2B5FD9]" />
+              </div>
+              <div>
+                <h2 className="text-[18px] font-heading font-semibold text-[#111827] dark:text-[#F8FAFC]">
+                  Add AI Provider
+                </h2>
+                <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">
+                  Configure a custom AI provider endpoint
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleClose}
+              className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#334155] transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5 text-[#94A3B8]" />
+            </button>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+            <p className="text-[13px] text-red-700 dark:text-red-400">{error}</p>
+          </div>
+        )}
+
+        {/* Provider fields */}
         <div>
           <label className="block text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0] mb-1.5">
             Provider Name *
@@ -522,7 +534,13 @@ export function AddProviderPanel({
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Save Provider
           </Button>
-          <Button variant="ghost" onClick={handleClose}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (embedded) onCancel?.();
+              else handleClose();
+            }}
+          >
             Cancel
           </Button>
         </div>

@@ -135,22 +135,24 @@ export type GatewayCapabilityId = Exclude<CapabilityId, 'QUALITY_EVALUATION' | '
 // Shapes mirror the gateway ProviderExperienceService (the web app never
 // imports from services/api — these are the typed API contract).
 
-interface ProviderExperienceViewDTO {
-  providers: Array<{
-    providerId: string;
-    name: string;
-    family: string;
-    selectedModel: { id: string; name: string } | null;
-    models: Array<{ id: string; name: string; capabilities: string[] }>;
-    availability: 'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE' | 'LOCAL' | 'UNKNOWN';
-    enabled: boolean;
-    /** Present when the mandatory-provider invariant forbids a switch flip. */
-    switchDisabledReason?: string;
-    resourceType: string;
-    freeToUse: boolean;
-    health: { status: string; score: number; latencyMs: number; quotaUsedPercent: number };
-    lifecycleStatus: string;
-  }>;
+export interface ProviderExperienceRowDTO {
+  providerId: string;
+  name: string;
+  family: string;
+  selectedModel: { id: string; name: string } | null;
+  models: Array<{ id: string; name: string; capabilities: string[] }>;
+  availability: 'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE' | 'LOCAL' | 'UNKNOWN';
+  enabled: boolean;
+  /** Present when the mandatory-provider invariant forbids a switch flip. */
+  switchDisabledReason?: string;
+  resourceType: string;
+  freeToUse: boolean;
+  health: { status: string; score: number; latencyMs: number; quotaUsedPercent: number };
+  lifecycleStatus: string;
+}
+
+export interface ProviderExperienceViewDTO {
+  providers: ProviderExperienceRowDTO[];
   usage: {
     tokensUsed: number;
     tokenBudget: number;
