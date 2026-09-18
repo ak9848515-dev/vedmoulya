@@ -177,6 +177,7 @@ export default function ModelRegistryView({ userId }: { userId: string }): React
             />
             <div className="flex rounded-lg border border-[#E2E8F0] dark:border-[#334155] overflow-hidden">
               <button
+                type="button"
                 onClick={() => {
                   setViewMode('table');
                 }}
@@ -186,6 +187,7 @@ export default function ModelRegistryView({ userId }: { userId: string }): React
                 <Table2 className="h-4 w-4" />
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setViewMode('grid');
                 }}

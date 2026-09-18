@@ -336,6 +336,99 @@ describe('ProviderConfigScreen (simplified Configure AI)', () => {
     );
   });
 
+  it('announces a failed probe by focusing the alert (keyboard users land on Try Again)', async () => {
+    mocks.connectMutate.mockResolvedValue({
+      connected: false,
+      status: 'failed',
+      message: 'boom',
+      errorKind: 'unreachable',
+      testedAt: new Date().toISOString(),
+      serverManagedKey: false,
+      runtimeConfigured: false,
+    } satisfies ProviderConnectionResultDTO);
+    renderScreen({ runtime: null });
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'sk-test-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    const error = await waitFor(() => screen.getByTestId('provider-connection-error'));
+    expect(document.activeElement).toBe(error);
+  });
+
+  it('runs the connection test when the key field is submitted (Enter)', async () => {
+    mocks.connectMutate.mockResolvedValue({
+      connected: false,
+      status: 'failed',
+      message: 'nope',
+      errorKind: 'invalid_api_key',
+      testedAt: new Date().toISOString(),
+      serverManagedKey: false,
+      runtimeConfigured: false,
+    } satisfies ProviderConnectionResultDTO);
+    renderScreen({ runtime: null });
+
+    const input = screen.getByTestId('provider-api-key-input');
+    fireEvent.change(input, { target: { value: 'sk-test-key' } });
+    const form = input.closest('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(mocks.connectMutate).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'u1', family: 'google', apiKey: 'sk-test-key' }),
+      );
+    });
+  });
+
+  it('associates the credential help text with the API key field', () => {
+    renderScreen({ runtime: null });
+
+    const input = screen.getByTestId('provider-api-key-input');
+    const describedBy = input.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    // The help text is real help for assistive tech, not decoration only.
+    expect(document.getElementById(describedBy as string)?.textContent).toMatch(/create a key/i);
+  });
+
+  it('labels each section with its heading (accessible landmarks)', () => {
+    renderScreen();
+    for (const [sectionTestId, headingId] of [
+      ['config-section-connection', 'connection-heading'],
+      ['config-section-model', 'model-heading'],
+      ['config-section-capabilities', 'capabilities-heading'],
+      ['config-section-usage', 'usage-heading'],
+    ] as const) {
+      const section = screen.getByTestId(sectionTestId);
+      expect(section.getAttribute('aria-labelledby')).toBe(headingId);
+      expect(document.getElementById(headingId)).not.toBeNull();
+    }
+  });
+
+  it('counts discovered models in plain language (no "1 models")', async () => {
+    mocks.connectMutate.mockResolvedValue({
+      connected: true,
+      status: 'connected',
+      message: 'Connected',
+      latencyMs: 90,
+      models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
+      testedAt: new Date().toISOString(),
+      serverManagedKey: false,
+      runtimeConfigured: true,
+    } satisfies ProviderConnectionResultDTO);
+    renderScreen({ runtime: null });
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'sk-test-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    const success = await waitFor(() => screen.getByTestId('provider-connection-success'));
+    expect(success.textContent).toMatch(/1 model available/);
+    expect(success.textContent).not.toMatch(/1 models/);
+  });
+
   it('shows ✓ Connected on success and switches the AI on when it was off', async () => {
     mocks.connectMutate.mockResolvedValue({
       connected: true,

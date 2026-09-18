@@ -201,7 +201,8 @@ export function providerStatusDisplay(
       key: 'not_connected',
       label: 'Not connected',
       symbol: '○',
-      tone: 'text-[#94A3B8]',
+      // #64748B on white is 4.76:1 (WCAG AA); the darker slate tint failed it.
+      tone: 'text-[#64748B] dark:text-[#94A3B8]',
       hint:
         (runtimeStatus ? NOT_CONNECTED_HINTS[runtimeStatus] : undefined) ??
         'Connect this AI to use it.',

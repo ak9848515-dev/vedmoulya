@@ -185,7 +185,8 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
           expect.objectContaining({ userId: 'u1', family: 'google' }),
         );
       });
-      const call = mocks.connectMutate.mock.calls[0][0] as Record<string, unknown>;
+      const firstCall = mocks.connectMutate.mock.calls[0];
+      const call = (firstCall?.[0] ?? {}) as Record<string, unknown>;
       expect('apiKey' in call).toBe(false);
     });
 

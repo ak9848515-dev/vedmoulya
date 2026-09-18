@@ -18,7 +18,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { GeminiFirstRunDialog } from '../GeminiFirstRunDialog.js';
 import { useFirstRunStore } from '../../stores/first-run-store.js';
-import type { ProviderConnectionResultDTO } from '../../../lib/api-client.js';
+// This file lives in src/components/__tests__ → two levels up reaches src/lib
+// (the same module id the vi.mock below targets).
+import type { ProviderConnectionResultDTO } from '../../lib/api-client.js';
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),

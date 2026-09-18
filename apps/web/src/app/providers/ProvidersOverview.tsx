@@ -17,11 +17,19 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Badge, EmptyState } from '@vedmoulya/ui';
 import { MoreVertical, Settings2, Plus } from 'lucide-react';
 import type { ProviderExperienceRowDTO, ProviderRuntimeStateDTO } from '../../lib/api-client.js';
 import { ProviderMark } from './ProviderMark.js';
-import { AddAIDialog, type AddAIOption } from './AddAIDialog.js';
+import type { AddAIOption } from './AddAIDialog.js';
+
+// The Add AI picker (and the custom-provider form it embeds) is only needed
+// once the user asks for it — it stays out of the list's first load.
+const AddAIDialog = dynamic(
+  () => import('./AddAIDialog.js').then((m) => ({ default: m.AddAIDialog })),
+  { ssr: false, loading: () => null },
+);
 import {
   isProviderActive,
   providerIdentity,
@@ -57,6 +65,8 @@ export interface ProvidersOverviewProps {
   onOpenDetails: (providerId: string) => void;
   onToggle: (providerId: string, enabled: boolean) => void;
   onSetPrimary: (providerId: string) => void;
+  /** Re-read the provider experience view model in place (no page reload). */
+  onRefresh: () => void;
   addAIOpen: boolean;
   onAddAIOpenChange: (open: boolean) => void;
 }
@@ -82,6 +92,7 @@ function ProviderMenu({
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Keyboard users land inside the menu when it opens and return to the
   // trigger when it closes (WCAG 2.1 — predictable focus movement).
@@ -110,6 +121,31 @@ function ProviderMenu({
     };
   }, [open]);
 
+  /** Roving keyboard model: arrows / Home / End walk the actionable items. */
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Tab') {
+      // Tabbing out of the menu closes it without trapping the user.
+      setOpen(false);
+      return;
+    }
+    const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    // Every item stays reachable by keyboard — including unavailable actions,
+    // which announce why they are unavailable instead of disappearing.
+    const nodes = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+    );
+    if (nodes.length === 0) return;
+    event.preventDefault();
+    const current = nodes.indexOf(document.activeElement as HTMLButtonElement);
+    const last = nodes.length - 1;
+    let next = 0;
+    if (event.key === 'End') next = last;
+    else if (event.key === 'ArrowUp') next = current <= 0 ? last : current - 1;
+    else if (event.key === 'ArrowDown') next = current >= last ? 0 : current + 1;
+    nodes.at(next)?.focus();
+  };
+
   return (
     <div ref={containerRef} className="relative shrink-0">
       <button
@@ -127,28 +163,43 @@ function ProviderMenu({
       </button>
       {open ? (
         <div
+          ref={menuRef}
           role="menu"
           aria-label={`Actions for ${providerName}`}
+          onKeyDown={handleMenuKeyDown}
           className="absolute right-0 z-30 mt-1 w-56 rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-1 shadow-lg"
         >
-          {items.map((item, index) => (
-            <button
-              key={item.label}
-              type="button"
-              ref={index === 0 ? firstItemRef : undefined}
-              role="menuitem"
-              aria-disabled={item.disabled ?? false}
-              title={item.disabled ? item.disabledReason : undefined}
-              disabled={item.disabled ?? false}
-              onClick={() => {
-                setOpen(false);
-                item.onSelect();
-              }}
-              className="w-full rounded-lg px-2.5 py-2 text-left text-[13px] text-[#374151] dark:text-[#E2E8F0] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-            >
-              {item.label}
-            </button>
-          ))}
+          {items.map((item, index) => {
+            const unavailable = item.disabled ?? false;
+            return (
+              <button
+                key={item.label}
+                type="button"
+                ref={index === 0 ? firstItemRef : undefined}
+                role="menuitem"
+                aria-disabled={unavailable}
+                title={unavailable ? item.disabledReason : undefined}
+                onClick={() => {
+                  // An unavailable action explains itself (above) instead of
+                  // silently doing nothing, and keeps the menu open so the user
+                  // can pick another one.
+                  if (unavailable) return;
+                  setOpen(false);
+                  item.onSelect();
+                }}
+                className={`w-full rounded-lg px-2.5 py-2 text-left text-[13px] text-[#374151] dark:text-[#E2E8F0] transition-colors ${
+                  unavailable
+                    ? 'cursor-not-allowed opacity-50'
+                    : 'hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A]'
+                }`}
+              >
+                {item.label}
+                {unavailable && item.disabledReason ? (
+                  <span className="sr-only"> — {item.disabledReason}</span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -174,6 +225,10 @@ function ConnectionStatus({
       >
         <span aria-hidden="true">{status.connection.symbol}</span>
         {status.connection.label}
+        {/* The hint is real text for screen readers, not tooltip-only. */}
+        {status.connection.hint ? (
+          <span className="sr-only"> — {status.connection.hint}</span>
+        ) : null}
       </span>
       {active ? (
         <Badge variant="success" size="sm" className="gap-1">
@@ -217,10 +272,17 @@ function PrimaryProviderCard({
             {provider.selectedModel?.name ?? 'Automatic model selection'}
           </p>
           <ConnectionStatus status={status} active={active} className="mt-1.5" />
+          {/* A provider that cannot operate says why — in plain language, not
+              a tooltip-only hint. */}
+          {!status.configured && status.connection.hint ? (
+            <p className="mt-1.5 text-[12px] text-[#64748B] dark:text-[#94A3B8]">
+              {status.connection.hint}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-5 flex items-center gap-2.5">
+      <div className="mt-5 flex flex-wrap items-center gap-2.5">
         <button
           type="button"
           onClick={onConfigure}
@@ -294,6 +356,7 @@ export function ProvidersOverview({
   onOpenDetails,
   onToggle,
   onSetPrimary,
+  onRefresh,
   addAIOpen,
   onAddAIOpenChange,
 }: ProvidersOverviewProps): React.JSX.Element {
@@ -316,6 +379,16 @@ export function ProvidersOverview({
     // Disabling is refused by the server while this provider is the last
     // enabled one or the current Primary AI — the reason is surfaced verbatim.
     const cannotDisable = provider.enabled && Boolean(provider.switchDisabledReason);
+    // Every unavailable action carries a plain-language reason: it is rendered
+    // for screen readers, not hidden behind a tooltip.
+    const toggleReason = provider.switchDisabledReason ?? (busy ? 'Just a moment…' : undefined);
+    const primaryReason = isPrimary
+      ? 'Already the primary AI.'
+      : !provider.enabled
+        ? 'Turn this AI on first.'
+        : busy
+          ? 'Just a moment…'
+          : undefined;
     return [
       {
         label: provider.enabled ? 'Turn off for now' : 'Use this AI',
@@ -323,7 +396,7 @@ export function ProvidersOverview({
           onToggle(provider.providerId, !provider.enabled);
         },
         disabled: busy || cannotDisable,
-        ...(provider.switchDisabledReason ? { disabledReason: provider.switchDisabledReason } : {}),
+        ...(toggleReason ? { disabledReason: toggleReason } : {}),
       },
       {
         label: isPrimary ? 'Primary AI' : 'Use as primary AI',
@@ -331,7 +404,7 @@ export function ProvidersOverview({
           onSetPrimary(provider.providerId);
         },
         disabled: busy || isPrimary || !provider.enabled,
-        ...(!provider.enabled ? { disabledReason: 'Turn this AI on first.' } : {}),
+        ...(primaryReason ? { disabledReason: primaryReason } : {}),
       },
       {
         label: 'Provider details',
@@ -348,13 +421,41 @@ export function ProvidersOverview({
     connected: statusOf(provider).configured,
   }));
 
+  const addAIDialog = (
+    <AddAIDialog
+      open={addAIOpen}
+      onOpenChange={onAddAIOpenChange}
+      options={options}
+      userId={userId}
+      onSelect={(family) => {
+        onAddAIOpenChange(false);
+        onConfigure(family);
+      }}
+      onProviderAdded={() => {
+        onAddAIOpenChange(false);
+        // Re-read the registry-backed view model instead of reloading the
+        // whole app — the new AI simply appears in the list.
+        onRefresh();
+      }}
+    />
+  );
+
   if (providers.length === 0) {
     return (
-      <EmptyState
-        icon={<Plus className="h-8 w-8" />}
-        title="No AI connected yet"
-        description="Connect an AI to VedMoulya — the rest is handled for you."
-      />
+      <div className="space-y-4">
+        <EmptyState
+          icon={<Plus className="h-8 w-8" />}
+          title="No AI connected yet"
+          description="Connect an AI to VedMoulya — the rest is handled for you."
+          action={{
+            label: 'Add AI',
+            onClick: () => {
+              onAddAIOpenChange(true);
+            },
+          }}
+        />
+        {addAIDialog}
+      </div>
     );
   }
 
@@ -411,20 +512,7 @@ export function ProvidersOverview({
         </section>
       ) : null}
 
-      <AddAIDialog
-        open={addAIOpen}
-        onOpenChange={onAddAIOpenChange}
-        options={options}
-        userId={userId}
-        onSelect={(family) => {
-          onAddAIOpenChange(false);
-          onConfigure(family);
-        }}
-        onProviderAdded={() => {
-          onAddAIOpenChange(false);
-          window.location.reload();
-        }}
-      />
+      {addAIDialog}
     </div>
   );
 }

@@ -161,6 +161,7 @@ function DisclosureSection({
   return (
     <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] overflow-hidden">
       <button
+        type="button"
         onClick={() => {
           setOpen(!open);
         }}
@@ -267,6 +268,7 @@ export function ProviderDetailView({
     return (
       <div className="space-y-4">
         <button
+          type="button"
           onClick={onBack}
           className="inline-flex items-center gap-1 text-[13px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
         >
@@ -281,6 +283,7 @@ export function ProviderDetailView({
             Please try again in a moment.
           </p>
           <button
+            type="button"
             onClick={() => {
               void refetchStatus();
             }}
@@ -323,6 +326,7 @@ export function ProviderDetailView({
     <div className="space-y-5 animate-slide-up">
       {/* Back */}
       <button
+        type="button"
         onClick={onBack}
         className="inline-flex items-center gap-1 text-[13px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
       >
@@ -461,6 +465,7 @@ export function ProviderDetailView({
                   )}
                 </span>
                 <button
+                  type="button"
                   onClick={() => {
                     void handleRefresh();
                   }}

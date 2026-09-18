@@ -22,7 +22,7 @@
 
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loading, Switch } from '@vedmoulya/ui';
 import {
   ArrowLeft,
@@ -111,12 +111,16 @@ interface ModelChoice {
 function SectionCard({
   children,
   testId,
+  labelledBy,
 }: {
   children: React.ReactNode;
   testId?: string;
+  /** id of the section heading — gives the region an accessible name. */
+  labelledBy?: string;
 }): React.JSX.Element {
   return (
     <section
+      aria-labelledby={labelledBy}
       className="rounded-2xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-5 sm:p-6"
       data-testid={testId}
     >
@@ -179,6 +183,8 @@ export function ProviderConfigScreen({
   const [savingModel, setSavingModel] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Announced to assistive tech when a probe fails (the alert is focused).
+  const failureRef = useRef<HTMLDivElement>(null);
 
   // The deployment may already hold a working credential for this provider
   // (same rule the Simple mode uses) — then no key is needed from the user.
@@ -373,6 +379,12 @@ export function ProviderConfigScreen({
     }
   }, [refreshIntelligence, userId, provider.providerId]);
 
+  // A failed probe is announced to screen-reader users by moving focus to the
+  // alert (keyboard users land on the Try Again action next).
+  useEffect(() => {
+    if (failure) failureRef.current?.focus();
+  }, [failure]);
+
   if (intelligence.isLoading && models.length === 0) {
     return (
       <div className="flex items-center justify-center h-[40vh]">
@@ -412,7 +424,7 @@ export function ProviderConfigScreen({
       </div>
 
       {/* ── 1. Connection ───────────────────────────────────────────────── */}
-      <SectionCard testId="config-section-connection">
+      <SectionCard testId="config-section-connection" labelledBy="connection-heading">
         <SectionTitle id="connection-heading">Connection</SectionTitle>
         <Subtitle>
           {serverManagedAvailable
@@ -469,16 +481,23 @@ export function ProviderConfigScreen({
               <p
                 key={`${option.id}-reason`}
                 data-testid={`auth-option-${option.id}-unavailable`}
-                className="mt-2 text-[11.5px] text-[#94A3B8]"
+                className="mt-2 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]"
               >
                 {option.unavailableReason}
               </p>
             ))}
         </fieldset>
 
-        {/* API key panel */}
+        {/* API key panel — a real form, so pressing Enter in the key field
+            runs the connection test (no hidden save action). */}
         {method === 'api_key' ? (
-          <div className="mt-5 space-y-3">
+          <form
+            className="mt-5 space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleTest();
+            }}
+          >
             {serverManagedAvailable ? (
               <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-[#F0FDF4] dark:bg-[#0F291D] p-3.5">
                 <p className="text-[13px] font-medium text-emerald-700 dark:text-emerald-400">
@@ -508,6 +527,9 @@ export function ProviderConfigScreen({
                       }}
                       placeholder={`Paste your ${identity.name} key`}
                       data-testid="provider-api-key-input"
+                      {...(preset.credentialHelp
+                        ? { 'aria-describedby': 'provider-api-key-help' }
+                        : {})}
                       className="w-full h-11 rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] pl-3 pr-11 text-[13px] text-[#111827] dark:text-[#F8FAFC] placeholder:text-[#94A3B8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus:border-[#2B5FD9]"
                     />
                     <button
@@ -516,7 +538,7 @@ export function ProviderConfigScreen({
                         setShowKey((prev) => !prev);
                       }}
                       aria-label={showKey ? 'Hide API key' : 'Show API key'}
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#94A3B8] hover:text-[#374151] dark:hover:text-[#E2E8F0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9]"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#64748B] dark:text-[#94A3B8] hover:text-[#374151] dark:hover:text-[#E2E8F0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9]"
                     >
                       {showKey ? (
                         <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -527,7 +549,10 @@ export function ProviderConfigScreen({
                   </span>
                 </div>
                 {preset.credentialHelp ? (
-                  <p className="mt-1.5 text-[11.5px] text-[#94A3B8]">
+                  <p
+                    id="provider-api-key-help"
+                    className="mt-1.5 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]"
+                  >
                     {preset.credentialHelp}{' '}
                     {preset.docsUrl ? (
                       <a
@@ -546,10 +571,7 @@ export function ProviderConfigScreen({
 
             <div className="flex flex-wrap items-center gap-2.5">
               <button
-                type="button"
-                onClick={() => {
-                  void handleTest();
-                }}
+                type="submit"
                 disabled={testing || (!serverManagedAvailable && apiKey.trim() === '')}
                 data-testid="provider-test-connection"
                 className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#2B5FD9] px-4 text-[13px] font-medium text-white hover:bg-[#1E4AA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -587,7 +609,7 @@ export function ProviderConfigScreen({
                   <span className="text-[12px] font-normal text-[#64748B] dark:text-[#94A3B8]">
                     · {result.latencyMs} ms
                     {discovered.length > 0
-                      ? ` · ${String(discovered.length)} models available`
+                      ? ` · ${String(discovered.length)} model${discovered.length === 1 ? '' : 's'} available`
                       : ''}
                   </span>
                 ) : null}
@@ -596,9 +618,11 @@ export function ProviderConfigScreen({
 
             {failure ? (
               <div
+                ref={failureRef}
                 role="alert"
+                tabIndex={-1}
                 data-testid="provider-connection-error"
-                className="rounded-xl border border-rose-200 dark:border-rose-900 bg-[#FEF2F2] dark:bg-[#2A1215] p-3.5"
+                className="rounded-xl border border-rose-200 dark:border-rose-900 bg-[#FEF2F2] dark:bg-[#2A1215] p-3.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
               >
                 <p className="text-[13px] font-medium text-rose-700 dark:text-rose-400">
                   {failure.title}
@@ -609,17 +633,14 @@ export function ProviderConfigScreen({
                   </p>
                 ) : null}
                 <button
-                  type="button"
-                  onClick={() => {
-                    void handleTest();
-                  }}
+                  type="submit"
                   className="mt-2.5 inline-flex h-9 items-center rounded-xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-transparent px-3.5 text-[12.5px] font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
                 >
                   Try Again
                 </button>
               </div>
             ) : null}
-          </div>
+          </form>
         ) : (
           /* OAuth panel — uses the EXISTING Google authorization flow */
           <div className="mt-5 space-y-3" data-testid="provider-oauth-panel">
@@ -664,7 +685,7 @@ export function ProviderConfigScreen({
                   ) : null}
                   Continue with Google
                 </button>
-                <p className="text-[11.5px] text-[#94A3B8]">
+                <p className="text-[11.5px] text-[#64748B] dark:text-[#94A3B8]">
                   Uses VedMoulya&apos;s existing Google sign-in — no new account is created.
                 </p>
               </>
@@ -679,7 +700,7 @@ export function ProviderConfigScreen({
       </SectionCard>
 
       {/* ── 2. Model ────────────────────────────────────────────────────── */}
-      <SectionCard testId="config-section-model">
+      <SectionCard testId="config-section-model" labelledBy="model-heading">
         <SectionTitle id="model-heading">Model</SectionTitle>
         <Subtitle>Choose the model VedMoulya should use.</Subtitle>
 
@@ -747,7 +768,7 @@ export function ProviderConfigScreen({
         )}
 
         {models.length > 1 && !isPrimary ? (
-          <p className="mt-3 text-[11.5px] text-[#94A3B8]">
+          <p className="mt-3 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]">
             Choosing a specific model makes this AI your primary AI.
           </p>
         ) : null}
@@ -759,7 +780,7 @@ export function ProviderConfigScreen({
       </SectionCard>
 
       {/* ── 3. How VedMoulya can use this AI (read-only) ─────────────────── */}
-      <SectionCard testId="config-section-capabilities">
+      <SectionCard testId="config-section-capabilities" labelledBy="capabilities-heading">
         <SectionTitle id="capabilities-heading">How VedMoulya can use this AI</SectionTitle>
         {capabilities.length > 0 ? (
           <ul className="mt-3.5 space-y-2" data-testid="provider-capabilities">
@@ -780,13 +801,13 @@ export function ProviderConfigScreen({
             Capabilities are detected automatically once VedMoulya connects to this AI.
           </p>
         )}
-        <p className="mt-3 text-[11.5px] text-[#94A3B8]">
+        <p className="mt-3 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]">
           Automatically detected — VedMoulya routes each task to the AI that fits it.
         </p>
       </SectionCard>
 
       {/* ── 4. Usage ────────────────────────────────────────────────────── */}
-      <SectionCard testId="config-section-usage">
+      <SectionCard testId="config-section-usage" labelledBy="usage-heading">
         <SectionTitle id="usage-heading">Usage</SectionTitle>
         <div className="mt-4 space-y-3">
           <div
@@ -831,7 +852,10 @@ export function ProviderConfigScreen({
               with Gemini as the primary AI, so this switch says so instead of
               silently doing nothing. */}
           {defaultPrimary ? (
-            <p className="text-[11.5px] text-[#94A3B8]" data-testid="provider-default-primary-note">
+            <p
+              className="text-[11.5px] text-[#64748B] dark:text-[#94A3B8]"
+              data-testid="provider-default-primary-note"
+            >
               {identity.name} is VedMoulya&apos;s default primary AI. Choose another AI to change
               that.
             </p>
@@ -852,14 +876,20 @@ export function ProviderConfigScreen({
             <dd className="text-[#374151] dark:text-[#E2E8F0]">Automatic</dd>
           </div>
         </dl>
-        <p className="mt-3 text-[11.5px] text-[#94A3B8]">
+        <p className="mt-3 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]">
           VedMoulya chooses between your enabled AIs for every task — there is nothing to prioritise
           by hand.
         </p>
       </SectionCard>
 
       {/* ── 5. Advanced (collapsed by default) ──────────────────────────── */}
-      <section className="rounded-2xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] overflow-hidden">
+      <section
+        aria-labelledby="provider-advanced-heading"
+        className="rounded-2xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] overflow-hidden"
+      >
+        <h2 id="provider-advanced-heading" className="sr-only">
+          Advanced
+        </h2>
         <button
           type="button"
           onClick={() => {
@@ -875,9 +905,15 @@ export function ProviderConfigScreen({
             Advanced
           </span>
           {showAdvanced ? (
-            <ChevronDown className="h-4 w-4 text-[#94A3B8]" aria-hidden="true" />
+            <ChevronDown
+              className="h-4 w-4 text-[#64748B] dark:text-[#94A3B8]"
+              aria-hidden="true"
+            />
           ) : (
-            <ChevronRight className="h-4 w-4 text-[#94A3B8]" aria-hidden="true" />
+            <ChevronRight
+              className="h-4 w-4 text-[#64748B] dark:text-[#94A3B8]"
+              aria-hidden="true"
+            />
           )}
         </button>
         {showAdvanced ? (
@@ -909,7 +945,7 @@ export function ProviderConfigScreen({
                     </div>
                   ))}
                 </dl>
-                <p className="text-[11.5px] text-[#94A3B8]">
+                <p className="text-[11.5px] text-[#64748B] dark:text-[#94A3B8]">
                   VedMoulya configures and maintains this AI for you — there is nothing to fill in
                   here.
                 </p>
@@ -979,7 +1015,8 @@ function ModelOption({
       <span
         aria-hidden="true"
         className={`mt-1 h-4 w-4 shrink-0 rounded-full border-2 peer-focus-visible:outline-none ${
-          selected ? 'border-[#2B5FD9] bg-[#2B5FD9]' : 'border-[#CBD5E1] dark:border-[#475569]'
+          // Unselected ring keeps ≥3:1 non-text contrast (WCAG 1.4.11).
+          selected ? 'border-[#2B5FD9] bg-[#2B5FD9]' : 'border-[#64748B] dark:border-[#94A3B8]'
         }`}
       />
       <span className="min-w-0">

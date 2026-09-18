@@ -192,6 +192,7 @@ export function ModelSelector({
     <div ref={containerRef} className="relative inline-block">
       {/* ── Trigger ──────────────────────────────────────────────────────── */}
       <button
+        type="button"
         onClick={handleOpen}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') handleOpen();
@@ -248,6 +249,7 @@ export function ModelSelector({
                   {providerName} models
                 </span>
                 <button
+                  type="button"
                   onClick={() => {
                     setOpen(false);
                   }}
@@ -298,6 +300,7 @@ export function ModelSelector({
 
                   return (
                     <button
+                      type="button"
                       key={model.id}
                       data-index={idx}
                       role="option"

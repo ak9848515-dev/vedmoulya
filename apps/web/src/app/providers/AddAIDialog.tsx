@@ -116,13 +116,13 @@ export function AddAIDialog({
                           className={`shrink-0 text-[12px] font-medium ${
                             option.connected
                               ? 'text-emerald-600 dark:text-emerald-400'
-                              : 'text-[#94A3B8]'
+                              : 'text-[#64748B] dark:text-[#94A3B8]'
                           }`}
                         >
                           {option.connected ? '✓ Connected' : '○ Not connected'}
                         </span>
                         <ChevronRight
-                          className="h-4 w-4 shrink-0 text-[#94A3B8]"
+                          className="h-4 w-4 shrink-0 text-[#64748B] dark:text-[#94A3B8]"
                           aria-hidden="true"
                         />
                       </button>
@@ -151,7 +151,10 @@ export function AddAIDialog({
                   Bring your own endpoint
                 </span>
               </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-[#94A3B8]" aria-hidden="true" />
+              <ChevronRight
+                className="h-4 w-4 shrink-0 text-[#64748B] dark:text-[#94A3B8]"
+                aria-hidden="true"
+              />
             </button>
           </div>
         )}

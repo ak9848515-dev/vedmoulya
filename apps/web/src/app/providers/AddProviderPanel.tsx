@@ -261,6 +261,7 @@ export function AddProviderPanel({
   if (!embedded && !isOpen) {
     return (
       <button
+        type="button"
         onClick={handleOpen}
         className="w-full rounded-xl border-2 border-dashed border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-6 hover:border-[#2B5FD9] dark:hover:border-[#6B8FEF] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A] transition-all duration-200 group"
       >
@@ -297,6 +298,7 @@ export function AddProviderPanel({
               </div>
             </div>
             <button
+              type="button"
               onClick={handleClose}
               className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#334155] transition-colors"
               aria-label="Close"
@@ -336,6 +338,7 @@ export function AddProviderPanel({
           <div className="flex flex-wrap gap-2">
             {CATEGORIES.map((cat) => (
               <button
+                type="button"
                 key={cat}
                 onClick={() => {
                   setForm({ ...form, category: cat });
@@ -432,6 +435,7 @@ export function AddProviderPanel({
           <div className="flex gap-2">
             {DEPLOYMENTS.map((d) => (
               <button
+                type="button"
                 key={d.value}
                 onClick={() => {
                   setForm({ ...form, deployment: d.value });

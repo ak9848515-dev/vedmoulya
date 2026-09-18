@@ -59,9 +59,7 @@ import {
   useProviderUsageDetail,
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
-import { ProviderDetailView } from './ProviderDetailView.js';
 import { ProvidersOverview } from './ProvidersOverview.js';
-import { ProviderConfigScreen } from './ProviderConfigScreen.js';
 import { OpenAIOrgUsagePanel } from './OpenAIOrgUsagePanel.js';
 import { AIBalanceWidget } from './AIBalanceWidget.js';
 import {
@@ -72,7 +70,11 @@ import {
 import { providerReadiness, type ProviderReadiness } from './provider-readiness.js';
 import { providerIdentity } from './provider-ux.js';
 
-// ── Lazy-loaded registry tabs (progressive disclosure) ───────────────────────
+// ── Lazy-loaded views (progressive disclosure + a lean first load) ──────────
+// The provider list is what opens first. The configuration experience, the
+// registry-intelligence detail and the registry tabs load on demand — the same
+// pattern the registry tabs already used, so the initial /providers bundle
+// carries only the list and its cards.
 const BenchmarkDatasetsView = dynamic(
   () => import('./benchmark-view.js').then((m) => ({ default: m.default })),
   { ssr: false, loading: () => null },
@@ -81,6 +83,24 @@ const ModelRegistryView = dynamic(
   () => import('./model-registry-view.js').then((m) => ({ default: m.default })),
   { ssr: false, loading: () => null },
 );
+const ProviderConfigScreen = dynamic(
+  () => import('./ProviderConfigScreen.js').then((m) => ({ default: m.ProviderConfigScreen })),
+  { ssr: false, loading: () => <CenteredLoading label="Loading this AI..." /> },
+);
+const ProviderDetailView = dynamic(
+  () => import('./ProviderDetailView.js').then((m) => ({ default: m.ProviderDetailView })),
+  { ssr: false, loading: () => <CenteredLoading label="Loading provider intelligence..." /> },
+);
+
+// ── Shared loading shell ────────────────────────────────────────────────────
+
+function CenteredLoading({ label }: { label: string }): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-center h-[40vh]" role="status" aria-live="polite">
+      <Loading label={label} size="lg" />
+    </div>
+  );
+}
 
 // ── Usage formatting helpers ────────────────────────────────────────────────
 
@@ -238,7 +258,7 @@ export default function ProvidersPage(): React.JSX.Element {
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-slide-up">
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-3">
         <div className="flex-1 min-w-0">
           <h1 className="text-[24px] md:text-[28px] font-heading font-bold text-[#111827] dark:text-[#F8FAFC]">
             AI Providers
@@ -252,7 +272,7 @@ export default function ProvidersPage(): React.JSX.Element {
             setAddAIOpen(true);
           }}
           data-testid="add-ai-button"
-          className="shrink-0 inline-flex h-10 items-center gap-2 rounded-xl bg-[#2B5FD9] px-4 text-[13px] font-medium text-white hover:bg-[#1E4AA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus-visible:ring-offset-2 transition-colors"
+          className="shrink-0 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#2B5FD9] px-4 text-[13px] font-medium text-white hover:bg-[#1E4AA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus-visible:ring-offset-2 sm:w-auto transition-colors"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           Add AI
@@ -369,11 +389,7 @@ function ProviderConfigLoader({
   );
 
   if (isLoading || !data) {
-    return (
-      <div className="flex items-center justify-center h-[40vh]">
-        <Loading label="Loading this AI..." size="lg" />
-      </div>
-    );
+    return <CenteredLoading label="Loading this AI..." />;
   }
 
   if (isError) {
@@ -520,11 +536,7 @@ function ProviderExperienceView({
   );
 
   if (isLoading || !data) {
-    return (
-      <div className="flex items-center justify-center h-[40vh]">
-        <Loading label="Loading AI providers..." size="lg" />
-      </div>
-    );
+    return <CenteredLoading label="Loading AI providers..." />;
   }
 
   if (isError) {
@@ -594,6 +606,9 @@ function ProviderExperienceView({
         }}
         onSetPrimary={(providerId) => {
           void handleSetPrimaryBrain(providerId);
+        }}
+        onRefresh={() => {
+          void refetch();
         }}
         addAIOpen={addAIOpen}
         onAddAIOpenChange={onAddAIOpenChange}
@@ -699,11 +714,7 @@ function UsageDetailView({
   const { data, isLoading } = useProviderUsageDetail(userId);
 
   if (isLoading || !data) {
-    return (
-      <div className="flex items-center justify-center h-[40vh]">
-        <Loading label="Loading usage details..." size="lg" />
-      </div>
-    );
+    return <CenteredLoading label="Loading usage details..." />;
   }
 
   const { totals, byProvider, byModel, executions } = data;
@@ -712,6 +723,7 @@ function UsageDetailView({
     <div className="space-y-5 animate-slide-up">
       {/* Back */}
       <button
+        type="button"
         onClick={onBack}
         className="inline-flex items-center gap-1 text-[13px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
       >

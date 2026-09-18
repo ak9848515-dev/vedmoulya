@@ -100,6 +100,7 @@ function renderOverview(
   const onOpenDetails = vi.fn();
   const onToggle = vi.fn();
   const onSetPrimary = vi.fn();
+  const onRefresh = vi.fn();
   const onAddAIOpenChange = vi.fn();
   render(
     <ProvidersOverview
@@ -117,11 +118,19 @@ function renderOverview(
       onOpenDetails={onOpenDetails}
       onToggle={onToggle}
       onSetPrimary={onSetPrimary}
+      onRefresh={onRefresh}
       addAIOpen={overrides.addAIOpen ?? false}
       onAddAIOpenChange={onAddAIOpenChange}
     />,
   );
-  return { onConfigure, onOpenDetails, onToggle, onSetPrimary, onAddAIOpenChange };
+  return {
+    onConfigure,
+    onOpenDetails,
+    onToggle,
+    onSetPrimary,
+    onRefresh,
+    onAddAIOpenChange,
+  };
 }
 
 describe('ProvidersOverview (simplified AI Providers screen)', () => {
@@ -185,6 +194,28 @@ describe('ProvidersOverview (simplified AI Providers screen)', () => {
     expect(onOpenDetails).toHaveBeenCalledWith('openai');
   });
 
+  it('keeps an unavailable action reachable, explains why, and does nothing when used', async () => {
+    const { onSetPrimary } = renderOverview();
+
+    fireEvent.click(screen.getByRole('button', { name: /more actions for gemini/i }));
+    // Gemini is already the primary AI: the item stays focusable and announces
+    // the reason instead of being silently unavailable.
+    const primaryItem = await screen.findByRole(
+      'menuitem',
+      { name: /Primary AI/ },
+      { timeout: 5000 },
+    );
+    expect(primaryItem.getAttribute('aria-disabled')).toBe('true');
+    // The unavailable action explains itself synchronously and for the
+    // accessibility tree — the reason is real text, not a tooltip only.
+    expect(primaryItem.textContent).toMatch(/already the primary ai/i);
+
+    fireEvent.click(primaryItem);
+    expect(onSetPrimary).not.toHaveBeenCalled();
+    // The menu stays open so another action can be chosen.
+    expect(screen.getAllByRole('menuitem').length).toBeGreaterThan(0);
+  });
+
   it('keeps the server-enforced switch invariant visible in the menu', () => {
     const { onToggle } = renderOverview();
 
@@ -194,10 +225,14 @@ describe('ProvidersOverview (simplified AI Providers screen)', () => {
     expect(onToggle).toHaveBeenCalledWith('openai', true);
   });
 
-  it('offers the registry providers and Custom AI in the Add AI dialog', () => {
+  it('offers the registry providers and Custom AI in the Add AI dialog', async () => {
     const { onConfigure } = renderOverview({ addAIOpen: true });
 
-    expect(screen.getByText('Connect an AI to VedMoulya')).toBeDefined();
+    // The dialog (and the custom-provider form it embeds) loads on demand, so
+    // this assertion waits for the lazy chunk under a generous budget.
+    expect(
+      await screen.findByText('Connect an AI to VedMoulya', {}, { timeout: 5000 }),
+    ).toBeDefined();
     // Real registry entries with their true connection state.
     expect(screen.getByTestId('add-ai-option-google').textContent).toMatch(/✓ Connected/);
     expect(screen.getByTestId('add-ai-option-openai').textContent).toMatch(/✓ Connected/);
@@ -208,8 +243,43 @@ describe('ProvidersOverview (simplified AI Providers screen)', () => {
     expect(onConfigure).toHaveBeenCalledWith('anthropic');
   });
 
-  it('shows an inviting empty state when no AI is connected', () => {
-    renderOverview({ providers: [] });
+  it('shows an inviting empty state with a working Add AI action', async () => {
+    const { onAddAIOpenChange } = renderOverview({ providers: [] });
     expect(screen.getByText(/No AI connected yet/i)).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add AI' }));
+    expect(onAddAIOpenChange).toHaveBeenCalledWith(true);
+  });
+
+  it('walks the ⋮ menu with the keyboard and returns focus on Escape', async () => {
+    renderOverview();
+    const trigger = screen.getByRole('button', { name: /more actions for gemini/i });
+    fireEvent.click(trigger);
+
+    // Every item is part of the roving focus order — including the one that is
+    // unavailable (Gemini is already the primary AI), so keyboard users can
+    // reach it and hear why it cannot be used.
+    const items = await screen.findAllByRole('menuitem', {}, { timeout: 5000 });
+    expect(items.length).toBeGreaterThan(1);
+    const last = items.length - 1;
+
+    // Opening the menu focuses the first item.
+    expect(document.activeElement).toBe(items[0]);
+
+    fireEvent.keyDown(items[0] as HTMLElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'End' });
+    expect(document.activeElement).toBe(items[last]);
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowDown' });
+    // Wraps to the first item.
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items[last]);
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+    expect(document.activeElement).toBe(items[0]);
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Escape' });
+    expect(screen.queryAllByRole('menuitem')).toHaveLength(0);
+    expect(document.activeElement).toBe(trigger);
   });
 });
