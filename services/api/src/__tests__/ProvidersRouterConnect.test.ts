@@ -43,16 +43,14 @@ function makeRouterWithCredentials() {
 const CTX = {} as never;
 
 function okGeminiFetch(): ReturnType<typeof vi.fn> {
-  return vi
-    .fn()
-    .mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          models: [{ name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' }],
-        }),
-        { status: 200 },
-      ),
-    );
+  return vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        models: [{ name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' }],
+      }),
+      { status: 200 },
+    ),
+  );
 }
 
 describe('ProvidersRouter — connectProvider / testConnection (FINAL-02)', () => {
