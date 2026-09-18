@@ -155,12 +155,41 @@ describe('ProvidersOverview (simplified AI Providers screen)', () => {
     const openai = screen.getByTestId('provider-card-openai');
     expect(openai.textContent).toMatch(/OpenAI/);
     expect(openai.textContent).toMatch(/GPT-4o/);
-    expect(openai.textContent).toMatch(/✓Connected/);
+    // PROVIDER-01 — OpenAI is CONFIGURED in this fixture but switched OFF.
+    // A provider that cannot be used must never read "Connected": the card
+    // says it is not connected and explains why (configured ≠ connected).
+    expect(openai.textContent).toMatch(/○Not connected/);
+    expect(openai.textContent).not.toMatch(/✓Connected/);
+    expect(openai.textContent).toMatch(/turned off/i);
     expect(within(openai).getByRole('button', { name: /configure openai/i })).toBeDefined();
 
     const claude = screen.getByTestId('provider-card-anthropic');
     expect(claude.textContent).toMatch(/Claude/);
     expect(claude.textContent).toMatch(/○Not connected/);
+  });
+
+  it('reads Connected for a configured, switched-on AI that is not the primary', () => {
+    renderOverview({
+      providers: PROVIDERS.map((provider) =>
+        provider.providerId === 'openai' ? { ...provider, enabled: true } : provider,
+      ),
+    });
+
+    const openai = screen.getByTestId('provider-card-openai');
+    expect(openai.textContent).toMatch(/✓Connected/);
+    expect(openai.textContent).toMatch(/GPT-4o/);
+    expect(openai.textContent).not.toMatch(/turned off/i);
+  });
+
+  it('shows a configured-but-disabled AI as Not connected while still enabling it', () => {
+    renderOverview();
+
+    const openai = screen.getByTestId('provider-card-openai');
+    // The user can still turn it back on — "not connected" here means
+    // "switched off", not "nothing is configured".
+    expect(openai.textContent).toMatch(/Not connected/);
+    expect(openai.textContent).not.toMatch(/ACTIVE/);
+    expect(within(openai).getByRole('button', { name: /configure openai/i })).toBeDefined();
   });
 
   it('never exposes infrastructure on the cards', () => {

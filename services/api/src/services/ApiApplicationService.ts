@@ -41,7 +41,7 @@ import {
   InMemoryLocalModelDiscovery,
   ProviderPreferencesService,
 } from '@vedmoulya/providers';
-import type { ProviderRepository } from '@vedmoulya/providers';
+import type { ProviderCredentialService, ProviderRepository } from '@vedmoulya/providers';
 import { ContextApplicationService } from '@vedmoulya/context';
 import type { ContextRepository } from '@vedmoulya/context';
 import { ExecutionStrategyApplicationService } from '@vedmoulya/execution-strategy';
@@ -275,6 +275,7 @@ import {
   createProductionMemoryIntelligenceRepository,
   createProductionOSIntelligenceRepository,
   createProductionContextFabricRepository,
+  createProductionProviderCredentialService,
   createProductionProviderRepository,
   createProductionRagRepository,
   awaitAllEngineEnsureTables,
@@ -344,6 +345,13 @@ export interface ApiApplicationServiceOptions {
    * inject the seeded in-memory registry via options.
    */
   providersRepository?: ProviderRepository;
+  /**
+   * PROVIDER-01 — server-side encrypted credential service override. The
+   * production default is built from the deployment's encryption key
+   * (AI_CREDENTIAL_ENCRYPTION_KEY); `null` disables user-credential storage
+   * explicitly (used by tests that must prove the platform-only path).
+   */
+  providerCredentialService?: ProviderCredentialService | null;
   /**
    * Context repository override. Production default: Postgres-backed
    * Enterprise Context Registry (EI-003, CERT-002 C-04). The registry is
@@ -671,6 +679,12 @@ export class ApiApplicationService {
   readonly preferencesService: ProviderPreferencesService;
   readonly modelSelection: ModelSelectionIntelligence;
   readonly providerExperience: ProviderExperienceService;
+  /**
+   * PROVIDER-01 — encrypted per-user provider credentials. `undefined` means
+   * this deployment has no credential encryption key, so user credentials are
+   * never persisted (the platform credential remains the only source).
+   */
+  readonly providerCredentialService: ProviderCredentialService | undefined;
 
   // ── EPIC-012 — Production Observability & Control Plane ───────────────────
   /** The correlated execution-trace spine (also the engine TelemetryPort). */
@@ -938,6 +952,17 @@ export class ApiApplicationService {
       const marketplace = await this.providers.getMarketplace();
       return (marketplace.data?.providers ?? []).map((p) => p.id);
     });
+
+    // ── PROVIDER-01 — Encrypted per-user provider credentials ─────────
+    //    PATH B (the user supplies their own Gemini key) needs the credential
+    //    to survive a restart and never reach the browser again. The store is
+    //    encrypted at rest and owner-scoped; resolution is always
+    //    user → platform → none. Without a deployment encryption key the
+    //    service is absent and NO credential is stored — never in plaintext.
+    this.providerCredentialService =
+      options.providerCredentialService === null
+        ? undefined
+        : (options.providerCredentialService ?? createProductionProviderCredentialService());
 
     // ── EPIC-012B — Provider Intelligence cache ─────────────────────
     //    Bounded in-memory cache of refresh results (profiles + staleness).

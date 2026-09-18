@@ -310,6 +310,72 @@ describe('ProviderConnectionTester (FINAL-02 — connection + model discovery)',
       expect(headers['x-goog-api-key']).toBe('user-key');
     });
 
+    it('ACTUALLY sends the deployment key when no user key is given (PATH A)', async () => {
+      // Regression: the server-managed path previously reported success without
+      // ever sending the key, so a real deployment got a 401 and first-login
+      // Gemini could never reach READY.
+      const fetchFn = okFetch({ models: [{ name: 'models/gemini-2.5-flash' }] });
+      const result = await testProviderConnection({
+        family: 'google',
+        fetchFn,
+        env: { AI_GOOGLE_API_KEY: 'server-key' },
+      });
+
+      const headers = (
+        (fetchFn as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
+      )[1].headers as Record<string, string>;
+      expect(headers['x-goog-api-key']).toBe('server-key');
+      expect(headers['Authorization']).toBeUndefined();
+      expect(result.credentialSource).toBe('PLATFORM');
+      expect(result.serverManagedKey).toBe(true);
+    });
+
+    it('reports the credential source the probe really used', async () => {
+      const fetchFn = okFetch({ models: [] });
+      const userProbed = await run({ family: 'google', apiKey: 'user-key', fetchFn });
+      expect(userProbed.credentialSource).toBe('USER');
+
+      const platformProbed = await testProviderConnection({
+        family: 'google',
+        env: { AI_GOOGLE_API_KEY: 'server-key' },
+        fetchFn: okFetch({ models: [] }),
+      });
+      expect(platformProbed.credentialSource).toBe('PLATFORM');
+
+      const none = await run({ family: 'google', fetchFn: okFetch({ models: [] }) });
+      expect(none.credentialSource).toBe('NONE');
+      expect(none.connected).toBe(false);
+    });
+
+    it('an explicitly resolved credential wins and keeps its source', async () => {
+      const fetchFn = okFetch({ models: [] });
+      const result = await testProviderConnection({
+        family: 'google',
+        fetchFn,
+        // The server-side credential service resolved a stored USER credential
+        // even though the deployment also has one — the two never mix.
+        credential: { source: 'USER', secret: 'stored-user-key' },
+        env: { AI_GOOGLE_API_KEY: 'server-key' },
+      });
+
+      const headers = (
+        (fetchFn as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
+      )[1].headers as Record<string, string>;
+      expect(headers['x-goog-api-key']).toBe('stored-user-key');
+      expect(result.credentialSource).toBe('USER');
+      expect(result.serverManagedKey).toBe(false);
+    });
+
+    it('never reads a prototype-named env member as a credential', async () => {
+      const result = await testProviderConnection({
+        family: 'openai',
+        fetchFn: okFetch({ data: [] }),
+        env: { toString: 'sneaky', AI_OPENAI_API_KEY: '  ' },
+      });
+      expect(result.credentialSource).toBe('NONE');
+      expect(result.errorKind).toBe('no_credential');
+    });
+
     it('honestly reports when the deployment has NO runtime credential', async () => {
       const result = await run({ family: 'openai', apiKey: 'k', fetchFn: okFetch({ data: [] }) });
 

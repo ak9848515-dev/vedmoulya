@@ -11,12 +11,14 @@
 // FLOW (Phase 5): credential → Test Connection (server-side probe) → real
 // model discovery → choose model (or preset default) → Save & Enable.
 //
-// SECURITY: the API key lives only in this form's state and is sent once to
-// the gateway for the probe; it is never persisted, never logged, and never
-// rendered outside the password input. Save & Enable persists ONLY
-// owner-scoped, non-secret configuration (enabled flag + preferred model)
-// through the existing provider preferences service. Runtime credentials
-// remain the deployment's server-side env keys — nothing is invented here.
+// SECURITY (PROVIDER-01): the API key lives only in this form's state and is
+// sent once to the gateway, which verifies it against the REAL provider. On a
+// successful verification the gateway (never this component) persists it
+// ENCRYPTED at rest, owner-scoped, and it can never be read back by a browser;
+// it is never logged and never rendered outside the password input. Without a
+// deployment encryption key nothing is stored at all — there is no plaintext
+// fallback. Save & Enable persists ONLY owner-scoped, non-secret configuration
+// (enabled flag + preferred model) through the provider preferences service.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
@@ -137,7 +139,9 @@ export function SimpleProviderConfig({
     const modelId = discoveryAvailable ? selectedModel : manualModel.trim();
     try {
       // Owner-scoped, NON-SECRET configuration only: enable the provider for
-      // routing and record the chosen model. No credential is ever stored.
+      // routing and record the chosen model. The credential was already
+      // verified and sealed server-side by the connect call — this writes no
+      // secret material and never sends one back to the browser.
       await setEnabled.mutateAsync({ userId, providerId: preset.presetId, enabled: true });
       await setPrefs.mutateAsync({
         userId,
@@ -432,8 +436,8 @@ export function SimpleProviderConfig({
       ) : null}
 
       <p className="text-[11px] text-[#94A3B8]">
-        Your key is verified server-side and never stored or logged. VedMoulya keeps only your
-        provider choice and selected model.
+        Your key is verified against the provider and is never shown again or written to logs.
+        VedMoulya keeps your provider choice and selected model in your account.
       </p>
     </div>
   );

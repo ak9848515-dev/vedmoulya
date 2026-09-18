@@ -145,6 +145,52 @@ export interface MissionObjective {
   revisionHistory?: ObjectiveRevision[];
   /** AUTONOMY-02 — current revision attempt number (0 = original). */
   revisionAttempt?: number;
+  /**
+   * FINAL-03A — durable structured root-cause diagnoses produced by the
+   * production failure → diagnosis → repair path. Bounded (newest first) so
+   * the audit trail survives restart without unbounded growth. Diagnosis is
+   * ADVISORY: the frozen recovery policy, budgets and governed tools remain
+   * authoritative — this history never grants an extra retry.
+   */
+  diagnosisHistory?: MissionFailureDiagnosisRecord[];
+}
+
+/**
+ * FINAL-03A — One durable, bounded diagnosis record written by the
+ * production failure → diagnosis → repair path. It carries the EXISTING
+ * structured `FailureDiagnosis` (AUTONOMY-04) verbatim, plus the two
+ * production facts the controller is authoritative for: which attempt
+ * produced it, and whether the frozen recovery policy then permitted a
+ * repair/revision. The controller — never the diagnosis — decides that
+ * second fact.
+ */
+export interface MissionFailureDiagnosisRecord {
+  /** The structured diagnosis, reused unchanged from AUTONOMY-04. */
+  diagnosis: import('../domain/diagnosis-repair.js').FailureDiagnosis;
+  /** Which attempt produced this diagnosis (objective.retryCount at the time). */
+  attempt: number;
+  /** The classification the diagnosis was built from (frozen authority). */
+  classification: MissionFailureClassification;
+  /**
+   * Whether the FROZEN bounded recovery policy permitted a repair/revision
+   * after this diagnosis. Diagnosis never decides this — budgets, retries
+   * and replans do.
+   */
+  repairPermitted: boolean;
+  /** The bounded action actually taken by the existing recovery mechanism. */
+  nextAction: 'REPAIR' | 'RETRY' | 'BLOCK' | 'FAIL';
+  /**
+   * FINAL-03A — the outcome of the GOVERNED repair mechanism, when the frozen
+   * recovery policy permitted a repair and the production composition wired
+   * one. It is the EXISTING AUTONOMY-04 `RepairResult` verbatim: whether a
+   * bounded governed repair was attempted, whether it succeeded, which
+   * workspace files it modified, and its real verification evidence. Absent
+   * = no governed repair was attempted (a missing port, a diagnosis whose
+   * strategy is not a workspace mutation, or nothing to repair). It never
+   * grants extra recovery: the objective still re-executes and re-verifies.
+   */
+  repair?: import('../domain/diagnosis-repair.js').RepairResult;
+  diagnosedAt: string;
 }
 
 /**
@@ -163,6 +209,23 @@ export interface ObjectiveRevision {
   revisedPlanId?: string;
   /** Failure context that triggered this revision. */
   failureContext?: FailureContext;
+  /**
+   * FINAL-03A — the structured root-cause diagnosis (AUTONOMY-04
+   * `FailureDiagnosis`) that the production failure path produced for this
+   * revision. ADVISORY CONTEXT ONLY: it explains WHY the previous attempt
+   * failed so the next governed planning attempt can be better informed.
+   * It grants no authority — tools, permissions, budgets and verification
+   * remain entirely governed by the existing pipeline.
+   */
+  failureDiagnosis?: import('../domain/diagnosis-repair.js').FailureDiagnosis;
+  /**
+   * FINAL-03A — the governed repair attempt made for this revision, if any.
+   * The repair ran through the governed tool path BEFORE this revision is
+   * re-planned and re-executed, so the next planning attempt (and the real
+   * re-execution) see the repaired workspace. It carries no authority of its
+   * own: budgets, permissions and verification remain the existing ones.
+   */
+  repairResult?: import('../domain/diagnosis-repair.js').RepairResult;
   /** When this revision was created. */
   revisedAt: string;
   /** Whether this revision was executed. */

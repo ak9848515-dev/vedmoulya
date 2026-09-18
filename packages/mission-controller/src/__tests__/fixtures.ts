@@ -16,6 +16,8 @@ import type {
   ExecutionMemoryPort,
   ExperienceOptimizationPort,
   FailureClassificationPort,
+  FailureDiagnosisPort,
+  FailureRepairPort,
 } from '../contracts/mission-ports.js';
 
 import { InMemoryMissionStore } from '../infrastructure/InMemoryMissionStore.js';
@@ -156,6 +158,10 @@ export interface FakePortsOptions {
   }) => void;
   /** AUTONOMY-06 — optional learning retrieval port. */
   learningPort?: LearningRetrievalPort;
+  /** FINAL-03A — optional production structured diagnosis port. */
+  diagnosisPort?: FailureDiagnosisPort;
+  /** FINAL-03A — optional governed repair mechanism port. */
+  repairPort?: FailureRepairPort;
 }
 
 export interface FakePorts {
@@ -341,6 +347,8 @@ export function createTestService(options: TestServiceOptions = {}): TestService
     experienceOptimization: ports.experienceOptimization,
     failureClassifier: ports.failureClassifier,
     learning: options.learningPort,
+    diagnosis: options.diagnosisPort,
+    repair: options.repairPort,
     clock: new SystemClock(),
     idGenerator: createIdGenerator(),
   });

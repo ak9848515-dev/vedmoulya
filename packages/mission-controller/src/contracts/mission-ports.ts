@@ -21,6 +21,12 @@ import type {
   GitSafetyClassification,
 } from '../types/mission-types.js';
 import type { FailureContext } from '../domain/failure-context.js';
+import type {
+  CommandFailureEvidence,
+  FailureDiagnosis,
+  HistoricalRepairEvidence,
+  RepairResult,
+} from '../domain/diagnosis-repair.js';
 
 export type {
   ProviderStatus,
@@ -216,6 +222,87 @@ export interface FailureClassificationPort {
     executionResult: { failureClass?: string; usage: unknown },
     providerStatus: ProviderStatus,
   ): Promise<MissionFailureClassification>;
+}
+
+// -- Failure Diagnosis Port (FINAL-03A) -----------------------------
+/**
+ * FINAL-03A — production structured root-cause diagnosis.
+ *
+ * The frozen MissionControllerService calls this port AFTER a failure has
+ * been detected and classified, and BEFORE the existing bounded
+ * repair/revision decision. The port returns the EXISTING structured
+ * `FailureDiagnosis` contract (AUTONOMY-04 `diagnosis-repair.ts`) — there is
+ * no competing diagnosis type.
+ *
+ * STRICT boundaries (the diagnosis is ADVISORY, never authority):
+ *   - the port can only READ evidence the controller already observed
+ *     (failure context, executor error/output, previous repairs) — it can
+ *     never execute tools, spawn processes, mutate the workspace, call a
+ *     provider on the controller's behalf, or widen permissions;
+ *   - the diagnosis cannot bypass `maxAttempts` / `maxRetries` /
+ *     `maxReplans`, budgets, permission checks, tool allowlists or the
+ *     governed ToolRegistry: the controller consumes the diagnosis as
+ *     bounded CONTEXT while the frozen recovery policy stays authoritative;
+ *   - any repair the diagnosis recommends still flows through the existing
+ *     governed planning → agent execution → governed tool path;
+ *   - a diagnosis port that throws has NO effect on recovery semantics —
+ *     the controller records the absence honestly and continues with the
+ *     frozen failure behavior.
+ */
+export interface FailureDiagnosisPort {
+  diagnose(input: {
+    evidence: CommandFailureEvidence;
+    objective: string;
+    missionContext: string;
+    workspaceFiles?: string[];
+    /** Bounded historical repair evidence (advisory ranking only). */
+    historicalLearning?: HistoricalRepairEvidence[];
+  }): Promise<FailureDiagnosis>;
+}
+
+// -- Governed Repair Port (FINAL-03A) ------------------------------
+/**
+ * FINAL-03A — the production GOVERNED REPAIR mechanism.
+ *
+ * After the structured diagnosis (above) and BEFORE the objective is
+ * re-planned/re-executed, the controller offers the diagnosis's repair intent
+ * to this port. The port is what turns a STRUCTURED repair INTENT into a REAL,
+ * GOVERNED action: it must perform every mutation through the SAME governed
+ * tool path the mission already uses (governed ToolRegistry → path-jailed
+ * workspace tools), under the mission's existing allowlist, permission
+ * classes, rate limits and budgets. It returns the EXISTING AUTONOMY-04
+ * `RepairResult` contract — there is no competing repair type.
+ *
+ * STRICT boundaries (the repair is ADVISORY-DRIVEN but never AUTHORITATIVE):
+ *   - the port receives a structured diagnosis + the mission's own governed
+ *     allowlist/permission classes; it can never widen either. If a tool is
+ *     not allowed or the class is not granted, the repair must NOT run;
+ *   - it may never execute anything the diagnosis "invented": no free-form
+ *     shell string, no executable, no command id outside the governed
+ *     catalog, no write outside the workspace jail. The only source of a
+ *     repair target is the mission's own objective (the same bounded,
+ *     deterministic rule the production plan uses);
+ *   - it can never fabricate success: a refused/denied/failed repair is
+ *     reported honestly (`attempted`/`success`) and grants nothing. The
+ *     frozen recovery policy still decides whether the objective recovers;
+ *   - the controller treats a missing port, a thrown port, or an
+ *     `attempted:false` result exactly as "no repair" — recovery semantics
+ *     are unchanged (this closes the pre-FINAL-03A behavior).
+ */
+export interface FailureRepairPort {
+  repair(input: {
+    /** The structured diagnosis produced for this failure (AUTONOMY-04). */
+    diagnosis: FailureDiagnosis;
+    /** The frozen failure classification the diagnosis was built from. */
+    classification: MissionFailureClassification;
+    /** The objective that declares the repair target (operator-authored). */
+    objective: string;
+    missionContext: string;
+    /** The mission's governed tool allowlist — never widened by a repair. */
+    allowedTools?: string[];
+    /** The permission classes the principal holds — never widened. */
+    grantedPermissionClasses?: string[];
+  }): Promise<RepairResult>;
 }
 
 // -- Clock Port ---------------------------------------------------

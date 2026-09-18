@@ -4,7 +4,8 @@
 // (EPIC-004 / EI-002)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { ProviderApplicationService } from '@vedmoulya/providers';
+import type { ProviderApplicationService, ProviderCredentialService } from '@vedmoulya/providers';
+import { resolvePlatformCredential } from '@vedmoulya/providers';
 import { readProviderRuntimeState, toRuntimeMode, validateDefaultProvider } from '@vedmoulya/core';
 import type { ProviderExperienceService } from '../services/ProviderExperienceService.js';
 import {
@@ -150,6 +151,15 @@ export interface ProvidersHandlers {
     },
     _ctx: TRPCContext,
   ) => Promise<ApiResponse>;
+  /**
+   * PROVIDER-01 — forget the owner's stored credential for one provider
+   * family (the "user credential removed" path). Idempotent: removing a
+   * credential that does not exist is not an error.
+   */
+  disconnectProvider: (
+    input: { userId: string; family: string },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
   // SPRINT-049 — test connection for custom providers.
   testConnection: (
     input: { userId: string; endpointUrl: string; apiKey: string; protocol: string },
@@ -160,9 +170,14 @@ export interface ProvidersHandlers {
 export function createProvidersRouter(
   providersService: ProviderApplicationService,
   experienceService?: ProviderExperienceService,
+  credentialService?: ProviderCredentialService,
 ): ProvidersHandlers {
   const svc = providersService;
   const exp = experienceService;
+  // PROVIDER-01 — server-side encrypted credential lifecycle. Undefined when
+  // the deployment has no credential encryption key: user credentials are then
+  // never stored and only the platform credential can answer.
+  const credentials = credentialService;
   // The experience handlers are only reachable through the RouterRegistry
   // wiring (which always provides the service); the guard keeps the optional
   // constructor argument honest without non-null assertions.
@@ -349,19 +364,62 @@ export function createProvidersRouter(
       ),
 
     // FINAL-02 — family-aware connection test + real model discovery for the
-    // friendly provider UX (Simple mode / first-login Gemini connect). The
-    // user-supplied API key is used for THIS probe only: it is never
-    // persisted, never logged, and never echoed back. Server-managed Gemini
-    // (no apiKey in input) uses THIS deployment's AI_GOOGLE_API_KEY key NAME
-    // only — the response carries no secret material.
+    // friendly provider UX (Simple mode / first-login Gemini connect).
+    // PROVIDER-01 extends it into the full credential lifecycle:
+    //   CONNECT → VERIFY → DISCOVER → SELECT → TEST → persist → READY.
+    // A user-supplied key is verified against the REAL provider before it is
+    // stored (encrypted at rest, owner-scoped) and is NEVER echoed back. With
+    // no key in the request the credential service resolves the owner's stored
+    // credential first and this deployment's own credential second — and the
+    // result always says WHICH source answered, without any secret material.
     connectProvider: async (input, _ctx): Promise<ApiResponse> => {
       const family = input.family as TestableProviderFamily;
+      const userSuppliedKey = input.apiKey?.trim() || undefined;
+
+      // Resolve user → platform → none. A freshly typed key is the user's
+      // intent, so it is what gets probed AND (on success) what gets stored.
+      let resolved: { source: 'USER' | 'PLATFORM'; secret: string } | undefined;
+      if (credentials) {
+        if (userSuppliedKey) {
+          resolved = { source: 'USER', secret: userSuppliedKey };
+        } else {
+          const outcome = await credentials.resolve(
+            input.userId,
+            family,
+            resolvePlatformCredential(family, process.env),
+          );
+          if (outcome.secret !== undefined && outcome.source !== 'NONE') {
+            resolved = { source: outcome.source, secret: outcome.secret };
+          }
+        }
+      }
+
       const result = await testProviderConnection({
         family,
-        apiKey: input.apiKey || undefined,
+        ...(resolved ? { credential: resolved } : { apiKey: userSuppliedKey }),
         endpointUrl: input.endpointUrl || undefined,
       });
+
+      // Persist ONLY after the provider really authenticated the credential.
+      // A storage failure never turns a working connection into an error.
+      if (credentials && userSuppliedKey && result.connected) {
+        try {
+          await credentials.store(input.userId, family, userSuppliedKey);
+        } catch {
+          // Verification is the truth; persistence is best-effort here.
+        }
+      }
       return successResponse(result);
+    },
+
+    // PROVIDER-01 — the owner forgets a stored credential. Idempotent, and
+    // honest when this deployment cannot store credentials at all.
+    disconnectProvider: async (input, _ctx): Promise<ApiResponse> => {
+      if (!credentials) {
+        return successResponse({ family: input.family, removed: false, supported: false });
+      }
+      await credentials.delete(input.userId, input.family);
+      return successResponse({ family: input.family, removed: true, supported: true });
     },
 
     // SPRINT-049 — test connection for custom providers.

@@ -528,13 +528,20 @@ const providerSetEnabledInput = z.object({
 });
 
 // FINAL-02 — family-aware connection test + model discovery (friendly
-// provider UX). The optional API key is used for the server-side probe ONLY
-// (never persisted, never logged); server-managed Gemini omits it.
+// provider UX). The optional API key is used for the server-side probe; on
+// success PROVIDER-01 stores it ENCRYPTED at rest (owner-scoped) — it is never
+// logged and never echoed back. Server-managed Gemini omits it.
 const providerConnectInput = z.object({
   userId: z.string().min(1),
   family: z.enum(['google', 'openai', 'anthropic', 'deepseek', 'ollama', 'openai-compatible']),
   endpointUrl: z.string().max(2000).optional(),
   apiKey: z.string().max(4096).optional(),
+});
+
+// PROVIDER-01 — forget a stored (encrypted) provider credential.
+const providerDisconnectInput = z.object({
+  userId: z.string().min(1),
+  family: z.enum(['google', 'openai', 'anthropic', 'deepseek', 'ollama', 'openai-compatible']),
 });
 
 const providerExplainSelectionInput = z.object({
@@ -3556,7 +3563,22 @@ export function createAppRouter(services: ApiApplicationService) {
       connectProvider: standardProcedure
         .input(providerConnectInput)
         .mutation(({ input, ctx }) =>
-          createProvidersRouter(services.providers).connectProvider(input, ctx),
+          createProvidersRouter(
+            services.providers,
+            services.providerExperience,
+            services.providerCredentialService,
+          ).connectProvider(input, ctx),
+        ),
+
+      // PROVIDER-01 — remove the owner's stored credential for one family.
+      disconnectProvider: standardProcedure
+        .input(providerDisconnectInput)
+        .mutation(({ input, ctx }) =>
+          createProvidersRouter(
+            services.providers,
+            services.providerExperience,
+            services.providerCredentialService,
+          ).disconnectProvider(input, ctx),
         ),
 
       // EPIC-012A — Provider Experience (Phases 4–6 / 12–17): owner-scoped

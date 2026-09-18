@@ -270,11 +270,23 @@ export class AgentExecutionAdapter implements ExecutionPort {
     const success = run.state === 'COMPLETED';
     const verified =
       success && run.stepResults.length > 0 && run.stepResults.every((step) => step.verified);
+    // FINAL-03A — a FAILED_FINAL run means the objective's plan did NOT reach
+    // an achieved, verified outcome. Reporting every FAILED_FINAL as `UNKNOWN`
+    // threw that semantic away and let the controller classify a real
+    // verification failure as a generic transient error — burning retries on
+    // an identical plan that can never pass, instead of entering the existing
+    // revision/repair path. A run that ended in an explicitly REJECTED
+    // approval is a deliberate operator decision, not a verification failure,
+    // so it keeps the pre-FINAL-03A delegation to the frozen classifier; every
+    // other FAILED_FINAL is the honest VERIFICATION_FAILURE of the objective.
+    const approvalRejected = run.approvalDecisions.some(
+      (decision) => decision.decision === 'rejected',
+    );
     const failureClass =
       run.state === 'BLOCKED'
         ? blockedRunFailureClass(run.outcomeReasons)
-        : run.state === 'FAILED_FINAL'
-          ? 'UNKNOWN'
+        : run.state === 'FAILED_FINAL' && !approvalRejected
+          ? 'VERIFICATION_FAILURE'
           : undefined;
     const output = [...run.stepResults].reverse().find((step) => step.output)?.output;
     const error =

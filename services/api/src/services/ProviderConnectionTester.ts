@@ -18,6 +18,8 @@
 //     never credential material.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { resolvePlatformCredential, type ProviderCredentialSource } from '@vedmoulya/providers';
+
 // Google Gemini generativelanguage API (same host @ai-sdk/google uses).
 const GOOGLE_GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com';
 const OPENAI_ENDPOINT = 'https://api.openai.com/v1';
@@ -54,6 +56,12 @@ export interface ProviderConnectionTestResult {
   status: 'connected' | 'failed';
   message: string;
   errorKind?: ProviderConnectionErrorKind;
+  /**
+   * WHICH credential authenticated the probe: the user's, this deployment's,
+   * or none (PROVIDER-01 Decision 4). The caller always learns the source; the
+   * secret itself is never returned.
+   */
+  credentialSource: ProviderCredentialSource;
   /** Measured round-trip of the probe. */
   latencyMs?: number;
   /** Number of models the provider actually reported. */
@@ -73,6 +81,13 @@ export interface TestProviderConnectionInput {
   family: TestableProviderFamily;
   /** User-supplied key — used for THIS probe only, never stored or logged. */
   apiKey?: string;
+  /**
+   * An ALREADY-RESOLVED credential (user credential first, then the platform
+   * one) from the server-side credential service. When present it wins over
+   * `apiKey`/env resolution so the probe cannot pick a different source than
+   * the resolver decided — the secret still never leaves the server.
+   */
+  credential?: { source: Exclude<ProviderCredentialSource, 'NONE'>; secret: string };
   /** User-supplied endpoint (ollama / openai-compatible). */
   endpointUrl?: string;
   /** Test doubles only. */
@@ -165,35 +180,46 @@ function runtimeStateFor(
   family: TestableProviderFamily,
   env: Record<string, string | undefined>,
 ): { runtimeConfigured: boolean; runtimeNote?: string } {
-  const set = (name: string): boolean => (env[name] ?? '').trim() !== '';
+  // Read the environment ONCE into the set of names that really carry a value,
+  // then answer from that set. A keyed member access on the environment would
+  // let a name resolve an inherited `Object.prototype` member as "configured",
+  // and it is exactly the shape the object-injection heuristic flags — so the
+  // entries are folded through a Set instead: only OWN enumerable env names
+  // that hold a non-blank string can ever report as configured.
+  const configuredNames = new Set(
+    Object.entries(env)
+      .filter(([, value]) => typeof value === 'string' && value.trim() !== '')
+      .map(([name]) => name),
+  );
+  // Credential families answer through the ONE shared env-key table, so the
+  // tester, the runtime registry and the credential resolver cannot disagree.
+  const hasPlatformKey = resolvePlatformCredential(family, env) !== undefined;
   switch (family) {
     case 'google':
       return {
-        runtimeConfigured: set('AI_GOOGLE_API_KEY'),
-        runtimeNote: set('AI_GOOGLE_API_KEY')
+        runtimeConfigured: hasPlatformKey,
+        runtimeNote: hasPlatformKey
           ? 'This deployment has a server-managed Gemini credential (AI_GOOGLE_API_KEY) — AI execution is live.'
           : 'No Gemini credential is configured for this deployment — set AI_GOOGLE_API_KEY server-side to activate AI execution.',
       };
-    case 'openai': {
-      const configured = set('AI_OPENAI_API_KEY') || set('OPENAI_API_KEY');
+    case 'openai':
       return {
-        runtimeConfigured: configured,
-        runtimeNote: configured
+        runtimeConfigured: hasPlatformKey,
+        runtimeNote: hasPlatformKey
           ? 'This deployment has a server-managed OpenAI credential — AI execution is live.'
           : 'No OpenAI credential is configured for this deployment — set AI_OPENAI_API_KEY server-side to activate AI execution.',
       };
-    }
     case 'deepseek':
       return {
-        runtimeConfigured: set('AI_DEEPSEEK_API_KEY'),
-        runtimeNote: set('AI_DEEPSEEK_API_KEY')
+        runtimeConfigured: hasPlatformKey,
+        runtimeNote: hasPlatformKey
           ? 'This deployment has a server-managed DeepSeek credential — AI execution is live.'
           : 'No DeepSeek credential is configured for this deployment — set AI_DEEPSEEK_API_KEY server-side to activate AI execution.',
       };
     case 'ollama':
       return {
-        runtimeConfigured: set('AI_OLLAMA_BASE_URL'),
-        runtimeNote: set('AI_OLLAMA_BASE_URL')
+        runtimeConfigured: configuredNames.has('AI_OLLAMA_BASE_URL'),
+        runtimeNote: configuredNames.has('AI_OLLAMA_BASE_URL')
           ? 'This deployment registers Ollama for AI execution (AI_OLLAMA_BASE_URL).'
           : 'Ollama is not registered for execution on this deployment — set AI_OLLAMA_BASE_URL server-side to activate it.',
       };
@@ -346,15 +372,29 @@ export async function testProviderConnection(
   const testedAt = new Date().toISOString();
   const runtime = runtimeStateFor(input.family, env);
 
-  // Server-managed Gemini: the deployment's own key (never user-supplied).
-  const serverManagedKey = input.family === 'google' && !input.apiKey && runtime.runtimeConfigured;
-  const apiKey = input.apiKey?.trim() || undefined;
+  // ── Credential resolution: user → platform → none (PROVIDER-01 Decision 4) ─
+  // An already-resolved credential (from the server-side credential service)
+  // wins outright, so the probe can never authenticate with a different source
+  // than the resolver chose. Otherwise a user-supplied key is used, and only
+  // then does THIS deployment's own key answer.
+  const explicit = input.credential;
+  const explicitSecret = explicit?.secret.trim() || undefined;
+  const userKey =
+    explicit !== undefined
+      ? explicit.source === 'USER'
+        ? explicitSecret
+        : undefined
+      : input.apiKey?.trim() || undefined;
+  const apiKey = userKey ?? explicitSecret ?? resolvePlatformCredential(input.family, env);
+  const credentialSource: ProviderCredentialSource =
+    userKey !== undefined ? 'USER' : apiKey !== undefined ? 'PLATFORM' : 'NONE';
+  // True when the probe authenticated with THIS deployment's own key.
+  const serverManagedKey = credentialSource === 'PLATFORM';
 
   const missingCredential =
     input.family !== 'ollama' &&
     input.family !== 'openai-compatible' &&
-    !apiKey &&
-    !serverManagedKey;
+    credentialSource === 'NONE';
   if (missingCredential) {
     return {
       connected: false,
@@ -365,6 +405,7 @@ export async function testProviderConnection(
           : 'An API key is required to test this provider.',
       errorKind: 'no_credential',
       testedAt,
+      credentialSource,
       serverManagedKey: false,
       ...runtime,
     };
@@ -388,6 +429,7 @@ export async function testProviderConnection(
         errorKind,
         latencyMs,
         testedAt,
+        credentialSource,
         serverManagedKey,
         ...runtime,
       };
@@ -406,6 +448,7 @@ export async function testProviderConnection(
       modelCount: models.length,
       models,
       testedAt,
+      credentialSource,
       serverManagedKey,
       ...runtime,
     };
@@ -418,6 +461,7 @@ export async function testProviderConnection(
       errorKind,
       latencyMs: Date.now() - startedAt,
       testedAt,
+      credentialSource,
       serverManagedKey,
       ...runtime,
     };

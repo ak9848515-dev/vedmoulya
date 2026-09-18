@@ -29,6 +29,14 @@ export {
 // Adapters — failure classification hardening (delegates to the frozen classifier)
 export { MissionFailureClassifierAdapter } from './adapters/MissionFailureClassifierAdapter.js';
 
+// Adapters — FINAL-03A production structured root-cause diagnosis (reuses AUTONOMY-04)
+export { MissionDiagnosisAdapter } from './adapters/DiagnosisRepairAdapter.js';
+export type { MissionDiagnosisAdapterOptions } from './adapters/DiagnosisRepairAdapter.js';
+
+// Adapters — FINAL-03A governed repair mechanism over the governed registry
+export { GovernedRepairAdapter } from './adapters/GovernedRepairAdapter.js';
+export type { GovernedRepairAdapterOptions } from './adapters/GovernedRepairAdapter.js';
+
 // Adapters — bounded, path-jailed governed workspace tools (ToolRuntime)
 export {
   WORKSPACE_READ_TOOL,

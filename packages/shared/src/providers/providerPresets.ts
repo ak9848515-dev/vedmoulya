@@ -177,9 +177,21 @@ export const SIMPLE_PROVIDER_PRESET_IDS: readonly ProviderPresetId[] = [
   'ollama',
 ];
 
+/**
+ * Keyed index over the preset table.
+ *
+ * A Map (not a keyed object read) so a caller-supplied id can never resolve
+ * an inherited `Object.prototype` member (`toString`, `constructor`, …) as if
+ * it were a preset — the lookup is exactly the table's own entries and
+ * nothing else.
+ */
+const PROVIDER_PRESETS_BY_ID: ReadonlyMap<string, ProviderPreset> = new Map(
+  Object.entries(PROVIDER_PRESETS),
+);
+
 /** Safe lookup — never undefined (returns a fallback carrying the id). */
 export function providerPreset(id: string): ProviderPreset {
-  const preset = (PROVIDER_PRESETS as Record<string, ProviderPreset | undefined>)[id];
+  const preset = PROVIDER_PRESETS_BY_ID.get(id);
   if (preset) return preset;
   return {
     presetId: 'custom',

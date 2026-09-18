@@ -27,6 +27,7 @@ export type {
   GitSafetyClassification,
   MissionActivityEvent,
   MissionObjectiveLease,
+  MissionFailureDiagnosisRecord,
 } from './types/mission-types.js';
 export { MISSION_TERMINAL_STATES, OBJECTIVE_STATES } from './types/mission-types.js';
 
@@ -52,8 +53,36 @@ export { SimpleProviderAvailability } from './domain/provider-availability.js';
 export { createFailureContext } from './domain/failure-context.js';
 export type { FailureContext } from './types/mission-types.js';
 
+// FINAL-03A — production structured root-cause diagnosis (reuses AUTONOMY-04).
+// The diagnosis contract and its deterministic engine are the SAME types the
+// production failure → diagnosis → repair path uses; nothing is duplicated.
+export {
+  analyzeRootCause,
+  createDiagnosis,
+  createRepairRecord,
+  rankRepairStrategy,
+  selectRepairStrategy,
+} from './domain/diagnosis-repair.js';
+export type {
+  CommandFailureEvidence,
+  DiagnosisInput,
+  FailureDiagnosis,
+  HistoricalRepairEvidence,
+  RepairAttemptRecord,
+  RepairResult,
+  RepairStrategy,
+  RootCause,
+  RootCauseCategory,
+} from './domain/diagnosis-repair.js';
+export type { FailureDiagnosisPort, FailureRepairPort } from './contracts/mission-ports.js';
+
 // Application
-export { MissionControllerService } from './application/MissionControllerService.js';
+export {
+  DEFAULT_LEASE_TTL_MS,
+  DEFAULT_MAX_ACTIVITY_EVENTS,
+  DEFAULT_MAX_DIAGNOSIS_HISTORY,
+  MissionControllerService,
+} from './application/MissionControllerService.js';
 export type {
   MissionControllerOptions,
   MissionStatusDTO,

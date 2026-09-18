@@ -25,7 +25,7 @@
    apps/web/src/app/providers/ModelSelector.tsx). */
 
 import { isSimpleProviderPreset, providerPreset } from '@vedmoulya/shared';
-import { providerReadiness } from './provider-readiness.js';
+import { deriveProviderState } from './provider-state.js';
 
 // ── Provider identity ───────────────────────────────────────────────────────
 
@@ -137,14 +137,6 @@ export interface ConnectionDisplay {
   hint?: string;
 }
 
-/** Plain-language explanation per not-connected runtime state. */
-const NOT_CONNECTED_HINTS: Record<string, string> = {
-  UNSUPPORTED_RUNTIME:
-    'This VedMoulya build can verify the connection, but it cannot run this AI yet.',
-  DISABLED: 'This AI is not registered for use here.',
-  NOT_CONFIGURED: 'Connect with an API key to use this AI.',
-};
-
 export interface ProviderStatusDisplay {
   connection: ConnectionDisplay;
   /**
@@ -158,42 +150,73 @@ export interface ProviderStatusDisplay {
 /**
  * Map the runtime-truth status (the SAME registry the config layer,
  * production validator and registration use) onto the calm connection
- * vocabulary. `providerReadiness` remains the single source of truth for
- * whether a provider can operate at all: only a GREEN/ORANGE readiness counts
- * as configured, and the ERROR state is the one genuine "connection issue".
- * Only the WORDING is local to this module — operator-facing runtime reasons
- * (env key names, adapter internals) are never shown to the user.
+ * vocabulary. PROVIDER-01: this is now a pure PROJECTION of the single
+ * provider lifecycle (`provider-state.ts`) — it derives nothing of its own, so
+ * `configured` and the connection chip cannot contradict the provider card or
+ * the readiness indicator. Only the SHAPE is local to this module;
+ * operator-facing runtime reasons (env key names, adapter internals) are never
+ * shown to the user because the canonical hints never contain them.
  */
 export function providerStatusDisplay(
   runtimeStatus: string | undefined,
   providerName: string,
+  /**
+   * The user's enable preference. Passing it keeps this display honest: a
+   * configured-but-disabled provider is NOT "Connected" (PROVIDER-01 —
+   * configured ≠ connected ≠ enabled ≠ ready). Defaults to `true` for call
+   * sites that only hold a status snapshot.
+   */
+  enabled = true,
+  /** Optional outcome of the last REAL verification for this provider. */
+  lastVerification?: { ok: boolean; failureKind?: string },
 ): ProviderStatusDisplay {
-  const configured = providerReadiness(runtimeStatus, true).key !== 'red';
-  if (configured) {
+  const state = deriveProviderState({ runtimeStatus, enabled, lastVerification });
+  const configured = state.runtimeConfigured;
+  // The REASON always comes from the canonical lifecycle, so the connection
+  // chip, the readiness indicator and the provider card can never disagree
+  // about why a provider is unusable. The provider name is only needed for a
+  // state that carries no message of its own (guaranteed total fallback).
+  const issueHint = state.hint.trim() === '' ? `Couldn't connect to ${providerName}.` : state.hint;
+
+  if (state.ready) {
     return {
       connection: {
         key: 'connected',
         label: 'Connected',
         symbol: '✓',
         tone: 'text-emerald-600 dark:text-emerald-400',
-        hint:
-          runtimeStatus === 'MOCK'
-            ? 'Development mock runtime — deterministic and free.'
-            : 'Ready to use.',
+        hint: state.hint,
       },
-      configured: true,
+      configured,
     };
   }
-  if (runtimeStatus === 'ERROR') {
+  if (state.lifecycle === 'DEGRADED' || state.lifecycle === 'FAILED') {
+    // Two honest flavours of trouble: reachability (retry helps) vs a rejected
+    // credential (the user must reconnect). Raw technical text is never shown.
     return {
       connection: {
         key: 'issue',
+        // One calm label for both flavours; the canonical lifecycle state
+        // (and its hint) carries the distinction between "couldn't reach it"
+        // and "the credential was rejected".
         label: 'Connection issue',
         symbol: '⚠',
         tone: 'text-amber-600 dark:text-amber-400',
-        hint: `Couldn't connect to ${providerName}. Check your API key and try again.`,
+        hint: issueHint,
       },
-      configured: false,
+      configured,
+    };
+  }
+  if (state.lifecycle === 'CONFIGURING' || state.lifecycle === 'VERIFYING') {
+    return {
+      connection: {
+        key: 'not_connected',
+        label: state.label,
+        symbol: state.symbol,
+        tone: state.tone,
+        hint: state.hint,
+      },
+      configured,
     };
   }
   return {
@@ -203,11 +226,12 @@ export function providerStatusDisplay(
       symbol: '○',
       // #64748B on white is 4.76:1 (WCAG AA); the darker slate tint failed it.
       tone: 'text-[#64748B] dark:text-[#94A3B8]',
-      hint:
-        (runtimeStatus ? NOT_CONNECTED_HINTS[runtimeStatus] : undefined) ??
-        'Connect this AI to use it.',
+      // The canonical lifecycle owns every not-connected wording (missing
+      // credential, catalog-only, not-registered) — this module no longer
+      // keeps a second copy of that vocabulary.
+      hint: state.hint,
     },
-    configured: false,
+    configured,
   };
 }
 

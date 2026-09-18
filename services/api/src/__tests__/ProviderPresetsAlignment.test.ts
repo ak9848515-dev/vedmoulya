@@ -142,6 +142,41 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
     expect(fallback.displayName).toContain('some-new-family');
   });
 
+  it('prototype-named ids never resolve an inherited Object.prototype member', () => {
+    // Regression guard: the lookup used to be a keyed object read
+    // (`PROVIDER_PRESETS[id]`), so ids naming Object.prototype members
+    // ('toString', '__proto__', 'constructor', …) returned inherited
+    // functions/objects as if they were provider presets. The lookup is now
+    // Map-backed, so only the table's OWN entries can ever resolve.
+    const prototypeNames = [
+      'toString',
+      '__proto__',
+      'constructor',
+      'valueOf',
+      'hasOwnProperty',
+      'isPrototypeOf',
+      'propertyIsEnumerable',
+      '__defineGetter__',
+    ];
+    for (const id of prototypeNames) {
+      const preset = providerPreset(id);
+      // A real ProviderPreset shape — never a function or a prototype object.
+      expect(typeof preset.displayName, id).toBe('string');
+      expect(preset.presetId, id).toBe('custom');
+      expect(preset.displayName).toBe(`Custom provider (${id})`);
+      expect(preset.simpleModeSupported, id).toBe(false);
+      expect(preset.endpointUserConfigurable, id).toBe(true);
+      // '__proto__' is the one that used to return the prototype object itself.
+      expect(preset).not.toBe(Object.prototype);
+    }
+    // …and the guard did not disturb real ids.
+    expect(providerPreset('google').presetId).toBe('google');
+    expect(providerPreset('google').displayName).toBe('Google Gemini');
+    expect(providerPreset('openai').presetId).toBe('openai');
+    // An empty id stays the unqualified custom label (no dangling parentheses).
+    expect(providerPreset('').displayName).toBe('Custom provider');
+  });
+
   it('adapter default model ids stay pinned to the presets (pinning contract)', () => {
     // Sources (services/orchestrator/src/providers/*): the adapters' own
     // defaults — GoogleGeminiProvider → gemini-3.5-flash, VercelAIProvider →

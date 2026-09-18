@@ -11,6 +11,8 @@ import type {
   Mission,
   MissionCommand,
   MissionCheckpoint,
+  MissionFailureClassification,
+  MissionFailureDiagnosisRecord,
   MissionObjective,
   MissionOutcome,
 } from '../types/mission-types.js';
@@ -28,6 +30,8 @@ import type {
   ExperienceOptimizationPort,
   ExecutionPort,
   FailureClassificationPort,
+  FailureDiagnosisPort,
+  FailureRepairPort,
   GitSafetyPort,
   GoalUnderstandingPort,
   IdGeneratorPort,
@@ -43,12 +47,27 @@ import type {
 } from '../contracts/mission-ports.js';
 import { GitSafetyPolicy } from '../domain/git-safety-policy.js';
 import { createFailureContext } from '../domain/failure-context.js';
+import type {
+  CommandFailureEvidence,
+  FailureDiagnosis,
+  RepairResult,
+} from '../domain/diagnosis-repair.js';
+import { createRepairRecord, type RepairAttemptRecord } from '../domain/diagnosis-repair.js';
 
 /** BLD-025 — durable objective ownership lease TTL (ms). When a persisted
  *  RUNNING objective's lease expires, recovery treats the previous owner as
  *  dead and the objective as recoverable — a live lease means another worker
  *  still owns it and it must NOT be re-run. */
 export const DEFAULT_LEASE_TTL_MS = 60_000;
+
+/** FINAL-03A — bounded durable diagnosis trail per objective. */
+export const DEFAULT_MAX_DIAGNOSIS_HISTORY = 5;
+
+/** FINAL-03A — bounded diagnosis input sizes (evidence, never raw dumps). */
+const MAX_DIAGNOSIS_ERROR_CHARS = 1_000;
+const MAX_DIAGNOSIS_OUTPUT_CHARS = 1_000;
+const MAX_DIAGNOSIS_EVIDENCE_LINES = 10;
+const MAX_DIAGNOSIS_EVIDENCE_HISTORY = 3;
 
 /** BLD-025 — bounded durable activity trail per mission. */
 export const DEFAULT_MAX_ACTIVITY_EVENTS = 200;
@@ -94,6 +113,42 @@ export interface MissionControllerOptions {
   experienceOptimization: ExperienceOptimizationPort;
   failureClassifier: FailureClassificationPort;
   /**
+   * FINAL-03A — optional structured root-cause diagnosis over the EXISTING
+   * AUTONOMY-04 `FailureDiagnosis` contract. When configured, the production
+   * failure path invokes it automatically after classification and BEFORE
+   * the bounded repair/revision decision; the resulting structured diagnosis
+   * is persisted durably with the objective and folded into the existing
+   * revision/planning advisory context.
+   *
+   * STRICTLY ADVISORY: the frozen recovery policy (maxAttempts / maxRetries /
+   * maxReplans / budgets / permissions / tool allowlists) stays authoritative
+   * and is evaluated exactly as before. A diagnosis can NEVER add an attempt,
+   * widen a tool, execute a command, or mutate the workspace — any repair it
+   * recommends still flows through the existing governed planning →
+   * agent-execution → ToolRuntime path. A diagnosis port that throws or is
+   * absent degrades honestly to "no diagnosis" and never changes recovery
+   * semantics or fabricates success. Omitted = the frozen pre-FINAL-03A
+   * behavior (nothing is required for existing callers).
+   */
+  diagnosis?: FailureDiagnosisPort;
+  /**
+   * FINAL-03A — optional GOVERNED repair mechanism. When configured, the
+   * production failure path offers the structured diagnosis's repair intent
+   * to it (see `FailureRepairPort`) on the SAME bounded revision attempt the
+   * frozen recovery policy already authorised, and BEFORE the objective is
+   * re-planned and re-executed.
+   *
+   * STRICTLY BOUNDED: the repair runs inside the existing revision/replan
+   * budget (no extra retry, no extra revision is granted), it can only use the
+   * mission's own governed allowlist/permission classes, and it must perform
+   * every mutation through the governed tool path. A missing port, a thrown
+   * port, an `attempted:false` result or a failed repair leaves the frozen
+   * recovery behavior exactly as it is today and never fabricates success —
+   * the objective still has to be re-executed and re-verified. Omitted = the
+   * pre-FINAL-03A behavior (nothing is required for existing callers).
+   */
+  repair?: FailureRepairPort;
+  /**
    * AUTONOMY-06 — optional advisory learning retrieval over the existing
    * execution memory. Relevant, bounded, verified learning is surfaced to
    * the planner as GUIDANCE only: it can never bypass permissions, tools,
@@ -121,6 +176,12 @@ export interface MissionControllerOptions {
   leaseTtlMs?: number;
   /** BLD-025 — bounded durable activity trail length (defaults to 200). */
   maxActivityEvents?: number;
+  /**
+   * FINAL-03A — bounded durable diagnosis trail length per objective
+   * (defaults to `DEFAULT_MAX_DIAGNOSIS_HISTORY`). Lowering it never enables
+   * extra recovery; it only bounds persisted audit evidence.
+   */
+  maxDiagnosisHistory?: number;
 }
 
 export interface MissionStatusDTO {
@@ -575,6 +636,44 @@ export class MissionControllerService {
         providerStatus,
       );
 
+      // ── FINAL-03A — STRUCTURED ROOT-CAUSE DIAGNOSIS (production wiring). ──
+      //    Called automatically after classification and BEFORE the bounded
+      //    repair decision. The diagnosis is ADVISORY CONTEXT ONLY: it is
+      //    built from evidence the controller already observed, it is
+      //    persisted durably with the objective, and it is folded into the
+      //    existing revision/planning path below. It cannot widen authority:
+      //    `canRecover` / the budgets / the governed tools remain the only
+      //    things that decide whether — and how — anything runs again.
+      let storedDiagnosis: MissionFailureDiagnosisRecord | undefined;
+      if (this.options.diagnosis) {
+        try {
+          const diagnosis = await this.options.diagnosis.diagnose({
+            evidence: this.buildDiagnosisEvidence(
+              objective,
+              classification,
+              executionResult,
+              verificationResult,
+            ),
+            objective: objective.objective,
+            missionContext: mission.objective,
+          });
+          storedDiagnosis = {
+            diagnosis,
+            attempt: objective.retryCount,
+            classification,
+            // The frozen recovery policy decides this — never the diagnosis.
+            repairPermitted: false,
+            nextAction: 'FAIL',
+            diagnosedAt: this.options.clock.now(),
+          };
+        } catch {
+          // A diagnosis failure is recorded as its absence, never as a
+          // failure of the mission and never as a fabricated success. The
+          // frozen recovery behavior continues unchanged.
+          storedDiagnosis = undefined;
+        }
+      }
+
       // ── BLD-025 §17 — optional operator approval gate. ────────────────
       //    When configured and triggered, the MISSION enters the persisted
       //    WAITING_FOR_APPROVAL state and the loop stops. Nothing executes
@@ -662,6 +761,20 @@ export class MissionControllerService {
         mission.budgetUsage.retriesConsumed++; // Revision also counts as a retry
         mission.budgetUsage.replansConsumed++; // Revision consumes replan budget
 
+        // ── FINAL-03A — GOVERNED REPAIR. ────────────────────────────────
+        //    The structured diagnosis's repair INTENT is executed through the
+        //    governed repair mechanism (the mission's own governed tool path)
+        //    BEFORE this attempt is re-planned and re-executed. This consumes
+        //    NO extra budget: it rides the revision the frozen policy just
+        //    authorised. A missing/misconfigured/refused repair is recorded
+        //    honestly and grants nothing — the pre-FINAL-03A behavior.
+        const repairResult = await this.attemptGovernedRepair(
+          objective,
+          mission,
+          storedDiagnosis?.diagnosis,
+          classification,
+        );
+
         // Record the revision in the objective's history
         if (!objective.revisionHistory) {
           objective.revisionHistory = [];
@@ -684,10 +797,16 @@ export class MissionControllerService {
             objective.revisionAttempt,
             this.options.clock.now(),
           ),
+          // FINAL-03A — the EXISTING revision record carries the structured
+          // diagnosis so the next planning attempt (which already consumes
+          // `failureContext`) receives the root cause as advisory context.
+          failureDiagnosis: storedDiagnosis?.diagnosis,
+          repairResult,
         });
 
         objective.state = 'PENDING';
         objective.stateHistory.push('PENDING');
+        this.recordDiagnosis(objective, storedDiagnosis, 'REPAIR', repairResult);
         this.recordActivity(
           mission,
           'OBJECTIVE_REVISED',
@@ -699,6 +818,7 @@ export class MissionControllerService {
         objective.state = 'PENDING';
         objective.stateHistory.push('PENDING');
         mission.budgetUsage.retriesConsumed++;
+        this.recordDiagnosis(objective, storedDiagnosis, 'RETRY');
         this.recordActivity(
           mission,
           'OBJECTIVE_FAILED',
@@ -709,6 +829,14 @@ export class MissionControllerService {
           classification.recoverable &&
           (objective.retryCount >= objective.maxRetries ||
             mission.budgetUsage.replansConsumed >= mission.budget.maxReplans);
+        // FINAL-03A — the bounded recovery policy refused a repair. The
+        // diagnosis is still recorded (durably) as evidence, but it grants
+        // NOTHING: the objective stays FAILED.
+        this.recordDiagnosis(
+          objective,
+          storedDiagnosis,
+          classification.recoverable ? 'FAIL' : 'BLOCK',
+        );
         this.recordActivity(
           mission,
           'OBJECTIVE_FAILED',
@@ -1155,6 +1283,126 @@ export class MissionControllerService {
     const todo = /^resolve todo: (.*)$/.exec(title);
     if (todo && todo[1] !== undefined) return !overlapping(inspection.todos, todo[1]);
     return false;
+  }
+
+  /**
+   * FINAL-03A — build the structured evidence a diagnosis is derived from.
+   *
+   * EVERYTHING here is evidence the controller already observed during the
+   * real run: the classified failure, the executor's error/output, the real
+   * verification result, the proving command and the bounded repair history.
+   * This method performs NO I/O, executes NOTHING, spawns NOTHING and reads
+   * no path the controller was not already given — the diagnosis port is
+   * handed data, never capability.
+   */
+  private buildDiagnosisEvidence(
+    objective: MissionObjective,
+    classification: MissionFailureClassification,
+    executionResult: ExecutionResultData,
+    verificationResult: { verified: boolean; evidence: string[]; method: string },
+  ): CommandFailureEvidence {
+    const previousRepairs: RepairAttemptRecord[] = (objective.diagnosisHistory ?? [])
+      .slice(0, MAX_DIAGNOSIS_EVIDENCE_HISTORY)
+      .map((record) =>
+        createRepairRecord(
+          record.diagnosis,
+          record.diagnosis.suggestedRepair,
+          record.diagnosis.affectedFiles ?? [],
+          record.nextAction === 'REPAIR' || record.nextAction === 'RETRY',
+          record.diagnosedAt,
+          { error: record.classification.reason },
+        ),
+      );
+    // The verification evidence names the command/step that failed — the
+    // exact structured signal a root cause is derived from.
+    const verificationEvidence = verificationResult.evidence.slice(0, MAX_DIAGNOSIS_EVIDENCE_LINES);
+    return {
+      failureContext: createFailureContext(
+        classification,
+        executionResult,
+        {
+          objectiveId: objective.objectiveId,
+          title: objective.title,
+          goalId: objective.goalId,
+          planId: objective.planId,
+        },
+        objective.goalId,
+        objective.revisionAttempt ?? 0,
+        this.options.clock.now(),
+      ),
+      command: objective.goalId ?? objective.planId,
+      exitCode: executionResult.success ? 0 : 1,
+      stdout: executionResult.output?.slice(0, MAX_DIAGNOSIS_OUTPUT_CHARS),
+      stderr: executionResult.error?.slice(0, MAX_DIAGNOSIS_ERROR_CHARS),
+      timedOut: false,
+      relevantFiles: verificationEvidence,
+      previousRepairs: previousRepairs.length > 0 ? previousRepairs : undefined,
+    };
+  }
+
+  /**
+   * FINAL-03A — run the GOVERNED repair mechanism for a structured diagnosis,
+   * bounded and governed by construction:
+   *
+   *   - only reached on the revision the FROZEN recovery policy authorised
+   *     (retry + replan budgets were already consumed above) — a repair can
+   *     never add an attempt, a retry or a revision;
+   *   - the port receives ONLY the structured diagnosis, the classification
+   *     and the mission's OWN governed allowlist/permission classes. It holds
+   *     no authority to widen them, and every mutation it performs must go
+   *     through the governed tool path (the port contract);
+   *   - any throw, absence or refusal degrades to "no repair": the objective
+   *     still has to be re-planned, re-executed and re-verified, so success
+   *     is never fabricated by the repair layer.
+   */
+  private async attemptGovernedRepair(
+    objective: MissionObjective,
+    mission: Mission,
+    diagnosis: FailureDiagnosis | undefined,
+    classification: MissionFailureClassification,
+  ): Promise<RepairResult | undefined> {
+    if (!this.options.repair || !diagnosis) return undefined;
+    try {
+      return await this.options.repair.repair({
+        diagnosis,
+        classification,
+        objective: objective.objective,
+        missionContext: mission.objective,
+        allowedTools: mission.constraints.allowedTools,
+        grantedPermissionClasses: mission.constraints.grantedPermissionClasses,
+      });
+    } catch {
+      // A broken repair mechanism must never break the mission: the frozen
+      // recovery path continues exactly as it would without one.
+      return undefined;
+    }
+  }
+
+  /**
+   * FINAL-03A — persist the structured diagnosis durably (bounded) with the
+   * action the FROZEN recovery policy actually took and the governed repair
+   * outcome (if one was authorised). `action` is computed by the caller from
+   * budgets/retries — the diagnosis never selects it. Recording is always
+   * safe: no diagnosis (absent/threw) records nothing.
+   */
+  private recordDiagnosis(
+    objective: MissionObjective,
+    stored: MissionFailureDiagnosisRecord | undefined,
+    action: MissionFailureDiagnosisRecord['nextAction'],
+    repair?: RepairResult,
+  ): void {
+    if (!stored) return;
+    const history = objective.diagnosisHistory ?? [];
+    history.unshift({
+      ...stored,
+      repairPermitted: action === 'REPAIR' || action === 'RETRY',
+      nextAction: action,
+      ...(repair !== undefined ? { repair } : {}),
+    });
+    while (history.length > (this.options.maxDiagnosisHistory ?? DEFAULT_MAX_DIAGNOSIS_HISTORY)) {
+      history.pop();
+    }
+    objective.diagnosisHistory = history;
   }
 
   /** Bounded durable activity trail (structural, sanitized, capped). */

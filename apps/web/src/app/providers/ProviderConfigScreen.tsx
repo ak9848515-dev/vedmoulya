@@ -166,7 +166,10 @@ export function ProviderConfigScreen({
   const identity = providerIdentity(provider.family, provider.name);
   const preset = providerPreset(provider.family);
   const builtIn = isBuiltInProvider(provider.family);
-  const status = providerStatusDisplay(runtime?.status, identity.name);
+  // PROVIDER-01 — configured ≠ connected ≠ enabled: the display is derived
+  // from the one canonical lifecycle, so a disabled provider never claims to
+  // be connected.
+  const status = providerStatusDisplay(runtime?.status, identity.name, provider.enabled);
 
   const connect = useConnectProvider();
   const setPreferences = useSetProviderPreferences();

@@ -612,12 +612,23 @@ export function useSetProviderEnabled() {
   return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
 }
 
+/**
+ * PROVIDER-01 — forget the stored (encrypted) credential for one provider
+ * family. The secret was never readable by the browser, so "remove" is the
+ * only client-side operation that exists.
+ */
+export function useDisconnectProvider() {
+  const mutation = api.providers.disconnectProvider.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
+
 // ── FINAL-02 — Friendly provider connect (Simple mode / first-login) ────────
-// Family-aware connection test + real model discovery. The API key is used
-// for the server-side probe ONLY — never persisted, never logged, never
-// echoed back (the response carries no secret material). mutateAsync returns
-// the unwrapped ProviderConnectionResultDTO (envelope stripped, business
-// failures thrown) so Simple mode can consume the typed result directly.
+// Family-aware connection test + real model discovery. On success the gateway
+// persists a USER credential ENCRYPTED at rest (PROVIDER-01) — it is never
+// logged, never echoed back, and never readable by a browser again (the
+// response carries no secret material). mutateAsync returns the unwrapped
+// ProviderConnectionResultDTO (envelope stripped, business failures thrown) so
+// Simple mode can consume the typed result directly.
 
 export interface DiscoveredProviderModelDTO {
   id: string;
@@ -641,6 +652,12 @@ export interface ProviderConnectionResultDTO {
   modelCount?: number;
   models?: DiscoveredProviderModelDTO[];
   testedAt: string;
+  /**
+   * PROVIDER-01 — WHICH credential authenticated the probe: the user's own
+   * ('USER'), this deployment's ('PLATFORM'), or none ('NONE'). The browser
+   * never receives the credential itself.
+   */
+  credentialSource?: 'USER' | 'PLATFORM' | 'NONE';
   serverManagedKey: boolean;
   runtimeConfigured: boolean;
   runtimeNote?: string;

@@ -133,6 +133,28 @@ export {
   defaultProviderPreferences,
 } from './types/preferences-types.js';
 export type { ProviderPreferencesStore } from './domain/preferences/ProviderPreferencesStore.js';
+export type {
+  ProviderCredentialMetadata,
+  ProviderCredentialSource,
+  ResolvedProviderCredential,
+  SealedProviderCredential,
+} from './types/credential-types.js';
+export { isUsableCredentialSource } from './types/credential-types.js';
+export type {
+  ProviderCredentialRecord,
+  ProviderCredentialStore,
+} from './domain/credentials/ProviderCredentialStore.js';
+export {
+  MIN_CREDENTIAL_KEY_LENGTH,
+  PROVIDER_CREDENTIAL_CIPHER_VERSION,
+  createProviderCredentialCipher,
+} from './domain/credentials/credential-cipher.js';
+export type { ProviderCredentialCipher } from './domain/credentials/credential-cipher.js';
+export {
+  platformCredentialEnvKeys,
+  resolvePlatformCredential,
+} from './domain/credentials/platform-credential.js';
+export { ProviderCredentialService } from './application/ProviderCredentialService.js';
 export {
   MANDATORY_PROVIDER_ERROR,
   PRIMARY_BRAIN_DISABLE_BLOCKED_ERROR,
@@ -146,6 +168,8 @@ export { runWithProviderUser, currentProviderUser } from './application/request-
 // ── Infrastructure ────────────────────────────────────────────────────────
 export { InMemoryProviderRepository } from './infrastructure/InMemoryProviderRepository.js';
 export { InMemoryProviderPreferencesStore } from './infrastructure/InMemoryProviderPreferencesStore.js';
+export { InMemoryProviderCredentialStore } from './infrastructure/InMemoryProviderCredentialStore.js';
+export { PostgresProviderCredentialStore } from './infrastructure/PostgresProviderCredentialStore.js';
 export { PostgresProviderRepository } from './infrastructure/PostgresProviderRepository.js';
 
 // ── Application ───────────────────────────────────────────────────────────

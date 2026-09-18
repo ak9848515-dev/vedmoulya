@@ -7,11 +7,15 @@
 
 import { container, databaseManager, logger } from '@vedmoulya/core';
 import postgres from 'postgres';
-import type { ProviderRepository } from '@vedmoulya/providers';
+import type { ProviderCredentialStore, ProviderRepository } from '@vedmoulya/providers';
 import {
+  InMemoryProviderCredentialStore,
   InMemoryProviderRepository,
+  PostgresProviderCredentialStore,
   PostgresProviderRepository,
+  ProviderCredentialService,
   createCatalogProviders,
+  createProviderCredentialCipher,
 } from '@vedmoulya/providers';
 import type { CapabilityRepository } from '@vedmoulya/capabilities';
 import { PostgresCapabilityRepository } from '@vedmoulya/capabilities';
@@ -426,6 +430,67 @@ export function createProductionProviderRepository(): ProviderRepository {
 
   providerRegistrySlot.instance = repo;
   return repo;
+}
+
+/**
+ * PROVIDER-01 — the encryption key that protects user provider credentials at
+ * rest. Only the NAME is referenced here; the value is never read, logged or
+ * returned. When it is absent the gateway does not persist user credentials at
+ * all (there is no plaintext fallback) — the platform-credential path still
+ * works, honestly reported as PLATFORM.
+ */
+export const PROVIDER_CREDENTIAL_KEY_ENV = 'AI_CREDENTIAL_ENCRYPTION_KEY';
+
+/** Singleton slot for the encrypted credential store. */
+const providerCredentialStoreSlot: RepositorySlot<ProviderCredentialStore> = {};
+
+/**
+ * Resolve the production credential store: Postgres in strict environments
+ * (production/staging), in-memory elsewhere — the same degradation policy the
+ * provider registry uses, so dev/test stays hermetic without pretending a
+ * secret is durable.
+ */
+export function createProductionProviderCredentialStore(): ProviderCredentialStore {
+  if (providerCredentialStoreSlot.instance) return providerCredentialStoreSlot.instance;
+
+  const env: string = process.env.NODE_ENV ?? 'development';
+  const isStrict = env === 'production' || env === 'staging';
+  if (!isStrict) {
+    providerCredentialStoreSlot.instance = new InMemoryProviderCredentialStore();
+    return providerCredentialStoreSlot.instance;
+  }
+
+  const sql = createEISql('vedmoulya-provider-credentials');
+  const store = new PostgresProviderCredentialStore(sql);
+  ensureTable(store, 'Provider credentials');
+
+  providerCredentialStoreSlot.instance = store;
+  return store;
+}
+
+/**
+ * PROVIDER-01 — the server-side credential service (encrypt → persist →
+ * resolve user → platform → none). Returns `undefined` when no encryption key
+ * is configured: a deployment without a key must NOT store user credentials
+ * (never in plaintext), and the gateway then simply reports the platform
+ * credential as the only source.
+ */
+export function createProductionProviderCredentialService(): ProviderCredentialService | undefined {
+  const keyMaterial = process.env.AI_CREDENTIAL_ENCRYPTION_KEY?.trim();
+  if (keyMaterial === undefined || keyMaterial === '') return undefined;
+  try {
+    return new ProviderCredentialService(
+      createProductionProviderCredentialStore(),
+      createProviderCredentialCipher(keyMaterial),
+    );
+  } catch (error) {
+    // Misconfigured (too-short) key: fail loudly for operators, but never
+    // fall back to unencrypted storage — the platform credential is still used.
+    logger.error('Provider credential store disabled: unusable encryption key', {
+      reason: error instanceof Error ? error.message : 'unknown',
+    });
+    return undefined;
+  }
 }
 
 /**

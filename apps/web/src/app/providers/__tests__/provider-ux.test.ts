@@ -84,8 +84,43 @@ describe('connection status (derived from the runtime-truth registry)', () => {
     const status = providerStatusDisplay('ERROR', 'OpenAI');
     expect(status.connection.key).toBe('issue');
     expect(status.connection.label).toBe('Connection issue');
-    expect(status.connection.hint).toMatch(/couldn't connect to openai/i);
+    // PROVIDER-01 — the reason is the canonical lifecycle hint: actionable,
+    // jargon-free, and never a raw error or an operator-facing key name.
+    expect(status.connection.hint).toMatch(/reconnect/i);
+    expect(status.connection.hint ?? '').not.toMatch(/AI_[A-Z_]+API_KEY|adapter/i);
     expect(status.configured).toBe(false);
+  });
+
+  it('never reads Connected for a configured provider the user switched off', () => {
+    const off = providerStatusDisplay('CONFIGURED', 'OpenAI', false);
+    expect(off.connection.key).toBe('not_connected');
+    expect(off.connection.label).toBe('Not connected');
+    // ...while still reporting that the runtime IS configured elsewhere.
+    expect(off.configured).toBe(true);
+    expect(off.connection.hint).toBeTruthy();
+  });
+
+  it('surfaces a real failed verification instead of a green connection', () => {
+    const rejected = providerStatusDisplay('CONFIGURED', 'Gemini', true, {
+      ok: false,
+      failureKind: 'invalid_api_key',
+    });
+    expect(rejected.connection.key).toBe('issue');
+    expect(rejected.connection.label).toBe('Connection issue');
+
+    const unreachable = providerStatusDisplay('CONFIGURED', 'Gemini', true, {
+      ok: false,
+      failureKind: 'unreachable',
+    });
+    expect(unreachable.connection.key).toBe('issue');
+    // The two flavours stay distinguishable through the reason, not the label.
+    expect(unreachable.connection.hint).not.toBe(rejected.connection.hint);
+  });
+
+  it('does not offer Connect for a runtime that is not registered in this build', () => {
+    const unregistered = providerStatusDisplay('DISABLED', 'Claude');
+    expect(unregistered.connection.key).toBe('not_connected');
+    expect(unregistered.connection.hint).toMatch(/not available in this version/i);
   });
 
   it('reports NOT_CONFIGURED / UNSUPPORTED_RUNTIME / unknown as not connected', () => {

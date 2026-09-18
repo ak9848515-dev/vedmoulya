@@ -50,6 +50,34 @@ const NON_RECOVERABLE_CLASSES: Record<
   },
 };
 
+/**
+ * FINAL-03A — executor-reported failure classes that are RECOVERABLE and must
+ * reach the EXISTING revision/repair path rather than a blind retry.
+ *
+ * A `FAILED_FINAL` execution run (every bounded recovery on the plan's own
+ * steps was exhausted without an achieved, verified outcome) is a
+ * verification failure of the OBJECTIVE: re-running the identical plan cannot
+ * help. The frozen classifier is text-heuristic and never sees run-level
+ * semantics, so without this the controller would retry a deterministic
+ * failure until the budget ran out instead of revising (and repairing) the
+ * objective. Bounds are untouched: the revision still consumes the existing
+ * retry and replan budgets.
+ */
+const RECOVERABLE_CLASSES: Record<
+  string,
+  {
+    failureClass: MissionFailureClassification['failureClass'];
+    reason: string;
+    suggestedAction: MissionFailureClassification['suggestedAction'];
+  }
+> = {
+  VERIFICATION_FAILURE: {
+    failureClass: 'VERIFICATION_FAILURE',
+    reason: 'The objective did not reach a verified outcome — the objective may need revision',
+    suggestedAction: 'REVISE_OBJECTIVE',
+  },
+};
+
 export class MissionFailureClassifierAdapter implements FailureClassificationPort {
   async classify(
     error: string,
@@ -64,6 +92,18 @@ export class MissionFailureClassifierAdapter implements FailureClassificationPor
         recoverable: false,
         reason: mapped.reason,
         suggestedAction: mapped.suggestedAction,
+        evidence: [error].filter((part) => part.length > 0),
+      };
+    }
+    // FINAL-03A — an executor-reported verification failure routes into the
+    // EXISTING revision path (still bounded by maxRetries / maxReplans).
+    const recoverable = reported ? RECOVERABLE_CLASSES[reported] : undefined;
+    if (recoverable) {
+      return {
+        failureClass: recoverable.failureClass,
+        recoverable: true,
+        reason: recoverable.reason,
+        suggestedAction: recoverable.suggestedAction,
         evidence: [error].filter((part) => part.length > 0),
       };
     }

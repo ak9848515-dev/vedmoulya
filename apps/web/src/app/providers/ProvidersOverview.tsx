@@ -371,6 +371,9 @@ export function ProvidersOverview({
     providerStatusDisplay(
       runtimeByFamily.get(provider.family)?.status,
       providerIdentity(provider.family, provider.name).name,
+      // PROVIDER-01 — the user's enable preference is part of the state:
+      // a configured-but-disabled provider must never read "Connected".
+      provider.enabled,
     );
 
   const menuItemsFor = (provider: ProviderExperienceRowDTO): MenuItem[] => {

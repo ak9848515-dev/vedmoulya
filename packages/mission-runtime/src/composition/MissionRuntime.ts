@@ -55,6 +55,8 @@ import type {
   CheckpointStore,
   ClockPort,
   FailureClassificationPort,
+  FailureDiagnosisPort,
+  FailureRepairPort,
   IdGeneratorPort,
   MissionControllerOptions,
   MissionStore,
@@ -85,6 +87,8 @@ import {
 import { createWorkspaceFileTemplate } from '../adapters/WorkspaceDevTemplate.js';
 import { createOrchestratorRoutingPorts } from '../adapters/OrchestratorRoutingPorts.js';
 import { MissionFailureClassifierAdapter } from '../adapters/MissionFailureClassifierAdapter.js';
+import { MissionDiagnosisAdapter } from '../adapters/DiagnosisRepairAdapter.js';
+import { GovernedRepairAdapter } from '../adapters/GovernedRepairAdapter.js';
 import { MissionRuntimeApi } from '../mission-api/MissionRuntimeApi.js';
 
 export interface MissionRuntimeOptions {
@@ -150,6 +154,24 @@ export interface MissionRuntimeOptions {
    * the frozen default (failure classification decides directly).
    */
   approvalGate?: MissionControllerOptions['approvalGate'];
+  /**
+   * FINAL-03A — override the production structured root-cause diagnosis
+   * adapter. Default: the real `MissionDiagnosisAdapter` over the existing
+   * AUTONOMY-04 diagnosis engine, wired into the production controller.
+   * Pass `null` to explicitly compose WITHOUT diagnosis (pre-FINAL-03A
+   * behavior); an override must still implement the same port contract.
+   */
+  diagnosis?: FailureDiagnosisPort | null;
+  /**
+   * FINAL-03A — override the production GOVERNED repair mechanism. Default:
+   * the real `GovernedRepairAdapter` over the SAME governed ToolRegistry the
+   * mission executes plans against (only when the governed workspace tools
+   * are part of this composition). Pass `null` to explicitly compose without
+   * a repair mechanism (pre-FINAL-03A behavior); an override must still
+   * implement the same port contract and perform its mutations through the
+   * governed tool path.
+   */
+  repair?: FailureRepairPort | null;
 }
 
 /** Every wired component of the composed mission runtime. */
@@ -175,6 +197,18 @@ export interface MissionRuntimeComponents {
     /** AUTONOMY-06 — advisory learning retrieval over the existing memory. */
     learning: import('@vedmoulya/mission-controller').LearningRetrievalPort;
     failureClassifier: FailureClassificationPort;
+    /**
+     * FINAL-03A — production structured root-cause diagnosis. Present unless
+     * the composition was explicitly asked to omit it (`diagnosis: null`).
+     */
+    diagnosis?: FailureDiagnosisPort;
+    /**
+     * FINAL-03A — production governed repair mechanism. Present when the
+     * composition registers the governed workspace tools (a repair can only
+     * exist where a governed `workspace_write` really exists), unless the
+     * composition was explicitly asked to omit it (`repair: null`).
+     */
+    repair?: FailureRepairPort;
     repositoryInspector?: RepositoryInspectionPort;
     gitSafety: RuntimeGitSafetyAdapter;
   };
@@ -282,6 +316,26 @@ export function buildMissionRuntimeComponents(
   // executor-reported permanent failure classes (permission/capability).
   const failureClassifier: FailureClassificationPort = new MissionFailureClassifierAdapter();
 
+  // FINAL-03A — production structured root-cause diagnosis over the EXISTING
+  // AUTONOMY-04 engine. `null` is an explicit, deliberate opt-out (the
+  // pre-FINAL-03A behavior); the default is the real production adapter.
+  const diagnosis: FailureDiagnosisPort | undefined =
+    options.diagnosis === null ? undefined : (options.diagnosis ?? new MissionDiagnosisAdapter());
+
+  // FINAL-03A — production GOVERNED repair mechanism over the SAME governed
+  // registry the mission executes plan actions against. It is only wired when
+  // the governed workspace tools are really registered (otherwise there is no
+  // governed `workspace_write` for a repair to use, and the honest answer is
+  // "no repair mechanism" rather than a mechanism that can only fail).
+  const governedWriteRegistered = includeWorkspaceTools && Boolean(options.workspaceRoot);
+  const repair: FailureRepairPort | undefined =
+    options.repair === null
+      ? undefined
+      : (options.repair ??
+        (governedWriteRegistered
+          ? new GovernedRepairAdapter({ registry: toolRegistry })
+          : undefined));
+
   return {
     orchestrator,
     workspace,
@@ -305,6 +359,8 @@ export function buildMissionRuntimeComponents(
       experienceOptimization: new MissionExperienceOptimizationAdapter(optimization),
       learning,
       failureClassifier,
+      diagnosis,
+      repair,
       repositoryInspector: inspector,
       gitSafety,
     },
@@ -336,6 +392,8 @@ export function createMissionRuntime(options: MissionRuntimeOptions = {}): Missi
     experienceOptimization: components.ports.experienceOptimization,
     learning: components.ports.learning,
     failureClassifier: components.ports.failureClassifier,
+    diagnosis: components.ports.diagnosis,
+    repair: components.ports.repair,
     clock: options.clock ?? new SystemClock(),
     idGenerator: options.idGenerator ?? createIdGenerator(),
     repositoryInspector: components.ports.repositoryInspector,

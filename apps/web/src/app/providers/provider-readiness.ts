@@ -23,6 +23,13 @@
 
 // ── Readiness ───────────────────────────────────────────────────────────────
 
+// PROVIDER-01 — this indicator is a PROJECTION of the single provider
+// lifecycle (`provider-state.ts`), which is the authority for whether a
+// provider is READY. Nothing here re-derives readiness: GREEN exists only when
+// the canonical state is READY (runtime-configured AND enabled AND no failed
+// verification), so the indicator can never contradict the provider card.
+import { deriveProviderState } from './provider-state.js';
+
 export type ReadinessKey = 'green' | 'orange' | 'red';
 
 export interface ProviderReadiness {
@@ -50,38 +57,38 @@ export const READINESS_LEGEND: ReadonlyArray<{
  * ERROR — the same registry the config layer and production validator use)
  * plus the user's enable preference onto the single readiness indicator.
  *
- * A provider may only reach GREEN when it is genuinely CONFIGURED (or the
- * deterministic mock is the active dev/test runtime) AND the user enabled it.
+ * A provider may only reach GREEN when the canonical lifecycle is READY
+ * (runtime-configured AND enabled AND no failed verification).
+ *
+ * `lastVerification` (optional) lets a caller surface a real failed check as
+ * red rather than green — the indicator never contradicts a real probe.
  */
 export function providerReadiness(
   runtimeStatus: string | undefined,
   enabled: boolean,
+  lastVerification?: { ok: boolean; failureKind?: string },
 ): ProviderReadiness {
+  const state = deriveProviderState({ runtimeStatus, enabled, lastVerification });
+  const isMock = runtimeStatus === 'MOCK';
+
+  if (state.ready) {
+    return {
+      key: 'green',
+      label: isMock ? 'Mock provider ready' : 'Configured and enabled',
+      hint: isMock ? 'Deterministic mock active — development/test runtime.' : 'Ready to use',
+    };
+  }
+  if (state.lifecycle === 'DISABLED') {
+    // Runtime-configured, but the user switched it off (never "ready").
+    return {
+      key: 'orange',
+      label: isMock ? 'Mock provider, disabled' : 'Configured, not enabled',
+      hint: isMock ? 'Deterministic mock is configured but turned off.' : 'Ready to enable',
+    };
+  }
+  // Everything else is genuinely not usable right now; the reason comes from
+  // the real runtime report (never invented).
   switch (runtimeStatus) {
-    case 'CONFIGURED':
-      return enabled
-        ? { key: 'green', label: 'Configured and enabled', hint: 'Ready to use' }
-        : { key: 'orange', label: 'Configured, not enabled', hint: 'Ready to enable' };
-    case 'MOCK':
-      // The deterministic mock is a real registered runtime in dev/test only.
-      // It is never branded "Configured" (no key) — but it does execute.
-      return enabled
-        ? {
-            key: 'green',
-            label: 'Mock provider ready',
-            hint: 'Deterministic mock active — development/test runtime.',
-          }
-        : {
-            key: 'orange',
-            label: 'Mock provider, disabled',
-            hint: 'Deterministic mock is configured but turned off.',
-          };
-    case 'NOT_CONFIGURED':
-      return {
-        key: 'red',
-        label: 'Not configured',
-        hint: 'No runtime key is set — configure the provider to use it.',
-      };
     case 'UNSUPPORTED_RUNTIME':
       return {
         key: 'red',
@@ -99,6 +106,17 @@ export function providerReadiness(
         key: 'red',
         label: 'Not registered',
         hint: 'This provider is not registered for execution in this environment.',
+      };
+    case 'CONFIGURED':
+    case 'MOCK':
+      // Configured and enabled, but a real verification failed: the state is
+      // DEGRADED/FAILED, so the indicator is red with the canonical reason.
+      return { key: 'red', label: state.label, hint: state.hint };
+    case 'NOT_CONFIGURED':
+      return {
+        key: 'red',
+        label: 'Not configured',
+        hint: 'No runtime key is set — configure the provider to use it.',
       };
     default:
       // Custom/user-registered entries, unknown families, or a missing runtime
