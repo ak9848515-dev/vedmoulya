@@ -12,12 +12,6 @@ import dynamic from 'next/dynamic';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, NavBar, Breadcrumb, useTheme } from '@vedmoulya/ui';
 import {
-  LayoutDashboard,
-  Briefcase,
-  BookOpen,
-  BarChart3,
-  Store,
-  Lightbulb,
   Search,
   PanelRightOpen,
   Bell,
@@ -26,34 +20,13 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  Settings,
-  PenSquare,
-  Boxes,
-  Cpu,
-  Layers,
-  Workflow,
-  GitBranch,
-  Target,
-  BrainCircuit,
-  Brain,
-  GraduationCap,
-  Library,
-  Database,
-  MonitorCog,
-  Fingerprint,
-  RefreshCw,
-  Radar,
-  Zap,
-  Rocket,
 } from 'lucide-react';
 import { logout } from '../auth/session-manager.js';
 import { useAuthStore } from '../stores/auth-store.js';
 import { isNativePlatform } from '../auth/platform.js';
-import {
-  useNavigationStore,
-  buildSidebarGroups,
-  type NavSectionId,
-} from '../stores/navigation-store.js';
+import { useNavigationStore, buildSidebarGroups } from '../stores/navigation-store.js';
+import { destinationForPathname, type AppDestination } from '../lib/navigation-model.js';
+import { useClientSearch } from '../lib/use-client-search.js';
 import { useUIStore } from '../stores/ui-store.js';
 import { AIWorldBell } from './AIWorldBell.js';
 import { CommandPalette } from './CommandPalette.js';
@@ -106,104 +79,9 @@ const GeminiFirstRunDialog = dynamic(
   },
 );
 
-// ── Module Icon Map ─────────────────────────────────────────────────────────
-
-const moduleIcons: Record<string, React.ReactNode> = {
-  dashboard: <LayoutDashboard className="h-5 w-5" />,
-  'autonomous-builder': <Rocket className="h-5 w-5" />,
-  insights: <Lightbulb className="h-5 w-5" />,
-  search: <Search className="h-5 w-5" />,
-  career: <Briefcase className="h-5 w-5" />,
-  learning: <BookOpen className="h-5 w-5" />,
-  business: <BarChart3 className="h-5 w-5" />,
-  marketplace: <Store className="h-5 w-5" />,
-  capabilities: <Boxes className="h-5 w-5" />,
-  'capability-marketplace': <Radar className="h-5 w-5" />,
-  providers: <Cpu className="h-5 w-5" />,
-  context: <Layers className="h-5 w-5" />,
-  'execution-strategy': <Workflow className="h-5 w-5" />,
-  execution: <GitBranch className="h-5 w-5" />,
-  goals: <Target className="h-5 w-5" />,
-  intelligence: <BrainCircuit className="h-5 w-5" />,
-  'learning-intelligence': <GraduationCap className="h-5 w-5" />,
-  'enterprise-brain': <BrainCircuit className="h-5 w-5" />,
-  brain: <Brain className="h-5 w-5" />,
-  'live-intelligence': <Zap className="h-5 w-5" />,
-  knowledge: <Library className="h-5 w-5" />,
-  memory: <Database className="h-5 w-5" />,
-  os: <MonitorCog className="h-5 w-5" />,
-  'context-fabric': <Fingerprint className="h-5 w-5" />,
-  loop: <RefreshCw className="h-5 w-5" />,
-  applications: <Boxes className="h-5 w-5" />,
-  'content-agency': <PenSquare className="h-5 w-5" />,
-  ecosystem: <Boxes className="h-5 w-5" />,
-  settings: <Settings className="h-5 w-5" />,
-};
-
-// Sections with real client-side routes — sidebar clicks navigate to them
-// (insights/search are state-only, MOB-002).
-function routeForSection(section: NavSectionId): string | undefined {
-  switch (section) {
-    case 'dashboard':
-      return '/';
-    case 'autonomous-builder':
-      return '/autonomous-builder';
-    case 'settings':
-      return '/settings';
-    case 'career':
-      return '/career';
-    case 'learning':
-      return '/learning';
-    case 'business':
-      return '/business';
-    case 'marketplace':
-      return '/marketplace';
-    case 'capabilities':
-      return '/capabilities';
-    case 'capability-marketplace':
-      return '/capability-marketplace';
-    case 'providers':
-      return '/providers';
-    case 'context':
-      return '/context';
-    case 'execution-strategy':
-      return '/execution-strategy';
-    case 'execution':
-      return '/execution';
-    case 'goals':
-      return '/goals';
-    case 'intelligence':
-      return '/intelligence';
-    case 'ecosystem-intelligence':
-      return '/ecosystem-intelligence';
-    case 'learning-intelligence':
-      return '/learning-intelligence';
-    case 'enterprise-brain':
-      return '/enterprise-brain';
-    case 'brain':
-      return '/brain';
-    case 'live-intelligence':
-      return '/live-intelligence';
-    case 'knowledge':
-      return '/knowledge';
-    case 'memory':
-      return '/memory';
-    case 'os':
-      return '/os';
-    case 'context-fabric':
-      return '/context-fabric';
-    case 'loop':
-      return '/loop';
-    case 'applications':
-      return '/applications';
-    case 'content-agency':
-      return '/content-agency';
-    case 'ecosystem':
-      return '/ecosystem';
-    default:
-      return undefined;
-  }
-}
+// Navigation STRUCTURE and iconography now live in `lib/navigation-model.ts`
+// (the one information architecture) — the shell only decides what a selection
+// DOES, so a nav change can never be half-applied here.
 
 // ── AppShell Props ──────────────────────────────────────────────────────────
 
@@ -219,14 +97,21 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
   const { theme, resolvedTheme, toggleTheme } = useTheme();
   const { user } = useAuthStore();
   const {
-    activeSection,
     sidebarCollapsed,
     mobileSidebarOpen,
     breadcrumbs,
     setActiveSection,
+    setBreadcrumbs,
     toggleSidebar,
     setMobileSidebarOpen,
   } = useNavigationStore();
+
+  // ── Active destination (DERIVED from the URL, never from click state) ────
+  // Deep links, refreshes and back/forward all highlight the right destination
+  // because the URL is the truth. The query string matters for the one pair of
+  // destinations that share a route (Settings vs Profile).
+  const clientSearch = useClientSearch(pathname);
+  const activeDestination = destinationForPathname(pathname, clientSearch);
 
   // MOB-002: mirror device connectivity into the auth store's offline flag
   // (also flips it back to online on reconnect → auto-recovery).
@@ -252,7 +137,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
       onExit: () => {
         exitNativeApp();
       },
-      isRoot: () => tabForPathname(window.location.pathname).id === 'dashboard',
+      isRoot: () => tabForPathname(window.location.pathname).id === 'home',
     });
 
     // State preservation: a bare "/" launch resumes the last visited tab.
@@ -264,9 +149,16 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
 
   // Persist the current tab so app restarts restore the previous page.
   useEffect(() => {
-    const tab = tabForPathname(pathname);
+    const tab = tabForPathname(pathname, clientSearch);
     persistLastTab(tab.id);
-  }, [pathname]);
+  }, [pathname, clientSearch]);
+
+  // Keep the store's session view (active section + breadcrumb) in step with
+  // the URL — consumers read from here, so it must never lag the route.
+  useEffect(() => {
+    setActiveSection(activeDestination.id);
+    setBreadcrumbs([{ label: activeDestination.label }]);
+  }, [activeDestination, setActiveSection, setBreadcrumbs]);
 
   // Auth screens (login / signup / OAuth callback) and the client portal
   // (AC-002, Module 7) render full-screen without the app chrome (MOB-001).
@@ -284,26 +176,22 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
   }
 
   // ── Navigation Handler ─────────────────────────────────────────────────
-  const handleNavigate = (section: NavSectionId): void => {
-    setActiveSection(section);
+  // A destination either opens an existing panel (✨ Ask VedMoulya → the AI
+  // Companion that already exists) or navigates to its route. Routes are never
+  // invented here — they come from the navigation model.
+  const handleSelectDestination = (destination: AppDestination): void => {
     setMobileSidebarOpen(false);
-    const route = routeForSection(section);
-    if (route && window.location.pathname !== route) {
-      router.push(route);
+    if (destination.action === 'open-ai-companion') {
+      toggleAiPanel();
+      return;
+    }
+    if (destination.route !== '' && `${pathname}${clientSearch}` !== destination.route) {
+      router.push(destination.route);
     }
   };
 
-  // ── Sidebar Groups ────────────────────────────────────────────────────
-  const groups = buildSidebarGroups(activeSection, handleNavigate);
-
-  // ── Enrich sidebar items with icons ───────────────────────────────────
-  const enrichedGroups = groups.map((group) => ({
-    ...group,
-    items: group.items.map((item) => ({
-      ...item,
-      icon: moduleIcons[item.id],
-    })),
-  }));
+  // ── Sidebar Groups (derived from the one navigation model) ────────────
+  const groups = buildSidebarGroups(activeDestination.id, handleSelectDestination);
 
   // ── Logo ──────────────────────────────────────────────────────────────
   const logo = (
@@ -329,7 +217,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
         `}
       >
         <Sidebar
-          groups={enrichedGroups}
+          groups={groups}
           collapsed={sidebarCollapsed}
           onToggleCollapse={handleToggleCollapse}
           className="h-full dark:bg-[#0F172A] dark:border-[#334155]"
@@ -382,7 +270,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
                 <button
                   onClick={handleSearchClick}
                   className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] transition-colors"
-                  aria-label="Search"
+                  aria-label="Search VedMoulya"
                 >
                   <Search className="h-5 w-5 text-[#64748B] dark:text-[#94A3B8]" />
                 </button>

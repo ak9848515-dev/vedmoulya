@@ -1,19 +1,46 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// VedMoulya — Navigation Store (Zustand)
-// Manages sidebar navigation state for the Life OS Web Application
-// BLD-016-A — Application Shell & Foundation
+// VedMoulya — Navigation Store (Zustand) — UX-02
+//
+// Holds the shell's navigation SESSION state (sidebar collapsed, mobile drawer,
+// breadcrumbs). The navigation STRUCTURE itself is no longer defined here: it is
+// derived from `lib/navigation-model.ts`, the one information architecture, so
+// the sidebar can never drift from the mobile tabs.
+//
+// Before UX-02 this file hard-coded a 28-item "Modules" list of engineering
+// surfaces (Execution Orchestrator, Context Fabric, Ecosystem Intelligence …).
+// Those screens all still exist — they are reached through their parent
+// destination (see UX-AUDIT.md for the route map), not from primary navigation.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
 
+import React from 'react';
 import { create } from 'zustand';
 import type { SidebarGroup } from '@vedmoulya/ui';
+import {
+  ASK_DESTINATION,
+  PRIMARY_DESTINATIONS,
+  SYSTEM_DESTINATIONS,
+  destinationForPathname,
+  type AppDestination,
+  type AppDestinationId,
+} from '../lib/navigation-model.js';
 
 // ── Navigation Item Types ───────────────────────────────────────────────────
 
-export type NavSectionId =
+/**
+ * The pre-UX-02 module section ids. They are NOT navigation destinations any
+ * more, but the screens themselves still call `setActiveSection('<module>')` on
+ * mount — so the shell keeps accepting them and resolves them to the destination
+ * that now OWNS them. A legacy screen therefore highlights its real parent
+ * (Application Factory → Life, Context Fabric → AI) instead of highlighting
+ * nothing, and no screen had to be rewritten to satisfy navigation.
+ */
+export type LegacyModuleSectionId =
   | 'dashboard'
   | 'autonomous-builder'
+  | 'insights'
+  | 'search'
   | 'career'
   | 'learning'
   | 'business'
@@ -38,25 +65,45 @@ export type NavSectionId =
   | 'loop'
   | 'applications'
   | 'content-agency'
-  | 'insights'
-  | 'search'
   | 'ecosystem'
   | 'settings';
 
+export type NavSectionId = AppDestinationId | LegacyModuleSectionId;
+
+/** The few legacy ids whose module does not have its own route to derive from. */
+const LEGACY_SECTION_ALIASES = new Map<string, AppDestinationId>([
+  ['dashboard', 'home'],
+  ['search', 'home'],
+  ['insights', 'progress'],
+]);
+
+/**
+ * Resolve any legacy section id to the destination that now owns it.
+ * Destination ids pass through untouched; everything else is derived from the
+ * module's real route (or the small alias table above).
+ */
+export function destinationIdForSection(section: NavSectionId): AppDestinationId {
+  const direct = [...PRIMARY_DESTINATIONS, ASK_DESTINATION, ...SYSTEM_DESTINATIONS].find(
+    (destination) => destination.id === section,
+  );
+  if (direct) return direct.id;
+  const alias = LEGACY_SECTION_ALIASES.get(section);
+  if (alias !== undefined) return alias;
+  return destinationForPathname(`/${section}`).id;
+}
+
 export interface NavSection {
-  id: NavSectionId;
+  id: AppDestinationId;
   label: string;
-  icon: string;
   route: string;
-  badge?: number;
   isActive: boolean;
 }
 
 // ── Navigation Store ────────────────────────────────────────────────────────
 
 interface NavigationState {
-  /** Currently active section */
-  activeSection: NavSectionId;
+  /** Currently active destination (derived from the URL by the shell). */
+  activeSection: AppDestinationId;
   /** Whether the sidebar is collapsed */
   sidebarCollapsed: boolean;
   /** Mobile sidebar open state */
@@ -74,14 +121,16 @@ interface NavigationState {
 
 export const useNavigationStore = create<NavigationState>((set) => ({
   // ── State ───────────────────────────────────────────────────────────────
-  activeSection: 'dashboard',
+  activeSection: 'home',
   sidebarCollapsed: false,
   mobileSidebarOpen: false,
-  breadcrumbs: [{ label: 'Dashboard' }],
+  breadcrumbs: [{ label: 'Home' }],
 
   // ── Actions (braces required for ESLint: no-confusing-void-expression) ──
   setActiveSection: (section: NavSectionId): void => {
-    set({ activeSection: section });
+    // Legacy module ids are mapped onto their owning destination so a module
+    // screen and the sidebar can never disagree about where the user "is".
+    set({ activeSection: destinationIdForSection(section) });
   },
   toggleSidebar: (): void => {
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }));
@@ -99,263 +148,62 @@ export const useNavigationStore = create<NavigationState>((set) => ({
 
 // ── Sidebar Groups Builder ──────────────────────────────────────────────────
 
+const ITEM_ICON_CLASS = 'h-5 w-5';
+
+function sidebarItem(
+  destination: AppDestination,
+  activeId: AppDestinationId,
+  onSelect: (destination: AppDestination) => void,
+): {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+} {
+  return {
+    id: destination.id,
+    label: destination.label,
+    icon: React.createElement(destination.icon, { className: ITEM_ICON_CLASS }),
+    active: destination.id === activeId,
+    onClick: (): void => {
+      onSelect(destination);
+    },
+  };
+}
+
+/**
+ * The desktop sidebar, in the UX-01 order:
+ *
+ *   Home · Missions · Progress · Life · AI
+ *   ────────────────────────────────────────
+ *   ✨ Ask VedMoulya
+ *   ────────────────────────────────────────
+ *   Settings · Profile
+ *
+ * Groups use an empty label (a divider, not a heading) so primary navigation
+ * reads as one calm list instead of a taxonomy.
+ */
 export function buildSidebarGroups(
-  activeSection: NavSectionId,
-  onNavigate: (section: NavSectionId) => void,
+  activeId: AppDestinationId,
+  onSelect: (destination: AppDestination) => void,
 ): SidebarGroup[] {
   return [
     {
-      label: 'Overview',
-      items: [
-        {
-          id: 'dashboard',
-          label: 'Dashboard',
-          active: activeSection === 'dashboard',
-          onClick: (): void => {
-            onNavigate('dashboard');
-          },
-        },
-        {
-          id: 'autonomous-builder',
-          label: 'Autonomous Builder',
-          active: activeSection === 'autonomous-builder',
-          onClick: (): void => {
-            onNavigate('autonomous-builder');
-          },
-        },
-        {
-          id: 'insights',
-          label: 'Insights',
-          active: activeSection === 'insights',
-          onClick: (): void => {
-            onNavigate('insights');
-          },
-        },
-        {
-          id: 'search',
-          label: 'Search',
-          active: activeSection === 'search',
-          onClick: (): void => {
-            onNavigate('search');
-          },
-        },
-        {
-          id: 'settings',
-          label: 'Settings',
-          active: activeSection === 'settings',
-          onClick: (): void => {
-            onNavigate('settings');
-          },
-        },
-      ],
+      label: '',
+      items: PRIMARY_DESTINATIONS.map((destination) =>
+        sidebarItem(destination, activeId, onSelect),
+      ),
     },
     {
-      label: 'Modules',
-      items: [
-        {
-          id: 'career',
-          label: 'Career',
-          active: activeSection === 'career',
-          badge: 3,
-          onClick: (): void => {
-            onNavigate('career');
-          },
-        },
-        {
-          id: 'learning',
-          label: 'Learning',
-          active: activeSection === 'learning',
-          badge: 5,
-          onClick: (): void => {
-            onNavigate('learning');
-          },
-        },
-        {
-          id: 'business',
-          label: 'Business',
-          active: activeSection === 'business',
-          onClick: (): void => {
-            onNavigate('business');
-          },
-        },
-        {
-          id: 'marketplace',
-          label: 'Marketplace',
-          active: activeSection === 'marketplace',
-          badge: 1,
-          onClick: (): void => {
-            onNavigate('marketplace');
-          },
-        },
-        {
-          id: 'capabilities',
-          label: 'Capability Registry',
-          active: activeSection === 'capabilities',
-          onClick: (): void => {
-            onNavigate('capabilities');
-          },
-        },
-        {
-          id: 'capability-marketplace',
-          label: 'AI Capability Marketplace',
-          active: activeSection === 'capability-marketplace',
-          onClick: (): void => {
-            onNavigate('capability-marketplace');
-          },
-        },
-        {
-          id: 'ecosystem',
-          label: 'AI Ecosystem',
-          active: activeSection === 'ecosystem',
-          onClick: (): void => {
-            onNavigate('ecosystem');
-          },
-        },
-        {
-          id: 'providers',
-          label: 'Provider Registry',
-          active: activeSection === 'providers',
-          onClick: (): void => {
-            onNavigate('providers');
-          },
-        },
-        {
-          id: 'context',
-          label: 'Context Intelligence',
-          active: activeSection === 'context',
-          onClick: (): void => {
-            onNavigate('context');
-          },
-        },
-        {
-          id: 'execution-strategy',
-          label: 'Execution Strategy',
-          active: activeSection === 'execution-strategy',
-          onClick: (): void => {
-            onNavigate('execution-strategy');
-          },
-        },
-        {
-          id: 'execution',
-          label: 'Execution Orchestrator',
-          active: activeSection === 'execution',
-          onClick: (): void => {
-            onNavigate('execution');
-          },
-        },
-        {
-          id: 'goals',
-          label: 'Goal & Task Intelligence',
-          active: activeSection === 'goals',
-          onClick: (): void => {
-            onNavigate('goals');
-          },
-        },
-        {
-          id: 'intelligence',
-          label: 'Enterprise Intelligence',
-          active: activeSection === 'intelligence',
-          onClick: (): void => {
-            onNavigate('intelligence');
-          },
-        },
-        {
-          id: 'ecosystem-intelligence',
-          label: 'Ecosystem Intelligence',
-          active: activeSection === 'ecosystem-intelligence',
-          onClick: (): void => {
-            onNavigate('ecosystem-intelligence');
-          },
-        },
-        {
-          id: 'learning-intelligence',
-          label: 'Learning Intelligence',
-          active: activeSection === 'learning-intelligence',
-          onClick: (): void => {
-            onNavigate('learning-intelligence');
-          },
-        },
-        {
-          id: 'enterprise-brain',
-          label: 'Enterprise Brain',
-          active: activeSection === 'enterprise-brain',
-          onClick: (): void => {
-            onNavigate('enterprise-brain');
-          },
-        },
-        {
-          id: 'brain',
-          label: 'VedMoulya Brain',
-          active: activeSection === 'brain',
-          onClick: (): void => {
-            onNavigate('brain');
-          },
-        },
-        {
-          id: 'live-intelligence',
-          label: 'Live Intelligence Bridge',
-          active: activeSection === 'live-intelligence',
-          onClick: (): void => {
-            onNavigate('live-intelligence');
-          },
-        },
-        {
-          id: 'knowledge',
-          label: 'Knowledge Intelligence',
-          active: activeSection === 'knowledge',
-          onClick: (): void => {
-            onNavigate('knowledge');
-          },
-        },
-        {
-          id: 'memory',
-          label: 'Memory Intelligence',
-          active: activeSection === 'memory',
-          onClick: (): void => {
-            onNavigate('memory');
-          },
-        },
-        {
-          id: 'os',
-          label: 'Operating System',
-          active: activeSection === 'os',
-          onClick: (): void => {
-            onNavigate('os');
-          },
-        },
-        {
-          id: 'context-fabric',
-          label: 'Context Fabric',
-          active: activeSection === 'context-fabric',
-          onClick: (): void => {
-            onNavigate('context-fabric');
-          },
-        },
-        {
-          id: 'loop',
-          label: 'AI Loop Engine',
-          active: activeSection === 'loop',
-          onClick: (): void => {
-            onNavigate('loop');
-          },
-        },
-        {
-          id: 'applications',
-          label: 'Application Factory',
-          active: activeSection === 'applications',
-          onClick: (): void => {
-            onNavigate('applications');
-          },
-        },
-        {
-          id: 'content-agency',
-          label: 'Content Agency',
-          active: activeSection === 'content-agency',
-          onClick: (): void => {
-            onNavigate('content-agency');
-          },
-        },
-      ],
+      label: '',
+      separatorBefore: true,
+      items: [sidebarItem(ASK_DESTINATION, activeId, onSelect)],
+    },
+    {
+      label: '',
+      separatorBefore: true,
+      items: SYSTEM_DESTINATIONS.map((destination) => sidebarItem(destination, activeId, onSelect)),
     },
   ];
 }

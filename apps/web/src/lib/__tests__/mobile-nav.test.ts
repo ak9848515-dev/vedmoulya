@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// VedMoulya — Mobile Navigation Model Tests (MOB-002)
+// VedMoulya — Mobile Navigation Model Tests (MOB-002 · UX-01/UX-02)
 // Verifies pathname → tab mapping (deep links), first-launch vs restore
-// resolution, and last-tab persistence.
+// resolution, and last-tab persistence for the FIVE-destination bottom bar:
+// Home · Missions · Progress · AI · More.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // @vitest-environment jsdom
@@ -24,56 +25,73 @@ beforeEach(() => {
 });
 
 describe('tabForPathname (deep links)', () => {
-  it('maps each module route to its owning tab', () => {
-    expect(tabForPathname('/').id).toBe('dashboard');
-    expect(tabForPathname('/learning').id).toBe('learning');
-    expect(tabForPathname('/career').id).toBe('career');
-    expect(tabForPathname('/marketplace').id).toBe('marketplace');
-    expect(tabForPathname('/content-agency').id).toBe('content-agency');
-    expect(tabForPathname('/settings').id).toBe('settings');
+  it('maps each primary destination to its tab', () => {
+    expect(tabForPathname('/').id).toBe('home');
+    expect(tabForPathname('/autonomous-builder').id).toBe('missions');
+    expect(tabForPathname('/progress').id).toBe('progress');
+    expect(tabForPathname('/ai').id).toBe('ai');
   });
 
-  it('maps nested sub-routes of a module to that module tab', () => {
-    expect(tabForPathname('/career/resume').id).toBe('career');
-    expect(tabForPathname('/learning/courses/123').id).toBe('learning');
-    expect(tabForPathname('/content-agency/clients/abc').id).toBe('content-agency');
+  it('maps the Missions detail surfaces to the Missions tab, not their own', () => {
+    for (const route of ['/goals', '/execution', '/execution-strategy', '/loop']) {
+      expect(tabForPathname(route).id, route).toBe('missions');
+    }
   });
 
-  it('falls back to the dashboard tab for unknown paths', () => {
-    expect(tabForPathname('/does-not-exist').id).toBe('dashboard');
+  it('maps AI surfaces (providers, intelligence, memory, marketplace…) to the AI tab', () => {
+    for (const route of [
+      '/providers',
+      '/brain',
+      '/memory',
+      '/knowledge',
+      '/context',
+      '/marketplace',
+      '/capability-marketplace',
+    ]) {
+      expect(tabForPathname(route).id, route).toBe('ai');
+    }
   });
 
-  it('covers the required bottom tabs including the Agency module', () => {
-    expect(MOBILE_TABS.map((t) => t.id)).toEqual([
-      'dashboard',
-      'learning',
-      'career',
-      'marketplace',
-      'content-agency',
-      'settings',
-    ]);
+  it('sends everything else to More instead of inventing a sixth tab', () => {
+    expect(tabForPathname('/career').id).toBe('more');
+    expect(tabForPathname('/learning/courses/123').id).toBe('more');
+    expect(tabForPathname('/business').id).toBe('more');
+    expect(tabForPathname('/content-agency/clients/abc').id).toBe('more');
+    expect(tabForPathname('/settings').id).toBe('more');
+  });
+
+  it('falls back to Home for an unknown path', () => {
+    expect(tabForPathname('/does-not-exist').id).toBe('home');
+  });
+
+  it('exposes exactly the five UX-01 destinations', () => {
+    expect(MOBILE_TABS.map((t) => t.id)).toEqual(['home', 'missions', 'progress', 'ai', 'more']);
+    expect(MOBILE_TABS.map((t) => t.label)).toEqual(['Home', 'Missions', 'Progress', 'AI', 'More']);
   });
 });
 
 describe('isMobileTabId / tabById', () => {
   it('validates tab ids', () => {
-    expect(isMobileTabId('dashboard')).toBe(true);
-    expect(isMobileTabId('settings')).toBe(true);
-    expect(isMobileTabId('insights')).toBe(false);
+    expect(isMobileTabId('home')).toBe(true);
+    expect(isMobileTabId('more')).toBe(true);
+    // The pre-UX-02 vocabulary is gone on purpose.
+    expect(isMobileTabId('dashboard')).toBe(false);
+    expect(isMobileTabId('content-agency')).toBe(false);
     expect(isMobileTabId(null)).toBe(false);
   });
 
-  it('resolves ids and falls back to dashboard', () => {
-    expect(tabById('career').route).toBe('/career');
+  it('resolves ids and falls back to Home', () => {
+    expect(tabById('missions').route).toBe('/autonomous-builder');
+    expect(tabById('ai').route).toBe('/ai');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(tabById('bogus' as any).id).toBe('dashboard');
+    expect(tabById('bogus' as any).id).toBe('home');
   });
 });
 
 describe('last-tab persistence (state preservation)', () => {
   it('persists and reads the last visited tab', () => {
-    persistLastTab('marketplace');
-    expect(readLastTab()).toBe('marketplace');
+    persistLastTab('missions');
+    expect(readLastTab()).toBe('missions');
   });
 
   it('ignores invalid persisted values', () => {
@@ -87,23 +105,31 @@ describe('last-tab persistence (state preservation)', () => {
 });
 
 describe('resolveLaunchTab', () => {
-  it('first launch (no persisted tab) resolves to the dashboard without restore', () => {
+  it('first launch (no persisted tab) resolves to Home without restore', () => {
     const { tab, restore } = resolveLaunchTab('/');
-    expect(tab.id).toBe('dashboard');
+    expect(tab.id).toBe('home');
     expect(restore).toBe(false);
   });
 
   it('bare launch with a persisted tab restores it', () => {
-    persistLastTab('career');
+    persistLastTab('missions');
     const { tab, restore } = resolveLaunchTab('/');
-    expect(tab.id).toBe('career');
+    expect(tab.id).toBe('missions');
     expect(restore).toBe(true);
   });
 
+  it('never restores More (a container, not a place) and never restores Home', () => {
+    persistLastTab('more');
+    expect(resolveLaunchTab('/')).toEqual({ tab: tabById('home'), restore: false });
+
+    persistLastTab('home');
+    expect(resolveLaunchTab('/').restore).toBe(false);
+  });
+
   it('deep link always wins over the persisted tab', () => {
-    persistLastTab('career');
+    persistLastTab('missions');
     const { tab, restore } = resolveLaunchTab('/settings');
-    expect(tab.id).toBe('settings');
+    expect(tab.id).toBe('more');
     expect(restore).toBe(false);
   });
 });

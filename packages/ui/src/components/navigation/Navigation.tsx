@@ -126,8 +126,12 @@ export interface SidebarItem {
 }
 
 export interface SidebarGroup {
+  /** Group heading. Empty string renders NO heading (UX-02: a calm, label-free
+   *  primary list separated by dividers instead of a module taxonomy). */
   label: string;
   items: SidebarItem[];
+  /** Render a divider above this group (primary → action → system). */
+  separatorBefore?: boolean;
 }
 
 export interface SidebarProps {
@@ -154,9 +158,15 @@ export function Sidebar({
       )}
     >
       <div className="flex-1 overflow-y-auto py-4 px-2">
-        {groups.map((group) => (
-          <div key={group.label} className="mb-6">
-            {!collapsed && (
+        {groups.map((group, index) => (
+          <div key={`${index}-${group.label}`} className="mb-6">
+            {group.separatorBefore ? (
+              <div
+                className="mx-3 mb-4 border-t border-[#E2E8F0] dark:border-[#334155]"
+                aria-hidden="true"
+              />
+            ) : null}
+            {!collapsed && group.label !== '' && (
               <p className="px-3 mb-2 text-[11px] font-semibold uppercase text-[#94A3B8] tracking-[0.05em]">
                 {group.label}
               </p>

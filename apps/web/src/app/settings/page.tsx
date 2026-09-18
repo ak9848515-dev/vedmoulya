@@ -36,8 +36,25 @@ import {
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { useProviderPreferences, useSetProviderPreferences } from '../../lib/api-client.js';
 import { useNavigationStore } from '../../stores/navigation-store.js';
+import { SEARCH_CHANGE_EVENT } from '../../lib/use-client-search.js';
+import Link from 'next/link';
 
 const HAPTICS_KEY = 'vedmoulya-haptics';
+
+/** Known tabs, in order. Kept in sync with the triggers below. */
+const SETTINGS_TABS = ['profile', 'notifications', 'appearance', 'ai', 'api', 'security'] as const;
+
+/**
+ * UX-02 — `?tab=` deep links. Profile is its own navigation destination
+ * (`/settings?tab=profile`), so the screen must honour the query on arrival and
+ * keep the URL honest when the user switches tabs.
+ */
+function tabFromQuery(): string {
+  if (typeof window === 'undefined') return 'profile';
+  const search = new URLSearchParams(window.location.search);
+  const requested = search.get('tab') ?? '';
+  return (SETTINGS_TABS as readonly string[]).includes(requested) ? requested : 'profile';
+}
 
 function readHapticsEnabled(): boolean {
   if (typeof window === 'undefined') return true;
@@ -51,7 +68,7 @@ function readHapticsEnabled(): boolean {
 export default function SettingsPage(): React.JSX.Element {
   const { setActiveSection, setBreadcrumbs } = useNavigationStore();
   const { theme, setTheme } = useTheme();
-  const [activeTab, setActiveTab] = React.useState('profile');
+  const [activeTab, setActiveTab] = React.useState(tabFromQuery);
   const [density, setDensity] = React.useState('Comfortable');
   const [haptics, setHaptics] = React.useState(readHapticsEnabled);
   const [notifications, setNotifications] = React.useState({
@@ -60,10 +77,29 @@ export default function SettingsPage(): React.JSX.Element {
     weeklyDigest: false,
   });
 
+  // The shell derives the highlighted destination from the URL; this screen must
+  // agree with it. `?tab=profile` IS the Profile destination, so it highlights
+  // Profile rather than fighting the shell for Settings.
+  const isProfileDestination =
+    activeTab === 'profile' &&
+    typeof window !== 'undefined' &&
+    window.location.search.includes('tab=profile');
+
   useEffect(() => {
-    setActiveSection('settings');
-    setBreadcrumbs([{ label: 'Settings' }]);
-  }, [setActiveSection, setBreadcrumbs]);
+    setActiveSection(isProfileDestination ? 'profile' : 'settings');
+    setBreadcrumbs([{ label: isProfileDestination ? 'Profile' : 'Settings' }]);
+  }, [isProfileDestination, setActiveSection, setBreadcrumbs]);
+
+  const handleTabChange = (value: string): void => {
+    setActiveTab(value);
+    if (typeof window === 'undefined') return;
+    window.history.replaceState(
+      null,
+      '',
+      value === 'profile' ? '/settings?tab=profile' : '/settings',
+    );
+    window.dispatchEvent(new Event(SEARCH_CHANGE_EVENT));
+  };
 
   // Logout: clear the JWT + cached user state, then return to the login screen.
   async function handleLogout(): Promise<void> {
@@ -90,7 +126,7 @@ export default function SettingsPage(): React.JSX.Element {
         </div>
       </div>
 
-      <TabsRoot value={activeTab} onValueChange={setActiveTab}>
+      <TabsRoot value={activeTab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="profile">
             <User className="h-4 w-4 mr-1.5" /> Profile
@@ -487,9 +523,18 @@ function AIPreferencesTab(): React.JSX.Element {
       <h3 className="text-[18px] font-semibold text-[#111827] dark:text-[#F8FAFC] mb-2">
         AI Preferences
       </h3>
-      <p className="text-[14px] text-[#64748B] dark:text-[#94A3B8] mb-6">
+      <p className="text-[14px] text-[#64748B] dark:text-[#94A3B8] mb-3">
         Control how VedMoulya uses AI providers, models, and budgets on your behalf.
       </p>
+      {/* One canonical provider destination (UX-01): Settings links to it rather
+          than growing a second place to connect providers. */}
+      <Link
+        href="/providers"
+        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline mb-6"
+      >
+        <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
+        Manage AI providers
+      </Link>
 
       {/* Budget policy */}
       <div className="mb-6">
