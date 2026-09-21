@@ -1,14 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// VedMoulya — AI (UX-02 destination)
+// VedMoulya — AI (UX-02 destination · UX-06 AI experience)
 //
-// The single front door for VedMoulya's intelligence: providers, models,
-// intelligence, memory, knowledge, context and the capability marketplace. All
-// of those screens still exist at their own routes; they are simply reached from
-// here with plain-language labels instead of competing for primary navigation.
+// The single front door for VedMoulya's intelligence. It answers two questions:
 //
-// The status shown is the REAL runtime registry state (`useProviderRuntimeStatus`
-// — the same source the provider screens use). Nothing is reported as connected
-// just because a row exists.
+//   1. "What is my AI doing right now?"  → the REAL provider runtime state
+//   2. "What is my AI made of?"          → the eight AI sections, in plain words
+//
+// The sections come from lib/ai-experience.ts — the AI hierarchy — which derives
+// every route from navigation-model.ts. Deeper engineering surfaces (Enterprise
+// Brain, Context Fabric, AI World, …) are NOT advertised here as competing
+// products; they are revealed inside the section they belong to.
+//
+// Nothing on this page is invented: status is the runtime registry, and every
+// link resolves to a route the navigation model assigns to AI.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
@@ -16,82 +20,47 @@
 import React from 'react';
 import Link from 'next/link';
 import { Card, Loading } from '@vedmoulya/ui';
-import {
-  ArrowRight,
-  Boxes,
-  BrainCircuit,
-  Cpu,
-  Database,
-  Layers,
-  Library,
-  Store,
-} from 'lucide-react';
+import { ArrowRight, BrainCircuit, Sparkles } from 'lucide-react';
 import { useProviderRuntimeStatus } from '../../lib/api-client.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
+import { useUIStore } from '../../stores/ui-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AI_SECTION_GROUPS, aiSectionById, type AISection } from '../../lib/ai-experience.js';
 
-interface AILink {
-  label: string;
-  route: string;
-  description: string;
-  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+function AISectionCard({ section }: { section: AISection }): React.JSX.Element {
+  const Icon = section.icon;
+  return (
+    <Link
+      href={section.route}
+      data-testid={`ai-section-${section.id}`}
+      className="group flex items-start gap-3 rounded-[16px] border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4 transition-colors hover:border-[#2B5FD9]/40"
+    >
+      <span className="p-2 rounded-xl bg-[#EFF4FE] dark:bg-[#1E3A8A]/40 shrink-0">
+        <Icon className="h-5 w-5 text-[#2B5FD9] dark:text-[#6B8FEF]" aria-hidden="true" />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[15px] font-medium text-[#111827] dark:text-[#F8FAFC]">
+          {section.label}
+        </span>
+        <span className="mt-0.5 block text-[12.5px] leading-relaxed text-[#64748B] dark:text-[#94A3B8]">
+          {section.description}
+        </span>
+      </span>
+      <ArrowRight
+        className="h-4 w-4 shrink-0 text-[#CBD5E1] transition-transform group-hover:translate-x-0.5 dark:text-[#475569]"
+        aria-hidden="true"
+      />
+    </Link>
+  );
 }
-
-/**
- * Internal AI navigation. "Models" deliberately points at the ONE canonical
- * provider destination: model choice belongs to a provider, and UX-01 forbids a
- * second place to configure the same thing.
- */
-const AI_LINKS: readonly AILink[] = [
-  {
-    label: 'Providers',
-    route: '/providers',
-    description: 'Connect and manage the AI VedMoulya uses.',
-    icon: Cpu,
-  },
-  {
-    label: 'Models',
-    route: '/providers',
-    description: 'Which model each provider is running.',
-    icon: Boxes,
-  },
-  {
-    label: 'Intelligence',
-    route: '/intelligence',
-    description: 'What your AI has noticed and decided.',
-    icon: BrainCircuit,
-  },
-  {
-    label: 'Memory',
-    route: '/memory',
-    description: 'What VedMoulya remembers about your journey.',
-    icon: Database,
-  },
-  {
-    label: 'Knowledge',
-    route: '/knowledge',
-    description: 'What you have taught it.',
-    icon: Library,
-  },
-  {
-    label: 'Context',
-    route: '/context',
-    description: 'What your AI considers before answering.',
-    icon: Layers,
-  },
-  {
-    label: 'Marketplace',
-    route: '/capability-marketplace',
-    description: 'Capabilities and skills you can add.',
-    icon: Store,
-  },
-];
 
 export default function AIPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
   const runtime = useProviderRuntimeStatus(userId);
+  // UX-08 — the AI hub is one of the canonical Ask VedMoulya entry points.
+  const setAiPanelOpen = useUIStore((s) => s.setAiPanelOpen);
 
   if (!hydrated || !sessionReady) {
     return (
@@ -139,7 +108,7 @@ export default function AIPage(): React.JSX.Element {
         : 'bg-[#F8FAFC] dark:bg-[#0F172A] border-[#E2E8F0] dark:border-[#334155] text-[#64748B] dark:text-[#94A3B8]';
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8" data-testid="ai-page">
       <header>
         <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#2B5FD9] dark:text-[#6B8FEF]">
           AI
@@ -148,12 +117,38 @@ export default function AIPage(): React.JSX.Element {
           Your AI
         </h1>
         <p className="mt-2 text-[14px] text-[#64748B] dark:text-[#94A3B8] max-w-2xl">
-          Providers, intelligence, memory and knowledge — one place to see what your AI is doing and
-          what it knows.
+          What your AI knows, remembers and runs on — one place to see what it is doing and what it
+          is made of.
         </p>
       </header>
 
       {/* ── Status (real registry state) ─────────────────────────────────── */}
+      {/* Ask VedMoulya — the canonical conversation layer (UX-08) */}
+      <button
+        type="button"
+        data-testid="ai-ask-vedmoulya"
+        onClick={() => {
+          setAiPanelOpen(true);
+        }}
+        className="group flex items-center gap-3 rounded-[16px] border-[#2B5FD9]/30 bg-[#EFF4FE] p-4 text-left transition-colors hover:border-[#2B5FD9]/60 dark:bg-[#1E3A8A]/30"
+      >
+        <span className="shrink-0 rounded-xl bg-white/70 p-2 dark:bg-black/20">
+          <Sparkles className="h-5 w-5 text-[#2B5FD9] dark:text-[#6B8FEF]" aria-hidden="true" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-semibold text-[#111827] dark:text-[#F8FAFC]">
+            Ask VedMoulya
+          </span>
+          <span className="mt-0.5 block text-[12.5px] leading-relaxed text-[#64748B] dark:text-[#94A3B8]">
+            Ask anything, or start something — your AI is one tap away.
+          </span>
+        </span>
+        <ArrowRight
+          className="h-4 w-4 shrink-0 text-[#2B5FD9] transition-transform group-hover:translate-x-0.5"
+          aria-hidden="true"
+        />
+      </button>
+
       <Card className={`border ${toneClass}`}>
         <div className="flex items-start gap-3">
           <div className="p-2.5 rounded-xl bg-white/70 dark:bg-black/20 shrink-0">
@@ -188,7 +183,7 @@ export default function AIPage(): React.JSX.Element {
         </div>
       ) : null}
 
-      {/* ── Internal AI navigation ──────────────────────────────────────── */}
+      {/* ── AI sections, grouped in plain language ──────────────────────── */}
       <section aria-labelledby="ai-sections-heading">
         <h2
           id="ai-sections-heading"
@@ -196,33 +191,22 @@ export default function AIPage(): React.JSX.Element {
         >
           Explore your AI
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {AI_LINKS.map((link) => {
-            const Icon = link.icon;
-            return (
-              <Link
-                key={`${link.label}-${link.route}`}
-                href={link.route}
-                className="group flex items-start gap-3 rounded-[16px] border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4 transition-colors hover:border-[#2B5FD9]/40"
-              >
-                <span className="p-2 rounded-xl bg-[#EFF4FE] dark:bg-[#1E3A8A]/40 shrink-0">
-                  <Icon className="h-5 w-5 text-[#2B5FD9] dark:text-[#6B8FEF]" aria-hidden={true} />
-                </span>
-                <span className="flex-1 min-w-0">
-                  <span className="block text-[15px] font-medium text-[#111827] dark:text-[#F8FAFC]">
-                    {link.label}
-                  </span>
-                  <span className="mt-0.5 block text-[12.5px] leading-relaxed text-[#64748B] dark:text-[#94A3B8]">
-                    {link.description}
-                  </span>
-                </span>
-                <ArrowRight
-                  className="h-4 w-4 shrink-0 text-[#CBD5E1] transition-transform group-hover:translate-x-0.5 dark:text-[#475569]"
-                  aria-hidden="true"
-                />
-              </Link>
-            );
-          })}
+        <div className="flex flex-col gap-6">
+          {AI_SECTION_GROUPS.map((group) => (
+            <div key={group.id} data-testid={`ai-group-${group.id}`}>
+              <h3 className="text-[13px] font-semibold text-[#111827] dark:text-[#F8FAFC]">
+                {group.label}
+              </h3>
+              <p className="mt-0.5 text-[12px] text-[#64748B] dark:text-[#94A3B8]">
+                {group.description}
+              </p>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {group.sections.map((id) => (
+                  <AISectionCard key={id} section={aiSectionById(id)} />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </section>
     </div>

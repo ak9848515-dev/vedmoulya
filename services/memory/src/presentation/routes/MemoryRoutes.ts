@@ -7,6 +7,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { resolveCorsOrigins } from '@vedmoulya/core';
 import type { MemoryApplicationService } from '@vedmoulya/services';
 import { MemoryController } from '../controllers/MemoryController.js';
 import { errorMiddleware } from '../middleware/ErrorMapper.js';
@@ -17,17 +18,10 @@ export function createMemoryRouter(memoryService: MemoryApplicationService): Hon
   const router = new Hono();
 
   // ── Global Middleware ────────────────────────────────────────────────────
-  // CORS restricted to API_CORS_ORIGIN (comma-separated) when set; permissive
-  // '*' default preserves backward compatibility for local development.
-  const corsRaw = process.env.API_CORS_ORIGIN?.trim();
-  const parsedOrigins = corsRaw
-    ? corsRaw
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : ['*'];
-  const corsOrigins = parsedOrigins.length > 0 ? parsedOrigins : ['*'];
-  router.use('*', cors({ origin: corsOrigins }));
+  // CORS — canonical policy (@vedmoulya/core resolveCorsOrigins). Development
+  // keeps the permissive local default; production/staging requires an explicit
+  // API_CORS_ORIGIN allow-list and never reflects an arbitrary Origin.
+  router.use('*', cors({ origin: resolveCorsOrigins() }));
   router.use('*', logger());
   router.use('*', errorMiddleware);
 

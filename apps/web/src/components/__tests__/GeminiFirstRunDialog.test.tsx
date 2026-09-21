@@ -428,7 +428,7 @@ describe('GeminiFirstRunDialog (PROVIDER-01 — first-login onboarding)', () => 
     await waitFor(() => expect(screen.getByTestId('gemini-ready')).toBeDefined());
     fireEvent.click(screen.getByTestId('gemini-enter'));
 
-    expect(mocks.push).toHaveBeenCalledWith('/dashboard');
+    expect(mocks.push).toHaveBeenCalledWith('/');
     expect(useFirstRunStore.getState().geminiConnectDone).toBe(true);
   });
 });

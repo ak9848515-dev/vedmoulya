@@ -250,6 +250,83 @@ describe('PreflightEngine — production mode', () => {
   });
 });
 
+describe('PreflightEngine — CORS policy (PROD-03)', () => {
+  const prodBase = {
+    AUTH_JWT_SECRET: 'x'.repeat(48),
+    IDENTITY_DATABASE_URL: 'postgres://u:p@db.prod.internal:5432/vm',
+    REDIS_URL: 'redis://u:p@redis.prod.internal:6379',
+  };
+
+  it('development keeps the permissive default without blocking', () => {
+    const report = run(makeEnvironment({ mode: 'development', env: {} }));
+    const cors = findCheck(report, 'cors');
+    expect(cors.status).toBe('READY');
+    expect(cors.required).toBe(false);
+  });
+
+  it('production without API_CORS_ORIGIN is DEGRADED — cross-origin is denied, never a wildcard', () => {
+    const report = run(
+      makeEnvironment({
+        mode: 'production',
+        env: { ...prodBase },
+        dockerAvailable: () => true,
+      }),
+    );
+    expect(report.blocked).toBe(false);
+    const cors = findCheck(report, 'cors');
+    expect(cors.status).toBe('DEGRADED');
+    expect(cors.required).toBe(false);
+    expect(cors.detail).toMatch(/DENIED/);
+    expect(cors.howToFix).toContain('API_CORS_ORIGIN');
+  });
+
+  it('a wildcard is never accepted as a production CORS policy', () => {
+    const cors = findCheck(
+      run(
+        makeEnvironment({
+          mode: 'production',
+          env: { ...prodBase, API_CORS_ORIGIN: '*' },
+          dockerAvailable: () => true,
+        }),
+      ),
+      'cors',
+    );
+    expect(cors.status).toBe('DEGRADED');
+    expect(cors.required).toBe(false);
+  });
+
+  it('a loopback allow-list blocks production and never echoes the value', () => {
+    const report = run(
+      makeEnvironment({
+        mode: 'production',
+        env: { ...prodBase, API_CORS_ORIGIN: 'http://localhost:3000' },
+        dockerAvailable: () => true,
+      }),
+    );
+    const cors = findCheck(report, 'cors');
+    expect(cors.status).toBe('MISCONFIGURED');
+    expect(cors.required).toBe(true);
+    expect(report.blocked).toBe(true);
+    expect(cors.detail).not.toContain('localhost');
+  });
+
+  it('an explicit production origin is READY and reported by count only', () => {
+    const cors = findCheck(
+      run(
+        makeEnvironment({
+          mode: 'production',
+          env: { ...prodBase, API_CORS_ORIGIN: 'https://app.vedmoulya.com' },
+          dockerAvailable: () => true,
+        }),
+      ),
+      'cors',
+    );
+    expect(cors.status).toBe('READY');
+    expect(cors.detail).toContain('1 origin');
+    expect(cors.detail).not.toContain('app.vedmoulya.com');
+  });
+});
+
 describe('PreflightEngine — required flags per mode (from the actual report)', () => {
   it('development requires only environment + authentication', () => {
     const report = run(

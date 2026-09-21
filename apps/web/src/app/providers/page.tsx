@@ -48,9 +48,9 @@ import {
   Layers,
   Plus,
 } from 'lucide-react';
-import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 import {
   useProviderExperience,
   useProviderRuntimeStatus,
@@ -221,14 +221,8 @@ export default function ProvidersPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
-  const { setActiveSection, setBreadcrumbs } = useNavigationStore();
   const [view, setView] = useState<ProvidersView>({ kind: 'list' });
   const [addAIOpen, setAddAIOpen] = useState(false);
-
-  useEffect(() => {
-    setActiveSection('providers');
-    setBreadcrumbs([{ label: 'AI Providers', href: '/providers' }]);
-  }, [setActiveSection, setBreadcrumbs]);
 
   // Deep link from AI World / capability marketplace: ?provider=<family>
   // opens the existing configuration experience directly (no duplicated
@@ -257,13 +251,23 @@ export default function ProvidersPage(): React.JSX.Element {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-slide-up">
+      {/* UX-01/UX-02/UX-06 — AI → Providers context + the rest of your AI */}
+      <AIContextBar
+        sectionId="providers"
+        pageLabel="Providers"
+        pathname="/providers"
+        description="Providers are part of your AI. Connect the AI services VedMoulya is allowed to use."
+      />
+
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start gap-x-3 gap-y-3">
         <div className="flex-1 min-w-0">
           <h1 className="text-[24px] md:text-[28px] font-heading font-bold text-[#111827] dark:text-[#F8FAFC]">
             AI Providers
           </h1>
-          <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">Your AI ecosystem</p>
+          <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">
+            Your AI ecosystem — the AI services VedMoulya can use.
+          </p>
         </div>
         <button
           type="button"

@@ -178,7 +178,7 @@ export class ExecutionMemoryService {
           recency: 1,
         }),
       };
-      await this.store.save(updated);
+      await this.persistSave(updated);
       return updated;
     }
     const entry = await this.upsertCandidate(candidate, nowMs, nowIso, 'user');
@@ -241,7 +241,12 @@ export class ExecutionMemoryService {
   }
 
   async deleteEntry(entryId: string): Promise<void> {
-    await this.store.delete(entryId);
+    try {
+      await this.store.delete(entryId);
+    } catch (error) {
+      this.observer?.onPersistenceFailure?.(error, { operation: 'delete', entryId });
+      throw error;
+    }
   }
 
   /** Pure confidence helper (exported for consumers/tests). */
@@ -255,6 +260,24 @@ export class ExecutionMemoryService {
   }
 
   // ── Internal ────────────────────────────────────────────────────
+
+  /**
+   * FINAL-04 — durable write with honest failure reporting. A store failure
+   * is surfaced to the observer (the production composition logs it) and then
+   * rethrown: learning is never reported as saved when persistence failed.
+   */
+  private async persistSave(entry: MemoryEntry): Promise<void> {
+    try {
+      await this.store.save(entry);
+    } catch (error) {
+      this.observer?.onPersistenceFailure?.(error, {
+        operation: 'save',
+        entryId: entry.entryId,
+        fingerprint: entry.fingerprint,
+      });
+      throw error;
+    }
+  }
 
   private async upsertCandidate(
     candidate: MemoryCandidate,
@@ -276,7 +299,7 @@ export class ExecutionMemoryService {
         this.retentionDays,
         sourceType,
       );
-      await this.store.save(merged.entry);
+      await this.persistSave(merged.entry);
       return merged.entry;
     });
     this.upsertLock = run.then(

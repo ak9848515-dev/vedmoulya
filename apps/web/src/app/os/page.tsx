@@ -43,6 +43,7 @@ import { MonitorCog, Workflow, Share2, Stethoscope, Gauge, History } from 'lucid
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: MonitorCog },
@@ -84,6 +85,7 @@ export default function OSPage(): React.JSX.Element {
 
   return (
     <div className="content-container py-6">
+      <AIContextBar sectionId="marketplace" pageLabel="Operating System" pathname="/os" />
       <header className="mb-6">
         <div className="flex items-center gap-2 text-sm font-medium text-[#2B5FD9]">
           <MonitorCog className="h-4 w-4" />

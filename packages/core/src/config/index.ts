@@ -8,6 +8,8 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { EnvironmentError, isStrongSecret } from '../env/index.js';
+import { assertProductionCorsOrigin } from './cors.js';
+import { normalizeConnectionUrl } from '../database/connection-url.js';
 import {
   readProviderRuntimeState,
   toRuntimeMode,
@@ -108,6 +110,11 @@ export function loadConfiguration(): Configuration {
     err.message = `Fail-fast: ${defaultProviderCheck.reason} (NODE_ENV=${envName}).`;
     throw err;
   }
+
+  // PROD-03 — production/staging must never run on a development CORS policy:
+  // a loopback allow-list is rejected here, and an absent allow-list is denied
+  // at runtime by resolveCorsOrigins (no silent wildcard; see config/cors.ts).
+  assertProductionCorsOrigin(process.env);
 
   const smtpHost = requireProdSecret('SMTP_HOST', { minLength: 4 });
   const smtpConfigured = smtpHost !== undefined;
@@ -235,8 +242,7 @@ export function loadConfiguration(): Configuration {
  */
 export function requireExternalUrl(key: string, devDefault: string): string {
   const env = process.env.NODE_ENV ?? 'development';
-  const raw = process.env[key];
-  const value = raw?.trim();
+  const value = normalizeConnectionUrl(process.env[key]);
 
   if (env === 'development') {
     return value && value !== '' ? value : devDefault;
@@ -345,8 +351,7 @@ export function requireProdSecret(
  * enforce the same guarantee without breaking local dev or unit tests.
  */
 export function requireProdExternalUrl(key: string, devDefault: string): string {
-  const raw = process.env[key];
-  const value = raw?.trim();
+  const value = normalizeConnectionUrl(process.env[key]);
 
   if (!isStrictEnv()) {
     return value && value !== '' ? value : devDefault;

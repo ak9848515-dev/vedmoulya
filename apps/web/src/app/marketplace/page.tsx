@@ -16,6 +16,7 @@ import { useMarketplace } from '../../lib/api-client.js';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 
 export default function MarketplacePage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
@@ -53,6 +54,11 @@ export default function MarketplacePage(): React.JSX.Element {
 
   return (
     <div className="space-y-8">
+      <AIContextBar
+        sectionId="marketplace"
+        pageLabel="Platform Marketplace"
+        pathname="/marketplace"
+      />
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>

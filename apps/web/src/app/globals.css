@@ -266,6 +266,20 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ── Utility: no-scrollbar (UX-09) ──────────────────────────
+   Horizontal chip/tab/nav strips scroll on small screens but must not draw a
+   scrollbar gutter. Referenced by PortalShell / AgencySubNav / CRM before this
+   utility existed (silent no-op); now defined once here. */
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* ── Base: overscroll + touch behavior (MOB-002) ─────────────────────────── */
 
 @layer base {

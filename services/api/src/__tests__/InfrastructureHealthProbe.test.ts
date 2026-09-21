@@ -105,6 +105,26 @@ describe('InfrastructureHealthProbe', () => {
     }
   });
 
+  // PROD-02A Task 4 — the health payload that carries this error is served by
+  // the PUBLIC readiness/health surface, so a driver failure message must not
+  // publish internal topology (host/port) or credentials.
+  it('redacts internal host/port topology and credentials from public health errors', async () => {
+    const probe = new InfrastructureHealthProbe({
+      env: 'development',
+      databaseUrl: 'postgres://topology-user:topology-secret@127.0.0.1:1/vedmoulya',
+      timeoutMs: 1000,
+    });
+    try {
+      const result = await probe.checkDatabase();
+      expect(result.status).toBe('unhealthy');
+      expect(result.error).toBeDefined();
+      expect(result.error).not.toContain('127.0.0.1');
+      expect(result.error).not.toContain('topology-secret');
+    } finally {
+      await probe.close();
+    }
+  });
+
   it('close() is idempotent and safe when no client exists', async () => {
     const probe = new InfrastructureHealthProbe({ env: 'development' });
     await expect(probe.close()).resolves.toBeUndefined();

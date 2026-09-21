@@ -68,6 +68,7 @@ import {
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: Brain },
@@ -112,6 +113,7 @@ export default function MemoryPage(): React.JSX.Element {
 
   return (
     <div className="content-container py-6">
+      <AIContextBar sectionId="memory" pageLabel="Memory" pathname="/memory" />
       <header className="mb-6">
         <div className="flex items-center gap-2 text-sm font-medium text-[#2B5FD9]">
           <Brain className="h-4 w-4" />

@@ -200,6 +200,45 @@ export interface MissionStatusDTO {
   };
 }
 
+/**
+ * FINAL-04 — outcome of one provider-wait watchdog reconciliation pass.
+ * Aggregate + per-mission ids only (never mission contents), so the watchdog
+ * is observable without leaking data or fabricating fields.
+ */
+export interface ProviderWaitReconciliationResult {
+  /** Missions actually looked at because they were in WAITING_FOR_PROVIDER. */
+  considered: number;
+  /** Those same mission ids (lets a caller dedupe across reconciliations). */
+  consideredMissionIds: string[];
+  /** Mission ids the watchdog resumed through the frozen state machine. */
+  resumed: string[];
+  /** Missions whose provider is still genuinely unavailable — left waiting. */
+  stillWaiting: Array<{
+    missionId: string;
+    requiredCapabilities: string[];
+    reason: string;
+  }>;
+  /** Missions skipped (provider check failed, or a concurrent owner moved them). */
+  skipped: Array<{ missionId: string; reason: string }>;
+}
+
+/**
+ * FINAL-05 — outcome of one ABANDONED-EXECUTION reconciliation pass.
+ * Aggregate + per-mission ids only (never mission contents).
+ */
+export interface AbandonedExecutionReconciliationResult {
+  /** RUNNING missions actually inspected (operator holds are never inspected). */
+  considered: number;
+  /** Those same mission ids (lets a caller dedupe across reconciliations). */
+  consideredMissionIds: string[];
+  /** Mission ids that are RUNNING with no live lease and are now resumable. */
+  resumed: string[];
+  /** RUNNING missions whose objective lease is still live — left untouched. */
+  stillOwned: Array<{ missionId: string; objectives: string[] }>;
+  /** Missions nothing could be done for (honest reason, never silent). */
+  skipped: Array<{ missionId: string; reason: string }>;
+}
+
 export class MissionControllerService {
   private readonly objectivesInFlight = new Set<string>();
 
@@ -256,6 +295,10 @@ export class MissionControllerService {
       updatedAt: now,
     };
 
+    // FINAL-04 — durable observability begins at creation: the mission
+    // document itself carries the creation event, so the trail survives a
+    // process restart (no second log system).
+    this.recordActivity(mission, 'MISSION_CREATED', `Mission created: ${mission.title}`);
     await store.save(mission);
     return mission;
   }
@@ -341,6 +384,14 @@ export class MissionControllerService {
       mission.state = 'WAITING_FOR_PROVIDER';
       mission.stateHistory.push('WAITING_FOR_PROVIDER');
       mission.outcomeReason = `No capable provider available (required capabilities: ${requiredCaps.join(', ') || 'none'})`;
+      // FINAL-04 — the provider hold is observable on the durable trail, so
+      // the reason a mission is (and stays) WAITING_FOR_PROVIDER survives a
+      // process restart.
+      this.recordActivity(
+        mission,
+        'WAITING_FOR_PROVIDER',
+        `No capable provider available (required capabilities: ${requiredCaps.join(', ') || 'none'})`,
+      );
       mission.updatedAt = this.options.clock.now();
       await this.options.store.save(mission);
       return mission;
@@ -1099,6 +1150,10 @@ export class MissionControllerService {
     if (isTerminal(mission.state)) return mission;
     const nowMs = this.options.clock.timestampMs();
     let changed = false;
+    // FINAL-04 — recovery is observable: the counts of each recovery action
+    // are recorded on the durable activity trail (never per-objective noise).
+    let healedLeases = 0;
+    let staleSkipped = 0;
 
     // Heal expired RUNNING leases (crash recovery at every objective boundary).
     for (const objective of mission.objectives) {
@@ -1111,6 +1166,7 @@ export class MissionControllerService {
       if (!objective.failureReason) {
         objective.failureReason = 'Recovered after process interruption (durable lease expired)';
       }
+      healedLeases += 1;
       changed = true;
     }
 
@@ -1128,9 +1184,25 @@ export class MissionControllerService {
           objective.failureReason =
             'Stale objective: no longer evidenced by current repository state (external change detected) — not re-executed';
           objective.updatedAt = this.options.clock.now();
+          staleSkipped += 1;
           changed = true;
         }
       }
+    }
+
+    if (healedLeases > 0) {
+      this.recordActivity(
+        mission,
+        'RECOVERY_LEASE_EXPIRED',
+        `${String(healedLeases)} interrupted objective(s) returned to READY after process interruption`,
+      );
+    }
+    if (staleSkipped > 0) {
+      this.recordActivity(
+        mission,
+        'RECOVERY_OBJECTIVE_SKIPPED',
+        `${String(staleSkipped)} stale objective(s) skipped after external repository change`,
+      );
     }
 
     // Provider-wait recovery (§18): re-check availability exactly once.
@@ -1201,6 +1273,212 @@ export class MissionControllerService {
       }
     }
     return { recovered, active: missions.length, resumableMissionIds, failed };
+  }
+
+  /**
+   * FINAL-04 §4 — PROVIDER-WAIT WATCHDOG (bounded reconciliation pass).
+   *
+   * A long-running mission must never remain permanently WAITING_FOR_PROVIDER
+   * simply because no process happened to revisit it. This is the bounded,
+   * restart-safe reconciliation the runtime cadence calls periodically:
+   *
+   *   - it only considers missions whose PERSISTED state is
+   *     WAITING_FOR_PROVIDER (the authoritative source — an in-memory list is
+   *     never relied on, so a fresh process reconciles the same missions);
+   *   - it re-evaluates REAL provider availability for each mission's own
+   *     required capabilities (the existing `ProviderAvailabilityPort`);
+   *   - a mission whose provider is available is resumed through the EXISTING
+   *     frozen state machine (`PROVIDER_AVAILABLE`: WAITING_FOR_PROVIDER →
+   *     RUNNING) — no parallel state machine, no duplicated execution;
+   *   - a mission whose provider is still unavailable is LEFT WAITING (its
+   *     hold, checkpoint and reason are untouched);
+   *   - a concurrent owner that already moved the mission (or a provider
+   *     check that threw) is skipped honestly, never double-driven;
+   *   - it grants NOTHING: no permission, tool, command, path, budget or
+   *     approval is touched — the resumed mission simply continues through
+   *     the same governed pipeline as any operator-initiated resume.
+   *
+   * Idempotent and side-effect-bounded: it may be called repeatedly (and from
+   * multiple processes); only one caller can observe the legal
+   * WAITING_FOR_PROVIDER → RUNNING transition, every other caller sees the
+   * mission already RUNNING (or gets an illegal-transition refusal, which is
+   * recorded as a skip). No busy loop, no worker is started here.
+   */
+  async reconcileProviderWaits(
+    options: { missionIds?: string[] } = {},
+  ): Promise<ProviderWaitReconciliationResult> {
+    const result: ProviderWaitReconciliationResult = {
+      considered: 0,
+      consideredMissionIds: [],
+      resumed: [],
+      stillWaiting: [],
+      skipped: [],
+    };
+    const candidates = options.missionIds
+      ? (await Promise.all(options.missionIds.map((id) => this.options.store.get(id)))).filter(
+          (mission): mission is Mission => mission !== undefined,
+        )
+      : await this.options.store.listActive();
+
+    for (const candidate of candidates) {
+      if (isTerminal(candidate.state)) continue;
+      if (candidate.state !== 'WAITING_FOR_PROVIDER') continue;
+      result.considered += 1;
+      result.consideredMissionIds.push(candidate.missionId);
+
+      const requiredCapabilities = candidate.constraints.requiredCapabilities ?? [];
+      let available = false;
+      let capableProviderIds: string[] = [];
+      try {
+        const status =
+          await this.options.providerAvailability.getProviderStatus(requiredCapabilities);
+        available = status.available;
+        capableProviderIds = status.capableProviders.map((provider) => provider.providerId);
+      } catch (error) {
+        // A provider registry that cannot be reached is NOT availability —
+        // leave the mission waiting and record the honest skip.
+        result.skipped.push({
+          missionId: candidate.missionId,
+          reason: `provider check failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        continue;
+      }
+
+      if (!available) {
+        result.stillWaiting.push({
+          missionId: candidate.missionId,
+          requiredCapabilities,
+          reason: `no capable provider (required: ${requiredCapabilities.join(', ') || 'none'})`,
+        });
+        continue;
+      }
+
+      // Re-read the persisted mission so a concurrent owner that already
+      // resumed (or cancelled) it is never double-driven.
+      const mission = await this.options.store.get(candidate.missionId);
+      if (!mission || mission.state !== 'WAITING_FOR_PROVIDER') {
+        result.skipped.push({
+          missionId: candidate.missionId,
+          reason: `mission no longer waiting (state: ${mission?.state ?? 'missing'})`,
+        });
+        continue;
+      }
+
+      try {
+        // The EXISTING frozen state machine owns the transition; the frozen
+        // applyCommand records the durable activity event as usual. One extra
+        // event names WHY the watchdog resumed (the providers it observed).
+        const resumed = await this.applyCommand(mission, { type: 'PROVIDER_AVAILABLE' });
+        this.recordActivity(
+          resumed,
+          'WATCHDOG_RESUMED',
+          `Watchdog: provider became available (${capableProviderIds.join(', ')}) — mission resumed`,
+        );
+        await this.options.store.save(resumed);
+        result.resumed.push(resumed.missionId);
+      } catch (error) {
+        // An illegal transition means another owner already moved the mission
+        // — never a failure of the mission, never a second execution.
+        result.skipped.push({
+          missionId: candidate.missionId,
+          reason: `not resumable: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * FINAL-05 §5 — ABANDONED-EXECUTION reconciliation (bounded, restart-safe).
+   *
+   * WHY: when an owner process is killed while it holds an objective lease,
+   * boot recovery deliberately does NOT touch that objective — the lease is
+   * still inside its TTL and could belong to a live worker, and stealing live
+   * work would be duplicate execution. The missing half was what happens
+   * AFTER the TTL expires: nothing revisited the mission, so an interrupted
+   * mission could sit RUNNING with no owner (and no human) forever.
+   *
+   * This pass closes that hole without weakening anything:
+   *   - it only considers PERSISTED RUNNING missions (operator holds — PAUSED,
+   *     WAITING_FOR_APPROVAL, BLOCKED — and terminal missions are never
+   *     touched; provider holds are reconciled by reconcileProviderWaits);
+   *   - a mission holding ANY live lease is reported as `stillOwned` and left
+   *     completely alone (a real owner is working: no stealing, no race);
+   *   - when every lease has EXPIRED, the objective state is healed by the
+   *     EXISTING frozen recovery path (`recoverMission` — expired lease →
+   *     READY, stale repo objective → SKIPPED, durable RECOVERY_* event);
+   *   - it grants nothing and starts no work: it only reports which missions
+   *     are now resumable, exactly like boot discovery, so the SAME loop this
+   *     runtime already runs continues them;
+   *   - idempotent and multi-process safe: healing is state-based, a second
+   *     caller observes nothing left to heal, and execution ownership stays
+   *     with the durable lease.
+   */
+  async reconcileAbandonedExecutions(
+    options: { missionIds?: string[] } = {},
+  ): Promise<AbandonedExecutionReconciliationResult> {
+    const result: AbandonedExecutionReconciliationResult = {
+      considered: 0,
+      consideredMissionIds: [],
+      resumed: [],
+      stillOwned: [],
+      skipped: [],
+    };
+    const candidates = options.missionIds
+      ? (await Promise.all(options.missionIds.map((id) => this.options.store.get(id)))).filter(
+          (mission): mission is Mission => mission !== undefined,
+        )
+      : await this.options.store.listActive();
+
+    for (const candidate of candidates) {
+      if (isTerminal(candidate.state)) continue;
+      if (candidate.state !== 'RUNNING') continue;
+      result.considered += 1;
+      result.consideredMissionIds.push(candidate.missionId);
+      const nowMs = this.options.clock.timestampMs();
+
+      const liveLeases = candidate.objectives
+        .filter((objective) => this.isLeaseLive(objective.lease, nowMs))
+        .map((objective) => objective.objectiveId);
+      if (liveLeases.length > 0) {
+        result.stillOwned.push({ missionId: candidate.missionId, objectives: liveLeases });
+        continue;
+      }
+
+      const abandoned = candidate.objectives.filter((objective) => objective.state === 'RUNNING');
+      if (abandoned.length === 0) {
+        result.skipped.push({
+          missionId: candidate.missionId,
+          reason: 'no abandoned objective to heal (nothing was left RUNNING)',
+        });
+        continue;
+      }
+
+      try {
+        // The EXISTING frozen recovery path owns the healing (and records the
+        // durable RECOVERY_LEASE_EXPIRED event). Nothing new is invented here.
+        const healed = await this.recoverMission(candidate.missionId);
+        const stillLive = healed.objectives.some((objective) =>
+          this.isLeaseLive(objective.lease, this.options.clock.timestampMs()),
+        );
+        if (healed.state === 'RUNNING' && !stillLive) {
+          result.resumed.push(healed.missionId);
+        } else {
+          result.skipped.push({
+            missionId: healed.missionId,
+            reason: `not resumable after healing (state: ${healed.state})`,
+          });
+        }
+      } catch (error) {
+        result.skipped.push({
+          missionId: candidate.missionId,
+          reason: `healing failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    return result;
   }
 
   /**

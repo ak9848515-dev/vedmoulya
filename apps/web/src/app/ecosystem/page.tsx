@@ -16,6 +16,7 @@ import { Cpu, Boxes, Wrench, Bot, Workflow, Shield, Info, ChevronRight } from 'l
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 import { useProviderExperience } from '../../lib/api-client.js';
 
 // ── Tab definitions ──────────────────────────────────────────────────────────
@@ -82,6 +83,7 @@ export default function EcosystemPage(): React.JSX.Element {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-slide-up">
+      <AIContextBar sectionId="marketplace" pageLabel="Ecosystem" pathname="/ecosystem" />
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
         <div className="p-2.5 rounded-xl bg-[#F5F3FF] dark:bg-[#7C3AED]/20">

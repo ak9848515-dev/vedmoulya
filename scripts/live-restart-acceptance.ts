@@ -200,6 +200,20 @@ async function main(): Promise<void> {
   });
   const workspaces: string[] = [];
 
+  // Bootstrap the mission schema through the SAME production DDL path the
+  // gateway uses on boot (idempotent CREATE TABLE IF NOT EXISTS) BEFORE any
+  // raw SQL touches these tables. Without this the acceptance could only run
+  // against a database that some earlier process had already initialised —
+  // i.e. it crashed on a freshly provisioned PostgreSQL, which is exactly the
+  // deployment an operator certifies. The pre-clean below still guarantees a
+  // clean slate; no assertion is relaxed by this bootstrap.
+  {
+    await ensureMissionPersistence(sql);
+    // Reaching this line means the real DDL path succeeded — a throw here is
+    // reported by the top-level handler as a hard acceptance failure.
+    check(true, 'bootstrapped durable mission schema through the production DDL path');
+  }
+
   // Pre-clean any leftover acceptance missions from earlier aborted runs so
   // boot recovery only sees THIS run's mission (deterministic acceptance).
   await sql`DELETE FROM mission_controller_checkpoints WHERE owner='mission-controller' AND (doc->>'userId' = 'live-crash-u1' OR doc->>'userId' = 'live-lease-u1')`;

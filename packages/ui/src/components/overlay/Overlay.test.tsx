@@ -188,3 +188,56 @@ describe('Tooltip', () => {
     expect(container.firstChild).toMatchSnapshot();
   });
 });
+// ── UX-09 Responsive contracts ──────────────────────────────
+// The overlay primitives must not overflow a phone viewport. These assert the
+// overflow-safe classes are present on the rendered nodes (contract tests, not
+// brittle snapshots).
+
+describe('UX-09 Drawer — viewport clamp', () => {
+  it('clamps every drawer size to the viewport width (max-w-[100vw])', () => {
+    const { container } = render(
+      <Drawer open>
+        <DrawerOverlay />
+        <DrawerContent size="lg" aria-label="Evidence">
+          <div>Wide drawer</div>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const content = container.querySelector('[role="dialog"]');
+    expect(content).not.toBeNull();
+    // The base clamp is what stops a 600px 'lg' drawer from overflowing 375px.
+    expect(content?.className).toContain('max-w-[100vw]');
+    expect(content?.className).toContain('w-[600px]');
+  });
+});
+
+describe('UX-09 Dialog — mobile gutter + padding', () => {
+  it('keeps a viewport gutter and mobile padding (no edge-to-edge squeeze)', () => {
+    const { container } = render(
+      <Dialog open>
+        <DialogPortal>
+          <DialogOverlay />
+          <DialogContent size="lg" aria-label="Configure provider">
+            <DialogHeader>
+              <DialogTitle>Configure</DialogTitle>
+              <DialogDescription>Provider details</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button>Save</Button>
+            </DialogFooter>
+          </DialogContent>
+        </DialogPortal>
+      </Dialog>,
+    );
+    const content = container.ownerDocument.querySelector('[role="dialog"]');
+    expect(content).not.toBeNull();
+    // Gutter: never 100vw; mobile-first padding; footer wraps.
+    expect(content?.className).toContain('w-[calc(100vw-24px)]');
+    expect(content?.className).toContain('p-6');
+    expect(content?.className).toContain('md:p-10');
+    const footer = content?.querySelector('div');
+    // DialogFooter must wrap its actions on narrow viewports.
+    expect(container.ownerDocument.body.innerHTML).toContain('flex-wrap');
+    expect(footer).not.toBeNull();
+  });
+});

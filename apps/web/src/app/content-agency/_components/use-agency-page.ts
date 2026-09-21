@@ -1,12 +1,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VedMoulya — Content Agency page helpers (EPIC-003 / AC-001)
 // Shared auth guard + navigation wiring so every module screen stays thin.
+//
+// UX-01 / UX-05: Content Agency is presented as a Life → Business workspace.
+// The trail is therefore declared through `usePageContext` against the ONE
+// navigation model (which now owns /content-agency under Life), so all 20
+// sub-screens show "Life › Content Agency › <screen>" without each having to
+// re-implement the hierarchy.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
 
-import { useEffect } from 'react';
-import { useNavigationStore } from '../../../stores/navigation-store.js';
+import { usePageContext } from '../../../lib/use-page-context.js';
 import { useAuthStore, useAuthHydrated } from '../../../stores/auth-store.js';
 
 export interface AgencyPageState {
@@ -16,6 +21,13 @@ export interface AgencyPageState {
   userId: string;
 }
 
+/** The sub-screen's own route, derived from the module root and the title. */
+function agencyRouteFor(title: string, route?: string): string {
+  if (route !== undefined) return route;
+  if (title === 'Dashboard') return '/content-agency';
+  return `/content-agency/${title.toLowerCase().replace(/\s+/g, '-')}`;
+}
+
 /**
  * Wire breadcrumbs + sidebar section for a content-agency screen and expose
  * the auth-guard state. Usage:
@@ -23,21 +35,12 @@ export interface AgencyPageState {
  *   if (!ready) return <Loading .../>;
  *   if (!userId) return <SignInRedirect />;
  */
-export function useAgencyPage(title: string, route = '/content-agency'): AgencyPageState {
+export function useAgencyPage(title: string, route?: string): AgencyPageState {
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
-  const setActiveSection = useNavigationStore((s) => s.setActiveSection);
-  const setBreadcrumbs = useNavigationStore((s) => s.setBreadcrumbs);
+  const pathname = agencyRouteFor(title, route);
 
-  useEffect(() => {
-    setActiveSection('content-agency');
-    setBreadcrumbs([
-      { label: 'Content Agency', href: '/content-agency' },
-      ...(title === 'Dashboard' || route === '/content-agency'
-        ? []
-        : [{ label: title, href: route }]),
-    ]);
-  }, [setActiveSection, setBreadcrumbs, title, route]);
+  usePageContext({ pathname, label: 'Content Agency' });
 
   return {
     ready: hydrated && sessionReady,

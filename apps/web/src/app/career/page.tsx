@@ -8,7 +8,6 @@ import {
   TabsList,
   TabsTrigger,
   TabsContent,
-  Progress,
   Loading,
 } from '@vedmoulya/ui';
 import { ErrorBoundary } from '../../components/ErrorBoundary.js';
@@ -22,25 +21,110 @@ import {
   Award,
   ArrowRight,
   Sparkles,
+  Flag,
+  Rocket,
+  Trophy,
 } from 'lucide-react';
 import { useCareer } from '../../lib/api-client.js';
-import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
-import { useEffect } from 'react';
+import { PageContextBar } from '../../components/PageContextBar.js';
+import { LifeJourneyStrip, type JourneyStep } from '../life/LifeJourneyStrip.js';
+import { usePageContext } from '../../lib/use-page-context.js';
+
+// ── UX-05 journey (real data only) ─────────────────────────────────────────
+//
+// Every field read here exists on the REAL CareerSnapshotDTO. When a field is
+// absent or empty the step is shown honestly as not-started — a goal, mission
+// or percentage is never invented.
+
+interface CareerJourneyInput {
+  profile?: { targetRole?: string | null } | null;
+  skills?: { totalCount?: number; skills?: ReadonlyArray<unknown> } | null;
+  gaps?: ReadonlyArray<unknown> | null;
+  roadmap?: {
+    milestones?: ReadonlyArray<{ status?: string; title?: string }>;
+    targetStage?: string | null;
+  } | null;
+}
+
+function careerJourneySteps(data: unknown): JourneyStep[] {
+  const input = (typeof data === 'object' && data !== null ? data : {}) as CareerJourneyInput;
+
+  const targetRole = typeof input.profile?.targetRole === 'string' ? input.profile.targetRole : '';
+  // `Array.isArray` narrows a readonly array to `any[]`, which would then leak
+  // `any` into every member access — assert the real element type back.
+  const milestones = (
+    Array.isArray(input.roadmap?.milestones) ? input.roadmap.milestones : []
+  ) as ReadonlyArray<{ status?: string; title?: string }>;
+  const completed = milestones.filter((milestone) => milestone.status === 'completed').length;
+  const skillCount =
+    typeof input.skills?.totalCount === 'number'
+      ? input.skills.totalCount
+      : Array.isArray(input.skills?.skills)
+        ? input.skills.skills.length
+        : 0;
+  const gapCount = Array.isArray(input.gaps) ? input.gaps.length : 0;
+  const targetStage =
+    typeof input.roadmap?.targetStage === 'string' ? input.roadmap.targetStage : '';
+
+  return [
+    {
+      label: 'Goal',
+      detail:
+        targetRole.length > 0
+          ? `Target role: ${targetRole}`
+          : 'Set a target role to give this area a direction.',
+      href: '/goals',
+      icon: Flag,
+      hasData: targetRole.length > 0,
+    },
+    {
+      label: 'Mission',
+      detail:
+        milestones.length > 0
+          ? 'Career work runs as missions you can start, watch and verify.'
+          : 'No career mission has been started yet.',
+      href: '/missions',
+      icon: Rocket,
+      hasData: milestones.length > 0,
+    },
+    {
+      label: 'Progress',
+      detail:
+        milestones.length > 0
+          ? `${completed} of ${milestones.length} roadmap milestone${
+              milestones.length === 1 ? '' : 's'
+            } completed.`
+          : 'No roadmap milestones recorded yet.',
+      href: milestones.length > 0 ? '/progress' : null,
+      icon: TrendingUp,
+      hasData: milestones.length > 0,
+    },
+    {
+      label: 'Outcome',
+      detail:
+        skillCount > 0 || gapCount > 0
+          ? `${skillCount} skill${skillCount === 1 ? '' : 's'} tracked, ${gapCount} gap${
+              gapCount === 1 ? '' : 's'
+            } identified${targetStage.length > 0 ? ` for ${targetStage}` : ''}.`
+          : 'Outcomes appear once your career profile is set up.',
+      href: skillCount > 0 || gapCount > 0 ? '/progress' : null,
+      icon: Trophy,
+      hasData: skillCount > 0 || gapCount > 0,
+    },
+  ];
+}
 
 export default function CareerPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
-  const { isLoading } = useCareer(userId);
-  const { setActiveSection, setBreadcrumbs } = useNavigationStore();
+  const { isLoading, data } = useCareer(userId);
   const [activeTab, setActiveTab] = React.useState('profile');
 
-  useEffect(() => {
-    setActiveSection('career');
-    setBreadcrumbs([{ label: 'Career', href: '/career' }, { label: 'Professional Profile' }]);
-  }, [setActiveSection, setBreadcrumbs]);
+  // UX-05: this screen is Life → Career, and says so.
+  const context = usePageContext({ pathname: '/career', label: 'Career' });
 
   // Hydration guard: prevent SSR/client mismatch from zustand persist
   if (!hydrated || !sessionReady) {
@@ -65,19 +149,24 @@ export default function CareerPage(): React.JSX.Element {
 
   return (
     <div className="space-y-8">
+      {/* UX-05 — Life → Career context: the user must know which area this is. */}
+      <PageContextBar
+        context={context}
+        label="Career"
+        description="Career is one area of your life in VedMoulya. Goals here become missions you can run."
+      />
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-[28px] font-heading font-bold text-[#111827]">
-              Career Intelligence
-            </h1>
+            <h1 className="text-[28px] font-heading font-bold text-[#111827]">Career</h1>
             <Badge variant="ai" size="sm">
-              AI-Powered
+              Part of Life
             </Badge>
           </div>
           <p className="text-[15px] text-[#64748B]">
-            AI-powered career insights, skills analysis, and growth recommendations
+            Your career goals, skills and the work you are building.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -86,6 +175,9 @@ export default function CareerPage(): React.JSX.Element {
           </Badge>
         </div>
       </div>
+
+      {/* UX-05 — Area → Goal → Mission → Progress → Outcome, from real data only. */}
+      <LifeJourneyStrip steps={careerJourneySteps(data)} />
 
       {/* Tabs */}
       <TabsRoot value={activeTab} onValueChange={setActiveTab}>
@@ -134,10 +226,18 @@ export default function CareerPage(): React.JSX.Element {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    {['Experience', 'Industry', 'Strengths', 'Growth Areas'].map((field) => (
-                      <div key={field} className="p-3 rounded-lg bg-[#F8FAFC]">
-                        <p className="text-[12px] font-medium text-[#94A3B8]">{field}</p>
-                        <p className="text-[14px] text-[#374151] mt-0.5">—</p>
+                    {[
+                      { label: 'Experience', value: '—' },
+                      { label: 'Industry', value: '—' },
+                      { label: 'Strengths', value: 'Set up your career profile to see strengths' },
+                      {
+                        label: 'Growth Areas',
+                        value: 'Set up your career profile to see growth areas',
+                      },
+                    ].map((field) => (
+                      <div key={field.label} className="p-3 rounded-lg bg-[#F8FAFC]">
+                        <p className="text-[12px] font-medium text-[#94A3B8]">{field.label}</p>
+                        <p className="text-[14px] text-[#374151] mt-0.5">{field.value}</p>
                       </div>
                     ))}
                   </div>
@@ -146,19 +246,9 @@ export default function CareerPage(): React.JSX.Element {
               <Card variant="standard" padding="lg">
                 <h3 className="text-[18px] font-semibold text-[#111827] mb-4">Quick Stats</h3>
                 <div className="space-y-4">
-                  {[
-                    { label: 'Profile Completeness', value: 0 },
-                    { label: 'ATS Readiness', value: 0 },
-                    { label: 'Market Fit', value: 0 },
-                  ].map((stat) => (
-                    <div key={stat.label}>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-[13px] text-[#64748B]">{stat.label}</span>
-                        <span className="text-[13px] font-bold text-[#2B5FD9]">{stat.value}%</span>
-                      </div>
-                      <Progress value={stat.value} size="sm" />
-                    </div>
-                  ))}
+                  <p className="text-[13px] text-[#94A3B8]">
+                    Complete your career profile to see stats here.
+                  </p>
                 </div>
               </Card>
             </div>
@@ -171,32 +261,10 @@ export default function CareerPage(): React.JSX.Element {
               <h3 className="text-[18px] font-semibold text-[#111827] mb-4">Skills Inventory</h3>
               <p className="text-[14px] text-[#64748B] mb-6">
                 Skills data loading from career service...
+              </p>{' '}
+              <p className="text-[14px] text-[#94A3B8]">
+                Skills data will appear here once your career profile is set up.
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {['Technical', 'Domain', 'Soft Skills'].map((category) => (
-                  <div
-                    key={category}
-                    className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0]"
-                  >
-                    <p className="text-[13px] font-semibold text-[#374151] mb-3">{category}</p>
-                    <div className="space-y-2">
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} className="flex items-center justify-between">
-                          <span className="text-[13px] text-[#64748B]">Skill {i}</span>
-                          <div className="flex gap-1">
-                            {[1, 2, 3, 4].map((dot) => (
-                              <div
-                                key={dot}
-                                className={`w-2 h-2 rounded-full ${dot <= 4 - i ? 'bg-[#2B5FD9]' : 'bg-[#E2E8F0]'}`}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
             </Card>
           </ErrorBoundary>
         </TabsContent>
@@ -208,35 +276,9 @@ export default function CareerPage(): React.JSX.Element {
               <p className="text-[14px] text-[#64748B] mb-6">
                 AI-powered analysis of skills needed for your career goals
               </p>
-              <div className="space-y-4">
-                {[
-                  'Critical Gap: Cloud Architecture',
-                  'Moderate Gap: System Design',
-                  'Optional: Go Programming',
-                ].map((gap, i) => (
-                  <div
-                    key={gap}
-                    className="flex items-center justify-between p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0]"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`p-1.5 rounded-lg ${i === 0 ? 'bg-[#FEF2F2]' : i === 1 ? 'bg-[#FFFBEB]' : 'bg-[#EFF6FF]'}`}
-                      >
-                        <TrendingUp
-                          className={`h-4 w-4 ${i === 0 ? 'text-[#EF4444]' : i === 1 ? 'text-[#F59E0B]' : 'text-[#3B82F6]'}`}
-                        />
-                      </div>
-                      <div>
-                        <p className="text-[14px] font-medium text-[#374151]">{gap}</p>
-                        <p className="text-[12px] text-[#94A3B8]">Recommendation available</p>
-                      </div>
-                    </div>
-                    <Badge variant={i === 0 ? 'danger' : i === 1 ? 'warning' : 'info'} size="sm">
-                      {i === 0 ? 'Priority' : i === 1 ? 'Recommended' : 'Optional'}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
+              <p className="text-[14px] text-[#94A3B8]">
+                Skill gap analysis will appear once your career profile is set up.
+              </p>
             </Card>
           </ErrorBoundary>
         </TabsContent>
@@ -248,34 +290,9 @@ export default function CareerPage(): React.JSX.Element {
               <p className="text-[14px] text-[#64748B] mb-6">
                 Your personalized career progression plan
               </p>
-              <div className="space-y-6">
-                {[
-                  { stage: 'Current Role', progress: 100, color: '#22C55E' },
-                  { stage: 'Senior Level', progress: 35, color: '#2B5FD9' },
-                  { stage: 'Lead / Architect', progress: 10, color: '#7C3AED' },
-                  { stage: 'Principal / Director', progress: 0, color: '#CBD5E1' },
-                ].map((milestone) => (
-                  <div key={milestone.stage}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[14px] font-medium text-[#374151]">
-                        {milestone.stage}
-                      </span>
-                      <span className="text-[12px] text-[#64748B]">{milestone.progress}%</span>
-                    </div>
-                    <Progress
-                      value={milestone.progress}
-                      variant={
-                        milestone.progress === 100
-                          ? 'success'
-                          : milestone.progress > 0
-                            ? 'default'
-                            : 'default'
-                      }
-                      size="md"
-                    />
-                  </div>
-                ))}
-              </div>
+              <p className="text-[14px] text-[#94A3B8]">
+                Your career roadmap will appear once your career profile is set up.
+              </p>
             </Card>
           </ErrorBoundary>
         </TabsContent>

@@ -50,6 +50,7 @@ export {
 export {
   LogVerificationEmailSender,
   SmtpVerificationEmailSender,
+  UnavailableVerificationEmailSender,
   createVerificationEmailSender,
   resolveAppOrigin,
 } from './auth/VerificationEmailSender.js';

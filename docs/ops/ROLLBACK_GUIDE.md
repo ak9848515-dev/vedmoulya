@@ -16,8 +16,9 @@
 1. **Assess impact** — confirm the failing commit; check dashboards and logs.
 2. **Notify** — announce the rollback to stakeholders.
 3. **Redeploy previous version** — `git checkout <last-known-good-tag>`
-   (e.g. `v1.0.0`), rebuild, and deploy via the
-   [Deployment Guide](./DEPLOYMENT_GUIDE.md).
+   (the newest tag currently in the repository is `v1.0.3`; no tag has been
+   deployed yet, so there is no previously deployed production version),
+   rebuild, and deploy via the [Deployment Guide](./DEPLOYMENT_GUIDE.md).
 4. **Roll back migrations** — if the release applied DB migrations, run the
    corresponding down-migrations against each service database (or restore
    from the pre-deploy backup).

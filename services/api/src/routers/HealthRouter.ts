@@ -160,8 +160,11 @@ export function createHealthRouter(
           infrastructureHealth.checkRedis(),
         ]);
         // SPRINT-090 — shared-pool observability: per-pool utilization metrics
-        // (redacted URLs, consumers, in-flight/total queries) ride along with
-        // the live database probe. No credentials, tokens, or secrets.
+        // (opaque pool id, provider/state metadata, consumers, in-flight/total
+        // queries) ride along with the live database probe. PROD-02A: pool
+        // snapshots carry NO connection details — this router is reachable
+        // anonymously, so credentials, host, port and database name must never
+        // appear here.
         const poolStats = databaseManager.getStats();
         components.push({
           name: 'database',

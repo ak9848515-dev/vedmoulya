@@ -29,6 +29,11 @@ import {
 } from '@vedmoulya/mission-runtime';
 import { registerPlatformProviders } from '@vedmoulya/orchestrator';
 import type { MissionRuntime, MissionRuntimeOptions } from '@vedmoulya/mission-runtime';
+import {
+  ExecutionMemoryService,
+  MemoryIntelligenceStoreAdapter,
+} from '@vedmoulya/execution-memory';
+import { PostgresMemoryRepository } from '@vedmoulya/memory-intelligence';
 import { MISSION_TERMINAL_STATES } from '@vedmoulya/mission-controller';
 import type { Mission, MissionObjective } from '@vedmoulya/mission-controller';
 import { redactSecrets } from '@vedmoulya/services';
@@ -177,6 +182,31 @@ export interface MissionServiceOptions {
   maxActivityPerMission?: number;
 }
 
+/**
+ * FINAL-04 — aggregate outcome of one provider-wait watchdog pass. Counts and
+ * mission ids only (never mission contents) so the pass is observable without
+ * leaking data or fabricating fields.
+ */
+export interface MissionWatchdogPassResult {
+  /** Missions the controller actually considered (WAITING_FOR_PROVIDER only). */
+  considered: number;
+  /** Missions resumed through the frozen state machine this pass. */
+  resumed: number;
+  /** Missions whose provider was still genuinely unavailable. */
+  stillWaiting: number;
+  /** Missions skipped honestly (concurrent owner / provider check failure). */
+  skipped: number;
+  /** Mission ids resumed this pass (for log correlation + loop relaunch). */
+  resumedMissionIds: string[];
+  /**
+   * FINAL-05 — how many of the resumed missions were rescued after a crashed
+   * owner abandoned them (expired lease healed by the frozen recovery path).
+   */
+  abandonedRecovered: number;
+  /** FINAL-05 — RUNNING missions still owned by a LIVE lease (never touched). */
+  stillOwned: number;
+}
+
 const DEFAULT_MAX_ACTIVITY = 200;
 
 /**
@@ -247,9 +277,21 @@ export class MissionService {
       const persisted = await ensureMissionPersistence(this.options.sql);
       stores = { missions: persisted.missions, checkpoints: persisted.checkpoints };
     }
+    // ── FINAL-04 — DURABLE EXECUTION LEARNING ────────────────────────────
+    //    Without this, execution learning lived only in process memory and
+    //    was lost on every restart. With a database configured the learning
+    //    estate persists through the EXISTING enterprise memory platform
+    //    (MemoryIntelligenceStoreAdapter → PostgresMemoryRepository) — the
+    //    documented production path, no second persistence architecture.
+    //    Persistence failures are NOT silent: the observer logs them and the
+    //    ingest rethrows, so learning is never claimed as saved when it was not.
+    const memory = this.options.sql
+      ? await this.createDurableExecutionMemory(this.options.sql)
+      : undefined;
     const runtime = createMissionRuntime({
       workspaceRoot: this.options.workspaceRoot ?? resolveDefaultMissionWorkspace(),
       stores,
+      ...(memory ? { memory } : {}),
       orchestratorOptions: { retryBaseDelayMs: 250 },
       registerProviders:
         this.options.runtimeOptions?.registerProviders ??
@@ -266,6 +308,38 @@ export class MissionService {
       persistence: this.options.sql ? 'postgres' : 'in-memory',
     });
     return runtime;
+  }
+
+  /**
+   * FINAL-04 — compose the DURABLE execution-learning service over the
+   * EXISTING enterprise memory persistence. The table is ensured before use
+   * (idempotent DDL). The observer makes a persistence failure OBSERVABLE
+   * (logged with the entry fingerprint, never its contents) — execution
+   * learning is advisory, so a database outage degrades to "learning not
+   * durably saved", it never breaks a mission or fabricates a save.
+   */
+  private async createDurableExecutionMemory(sql: Sql): Promise<ExecutionMemoryService> {
+    const repository = new PostgresMemoryRepository(sql);
+    await repository.ensureTable();
+    logger.info('MissionService: durable execution learning wired', {
+      store: 'PostgresMemoryRepository',
+    });
+    return new ExecutionMemoryService({
+      store: new MemoryIntelligenceStoreAdapter(repository),
+      observer: {
+        onPersistenceFailure: (error, context): void => {
+          logger.warn(
+            'MissionService: execution learning persistence FAILED — learning was not durably saved',
+            {
+              operation: context.operation,
+              entryId: context.entryId,
+              fingerprint: context.fingerprint,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          );
+        },
+      },
+    });
   }
 
   // ── Test/ops seam ─────────────────────────────────────────────────────
@@ -312,6 +386,54 @@ export class MissionService {
       recovered: result.recovered,
       active: result.active,
       failed: result.failed.length > 0 ? result.failed : undefined,
+    };
+  }
+
+  /**
+   * FINAL-04 §4 — one provider-wait watchdog pass.
+   *
+   * Bounded and state-based: the FROZEN controller rediscovers every mission
+   * whose PERSISTED state is WAITING_FOR_PROVIDER, re-evaluates real provider
+   * availability, and resumes only those whose provider is genuinely back
+   * (through the frozen state machine). Any resumable mission is then driven
+   * by the SAME detached autonomous loop the operator path uses — never a
+   * second execution engine, never a bypass of permissions/catalog/jail/budgets.
+   *
+   * Safe across restarts and safe to overlap with normal execution: a mission
+   * already owned by an in-flight loop is observed, never duplicated.
+   */
+  async runWatchdogPass(): Promise<MissionWatchdogPassResult> {
+    const runtime = await this.getRuntime();
+    // FINAL-05 — a mission whose owner process died while holding an objective
+    // lease is healed FIRST. Boot recovery deliberately refuses to steal a
+    // lease that is still inside its TTL; without this reconciliation nothing
+    // revisited the mission after the TTL expired, so an interrupted mission
+    // could stay RUNNING with no owner and no human forever. Healing is done by
+    // the frozen recovery path; this method only relaunches the EXISTING
+    // detached loop for the missions that are resumable again.
+    const abandoned = await runtime.controller.reconcileAbandonedExecutions();
+    // Then the provider-wait reconciliation (an independent condition: those
+    // missions are WAITING_FOR_PROVIDER, never RUNNING, so a mission is
+    // inspected by exactly one of the two in a single pass).
+    const reconciliation = await runtime.controller.reconcileProviderWaits();
+    const resumedMissionIds = [...new Set([...abandoned.resumed, ...reconciliation.resumed])];
+    for (const missionId of resumedMissionIds) {
+      if (!this.loopsInFlight.has(missionId)) {
+        this.launchLoop(missionId);
+      }
+    }
+    const consideredMissionIds = new Set([
+      ...abandoned.consideredMissionIds,
+      ...reconciliation.consideredMissionIds,
+    ]);
+    return {
+      considered: consideredMissionIds.size,
+      resumed: resumedMissionIds.length,
+      stillWaiting: reconciliation.stillWaiting.length,
+      skipped: reconciliation.skipped.length + abandoned.skipped.length,
+      resumedMissionIds,
+      abandonedRecovered: abandoned.resumed.length,
+      stillOwned: abandoned.stillOwned.length,
     };
   }
 
@@ -746,15 +868,48 @@ export class MissionService {
    * bounded by the runtime; messages are re-redacted defensively here.
    */
   private activityView(mission: Mission): MissionActivityEvent[] {
-    const live = this.getActivity(mission.missionId);
-    if (live.length > 0) return live;
-    const persisted = mission.activity ?? [];
-    return persisted.map((event) => ({
+    const persisted = (mission.activity ?? []).map((event) => ({
       id: event.id,
       at: event.at,
       kind: event.kind as MissionActivityEvent['kind'],
       message: redactSecrets(event.message).slice(0, 300),
     }));
+    const live = this.getActivity(mission.missionId);
+    if (live.length === 0) return persisted;
+    // FINAL-05 — the TWO trails are one trail for an operator: the durable
+    // controller trail (mission created, provider hold, recovery, watchdog
+    // resume, lifecycle) and this process's live observations must BOTH be
+    // visible. Returning the live list alone hid every durable controller
+    // event recorded during this process (e.g. WATCHDOG_RESUMED) until a
+    // restart, so "why is this mission in this state?" could not be answered.
+    // Events are deduplicated by id and ordered by time; the merged list stays
+    // bounded exactly like each trail is.
+    // A lifecycle fact the controller already wrote durably (e.g.
+    // MISSION_STARTED) is echoed by this class's own live trail; the echo is
+    // subtracted (as a multiset, so two genuine repeats of the same live event
+    // are both kept) rather than shown to the operator twice.
+    const remaining = new Map<string, number>();
+    for (const event of persisted) {
+      const key = `${event.kind}\u0000${event.message}`;
+      remaining.set(key, (remaining.get(key) ?? 0) + 1);
+    }
+    const seen = new Set<string>();
+    const merged: MissionActivityEvent[] = [...persisted];
+    for (const event of persisted) seen.add(event.id);
+    for (const event of live) {
+      if (seen.has(event.id)) continue;
+      const key = `${event.kind}\u0000${event.message}`;
+      const echoed = remaining.get(key) ?? 0;
+      if (echoed > 0) {
+        remaining.set(key, echoed - 1);
+        continue;
+      }
+      seen.add(event.id);
+      merged.push(event);
+    }
+    merged.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const max = this.options.maxActivityPerMission ?? DEFAULT_MAX_ACTIVITY;
+    return merged.slice(-max);
   }
 
   private record(mission: Mission, kind: MissionActivityEvent['kind'], message: string): void {

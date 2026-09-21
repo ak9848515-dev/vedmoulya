@@ -33,6 +33,7 @@
     "@vedmoulya/voice": "*",
     "@vedmoulya/capability-marketplace": "*",
     "@vedmoulya/execution-bridge": "*",
+    "@vedmoulya/execution-memory": "*",
     "@vedmoulya/execution-orchestrator": "*",
     "@vedmoulya/orchestration-fabric": "*",
     "@vedmoulya/goals": "*",

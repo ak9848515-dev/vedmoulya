@@ -115,9 +115,15 @@ describe('Decision DatabaseConnection', () => {
 
     const mod = await loadFresh();
     expect(() => mod.initializeDatabase()).toThrow('connection refused');
+    // PROD-03 — DatabaseManager re-wraps a synchronous pool-construction failure
+    // so a driver error (which can carry the whole DSN in `error.input`) never
+    // reaches a log. The underlying reason survives; only the exact phrasing is
+    // no longer asserted.
     expect(mockLogger.error).toHaveBeenCalledWith('Failed to initialize decision database', {
-      error: 'connection refused',
+      error: expect.stringContaining('connection refused'),
     });
+    const logged = mockLogger.error.mock.calls.at(-1)?.[1] as { error: string };
+    expect(logged.error).not.toMatch(/postgres(?:ql)?:\/\/[^\s@]+@/i);
   });
 
   it('closeDatabase releases the handle without ending the shared pool', async () => {

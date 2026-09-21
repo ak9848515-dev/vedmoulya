@@ -19,7 +19,6 @@ import {
   Settings,
   User,
   X,
-  History,
   Sparkles,
 } from 'lucide-react';
 import { useUIStore } from '../stores/ui-store.js';
@@ -34,20 +33,49 @@ interface SearchResult {
   icon: React.ReactNode;
 }
 
+/**
+ * Command Palette navigation results — routes must match the one navigation
+ * model in `lib/navigation-model.ts`. Every entry is a real, deep-linkable
+ * route that resolves to an existing page.
+ */
 const STATIC_RESULTS: SearchResult[] = [
   {
-    id: 'dash',
+    id: 'home',
     category: 'Navigation',
-    title: 'Dashboard',
-    description: 'View your Life OS overview',
+    title: 'Home',
+    description: 'Your Life OS overview',
     route: '/',
     icon: <LayoutDashboard className="h-4 w-4" />,
   },
   {
+    id: 'missions',
+    category: 'Navigation',
+    title: 'Missions',
+    description: 'Your goals, missions and execution',
+    route: '/autonomous-builder',
+    icon: <Briefcase className="h-4 w-4" />,
+  },
+  {
+    id: 'progress',
+    category: 'Navigation',
+    title: 'Progress',
+    description: 'What is changing in your life',
+    route: '/progress',
+    icon: <BarChart3 className="h-4 w-4" />,
+  },
+  {
+    id: 'life',
+    category: 'Navigation',
+    title: 'Life',
+    description: 'Career, learning and business',
+    route: '/life',
+    icon: <Lightbulb className="h-4 w-4" />,
+  },
+  {
     id: 'career',
     category: 'Navigation',
-    title: 'Career Intelligence',
-    description: 'Skills, roadmap, job matching',
+    title: 'Career',
+    description: 'Your career goals and progress',
     route: '/career',
     icon: <Briefcase className="h-4 w-4" />,
   },
@@ -55,7 +83,7 @@ const STATIC_RESULTS: SearchResult[] = [
     id: 'learning',
     category: 'Navigation',
     title: 'Learning',
-    description: 'Knowledge map, learning paths',
+    description: 'What you are learning next',
     route: '/learning',
     icon: <BookOpen className="h-4 w-4" />,
   },
@@ -63,51 +91,56 @@ const STATIC_RESULTS: SearchResult[] = [
     id: 'business',
     category: 'Navigation',
     title: 'Business',
-    description: 'KPIs, projects, strategy',
+    description: 'Ventures, clients and results',
     route: '/business',
     icon: <BarChart3 className="h-4 w-4" />,
+  },
+  {
+    id: 'ai',
+    category: 'Navigation',
+    title: 'AI',
+    description: 'Providers, intelligence, memory and knowledge',
+    route: '/ai',
+    icon: <Store className="h-4 w-4" />,
+  },
+  {
+    id: 'providers',
+    category: 'Navigation',
+    title: 'Providers',
+    description: 'Connect and manage AI providers',
+    route: '/providers',
+    icon: <Store className="h-4 w-4" />,
   },
   {
     id: 'marketplace',
     category: 'Navigation',
     title: 'Marketplace',
-    description: 'Assets, providers, updates',
+    description: 'Capabilities and skills you can add',
     route: '/marketplace',
     icon: <Store className="h-4 w-4" />,
-  },
-  {
-    id: 'insights',
-    category: 'Navigation',
-    title: 'Insights',
-    description: 'AI-powered cross-domain insights',
-    route: '/insights',
-    icon: <Lightbulb className="h-4 w-4" />,
   },
   {
     id: 'settings',
     category: 'Navigation',
     title: 'Settings',
-    description: 'Profile, preferences, configuration',
+    description: 'Account, appearance, notifications and security',
     route: '/settings',
     icon: <Settings className="h-4 w-4" />,
   },
   {
     id: 'profile',
     category: 'User',
-    title: 'My Profile',
-    description: 'View and edit your professional profile',
-    route: '/settings/profile',
+    title: 'Profile',
+    description: 'Your identity, goals and public presence',
+    route: '/settings?tab=profile',
     icon: <User className="h-4 w-4" />,
   },
 ];
-
-const RECENT_SEARCHES = ['Career roadmap', 'Skill gap analysis', 'Learning paths', 'Business KPIs'];
 
 export function CommandPalette(): React.JSX.Element {
   const { globalSearchOpen, setGlobalSearchOpen } = useUIStore();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [showRecent, setShowRecent] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -120,8 +153,10 @@ export function CommandPalette(): React.JSX.Element {
       )
     : [];
 
-  const results = query ? filteredResults : STATIC_RESULTS.slice(0, 5);
-  const displayItems = showRecent && !query ? RECENT_SEARCHES : results;
+  // No query → show the primary destinations as a starting point (browse);
+  // with a query → the matching real routes. There is no fabricated "recent"
+  // history here: the palette performs no AI call and stores no search history.
+  const displayItems = query ? filteredResults : STATIC_RESULTS.slice(0, 5);
 
   const handleClose = useCallback(() => {
     setGlobalSearchOpen(false);
@@ -130,12 +165,7 @@ export function CommandPalette(): React.JSX.Element {
   }, [setGlobalSearchOpen]);
 
   const handleSelect = useCallback(
-    (item: SearchResult | string) => {
-      if (typeof item === 'string') {
-        setQuery(item);
-        setShowRecent(false);
-        return;
-      }
+    (item: SearchResult) => {
       router.push(item.route);
       handleClose();
     },
@@ -162,7 +192,7 @@ export function CommandPalette(): React.JSX.Element {
   }, [globalSearchOpen, setGlobalSearchOpen]);
 
   const handleKeyNavigation = (e: React.KeyboardEvent): void => {
-    const maxIndex = Array.isArray(displayItems) ? displayItems.length - 1 : 0;
+    const maxIndex = displayItems.length - 1;
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -185,9 +215,10 @@ export function CommandPalette(): React.JSX.Element {
     }
   };
 
-  function handleClearRecent(): void {
+  function handleClearQuery(): void {
     setQuery('');
-    setShowRecent(true);
+    setSelectedIndex(0);
+    inputRef.current?.focus();
   }
 
   return (
@@ -200,7 +231,7 @@ export function CommandPalette(): React.JSX.Element {
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-[150] bg-[rgba(15,23,42,0.5)] backdrop-blur-sm" />
         <DialogPrimitive.Content
-          className="fixed z-[200] left-[50%] top-[15%] translate-x-[-50%] w-full max-w-[640px] bg-white rounded-[20px] shadow-[0_25px_50px_rgba(15,23,42,0.15)] overflow-hidden border border-[#E2E8F0]"
+          className="fixed z-[200] left-[50%] top-[10%] translate-x-[-50%] w-[calc(100vw-24px)] max-w-[640px] bg-white rounded-[20px] shadow-[0_25px_50px_rgba(15,23,42,0.15)] overflow-hidden border border-[#E2E8F0]"
           onKeyDown={handleKeyNavigation}
         >
           <VisuallyHidden>
@@ -215,7 +246,6 @@ export function CommandPalette(): React.JSX.Element {
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
-                setShowRecent(false);
                 setSelectedIndex(0);
               }}
               placeholder="Search anything..."
@@ -224,7 +254,8 @@ export function CommandPalette(): React.JSX.Element {
             />
             {query && (
               <button
-                onClick={handleClearRecent}
+                onClick={handleClearQuery}
+                aria-label="Clear search"
                 className="p-1 rounded-md hover:bg-[#F1F5F9] transition-colors"
               >
                 <X className="h-4 w-4 text-[#94A3B8]" />
@@ -237,65 +268,44 @@ export function CommandPalette(): React.JSX.Element {
 
           {/* Results */}
           <div className="max-h-[400px] overflow-y-auto p-2">
-            {showRecent && !query && (
-              <>
-                <p className="px-3 py-2 text-[11px] font-semibold uppercase text-[#94A3B8] tracking-[0.05em] flex items-center gap-1.5">
-                  <History className="h-3 w-3" /> Recent
-                </p>
-                {RECENT_SEARCHES.map((search, i) => (
-                  <button
-                    key={search}
-                    onClick={() => {
-                      handleSelect(search);
-                    }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] text-[#374151] transition-colors ${i === selectedIndex ? 'bg-[#EFF4FE] text-[#2B5FD9]' : 'hover:bg-[#F1F5F9]'}`}
-                  >
-                    <History className="h-4 w-4 text-[#94A3B8]" />
-                    {search}
-                  </button>
-                ))}
-              </>
-            )}
-            {!showRecent && (
-              <>
-                {filteredResults.length === 0 && query && (
-                  <div className="px-3 py-8 text-center">
-                    <Search className="h-8 w-8 text-[#CBD5E1] mx-auto mb-2" />
-                    <p className="text-[14px] text-[#94A3B8]">No results for &quot;{query}&quot;</p>
-                    <p className="text-[12px] text-[#CBD5E1] mt-1">Try a different search term</p>
-                  </div>
-                )}
-                {filteredResults.length > 0 && (
-                  <>
-                    <p className="px-3 py-2 text-[11px] font-semibold uppercase text-[#94A3B8] tracking-[0.05em]">
-                      Results
-                    </p>
-                    {filteredResults.map((result, i) => (
-                      <button
-                        key={result.id}
-                        onClick={() => {
-                          handleSelect(result);
-                        }}
-                        className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${i === selectedIndex ? 'bg-[#EFF4FE]' : 'hover:bg-[#F1F5F9]'}`}
-                      >
-                        <div className="p-1.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
-                          {result.icon}
-                        </div>
-                        <div className="flex-1 text-left">
-                          <p
-                            className={`text-[14px] font-medium ${i === selectedIndex ? 'text-[#2B5FD9]' : 'text-[#374151]'}`}
-                          >
-                            {result.title}
-                          </p>
-                          <p className="text-[12px] text-[#94A3B8]">{result.description}</p>
-                        </div>
-                        <span className="text-[11px] text-[#CBD5E1]">{result.category}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-              </>
-            )}
+            <>
+              {query && filteredResults.length === 0 && (
+                <div className="px-3 py-8 text-center">
+                  <Search className="h-8 w-8 text-[#CBD5E1] mx-auto mb-2" />
+                  <p className="text-[14px] text-[#94A3B8]">No results for &quot;{query}&quot;</p>
+                  <p className="text-[12px] text-[#CBD5E1] mt-1">Try a different search term</p>
+                </div>
+              )}
+              {displayItems.length > 0 && (
+                <>
+                  <p className="px-3 py-2 text-[11px] font-semibold uppercase text-[#94A3B8] tracking-[0.05em]">
+                    {query ? 'Results' : 'Go to'}
+                  </p>
+                  {displayItems.map((result, i) => (
+                    <button
+                      key={result.id}
+                      onClick={() => {
+                        handleSelect(result);
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${i === selectedIndex ? 'bg-[#EFF4FE]' : 'hover:bg-[#F1F5F9]'}`}
+                    >
+                      <div className="p-1.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
+                        {result.icon}
+                      </div>
+                      <div className="flex-1 text-left">
+                        <p
+                          className={`text-[14px] font-medium ${i === selectedIndex ? 'text-[#2B5FD9]' : 'text-[#374151]'}`}
+                        >
+                          {result.title}
+                        </p>
+                        <p className="text-[12px] text-[#94A3B8]">{result.description}</p>
+                      </div>
+                      <span className="text-[11px] text-[#CBD5E1]">{result.category}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </>
           </div>
 
           {/* Footer */}
@@ -313,7 +323,7 @@ export function CommandPalette(): React.JSX.Element {
               Close
             </span>
             <span className="ml-auto flex items-center gap-1">
-              <Sparkles className="h-3 w-3 text-[#7C3AED]" /> AI-powered search
+              <Sparkles className="h-3 w-3 text-[#7C3AED]" /> Search VedMoulya
             </span>
           </div>
         </DialogPrimitive.Content>

@@ -24,80 +24,18 @@ import { Loader2, Sparkles, User, Calendar, Target, Compass } from 'lucide-react
 import { completeProfile } from '../../../auth/session-manager.js';
 import { useAuthHydrated, useAuthStore } from '../../../stores/auth-store.js';
 import { SignInRedirect } from '../../../components/SignInRedirect.js';
-
-// ── Closed vocabularies (mirror the identity profile contract — the estate has
-//    no pre-existing gender/purpose taxonomy, so these are the identity
-//    profile's own options, never a parallel copy of another module's). ──────
-
-const GENDER_OPTIONS = [
-  { value: 'female', label: 'Female' },
-  { value: 'male', label: 'Male' },
-  { value: 'non_binary', label: 'Non-binary' },
-  { value: 'prefer_not_to_say', label: 'Prefer not to say' },
-];
-
-const PURPOSE_OPTIONS = [
-  { value: 'learning', label: 'Learning & skill building' },
-  { value: 'building', label: 'Building products / apps' },
-  { value: 'career', label: 'Career growth' },
-  { value: 'business', label: 'Business / freelancing' },
-  { value: 'personal', label: 'Personal organisation' },
-  { value: 'other', label: 'Something else' },
-];
-
-const AGE_MIN = 13;
-const AGE_MAX = 120;
-
-interface FieldErrors {
-  displayName?: string;
-  age?: string;
-  gender?: string;
-  purpose?: string;
-  primaryGoal?: string;
-}
-
-function validate(
-  displayName: string,
-  age: string,
-  gender: string,
-  purpose: string,
-  primaryGoal: string,
-): FieldErrors {
-  const errors: FieldErrors = {};
-
-  if (!displayName.trim()) {
-    errors.displayName = 'Enter your name.';
-  } else if (displayName.trim().length < 2) {
-    errors.displayName = 'Name must be at least 2 characters.';
-  } else if (displayName.trim().length > 100) {
-    errors.displayName = 'Name must be 100 characters or fewer.';
-  }
-
-  if (!age.trim()) {
-    errors.age = 'Enter your age.';
-  } else {
-    const n = Number(age);
-    if (!Number.isInteger(n) || n < AGE_MIN || n > AGE_MAX) {
-      errors.age = `Age must be a whole number between ${AGE_MIN} and ${AGE_MAX}.`;
-    }
-  }
-
-  if (!gender) {
-    errors.gender = 'Select your gender.';
-  }
-
-  if (!purpose) {
-    errors.purpose = 'Select your primary purpose.';
-  }
-
-  if (!primaryGoal.trim()) {
-    errors.primaryGoal = 'Enter your primary goal.';
-  } else if (primaryGoal.trim().length > 200) {
-    errors.primaryGoal = 'Primary goal must be 200 characters or fewer.';
-  }
-
-  return errors;
-}
+// The closed vocabularies and client-side validation live in ONE shared module
+// (lib/profile-fields.ts) because Settings → Profile edits the SAME
+// `PATCH /me/profile` contract. Two screens, one profile — never two copies of
+// the options that could drift apart.
+import {
+  AGE_MAX,
+  AGE_MIN,
+  GENDER_OPTIONS,
+  PURPOSE_OPTIONS,
+  validateProfile,
+  type ProfileFieldErrors,
+} from '../../../lib/profile-fields.js';
 
 // ── Onboarding Profile Page ──────────────────────────────────────────────────
 
@@ -111,7 +49,7 @@ export default function OnboardingProfilePage(): React.JSX.Element {
   const [gender, setGender] = useState('');
   const [purpose, setPurpose] = useState('');
   const [primaryGoal, setPrimaryGoal] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [namePrefilled, setNamePrefilled] = useState(false);
@@ -155,7 +93,7 @@ export default function OnboardingProfilePage(): React.JSX.Element {
     e.preventDefault();
     if (submitting) return;
 
-    const errors = validate(displayName, age, gender, purpose, primaryGoal);
+    const errors = validateProfile({ displayName, age, gender, purpose, primaryGoal });
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       return;

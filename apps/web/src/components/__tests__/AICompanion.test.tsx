@@ -28,6 +28,8 @@ beforeEach(() => {
 
 const mocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
+  createMission: vi.fn(),
+  push: vi.fn(),
 }));
 
 // Note: mock paths resolve relative to THIS file (src/components/__tests__/),
@@ -40,6 +42,25 @@ vi.mock('../../stores/ui-store.js', () => ({
 vi.mock('../../stores/auth-store.js', () => ({
   useAuthStore: (selector: (s: { user: { userId: string } | null }) => string) =>
     selector({ user: { userId: 'user-1' } }),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mocks.push }),
+}));
+
+// UX-08 — Ask now reads the REAL Life OS snapshot for context and routes
+// actions through the REAL mission infrastructure.
+vi.mock('../../lib/api-client.js', () => ({
+  useLifeOSSnapshot: () => ({ data: undefined, isLoading: false, isError: false }),
+  useProviderRuntimeStatus: () => ({
+    data: { providers: [{ canExecute: true }] },
+    isLoading: false,
+    isError: false,
+  }),
+  useMissionCreateAndRun: () => ({
+    mutateAsync: mocks.createMission,
+    isPending: false,
+  }),
 }));
 
 vi.mock('../../lib/trpc.js', () => ({
@@ -165,8 +186,8 @@ describe('AICompanion', () => {
   it('renders the drawer, greeting, input and send button when open', () => {
     render(<AICompanion />);
     // The component renders both a visually-hidden h2 and the visible h3.
-    expect(screen.getAllByText('AI Companion').length).toBeGreaterThan(0);
-    expect(screen.getByPlaceholderText('Ask anything...')).toBeDefined();
+    expect(screen.getAllByText('Ask VedMoulya').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Ask VedMoulya anything')).toBeDefined();
     expect(screen.getByLabelText('Send message')).toBeDefined();
   });
 
@@ -179,7 +200,7 @@ describe('AICompanion', () => {
     mocks.mutateAsync.mockResolvedValue(streamResult());
     render(<AICompanion />);
 
-    const input = screen.getByPlaceholderText('Ask anything...');
+    const input = screen.getByPlaceholderText('Ask anything…');
     fireEvent.change(input, { target: { value: 'How is my career?' } });
     expect(screen.getByLabelText('Send message').hasAttribute('disabled')).toBe(false);
 
@@ -224,7 +245,7 @@ describe('AICompanion', () => {
     mocks.mutateAsync.mockRejectedValue(new Error('stream connection reset'));
     render(<AICompanion />);
 
-    const input = screen.getByPlaceholderText('Ask anything...');
+    const input = screen.getByPlaceholderText('Ask anything…');
     fireEvent.change(input, { target: { value: 'Broken request' } });
     fireEvent.click(screen.getByLabelText('Send message'));
 
@@ -259,7 +280,7 @@ describe('AICompanion', () => {
     );
     render(<AICompanion />);
 
-    fireEvent.change(screen.getByPlaceholderText('Ask anything...'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask anything…'), {
       target: { value: 'Unknown topic' },
     });
     fireEvent.click(screen.getByLabelText('Send message'));
@@ -271,7 +292,7 @@ describe('AICompanion', () => {
   it('fills the input from a suggested question', () => {
     render(<AICompanion />);
     fireEvent.click(screen.getByText('What should I focus on today?'));
-    expect((screen.getByPlaceholderText('Ask anything...') as HTMLInputElement).value).toBe(
+    expect((screen.getByPlaceholderText('Ask anything…') as HTMLInputElement).value).toBe(
       'What should I focus on today?',
     );
   });

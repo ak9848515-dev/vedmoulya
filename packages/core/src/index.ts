@@ -85,6 +85,7 @@ export type {
   DatabaseManagerSnapshot,
   DatabasePoolAccessOptions,
   DatabasePoolStats,
+  DatabaseTargetMetadata,
 } from './database/index.js';
 
 // Feature Flags
@@ -111,6 +112,24 @@ export type {
   HealthCheck,
   HealthCheckFn,
 } from './health/index.js';
+
+// Connection-URL safety (PROD-03 — quoted env values + DSN-free errors)
+export {
+  normalizeConnectionUrl,
+  redactConnectionStrings,
+  safeConnectionError,
+} from './database/connection-url.js';
+
+// CORS origin policy (PROD-03 — one canonical resolver for every HTTP surface)
+export {
+  CORS_ORIGIN_ENV,
+  assertProductionCorsOrigin,
+  describeCorsPolicy,
+  hasConfiguredCorsOrigin,
+  isLoopbackOrigin,
+  parseCorsOrigins,
+  resolveCorsOrigins,
+} from './config/cors.js';
 
 // Startup Preflight (EPIC-018 — deterministic startup diagnostics)
 export { PreflightEngine, loadEnvFileSafe, loadEnvFilesSafe } from './startup/preflight.js';

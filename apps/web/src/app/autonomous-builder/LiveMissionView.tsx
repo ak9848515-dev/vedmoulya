@@ -195,7 +195,7 @@ export function LiveMissionView({
         ) : null}
         {!isTerminal ? (
           confirmCancel ? (
-            <span className="flex items-center gap-2">
+            <span className="flex flex-wrap items-center gap-2">
               <span className="text-sm">Cancel this autonomous mission?</span>
               <Button
                 variant="danger"

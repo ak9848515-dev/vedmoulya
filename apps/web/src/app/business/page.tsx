@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import {
   Card,
   Badge,
@@ -8,7 +8,6 @@ import {
   TabsList,
   TabsTrigger,
   TabsContent,
-  Progress,
   Loading,
 } from '@vedmoulya/ui';
 import { ErrorBoundary } from '../../components/ErrorBoundary.js';
@@ -17,31 +16,112 @@ import {
   Goal,
   FolderKanban,
   TrendingUp,
-  LineChart,
   DollarSign,
-  PiggyBank,
   Shield,
   Lightbulb,
-  Sparkles,
   Zap,
 } from 'lucide-react';
 import { useBusiness } from '../../lib/api-client.js';
-import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { PageContextBar } from '../../components/PageContextBar.js';
+import { LifeJourneyStrip, type JourneyStep } from '../life/LifeJourneyStrip.js';
+import { usePageContext } from '../../lib/use-page-context.js';
+import { Flag, Rocket } from 'lucide-react';
+
+// ── UX-05 journey (real data only) ─────────────────────────────────────────
+//
+// Reads the REAL BusinessSnapshotDTO: profile.businessName, goals[],
+// milestones[]. Every step degrades to an honest not-started state — a
+// business goal, project or revenue figure is never invented.
+
+interface BusinessJourneyInput {
+  profile?: { businessName?: string; stage?: string } | null;
+  vision?: string;
+  goals?: ReadonlyArray<{ title?: string; status?: string }> | null;
+  milestones?: ReadonlyArray<{ status?: string }> | null;
+  projects?: ReadonlyArray<unknown> | null;
+}
+
+function businessJourneySteps(data: unknown): JourneyStep[] {
+  const input = (typeof data === 'object' && data !== null ? data : {}) as BusinessJourneyInput;
+
+  const businessName =
+    typeof input.profile?.businessName === 'string' ? input.profile.businessName : '';
+  // `Array.isArray` narrows a readonly array to `any[]`, which would then leak
+  // `any` into every member access — assert the real element type back.
+  const goals = (Array.isArray(input.goals) ? input.goals : []) as ReadonlyArray<{
+    title?: string;
+    status?: string;
+  }>;
+  const activeGoals = goals.filter((goal) => goal.status === 'active').length;
+  const milestones = (Array.isArray(input.milestones) ? input.milestones : []) as ReadonlyArray<{
+    status?: string;
+  }>;
+  const completedMilestones = milestones.filter(
+    (milestone) => milestone.status === 'completed',
+  ).length;
+  const projects = Array.isArray(input.projects) ? input.projects.length : 0;
+
+  return [
+    {
+      label: 'Goal',
+      detail:
+        goals.length > 0
+          ? `${activeGoals} active business goal${
+              activeGoals === 1 ? '' : 's'
+            } of ${goals.length} tracked.`
+          : businessName.length > 0
+            ? `Set the first goal for ${businessName}.`
+            : 'Set a business goal to give this area a direction.',
+      href: '/goals',
+      icon: Flag,
+      hasData: goals.length > 0,
+    },
+    {
+      label: 'Mission',
+      detail:
+        projects > 0
+          ? `${projects} project${projects === 1 ? '' : 's'} recorded for this business.`
+          : 'No business mission has been started yet.',
+      href: '/missions',
+      icon: Rocket,
+      hasData: projects > 0,
+    },
+    {
+      label: 'Progress',
+      detail:
+        milestones.length > 0
+          ? `${completedMilestones} of ${milestones.length} milestone${
+              milestones.length === 1 ? '' : 's'
+            } completed.`
+          : 'No business milestones recorded yet.',
+      href: milestones.length > 0 ? '/progress' : null,
+      icon: TrendingUp,
+      hasData: milestones.length > 0,
+    },
+    {
+      label: 'Outcome',
+      detail:
+        completedMilestones > 0
+          ? `Outcomes are tracked from completed milestones (${completedMilestones}).`
+          : 'Outcomes appear once business work is completed.',
+      href: completedMilestones > 0 ? '/progress' : null,
+      icon: DollarSign,
+      hasData: completedMilestones > 0,
+    },
+  ];
+}
 
 export default function BusinessPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
-  const { isLoading } = useBusiness(userId);
-  const { setActiveSection, setBreadcrumbs } = useNavigationStore();
+  const { isLoading, data } = useBusiness(userId);
   const [activeTab, setActiveTab] = React.useState('overview');
 
-  useEffect(() => {
-    setActiveSection('business');
-    setBreadcrumbs([{ label: 'Business', href: '/business' }, { label: 'Business Dashboard' }]);
-  }, [setActiveSection, setBreadcrumbs]);
+  // UX-05: this screen is Life → Business, and says so.
+  const context = usePageContext({ pathname: '/business', label: 'Business' });
 
   // Hydration guard: prevent SSR/client mismatch from zustand persist
   if (!hydrated || !sessionReady) {
@@ -66,19 +146,26 @@ export default function BusinessPage(): React.JSX.Element {
 
   return (
     <div className="space-y-8">
+      {/* UX-05 — Life → Business context */}
+      <PageContextBar
+        context={context}
+        label="Business"
+        description="Business is one area of your life in VedMoulya. Ventures, clients and results live here."
+      />
+
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-[28px] font-heading font-bold text-[#111827]">
-              Business Intelligence
+            <h1 className="text-[28px] font-heading font-bold text-[#111827] dark:text-[#F1F5F9]">
+              Business
             </h1>
-            <Badge variant="info" size="sm">
-              Real-time
+            <Badge variant="ai" size="sm">
+              Part of Life
             </Badge>
           </div>
-          <p className="text-[15px] text-[#64748B]">
-            AI-powered business insights, KPI tracking, and strategic recommendations
+          <p className="text-[15px] text-[#64748B] dark:text-[#94A3B8]">
+            Ventures, clients and the results they produce.
           </p>
         </div>
         <Badge variant="success" size="md" className="flex items-center gap-1.5">
@@ -86,44 +173,14 @@ export default function BusinessPage(): React.JSX.Element {
         </Badge>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {[
-          {
-            label: 'Active Projects',
-            value: '6',
-            icon: <FolderKanban className="h-5 w-5 text-[#2B5FD9]" />,
-            bg: 'bg-[#EFF4FE]',
-          },
-          {
-            label: 'Revenue (MTD)',
-            value: '$12.4k',
-            icon: <LineChart className="h-5 w-5 text-[#22C55E]" />,
-            bg: 'bg-[#F0FDF4]',
-          },
-          {
-            label: 'Risk Score',
-            value: '23',
-            icon: <Shield className="h-5 w-5 text-[#F59E0B]" />,
-            bg: 'bg-[#FFFBEB]',
-          },
-          {
-            label: 'Profit Margin',
-            value: '18.5%',
-            icon: <PiggyBank className="h-5 w-5 text-[#7C3AED]" />,
-            bg: 'bg-[#F5F3FF]',
-          },
-        ].map((stat) => (
-          <Card key={stat.label} variant="standard" padding="md">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${stat.bg}`}>{stat.icon}</div>
-              <div>
-                <p className="text-[12px] text-[#64748B] font-medium">{stat.label}</p>
-                <p className="text-[22px] font-bold text-[#111827]">{stat.value}</p>
-              </div>
-            </div>
-          </Card>
-        ))}
+      {/* UX-05 — Area → Goal → Mission → Progress → Outcome, from real data only. */}
+      <LifeJourneyStrip steps={businessJourneySteps(data)} />
+
+      {/* Stats Grid — only show real data */}
+      <div className="rounded-2xl border border-dashed border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-5">
+        <p className="text-[14px] text-[#94A3B8]">
+          Business metrics will appear here once you set up your business profile.
+        </p>
       </div>
 
       <TabsRoot value={activeTab} onValueChange={setActiveTab}>
@@ -156,60 +213,17 @@ export default function BusinessPage(): React.JSX.Element {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Card variant="standard" padding="lg">
                 <h3 className="text-[18px] font-semibold text-[#111827] mb-4">Active Projects</h3>
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-4 py-3 border-b border-[#F1F5F9] last:border-0"
-                  >
-                    <div
-                      className={`p-2 rounded-lg ${i === 0 ? 'bg-[#EFF4FE]' : i === 1 ? 'bg-[#FFFBEB]' : 'bg-[#F0FDF4]'}`}
-                    >
-                      <FolderKanban
-                        className={`h-4 w-4 ${i === 0 ? 'text-[#2B5FD9]' : i === 1 ? 'text-[#F59E0B]' : 'text-[#22C55E]'}`}
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-medium text-[#374151]">
-                        Project Alpha {i + 1}
-                      </p>
-                      <Progress
-                        value={30 + i * 25}
-                        size="sm"
-                        variant={i === 0 ? 'default' : i === 1 ? 'success' : 'default'}
-                        className="mt-1"
-                      />
-                    </div>
-                    <Badge variant={i === 1 ? 'warning' : i === 0 ? 'info' : 'success'} size="sm">
-                      {i === 0 ? 'Active' : i === 1 ? 'At Risk' : 'On Track'}
-                    </Badge>
-                  </div>
-                ))}
+                <p className="text-[14px] text-[#94A3B8]">
+                  Your projects will appear here once you set up your business profile.
+                </p>
               </Card>
               <Card variant="standard" padding="lg">
                 <h3 className="text-[18px] font-semibold text-[#111827] mb-4">
                   Strategic Insights
                 </h3>
-                <div className="space-y-3">
-                  {[
-                    { text: 'Revenue growth 12% above target this quarter', type: 'positive' },
-                    { text: 'Customer acquisition cost decreased by 8%', type: 'positive' },
-                    {
-                      text: 'Two projects identified as at-risk — review resource allocation',
-                      type: 'warning',
-                    },
-                    { text: 'New market opportunity detected in APAC region', type: 'info' },
-                  ].map((insight) => (
-                    <div
-                      key={insight.text}
-                      className={`flex items-start gap-2 p-3 rounded-lg ${insight.type === 'positive' ? 'bg-[#F0FDF4]' : insight.type === 'warning' ? 'bg-[#FFFBEB]' : 'bg-[#EFF6FF]'}`}
-                    >
-                      <Sparkles
-                        className={`h-4 w-4 mt-0.5 ${insight.type === 'positive' ? 'text-[#22C55E]' : insight.type === 'warning' ? 'text-[#F59E0B]' : 'text-[#3B82F6]'}`}
-                      />
-                      <p className="text-[13px] text-[#374151]">{insight.text}</p>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-[14px] text-[#94A3B8]">
+                  AI-powered business insights will appear here once you have business activity.
+                </p>
               </Card>
             </div>
           </ErrorBoundary>

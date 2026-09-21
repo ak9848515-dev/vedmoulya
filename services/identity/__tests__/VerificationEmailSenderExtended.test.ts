@@ -214,4 +214,85 @@ describe('resolveAppOrigin', () => {
     vi.stubEnv('APP_URL', 'not-a-url');
     expect(resolveAppOrigin()).toBe('http://localhost:3000');
   });
+
+  // PROD-03 — resolution keeps its documented development fallback (local
+  // certification depends on it); the loopback link it produces is no longer
+  // DELIVERED to a real recipient — see the delivery-boundary guard below.
+  it('still resolves the local origin in production when APP_URL is missing (delivery is refused instead)', () => {
+    vi.stubEnv('APP_URL', undefined);
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(resolveAppOrigin()).toBe('http://localhost:3000');
+  });
+});
+
+describe('SmtpVerificationEmailSender — PROD-03 delivery guard', () => {
+  const config = { host: 'smtp.example.com', port: 587, from: 'no-reply@example.com' };
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    vi.restoreAllMocks();
+  });
+
+  // Regression: before the fix, a production deployment whose APP_URL was
+  // never set really emailed http://localhost:3000/... verification links.
+  it('refuses to email a loopback verification link in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const sender = new SmtpVerificationEmailSender(config);
+    await expect(
+      sender.sendVerificationEmail({
+        to: 'real@customer.com',
+        displayName: 'Real Customer',
+        verificationLink: 'http://localhost:3000/verify-email?token=abc123',
+      }),
+    ).rejects.toThrow(/Email delivery refused/);
+  });
+
+  it('refuses an IP-loopback verification link in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const sender = new SmtpVerificationEmailSender(config);
+    await expect(
+      sender.sendVerificationEmail({
+        to: 'real@customer.com',
+        displayName: 'Real Customer',
+        verificationLink: 'http://127.0.0.1:3000/verify-email?token=abc123',
+      }),
+    ).rejects.toThrow(/Email delivery refused/);
+  });
+
+  it('refuses a relative (non-absolute) verification link in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const sender = new SmtpVerificationEmailSender(config);
+    await expect(
+      sender.sendVerificationEmail({
+        to: 'real@customer.com',
+        displayName: 'Real Customer',
+        verificationLink: '/verify-email?token=abc123',
+      }),
+    ).rejects.toThrow(/Email delivery refused/);
+  });
+
+  it('delivers a public HTTPS verification link in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const sender = new SmtpVerificationEmailSender(config);
+    await expect(
+      sender.sendVerificationEmail({
+        to: 'real@customer.com',
+        displayName: 'Real Customer',
+        verificationLink: 'https://app.vedmoulya.com/verify-email?token=abc123',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('leaves development / local certification links unrestricted', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    const sender = new SmtpVerificationEmailSender(config);
+    await expect(
+      sender.sendVerificationEmail({
+        to: 'dev@example.com',
+        displayName: 'Dev User',
+        verificationLink: 'http://localhost:3000/verify-email?token=abc123',
+      }),
+    ).resolves.toBeUndefined();
+  });
 });

@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Hono, type MiddlewareHandler } from 'hono';
-import { InMemoryEventBus } from '@vedmoulya/core';
+import { InMemoryEventBus, logger } from '@vedmoulya/core';
 import {
   AuthService,
   authRouteConfig,
@@ -22,6 +22,8 @@ import {
   IdentityEventPublisher,
   createVerificationTokenStore,
   LogVerificationEmailSender,
+  UnavailableVerificationEmailSender,
+  type VerificationEmailSender,
   type VerificationTokenStore,
 } from '@vedmoulya/identity';
 import { createProductionIdentityRepository, awaitAllEngineEnsureTables } from '@vedmoulya/api';
@@ -89,14 +91,39 @@ export async function getAuthApp(): Promise<Hono> {
     const eventPublisher = new IdentityEventPublisher(new InMemoryEventBus());
     // SPRINT-098B — createVerificationEmailSender() throws when SMTP is not
     // configured (production defaults to SMTP mode). The auth app is decoupled
-    // from the full gateway and must not require SMTP to initialise. Fall back
-    // to LogVerificationEmailSender so sign-up/auth endpoints work; verification
-    // emails are logged server-side until SMTP is configured.
-    let emailSender;
+    // from the full gateway and must not require SMTP to INITIALISE, so this
+    // construction never propagates the failure.
+    //
+    // PROD-03 — but "boots without SMTP" must not become "silently delivers to
+    // the log". In production/staging a missing delivery configuration is
+    // reported loudly and the sender FAILS CLOSED at send time: the
+    // verification link (a single-use credential) is never written to a
+    // production log, and sign-up surfaces a real delivery failure instead of
+    // an account that silently never receives its email. Development/test keep
+    // the documented log-delivery default. An operator who WANTS log delivery
+    // in production sets EMAIL_DELIVERY_MODE=log explicitly — that explicit
+    // escape is honoured by the factory above and never reaches this catch.
+    let emailSender: VerificationEmailSender;
     try {
       emailSender = createVerificationEmailSender();
-    } catch {
-      emailSender = new LogVerificationEmailSender();
+    } catch (error) {
+      // Widened to string: the web build's tsconfig narrows NODE_ENV to a
+      // literal union without 'staging' (same widening as the identity
+      // package's AuthService / createVerificationEmailSender).
+      const env: string = process.env.NODE_ENV;
+      const strict = env === 'production' || env === 'staging';
+      const reason = error instanceof Error ? error.message : String(error);
+      if (strict) {
+        logger.error(
+          'Email delivery is NOT configured — production/staging refuses silent log delivery. ' +
+            'Verification emails will fail until SMTP_HOST, SMTP_PORT and EMAIL_FROM (+ APP_URL) are set, ' +
+            'or EMAIL_DELIVERY_MODE=log is set explicitly.',
+          { reason },
+        );
+        emailSender = new UnavailableVerificationEmailSender(reason);
+      } else {
+        emailSender = new LogVerificationEmailSender();
+      }
     }
     const authService = new AuthService(repository, eventPublisher, {
       verificationTokenStore,

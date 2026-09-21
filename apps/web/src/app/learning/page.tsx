@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import {
   Card,
   Badge,
@@ -8,7 +8,6 @@ import {
   TabsList,
   TabsTrigger,
   TabsContent,
-  Progress,
   Loading,
 } from '@vedmoulya/ui';
 import { ErrorBoundary } from '../../components/ErrorBoundary.js';
@@ -20,26 +19,112 @@ import {
   RefreshCw,
   Award,
   Zap,
-  Sparkles,
   BookHeart,
 } from 'lucide-react';
 import { useLearning } from '../../lib/api-client.js';
-import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { PageContextBar } from '../../components/PageContextBar.js';
+import { LifeJourneyStrip, type JourneyStep } from '../life/LifeJourneyStrip.js';
+import { usePageContext } from '../../lib/use-page-context.js';
+import { Flag, Rocket } from 'lucide-react';
+
+// ── UX-05 journey (real data only) ─────────────────────────────────────────
+//
+// Reads the REAL LearningSnapshotDTO: profile.goals, goals[], missions[],
+// skillProgress[] and achievements[]. Every step degrades to an honest
+// not-started state — nothing is invented.
+
+interface LearningJourneyInput {
+  profile?: { goals?: ReadonlyArray<string> } | null;
+  goals?: ReadonlyArray<{ title?: string; status?: string }> | null;
+  missions?: ReadonlyArray<{ title?: string; status?: string; progress?: number }> | null;
+  skillProgress?: ReadonlyArray<unknown> | null;
+  achievements?: ReadonlyArray<unknown> | null;
+}
+
+function learningJourneySteps(data: unknown): JourneyStep[] {
+  const input = (typeof data === 'object' && data !== null ? data : {}) as LearningJourneyInput;
+
+  // `Array.isArray` narrows a readonly array to `any[]`, which would then leak
+  // `any` into every member access — assert the real element type back.
+  const profileGoals = (
+    Array.isArray(input.profile?.goals) ? input.profile.goals : []
+  ) as ReadonlyArray<string>;
+  const goals = (Array.isArray(input.goals) ? input.goals : []) as ReadonlyArray<{
+    title?: string;
+    status?: string;
+  }>;
+  const goalsCount = Math.max(profileGoals.length, goals.length);
+  const firstGoal = goals[0]?.title ?? profileGoals[0] ?? '';
+
+  const missions = (Array.isArray(input.missions) ? input.missions : []) as ReadonlyArray<{
+    title?: string;
+    status?: string;
+    progress?: number;
+  }>;
+  const completedMissions = missions.filter((mission) => mission.status === 'completed').length;
+
+  const skillsTracked = Array.isArray(input.skillProgress) ? input.skillProgress.length : 0;
+  const achievements = Array.isArray(input.achievements) ? input.achievements.length : 0;
+
+  return [
+    {
+      label: 'Goal',
+      detail:
+        goalsCount > 0
+          ? `${goalsCount} learning goal${goalsCount === 1 ? '' : 's'}${
+              firstGoal.length > 0 ? `, starting with “${firstGoal}”` : ''
+            }.`
+          : 'Set a learning goal to give this area a direction.',
+      href: '/goals',
+      icon: Flag,
+      hasData: goalsCount > 0,
+    },
+    {
+      label: 'Mission',
+      detail:
+        missions.length > 0
+          ? `${missions.length} learning mission${missions.length === 1 ? '' : 's'} tracked.`
+          : 'No learning mission has been started yet.',
+      href: '/missions',
+      icon: Rocket,
+      hasData: missions.length > 0,
+    },
+    {
+      label: 'Progress',
+      detail:
+        missions.length > 0 || skillsTracked > 0
+          ? `${completedMissions} of ${missions.length} mission${
+              missions.length === 1 ? '' : 's'
+            } completed, ${skillsTracked} skill${skillsTracked === 1 ? '' : 's'} in progress.`
+          : 'No learning progress recorded yet.',
+      href: missions.length > 0 || skillsTracked > 0 ? '/progress' : null,
+      icon: Zap,
+      hasData: missions.length > 0 || skillsTracked > 0,
+    },
+    {
+      label: 'Outcome',
+      detail:
+        achievements > 0
+          ? `${achievements} achievement${achievements === 1 ? '' : 's'} earned.`
+          : 'Outcomes appear once you complete learning work.',
+      href: achievements > 0 ? '/progress' : null,
+      icon: Award,
+      hasData: achievements > 0,
+    },
+  ];
+}
 
 export default function LearningPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
-  const { isLoading } = useLearning(userId);
-  const { setActiveSection, setBreadcrumbs } = useNavigationStore();
+  const { isLoading, data } = useLearning(userId);
   const [activeTab, setActiveTab] = React.useState('overview');
 
-  useEffect(() => {
-    setActiveSection('learning');
-    setBreadcrumbs([{ label: 'Learning', href: '/learning' }, { label: 'Learning Home' }]);
-  }, [setActiveSection, setBreadcrumbs]);
+  // UX-05: this screen is Life → Learning, and says so.
+  const context = usePageContext({ pathname: '/learning', label: 'Learning' });
 
   // Hydration guard: prevent SSR/client mismatch from zustand persist
   if (!hydrated || !sessionReady) {
@@ -64,19 +149,24 @@ export default function LearningPage(): React.JSX.Element {
 
   return (
     <div className="space-y-8">
+      {/* UX-05 — Life → Learning context */}
+      <PageContextBar
+        context={context}
+        label="Learning"
+        description="Learning is one area of your life in VedMoulya. What you set as a goal here becomes something you can work on."
+      />
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-[28px] font-heading font-bold text-[#111827]">
-              Learning Intelligence
-            </h1>
+            <h1 className="text-[28px] font-heading font-bold text-[#111827]">Learning</h1>
             <Badge variant="ai" size="sm">
-              Adaptive
+              Part of Life
             </Badge>
           </div>
           <p className="text-[15px] text-[#64748B]">
-            Adaptive learning paths, knowledge retention, and skill development
+            What you are learning next and how far you have come.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -86,44 +176,14 @@ export default function LearningPage(): React.JSX.Element {
         </div>
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {[
-          {
-            label: 'Active Paths',
-            value: '3',
-            icon: <BookOpen className="h-5 w-5 text-[#2B5FD9]" />,
-            bg: 'bg-[#EFF4FE]',
-          },
-          {
-            label: 'Completion Rate',
-            value: '72%',
-            icon: <TrendingUp className="h-5 w-5 text-[#22C55E]" />,
-            bg: 'bg-[#F0FDF4]',
-          },
-          {
-            label: 'Retention Score',
-            value: '68%',
-            icon: <Award className="h-5 w-5 text-[#7C3AED]" />,
-            bg: 'bg-[#F5F3FF]',
-          },
-          {
-            label: 'Assessments',
-            value: '5',
-            icon: <Target className="h-5 w-5 text-[#F59E0B]" />,
-            bg: 'bg-[#FFFBEB]',
-          },
-        ].map((stat) => (
-          <Card key={stat.label} variant="standard" padding="md">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${stat.bg}`}>{stat.icon}</div>
-              <div>
-                <p className="text-[12px] text-[#64748B] font-medium">{stat.label}</p>
-                <p className="text-[22px] font-bold text-[#111827]">{stat.value}</p>
-              </div>
-            </div>
-          </Card>
-        ))}
+      {/* UX-05 — Area → Goal → Mission → Progress → Outcome, from real data only. */}
+      <LifeJourneyStrip steps={learningJourneySteps(data)} />
+
+      {/* Stats Overview — only show real data */}
+      <div className="rounded-2xl border border-dashed border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-5">
+        <p className="text-[14px] text-[#94A3B8]">
+          Learning stats will appear here once you start your first learning path.
+        </p>
       </div>
 
       {/* Tabs */}
@@ -159,47 +219,17 @@ export default function LearningPage(): React.JSX.Element {
                 <h3 className="text-[18px] font-semibold text-[#111827] mb-4">
                   Active Learning Paths
                 </h3>
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-4 py-3 border-b border-[#F1F5F9] last:border-0"
-                  >
-                    <div className="p-2 rounded-lg bg-[#EFF4FE]">
-                      <BookOpen className="h-4 w-4 text-[#2B5FD9]" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-medium text-[#374151]">Learning Path {i}</p>
-                      <Progress value={30 + i * 20} size="sm" className="mt-1" />
-                    </div>
-                    <span className="text-[13px] font-medium text-[#2B5FD9]">{30 + i * 20}%</span>
-                  </div>
-                ))}
+                <p className="text-[14px] text-[#94A3B8]">
+                  Your learning paths will appear here once you start learning.
+                </p>
               </Card>
               <Card variant="standard" padding="lg">
                 <h3 className="text-[18px] font-semibold text-[#111827] mb-4">
                   Recommended Topics
                 </h3>
-                <div className="space-y-2">
-                  {[
-                    'Advanced TypeScript Patterns',
-                    'System Design Fundamentals',
-                    'Machine Learning Basics',
-                    'Cloud Architecture',
-                  ].map((topic) => (
-                    <div
-                      key={topic}
-                      className="flex items-center justify-between p-3 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="h-3.5 w-3.5 text-[#7C3AED]" />
-                        <span className="text-[13px] text-[#374151]">{topic}</span>
-                      </div>
-                      <Badge variant="ai" size="sm">
-                        AI Recommended
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-[14px] text-[#94A3B8]">
+                  AI recommendations will appear here once you have learning activity.
+                </p>
               </Card>
             </div>
           </ErrorBoundary>

@@ -41,6 +41,7 @@ import {
   toRuntimeMode,
   validateDefaultProvider,
 } from './provider-runtime.js';
+import { isLoopbackOrigin, parseCorsOrigins } from '../config/cors.js';
 
 export type PreflightMode = 'development' | 'test' | 'staging' | 'production';
 
@@ -65,6 +66,7 @@ export interface PreflightCheck {
     | 'database'
     | 'redis'
     | 'ai-configuration'
+    | 'cors'
     | 'production-build'
     | 'provider-registry'
     | 'docker';
@@ -195,6 +197,7 @@ export class PreflightEngine {
       this.checkEnvironment(),
       this.checkAuthentication(),
       this.checkAiConfiguration(mode),
+      this.checkCors(mode),
       this.checkDatabase(mode),
       this.checkRedis(mode),
       this.checkProviderRegistry(mode),
@@ -353,6 +356,77 @@ export class PreflightEngine {
         : 'No real AI key configured — development uses the deterministic mock provider.',
       continues:
         'Development continues on the deterministic mock; production requires a real provider.',
+      mode,
+    };
+  }
+
+  /**
+   * PROD-03 — CORS origin policy.
+   *
+   * Production/staging must not serve a development CORS policy: a loopback
+   * allow-list entry is MISCONFIGURED (the fail-fast config loader rejects it
+   * too), and an absent/'*'-only allow-list is DEGRADED because the runtime then
+   * denies every cross-origin request — the same-origin web app is unaffected,
+   * but native WebView and other cross-origin clients stay blocked until the
+   * operator sets API_CORS_ORIGIN.
+   */
+  private checkCors(mode: PreflightMode): PreflightCheck {
+    const { env } = this.options.environment;
+    const strict = STRICT_MODES.has(mode);
+    const parsed = parseCorsOrigins(env.API_CORS_ORIGIN);
+
+    if (!strict) {
+      return {
+        id: 'cors',
+        label: 'CORS',
+        status: 'READY',
+        required: false,
+        detail:
+          parsed.length > 0 ? 'CORS allow-list configured.' : 'Permissive development default.',
+        mode,
+      };
+    }
+
+    const loopback = parsed.filter(isLoopbackOrigin);
+    if (loopback.length > 0) {
+      return {
+        id: 'cors',
+        label: 'CORS',
+        status: 'MISCONFIGURED',
+        required: true,
+        detail: `API_CORS_ORIGIN contains ${loopback.length} loopback origin(s) in ${mode}.`,
+        why: 'A loopback origin can never match a real client, so production would silently deny (or, worse, be edited to a wildcard).',
+        continues:
+          'Nothing can serve cross-origin clients until the allow-list names the real origin.',
+        howToFix:
+          'Set API_CORS_ORIGIN to the public origin of the deployed web app (for example https://app.vedmoulya.com); add the native WebView origins separately when the Capacitor client calls the API cross-origin.',
+        mode,
+      };
+    }
+
+    const usable = parsed.filter((origin) => origin !== '*');
+    if (usable.length === 0) {
+      return {
+        id: 'cors',
+        label: 'CORS',
+        status: 'DEGRADED',
+        required: false,
+        detail: `API_CORS_ORIGIN is not set in ${mode} — cross-origin requests are DENIED (never a wildcard).`,
+        why: 'Production/staging never fall back to a permissive origin policy; same-origin web traffic is unaffected.',
+        continues:
+          'The same-origin web app works fully; native WebView and other cross-origin clients are blocked until the allow-list is set.',
+        howToFix:
+          'Set API_CORS_ORIGIN to the public origin of the deployed web app (comma-separate additional origins).',
+        mode,
+      };
+    }
+
+    return {
+      id: 'cors',
+      label: 'CORS',
+      status: 'READY',
+      required: false,
+      detail: `Explicit cross-origin allow-list configured (${usable.length} origin${usable.length === 1 ? '' : 's'}).`,
       mode,
     };
   }

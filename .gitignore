@@ -77,6 +77,32 @@ tmp/
 _covgate.bat
 _fmt3.bat
 test.txt
+
+# PROD-03 hygiene — root-level forensic / scratch artifacts produced by
+# ad-hoc debugging sessions (analysis scripts, hexdumps, captured worker
+# output, local production-like env overrides). They are NEVER part of the
+# build: the deployed bundle comes from tracked sources only. Root-anchored
+# patterns are deliberate — `_components/`, `__tests__/` and every other
+# nested underscore path stays tracked.
+/_*.py
+/_*.ps1
+/_*.bat
+/_*.ts
+/_*.txt
+/_*.log
+/_*.json
+/.dev.txt
+/.dev.err.txt
+# Ad-hoc debug scripts under scripts/. Only .ts scratch is covered — the two
+# intentionally tracked probe scripts (`scripts/_e2e-token-probe.mjs`,
+# `scripts/_probe-factory.mjs`) and every real `scripts/live-*.ts` harness
+# stay visible to git.
+/scripts/_*.ts
+
+# Local production-like harness overrides (loopback infrastructure). The
+# NAMES-only template `.env.production.example` remains tracked; this
+# variant must never be committed.
+.env.production.localhost-only
 # Local scratch: ad-hoc coverage branch analyzer, regenerated per workspace on
 # demand. Ignored everywhere (the services/*-only pattern let one get committed
 # under packages/knowledge-intelligence).

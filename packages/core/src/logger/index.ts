@@ -7,6 +7,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { getConfig } from '../config/index.js';
+import { redactConnectionStrings } from '../database/connection-url.js';
 
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace';
 
@@ -64,7 +65,10 @@ class ConsoleLogger implements Logger {
       data,
     };
 
-    const output = JSON.stringify(entry);
+    // PROD-03 — defense in depth: no credential-bearing connection string can
+    // reach stdout/stderr through the logger, whatever the caller passes
+    // (including an error object whose `input` holds the DSN).
+    const output = redactConnectionStrings(JSON.stringify(entry));
 
     switch (level) {
       case 'error':

@@ -68,6 +68,21 @@ describe('tabForPathname (deep links)', () => {
     expect(MOBILE_TABS.map((t) => t.id)).toEqual(['home', 'missions', 'progress', 'ai', 'more']);
     expect(MOBILE_TABS.map((t) => t.label)).toEqual(['Home', 'Missions', 'Progress', 'AI', 'More']);
   });
+
+  // UX-09 — More must expose the exact secondary set, without becoming a
+  // second navigation system (Ask is an ACTION reachable from More, not a tab).
+  it('UX-09 More exposes Life/Career/Learning/Business/Marketplace (+ Ask/Settings/Profile)', async () => {
+    const { MOBILE_MORE_LINKS, SETTINGS_DESTINATION, PROFILE_DESTINATION, ASK_DESTINATION } =
+      await import('../navigation-model.js');
+    const labels = MOBILE_MORE_LINKS.map((l) => l.label);
+    for (const required of ['Life', 'Career', 'Learning', 'Business', 'Marketplace']) {
+      expect(labels).toContain(required);
+    }
+    // Settings/Profile are system destinations; Ask opens the canonical panel.
+    expect(SETTINGS_DESTINATION.route).toBe('/settings');
+    expect(PROFILE_DESTINATION.route).toBe('/settings?tab=profile');
+    expect(ASK_DESTINATION.action).toBe('open-ai-companion');
+  });
 });
 
 describe('isMobileTabId / tabById', () => {

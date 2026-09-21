@@ -32,6 +32,7 @@ import { api } from '../../lib/trpc.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 import { ErrorBoundary } from '../../components/ErrorBoundary.js';
 import {
   useBrainCreateTask,
@@ -328,6 +329,7 @@ export default function BrainPage(): React.JSX.Element {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-slide-up">
+      <AIContextBar sectionId="intelligence" pageLabel="Brain" pathname="/brain" />
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
         <div className="p-2.5 rounded-xl bg-[#EFF4FE] dark:bg-[#1E3A8A]/30">

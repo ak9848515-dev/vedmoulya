@@ -53,6 +53,8 @@
     "ai:smoke:live": "npx tsx scripts/ai-live-smoke.ts",
     "bld023:live": "npx tsx scripts/bld023-live-acceptance.ts",
     "mission:live:restart": "npx tsx scripts/live-restart-acceptance.ts",
+    "mission:live:final05": "npx tsx scripts/live-final05-certification.ts",
+    "mission:live:final06": "npx tsx scripts/live-final06-certification.ts",
     "rag:eval": "npx tsx scripts/rag-evaluate.ts",
     "ai:benchmark": "npx tsx scripts/token-benchmark.ts",
     "outdated": "npm outdated",

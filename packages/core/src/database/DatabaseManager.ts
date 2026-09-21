@@ -37,12 +37,20 @@
 // Observability: queries dispatched through the shared pool are tracked
 // (in-flight, peak, count, latency) for pool utilization metrics WITHOUT
 // replacing the postgres.js result object (which carries `.values()`, `.count()`
-// etc. used by drizzle). No credentials are ever exposed in stats or logs.
+// etc. used by drizzle).
+//
+// PROD-02A — a pool snapshot is published to LOGS and to PUBLIC health
+// surfaces (tRPC `health.check`, `/health/check`), so it must carry ZERO
+// connection details: no credentials, host, port, database name or URL. The
+// pool's internal Map key IS the connection URL, so it is never published —
+// stats expose an opaque sha256 fingerprint plus provider/state metadata.
 // ──────────────────────────────────────────────────────────────────────────────
 
+import { createHash } from 'node:crypto';
 import postgres from 'postgres';
 import { config } from '../config/index.js';
 import { logger } from '../logger/index.js';
+import { normalizeConnectionUrl, safeConnectionError } from './connection-url.js';
 
 /** Repository/store access options when borrowing a shared database pool. */
 export interface DatabasePoolAccessOptions {
@@ -62,10 +70,26 @@ export interface DatabasePoolAccessOptions {
   applicationName?: string;
 }
 
-/** Per-pool observability snapshot (URLs are redacted — never credentials). */
+/**
+ * Topology-free target metadata — deliberately NOT a connection URL. Safe to
+ * publish in logs and in public readiness/health payloads.
+ */
+export interface DatabaseTargetMetadata {
+  provider: 'postgres';
+  database: 'configured';
+  status: 'connected';
+}
+
+/**
+ * Per-pool observability snapshot. Contains NO connection details (no
+ * credentials, host, port, database name or URL) — operators correlate pools
+ * through the opaque `key` fingerprint, `applicationName` and `consumers`.
+ */
 export interface DatabasePoolStats {
+  /** Stable opaque pool id (sha256 fingerprint of the URL) — never the URL. */
   key: string;
-  url: string;
+  /** Safe provider/state metadata (no host, port or database name). */
+  target: DatabaseTargetMetadata;
   applicationName: string;
   poolMax: number;
   consumers: string[];
@@ -104,15 +128,18 @@ export interface DatabaseManager {
 
 const QUERY_METHODS: ReadonlySet<string> = new Set(['unsafe', 'file', 'query', 'begin']);
 
-function redactUrl(url: string): string {
-  try {
-    const next = new URL(url);
-    next.username = '***';
-    next.password = '***';
-    return next.toString();
-  } catch {
-    return 'postgres://***@<invalid>';
-  }
+/**
+ * Stable, non-reversible pool identifier. The pool's internal Map key is the
+ * connection URL itself, so it must NEVER be published: a short digest keeps
+ * pools distinguishable across restarts while exposing nothing about the host.
+ */
+function poolFingerprint(url: string): string {
+  return createHash('sha256').update(url).digest('hex').slice(0, 12);
+}
+
+/** Safe, topology-free pool metadata (replaces every connection URL in logs). */
+function databaseTarget(): DatabaseTargetMetadata {
+  return { provider: 'postgres', database: 'configured', status: 'connected' };
 }
 
 function envInt(name: string, fallback: number): number {
@@ -241,7 +268,9 @@ class SharedDatabaseManager implements DatabaseManager {
   private readonly pools = new Map<string, ManagedPool>();
 
   getPool(options: DatabasePoolAccessOptions = {}): postgres.Sql {
-    const url = (options.url?.trim() || config.database.url).trim();
+    // PROD-03 — a quoted/whitespace-padded env value must not reach the driver
+    // verbatim (postgres.js → new URL() → ERR_INVALID_URL).
+    const url = normalizeConnectionUrl(options.url?.trim() || config.database.url);
     const poolMax = positiveInt(options.poolMax, envInt('DB_POOL_MAX', envInt('EI_POOL_MAX', 10)));
     const poolMin = positiveInt(options.poolMin, envInt('DB_POOL_MIN', 2));
     const connectTimeoutSeconds = positiveInt(
@@ -263,13 +292,32 @@ class SharedDatabaseManager implements DatabaseManager {
 
     let pool = this.pools.get(key);
     if (!pool) {
-      const rawSql = postgres(url, {
-        max: poolMax,
-        connect_timeout: connectTimeoutSeconds,
-        idle_timeout: idleTimeoutSeconds,
-        max_lifetime: maxLifetimeSeconds,
-        connection: { application_name: applicationName },
-      });
+      let rawSql: postgres.Sql;
+      try {
+        rawSql = postgres(url, {
+          max: poolMax,
+          connect_timeout: connectTimeoutSeconds,
+          idle_timeout: idleTimeoutSeconds,
+          max_lifetime: maxLifetimeSeconds,
+          connection: { application_name: applicationName },
+        });
+      } catch (error) {
+        // PROD-03 — never let the driver's error reach a log: Node's
+        // ERR_INVALID_URL keeps the WHOLE connection string in `error.input`,
+        // which would print credentials verbatim. Name the misconfiguration
+        // and preserve the redacted REASON, never the value.
+        //
+        // A synchronous throw from the driver means the pool could not be
+        // constructed at all — an unparseable URL in practice, but the reason
+        // text is kept verbatim (redacted) so a non-URL failure is still
+        // diagnosable instead of being relabelled.
+        throw new Error(
+          `DatabaseManager: could not open a PostgreSQL pool from the configured URL ` +
+            `(${safeConnectionError(error)}). ` +
+            `The value must be a valid connection string — check IDENTITY_DATABASE_URL / DATABASE_URL; ` +
+            `a value wrapped in quotes must be pasted without them.`,
+        );
+      }
       pool = {
         key,
         url,
@@ -286,7 +334,8 @@ class SharedDatabaseManager implements DatabaseManager {
       pool.sql = trackQueries(pool);
       this.pools.set(key, pool);
       logger.info('DatabaseManager: opened shared connection pool', {
-        url: redactUrl(url),
+        ...databaseTarget(),
+        applicationName,
         poolMax,
         poolMin,
         connectTimeoutSeconds,
@@ -306,8 +355,8 @@ class SharedDatabaseManager implements DatabaseManager {
     const pools: DatabasePoolStats[] = [];
     for (const pool of this.pools.values()) {
       pools.push({
-        key: pool.key,
-        url: redactUrl(pool.url),
+        key: poolFingerprint(pool.url),
+        target: databaseTarget(),
         applicationName: pool.applicationName,
         poolMax: pool.poolMax,
         consumers: Array.from(pool.consumers).sort(),
@@ -354,7 +403,13 @@ class SharedDatabaseManager implements DatabaseManager {
           },
           (error: unknown) => {
             clearTimeout(timer);
-            resolve(settle(false, error instanceof Error ? error.message : String(error)));
+            // PROD-03 — this message is surfaced by the UNAUTHENTICATED
+            // /health/ready and /health/check endpoints. Redact at the source
+            // so a driver error can never carry a connection string (Node's
+            // ERR_INVALID_URL keeps the whole DSN in `error.input`) off this
+            // process. Callers still apply their own sanitizer; this is the
+            // defence-in-depth layer. `error.input` is never read.
+            resolve(settle(false, safeConnectionError(error)));
           },
         )
         .catch(() => undefined);

@@ -1,36 +1,29 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// VedMoulya — Dashboard Landing Page
-// Composes all Life OS sections from real API data
-// BLD-016-B — Dashboard Landing Experience
-// MOB-002 — Production Mobile Experience:
-//   • premium welcome screen (hero) + user profile card
-//   • today's mission + AI summary cards
-//   • quick actions wired to module routes
-//   • loading skeletons, graceful empty states, error states
-//   • pull-to-refresh, offline cache fallback, auto retry on reconnect
+// VedMoulya — Home (UX-03)
+//
+// "What matters to me right now?"
+//
+// The primary personal experience. A clear focal point in the first viewport
+// that immediately communicates who this space belongs to, what matters now,
+// what to do next, and what VedMoulya can help with.
+//
+// Hierarchy:
+//   Greeting → Today's Priority → Primary Mission → VedMoulya Insight →
+//   Life Momentum → Recent Activity → Ask VedMoulya
+//
+// Data sources: ALL from the certified Life OS snapshot (useLifeOSSnapshot).
+// No fabricated data. Empty/honest states for every section.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { Loading, Card, Button } from '@vedmoulya/ui';
-import {
-  RefreshCw,
-  AlertTriangle,
-  Sparkles,
-  Quote,
-  Target,
-  TrendingUp,
-  ArrowRight,
-  Users,
-  BookOpen,
-  Brain,
-  BarChart3,
-  Store,
-  CloudOff,
-} from 'lucide-react';
-import { useLifeOSSnapshot } from '../lib/api-client.js';
+import { RefreshCw, AlertTriangle, Sparkles, Target, ArrowRight, CloudOff } from 'lucide-react';
+import { useLifeOSSnapshot, useMissionHistory } from '../lib/api-client.js';
+import { missionDetailRoute } from '../lib/navigation-model.js';
 import { useAuthStore, useAuthHydrated } from '../stores/auth-store.js';
 import type {
   IdentitySummary,
@@ -44,19 +37,13 @@ import type {
   Metrics,
   AIContext,
 } from './sections/types.js';
-
-// ── Section Components ───────────────────────────────────────────────────────
-
-import dynamic from 'next/dynamic';
 import { ErrorBoundary } from '../components/ErrorBoundary.js';
 import { SignInRedirect } from '../components/SignInRedirect.js';
-import { TopPriorityCard } from './sections/TopPriorityCard.js';
-import { ExecutionCenter } from './sections/ExecutionCenter.js';
-import { DecisionCenter } from './sections/DecisionCenter.js';
-import { ProfileCard } from './sections/ProfileCard.js';
 import { TodayMissionCard } from './sections/TodayMissionCard.js';
 import { AISummaryCard } from './sections/AISummaryCard.js';
 import { AskAIInput } from './sections/AskAIInput.js';
+import { LifeMomentum } from './sections/LifeMomentum.js';
+import { RecentActivity } from './sections/RecentActivity.js';
 import { DashboardSkeleton } from './sections/DashboardSkeleton.js';
 import { usePullToRefresh } from '../lib/use-pull-to-refresh.js';
 import { markStartup, STARTUP_MARKS } from '../lib/startup.js';
@@ -67,20 +54,16 @@ import {
 } from '../lib/dashboard-cache.js';
 
 // Below-the-fold sections are lazy-loaded to keep the landing chunk small.
-const ModuleStatusGrid = dynamic(
-  () => import('./sections/ModuleStatusGrid.js').then((mod) => ({ default: mod.ModuleStatusGrid })),
+const ExecutionCenter = dynamic(
+  () => import('./sections/ExecutionCenter.js').then((mod) => ({ default: mod.ExecutionCenter })),
   { ssr: false, loading: () => null },
 );
-const MemoryTimeline = dynamic(
-  () => import('./sections/MemoryTimeline.js').then((mod) => ({ default: mod.MemoryTimeline })),
+const DecisionCenter = dynamic(
+  () => import('./sections/DecisionCenter.js').then((mod) => ({ default: mod.DecisionCenter })),
   { ssr: false, loading: () => null },
 );
 const JourneyOverview = dynamic(
   () => import('./sections/JourneyOverview.js').then((mod) => ({ default: mod.JourneyOverview })),
-  { ssr: false, loading: () => null },
-);
-const PrioritiesList = dynamic(
-  () => import('./sections/PrioritiesList.js').then((mod) => ({ default: mod.PrioritiesList })),
   { ssr: false, loading: () => null },
 );
 const RecommendationsPanel = dynamic(
@@ -95,15 +78,22 @@ const NotificationsPanel = dynamic(
     import('./sections/NotificationsPanel.js').then((mod) => ({ default: mod.NotificationsPanel })),
   { ssr: false, loading: () => null },
 );
+const ModuleStatusGrid = dynamic(
+  () => import('./sections/ModuleStatusGrid.js').then((mod) => ({ default: mod.ModuleStatusGrid })),
+  { ssr: false, loading: () => null },
+);
+const MemoryTimeline = dynamic(
+  () => import('./sections/MemoryTimeline.js').then((mod) => ({ default: mod.MemoryTimeline })),
+  { ssr: false, loading: () => null },
+);
+const PrioritiesList = dynamic(
+  () => import('./sections/PrioritiesList.js').then((mod) => ({ default: mod.PrioritiesList })),
+  { ssr: false, loading: () => null },
+);
 const AIInsights = dynamic(
   () => import('./sections/AIInsights.js').then((mod) => ({ default: mod.AIInsights })),
   { ssr: false, loading: () => null },
 );
-const QuickActions = dynamic(
-  () => import('./sections/QuickActions.js').then((mod) => ({ default: mod.QuickActions })),
-  { ssr: false, loading: () => null },
-);
-import type { QuickAction } from './sections/QuickActions.js';
 
 // ── Default Values for Missing Data ──────────────────────────────────────────
 
@@ -182,6 +172,18 @@ function safeArr<TVal>(val: unknown): TVal[] {
   return Array.isArray(val) ? (val as TVal[]) : [];
 }
 
+// ── Time-of-day greeting ─────────────────────────────────────────────────────
+
+function timeGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+/** Mission states in which nothing further is expected. */
+const TERMINAL_MISSION_STATES = ['COMPLETED', 'FAILED', 'CANCELLED'];
+
 // ── Home Page ───────────────────────────────────────────────────────────────
 
 export default function Home(): React.JSX.Element {
@@ -191,11 +193,30 @@ export default function Home(): React.JSX.Element {
   const userId = user?.userId ?? '';
   const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useLifeOSSnapshot(userId);
 
-  // ── Offline cache (MOB-002) ─────────────────────────────────────────────
+  // ── UX-03 canonical mission entry ──────────────────────────────────────
+  // The Home journey is Home → today's mission → Missions → mission detail →
+  // execution → verification → result. The PRIMARY Mission CTA therefore goes
+  // to the canonical operational mission experience when a REAL mission id
+  // exists, and to the Missions landing page otherwise. `/goals` stays fully
+  // valid and is still reachable where a goal (not a mission) is the subject.
+  //
+  // No mission id is ever fabricated: `useMissionHistory` only returns missions
+  // that actually exist, and `missionDetailRoute` refuses empty ids.
+  const missionHistory = useMissionHistory(userId);
+  const liveMission = useMemo(
+    () => missionHistory.data?.find((entry) => !TERMINAL_MISSION_STATES.includes(entry.state)),
+    [missionHistory.data],
+  );
+  const latestMission = liveMission ?? missionHistory.data?.[0];
+  const missionRoute = missionDetailRoute(latestMission?.missionId);
+
+  /** Where "continue working" should take the user. */
+  const continueRoute = missionRoute ?? '/missions';
+
+  // ── Offline cache ─────────────────────────────────────────────────────
   const [cachedEntry, setCachedEntry] = useState<CachedDashboardEntry | null>(null);
   const usingCache = !data && cachedEntry !== null;
 
-  // Write the last successful snapshot to the offline cache.
   useEffect(() => {
     if (data?.success && data.data) {
       cacheDashboardSnapshot(data.data);
@@ -204,14 +225,12 @@ export default function Home(): React.JSX.Element {
     }
   }, [data]);
 
-  // When the live query fails or the device is offline, fall back to cache.
   useEffect(() => {
     if ((isError || offline) && !data) {
       setCachedEntry(readCachedDashboard());
     }
   }, [isError, offline, data]);
 
-  // Re-sync on explicit retry (offline banner button).
   useEffect(() => {
     const onRetry = (): void => {
       void refetch();
@@ -222,10 +241,10 @@ export default function Home(): React.JSX.Element {
     };
   }, [refetch]);
 
-  // ── Pull-to-refresh (MOB-002) ───────────────────────────────────────────
+  // ── Pull-to-refresh ───────────────────────────────────────────────────
   const pullToRefresh = usePullToRefresh({ onRefresh: refetch });
 
-  // ── Hydration guard (prevents SSR/client mismatch) ──────────────────────
+  // ── Hydration guard ───────────────────────────────────────────────────
   if (!hydrated || !sessionReady) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
@@ -234,19 +253,16 @@ export default function Home(): React.JSX.Element {
     );
   }
 
-  // ── Signed-Out State (real auth enforced — no token, no dashboard) ──────
   if (!user) {
     return <SignInRedirect />;
   }
 
-  // ── Loading State → skeleton placeholders ───────────────────────────────
+  // ── Loading State ─────────────────────────────────────────────────────
   if (isLoading && !usingCache) {
     return <DashboardSkeleton />;
   }
 
-  // ── Error State (with cached fallback when available) ───────────────────
-  // When the query failed AND no fresh-enough cache exists, show the error UI.
-  // (If a cache exists, `usingCache` is true and we render from it below.)
+  // ── Error State ───────────────────────────────────────────────────────
   if ((isError || !data?.success) && cachedEntry === null) {
     const errorMessage = error?.message ?? 'Could not load your dashboard.';
     return (
@@ -257,7 +273,7 @@ export default function Home(): React.JSX.Element {
               <AlertTriangle className="h-6 w-6 text-[#EF4444]" />
             </div>
             <h2 className="text-[18px] font-heading font-semibold text-[#111827] dark:text-[#F8FAFC]">
-              Unable to Load Dashboard
+              Unable to Load Home
             </h2>
             <p className="text-[14px] text-[#64748B] dark:text-[#94A3B8]">{errorMessage}</p>
             <Button
@@ -283,7 +299,7 @@ export default function Home(): React.JSX.Element {
       <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
         <Card variant="standard" padding="lg" className="max-w-md text-center">
           <p className="text-[14px] text-[#64748B] dark:text-[#94A3B8]">
-            No dashboard data available yet.
+            No data available yet — setting up your Life OS.
           </p>
           <Button
             variant="primary"
@@ -300,6 +316,7 @@ export default function Home(): React.JSX.Element {
     );
   }
 
+  // ── Typed data extraction (all REAL production data from snapshot) ─────
   const identity: IdentitySummary = safeObj(raw.identity, defaultIdentity);
   const metrics: Metrics = safeObj(raw.metrics, defaultMetrics);
   const execution: ExecutionSummary = safeObj(raw.execution, defaultExecution);
@@ -315,7 +332,6 @@ export default function Home(): React.JSX.Element {
   const notifications: Notification[] = safeArr<Notification>(raw.globalNotifications);
   const topPriority: Priority | undefined = priorities[0];
 
-  // ── Journey Metrics (derived or from API) ─────────────────────────────
   const rawMetrics = raw.metrics as Record<string, unknown> | undefined;
   const journeyMetrics = {
     ...metrics,
@@ -326,69 +342,17 @@ export default function Home(): React.JSX.Element {
     momentum: rawMetrics?.momentum as number | undefined,
   };
 
-  // ── Quick actions wired to real routes (MOB-002) ───────────────────────
-  const scrollToId = (id: string): void => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-  const quickActions: QuickAction[] = [
-    {
-      label: 'Continue Mission',
-      icon: <Target className="h-4 w-4" />,
-      variant: 'primary',
-      onClick: (): void => {
-        scrollToId('todays-mission');
-      },
-    },
-    {
-      label: 'Review Career',
-      icon: <Users className="h-4 w-4" />,
-      variant: 'secondary',
-      onClick: (): void => {
-        router.push('/career');
-      },
-    },
-    {
-      label: 'Start Learning',
-      icon: <BookOpen className="h-4 w-4" />,
-      variant: 'secondary',
-      onClick: (): void => {
-        router.push('/learning');
-      },
-    },
-    {
-      label: 'Review Decisions',
-      icon: <Brain className="h-4 w-4" />,
-      variant: 'secondary',
-      onClick: (): void => {
-        scrollToId('decisions');
-      },
-    },
-    {
-      label: 'View Business',
-      icon: <BarChart3 className="h-4 w-4" />,
-      variant: 'ghost',
-      onClick: (): void => {
-        router.push('/business');
-      },
-    },
-    {
-      label: 'Browse Marketplace',
-      icon: <Store className="h-4 w-4" />,
-      variant: 'ghost',
-      onClick: (): void => {
-        router.push('/marketplace');
-      },
-    },
-  ];
-
   const cacheAgeMinutes = cachedEntry
     ? Math.max(1, Math.round((Date.now() - cachedEntry.fetchedAt) / 60000))
     : 0;
 
-  // ── Render Sections ───────────────────────────────────────────────────
+  const displayName = identity.displayName || 'User';
+  const hasInsight = Boolean(aiContext.contextSummary || aiContext.currentFocus);
+
+  // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div ref={pullToRefresh.pageRef} className="relative space-y-5 md:space-y-8 pb-4 md:pb-8">
-      {/* ── Pull-to-refresh indicator (MOB-002) ───────────────────────── */}
+    <div ref={pullToRefresh.pageRef} className="relative space-y-6 md:space-y-8 pb-4 md:pb-8">
+      {/* Pull-to-refresh indicator */}
       <div
         className="flex items-center justify-center overflow-hidden transition-[height] duration-200"
         style={{ height: pullToRefresh.refreshing ? 44 : Math.min(pullToRefresh.pullDistance, 72) }}
@@ -408,7 +372,7 @@ export default function Home(): React.JSX.Element {
         )}
       </div>
 
-      {/* ── Cached-data notice (MOB-002) ──────────────────────────────── */}
+      {/* Cached-data notice */}
       {usingCache && (
         <div
           role="status"
@@ -432,97 +396,138 @@ export default function Home(): React.JSX.Element {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
-          USER PROFILE CARD (MOB-002)
+          1. GREETING — who this space belongs to
           ═══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary section="profile">
-        <ProfileCard identity={identity} fallbackEmail={user.email} />
+      <ErrorBoundary section="greeting">
+        <header className="space-y-1">
+          <h1 className="text-[28px] md:text-[36px] font-heading font-bold text-[#111827] dark:text-[#F8FAFC] tracking-tight">
+            {timeGreeting()},{' '}
+            <span className="text-[#2B5FD9] dark:text-[#6B8FEF]">{displayName}</span>
+          </h1>
+          <p className="text-[15px] md:text-[17px] text-[#64748B] dark:text-[#94A3B8]">
+            {identity.purpose || "Here's what matters today."}
+          </p>
+        </header>
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          PREMIUM HERO: Greeting + Life Score + Daily Focus + Quote
+          2. TODAY'S PRIORITY — the single most important thing
           ═══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary section="hero">
-        <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#1E4AA8] via-[#2B5FD9] to-[#0EA5A9] p-6 md:p-10 animate-slide-up">
-          <div
-            className="absolute inset-0 opacity-10"
-            style={{
-              backgroundImage:
-                'radial-gradient(circle at 25% 25%, white 0%, transparent 50%), radial-gradient(circle at 75% 75%, white 0%, transparent 50%)',
-            }}
-          />
-          <div className="relative z-10">
-            <div className="flex items-start justify-between">
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-[26px] md:text-[42px] font-heading font-bold text-white tracking-tight">
-                    Good{' '}
-                    {new Date().getHours() < 12
-                      ? 'Morning'
-                      : new Date().getHours() < 17
-                        ? 'Afternoon'
-                        : 'Evening'}
-                    , <span className="text-[#A8C2F7]">{identity.displayName}</span>
-                  </h1>
-                  <Sparkles className="h-6 w-6 text-[#F59E0B]" />
-                </div>
-                <p className="text-[15px] md:text-[18px] text-[#D4E1FC] max-w-2xl leading-relaxed">
-                  {identity.purpose ||
-                    'Building a sustainable livelihood through knowledge, execution, and intelligent technology.'}
+      <ErrorBoundary section="priority">
+        {topPriority ? (
+          <Card
+            variant="standard"
+            padding="lg"
+            className="overflow-hidden relative dark:bg-[#1E293B] dark:border-[#334155]"
+          >
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#2B5FD9] via-[#5B8AEB] to-[#7C3AED]" />
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2B5FD9] dark:text-[#6B8FEF]">
+                  Today&apos;s Priority
                 </p>
-
-                {/* Stats Row */}
-                <div className="flex flex-wrap items-center gap-3 pt-2">
-                  <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-3.5 py-1.5">
-                    <TrendingUp className="h-4 w-4 text-[#A8C2F7]" />
-                    <span className="text-white text-[13px] md:text-[14px] font-medium">
-                      Life Score:{' '}
-                      <span className="text-[#A8C2F7] font-bold">{metrics.lifeScore}</span>/100
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-3.5 py-1.5">
-                    <Target className="h-4 w-4 text-[#A8C2F7]" />
-                    <span className="text-white text-[13px] md:text-[14px] font-medium">
-                      {execution.completedToday} tasks done today
-                    </span>
-                  </div>
-                  <div className="hidden sm:flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-full px-3.5 py-1.5">
-                    <Quote className="h-4 w-4 text-[#A8C2F7]" />
-                    <span className="text-white/80 text-[13px] italic">
-                      Small steps lead to great achievements
-                    </span>
-                  </div>
-                </div>
+                <h2 className="text-[19px] md:text-[22px] font-heading font-semibold text-[#111827] dark:text-[#F8FAFC] mt-1 leading-snug">
+                  {topPriority.title}
+                </h2>
+                <p className="text-[14px] text-[#64748B] dark:text-[#94A3B8] mt-1 line-clamp-2">
+                  {topPriority.description}
+                </p>
+                {topPriority.deadline && (
+                  <p className="text-[12px] text-[#94A3B8] mt-2">
+                    Due{' '}
+                    {new Date(topPriority.deadline).toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="primary"
+                size="md"
+                className="shrink-0"
+                onClick={() => {
+                  // UX-03: today's priority leads into the mission journey.
+                  router.push(continueRoute);
+                }}
+              >
+                Continue <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </Card>
+        ) : (
+          <Card variant="standard" padding="lg" className="dark:bg-[#1E293B] dark:border-[#334155]">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-[#F0FDF4] dark:bg-[#0F291D]">
+                <Target className="h-5 w-5 text-[#22C55E]" />
+              </div>
+              <div>
+                <p className="text-[15px] font-medium text-[#111827] dark:text-[#F8FAFC]">
+                  All caught up
+                </p>
+                <p className="text-[13px] text-[#64748B] dark:text-[#94A3B8]">
+                  No pending priorities — set a new goal to keep the momentum going.
+                </p>
               </div>
             </div>
-
-            {/* Continue Journey Button */}
-            <div className="mt-6 md:mt-8 flex items-center gap-3">
-              <button
-                onClick={() => {
-                  scrollToId('todays-mission');
-                }}
-                className="inline-flex items-center gap-2 bg-white text-[#2B5FD9] px-5 py-2.5 md:px-6 md:py-3 rounded-full text-[14px] md:text-[15px] font-semibold hover:bg-[#F1F5F9] transition-all shadow-lg hover:shadow-xl active:scale-95"
-              >
-                Continue Your Journey <ArrowRight className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => {
-                  scrollToId('ai-summary');
-                }}
-                className="inline-flex items-center gap-2 bg-white/15 text-white px-5 py-2.5 md:px-6 md:py-3 rounded-full text-[14px] md:text-[15px] font-medium hover:bg-white/25 transition-all active:scale-95"
-              >
-                <Sparkles className="h-4 w-4" /> AI Summary
-              </button>
-            </div>
-          </div>
-        </section>
+          </Card>
+        )}
       </ErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          ASK — immediate AI readiness (SPRINT-048)
-          A premium ask bar that opens the existing AI Companion with the
-          typed question — no provider setup required to ask. The readiness
-          chip reflects the REAL provider runtime (never a fabricated state).
+          3. PRIMARY MISSION — active mission with continue action
+          ═══════════════════════════════════════════════════════════════════ */}
+      <ErrorBoundary section="mission">
+        <TodayMissionCard
+          priority={topPriority}
+          execution={execution}
+          onContinue={() => {
+            // UX-03: the canonical mission experience, not the goals list.
+            router.push(continueRoute);
+          }}
+          onReviewBlockers={() => {
+            // Blockers are mission state, so review them where missions live.
+            router.push(missionRoute ?? '/goals');
+          }}
+        />
+      </ErrorBoundary>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          4. VEDMOULYA INSIGHT — what VedMoulya is noticing
+          ═══════════════════════════════════════════════════════════════════ */}
+      <ErrorBoundary section="insight">
+        {hasInsight ? (
+          <AISummaryCard aiContext={aiContext} />
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-5">
+            <div className="flex items-center gap-2 text-[#64748B] dark:text-[#94A3B8]">
+              <Sparkles className="h-4 w-4" />
+              <p className="text-[13px]">
+                Ask VedMoulya what to focus on next — insights appear here once there is activity to
+                synthesize.
+              </p>
+            </div>
+          </div>
+        )}
+      </ErrorBoundary>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          5. LIFE MOMENTUM — career, learning, business
+          ═══════════════════════════════════════════════════════════════════ */}
+      <ErrorBoundary section="momentum">
+        <LifeMomentum career={career} learning={learning} business={business} />
+      </ErrorBoundary>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          6. RECENT ACTIVITY — continuation surface
+          ═══════════════════════════════════════════════════════════════════ */}
+      <ErrorBoundary section="activity">
+        <RecentActivity priorities={priorities} memory={memory} />
+      </ErrorBoundary>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          7. ASK VEDMOULYA — immediate AI access
           ═══════════════════════════════════════════════════════════════════ */}
       {userId && (
         <ErrorBoundary section="ask-ai">
@@ -531,127 +536,13 @@ export default function Home(): React.JSX.Element {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
-          NOW — what matters this moment (SPRINT-043C IA tier)
-          ═══════════════════════════════════════════════════════════════════ */}
-      <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#0EA5A9] dark:text-[#66D0D3]">
-        <span className="h-1.5 w-1.5 rounded-full bg-[#0EA5A9]" aria-hidden="true" />
-        Now
-      </p>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          TODAY'S MISSION (MOB-002)
-          ═══════════════════════════════════════════════════════════════════ */}
-      <div id="todays-mission">
-        <ErrorBoundary section="mission">
-          <TodayMissionCard
-            priority={topPriority}
-            execution={execution}
-            onContinue={() => {
-              router.push('/goals');
-            }}
-            onReviewBlockers={() => {
-              router.push('/goals');
-            }}
-          />
-        </ErrorBoundary>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          AI SUMMARY (MOB-002)
-          ═══════════════════════════════════════════════════════════════════ */}
-      <div id="ai-summary">
-        <ErrorBoundary section="ai-summary">
-          <AISummaryCard aiContext={aiContext} />
-        </ErrorBoundary>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          TOP PRIORITY (when a mission card isn't enough)
-          ═══════════════════════════════════════════════════════════════════ */}
-      {topPriority && (
-        <ErrorBoundary section="top-priority">
-          <TopPriorityCard
-            priority={topPriority}
-            onContinue={() => {
-              router.push('/goals');
-            }}
-            onReviewBlockers={() => {
-              router.push('/goals');
-            }}
-          />
-        </ErrorBoundary>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          Execution + Decision Center (two-column)
-          ═══════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <ErrorBoundary section="execution">
-          <ExecutionCenter execution={execution} />
-        </ErrorBoundary>
-        <div id="decisions">
-          <ErrorBoundary section="decisions">
-            <DecisionCenter decisions={decisions} />
-          </ErrorBoundary>
-        </div>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          PROGRESS — Journey + Execution overview
-          ═══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary section="journey">
-        <JourneyOverview
-          execution={{
-            completedToday: execution.completedToday,
-            activePlans: execution.activePlans,
-            totalEstimatedMinutes: execution.totalEstimatedMinutes,
-          }}
-          metrics={journeyMetrics}
-        />
-      </ErrorBoundary>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          OPPORTUNITIES & SIGNALS — AI Recommendations + Notifications
-          ═══════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <ErrorBoundary section="recommendations">
-          <RecommendationsPanel recommendations={recommendations} />
-        </ErrorBoundary>
-        <ErrorBoundary section="notifications">
-          <NotificationsPanel
-            notifications={notifications}
-            unreadCount={metrics.unreadNotifications}
-          />
-        </ErrorBoundary>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          INTELLIGENCE — AI Insights + Stats
-          ═══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary section="ai-insights">
-        <AIInsights
-          metrics={{ lifeScore: metrics.lifeScore }}
-          execution={{
-            completedToday: execution.completedToday,
-            activePlans: execution.activePlans,
-          }}
-          memory={{ totalMemories: memory.totalMemories }}
-          aiContext={aiContext}
-          recommendationCount={recommendations.length}
-        />
-      </ErrorBoundary>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          DEEP DIVE — secondary overview, progressively disclosed
-          (Module status · Memory timeline · Priorities · Quick actions)
-          All capabilities remain reachable; only the initial viewport is
-          decluttered (SPRINT-043C information-architecture principle).
+          DEEP DIVE — all detail sections, progressively disclosed
           ═══════════════════════════════════════════════════════════════════ */}
       <details className="group rounded-[20px] border border-[#E8EDF5] dark:border-[#334155] bg-white dark:bg-[#1E293B]">
         <summary className="flex cursor-pointer select-none items-center justify-between gap-3 px-4 py-3 text-[14px] font-semibold text-[#374151] dark:text-[#E2E8F0] hover:bg-[#F1F5F9] dark:hover:bg-[#0F172A] transition-colors rounded-[20px]">
           <span className="flex items-center gap-2">
             <span className="h-1.5 w-1.5 rounded-full bg-[#0EA5A9]" aria-hidden="true" />
-            Deep dive — module status, memory, priorities, quick actions
+            Explore more — journey, execution, modules, recommendations
           </span>
           <span
             className="text-[12px] font-medium text-[#64748B] dark:text-[#94A3B8] transition-transform duration-200 group-open:rotate-180"
@@ -660,7 +551,57 @@ export default function Home(): React.JSX.Element {
             ▾
           </span>
         </summary>
-        <div className="space-y-5 px-4 pb-4">
+        <div className="space-y-6 px-4 pb-4">
+          {/* Journey Overview */}
+          <ErrorBoundary section="journey">
+            <JourneyOverview
+              execution={{
+                completedToday: execution.completedToday,
+                activePlans: execution.activePlans,
+                totalEstimatedMinutes: execution.totalEstimatedMinutes,
+              }}
+              metrics={journeyMetrics}
+            />
+          </ErrorBoundary>
+
+          {/* Execution + Decision Center */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ErrorBoundary section="execution">
+              <ExecutionCenter execution={execution} />
+            </ErrorBoundary>
+            <ErrorBoundary section="decisions">
+              <DecisionCenter decisions={decisions} />
+            </ErrorBoundary>
+          </div>
+
+          {/* AI Insights + Stats */}
+          <ErrorBoundary section="ai-insights">
+            <AIInsights
+              metrics={{ lifeScore: metrics.lifeScore }}
+              execution={{
+                completedToday: execution.completedToday,
+                activePlans: execution.activePlans,
+              }}
+              memory={{ totalMemories: memory.totalMemories }}
+              aiContext={aiContext}
+              recommendationCount={recommendations.length}
+            />
+          </ErrorBoundary>
+
+          {/* Recommendations + Notifications */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <ErrorBoundary section="recommendations">
+              <RecommendationsPanel recommendations={recommendations} />
+            </ErrorBoundary>
+            <ErrorBoundary section="notifications">
+              <NotificationsPanel
+                notifications={notifications}
+                unreadCount={metrics.unreadNotifications}
+              />
+            </ErrorBoundary>
+          </div>
+
+          {/* Module Status Grid */}
           <ErrorBoundary section="module-status">
             <ModuleStatusGrid
               career={career}
@@ -669,14 +610,15 @@ export default function Home(): React.JSX.Element {
               marketplace={marketplace}
             />
           </ErrorBoundary>
+
+          {/* Memory Timeline */}
           <ErrorBoundary section="memory-timeline">
             <MemoryTimeline memory={memory} />
           </ErrorBoundary>
+
+          {/* All Priorities */}
           <ErrorBoundary section="priorities">
             <PrioritiesList priorities={priorities} />
-          </ErrorBoundary>
-          <ErrorBoundary section="quick-actions">
-            <QuickActions actions={quickActions} />
           </ErrorBoundary>
         </div>
       </details>

@@ -120,9 +120,15 @@ describe('DatabaseConnection', () => {
     });
     const mod = await loadModule();
     expect(() => mod.initializeDatabase()).toThrow(/connection refused/);
+    // PROD-03 — DatabaseManager now re-wraps a synchronous pool-construction
+    // failure so the driver's own error (which can carry the whole DSN in
+    // `error.input`) never reaches a log. The underlying reason must survive;
+    // only the exact phrasing is no longer asserted.
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Failed to initialize memory database',
-      expect.objectContaining({ error: 'connection refused' }),
+      expect.objectContaining({ error: expect.stringContaining('connection refused') }),
     );
+    const logged = mockLogger.error.mock.calls.at(-1)?.[1] as { error: string };
+    expect(logged.error).not.toMatch(/postgres(?:ql)?:\/\/[^\s@]+@/i);
   });
 });

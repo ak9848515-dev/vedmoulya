@@ -116,12 +116,52 @@ describe('Shared Database Manager', () => {
     expect(sql.unsafe).toBeTypeOf('function');
   });
 
-  it('redacts credentials from stats', () => {
-    databaseManager.getPool({ url: 'postgres://secret-user:secret-pass@db.internal:5432/x' });
-    const snapshot = databaseManager.getStats();
-    expect(snapshot.pools[0]?.url).not.toContain('secret-user');
-    expect(snapshot.pools[0]?.url).not.toContain('secret-pass');
-    expect(snapshot.pools[0]?.url).toContain('***');
+  // PROD-02A Task 4 — a pool snapshot reaches LOGS and PUBLIC health payloads
+  // (tRPC `health.check` is reachable anonymously, and /health/check reads the
+  // same snapshot). It must therefore carry ZERO connection details: no
+  // credentials, host, port, database name or URL. Regression: the snapshot
+  // previously echoed the pool's raw Map key (the full connection URL,
+  // credentials included) and a credential-masked-but-topology-bearing `url`.
+  it('never exposes credentials, host, port, database name or URL in stats', () => {
+    databaseManager.getPool({
+      url: 'postgres://secret-user:secret-pass@db.internal:5432/secret_db?sslmode=require',
+      applicationName: 'leak-test',
+    });
+
+    const pool = databaseManager.getStats().pools[0];
+    expect(pool).toBeDefined();
+    const serialized = JSON.stringify(pool);
+    for (const secret of [
+      'secret-user',
+      'secret-pass',
+      'db.internal',
+      'secret_db',
+      'sslmode',
+      'postgres://',
+      '5432',
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+
+    // The pool is still identifiable (opaque), and the safe metadata operators
+    // actually need is present.
+    expect(pool?.key).toMatch(/^[0-9a-f]{12}$/);
+    expect(pool?.target).toEqual({
+      provider: 'postgres',
+      database: 'configured',
+      status: 'connected',
+    });
+    expect(pool?.applicationName).toBe('leak-test');
+    expect(pool?.consumers).toContain('leak-test');
+    expect(pool?.poolMax).toBeGreaterThan(0);
+  });
+
+  it('derives a STABLE opaque pool id (same database ⇒ same id across snapshots)', () => {
+    databaseManager.getPool({ url: 'postgres://u:p@db.internal:5432/x' });
+    const first = databaseManager.getStats().pools[0]?.key;
+    const second = databaseManager.getStats().pools[0]?.key;
+    expect(first).toBeDefined();
+    expect(first).toBe(second);
   });
 
   it('readiness probe SELECTs through the shared pool', async () => {

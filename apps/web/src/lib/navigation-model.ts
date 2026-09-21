@@ -99,6 +99,10 @@ export const MISSIONS_DESTINATION: AppDestination = {
     '/execution',
     '/execution-strategy',
     '/loop',
+    // The Application Factory is a BUILD ENGINE over the same mission journey
+    // (goal → plan → build → verify) — an advanced execution surface, not a
+    // Life area and not a top-level product of its own.
+    '/applications',
   ],
   icon: Rocket,
 };
@@ -122,7 +126,16 @@ export const LIFE_DESTINATION: AppDestination = {
   label: 'Life',
   description: 'Career, learning and business — the areas you are growing.',
   route: '/life',
-  match: ['/life', '/career', '/learning', '/business', '/content-agency', '/applications'],
+  match: [
+    '/life',
+    '/career',
+    '/learning',
+    '/business',
+    // Content Agency is a revenue workspace (clients · brands · projects ·
+    // invoicing · analytics) over the existing business services, so it is a
+    // Life → Business sub-experience rather than a separate product.
+    '/content-agency',
+  ],
   icon: Compass,
 };
 
@@ -369,4 +382,42 @@ export function isMobileDestinationId(
   value: string | null | undefined,
 ): value is MobileDestinationId {
   return MOBILE_DESTINATIONS.some((destination) => destination.id === value);
+}
+
+// ── Owned children (UX-01 / UX-02 / UX-05) ──────────────────────────────────
+
+/**
+ * The canonical route that opens a mission's OPERATIONAL detail.
+ *
+ * /missions is the history / discovery surface; an individual mission is
+ * observed and controlled at /autonomous-builder?mission={id} (the existing
+ * canonical operational experience). This helper exists so every surface links
+ * to the SAME place instead of re-inventing the query string.
+ *
+ * Returns null when there is no real mission id — callers must fall back to the
+ * Missions landing page rather than fabricating an id.
+ */
+export function missionDetailRoute(missionId: string | null | undefined): string | null {
+  const id = typeof missionId === 'string' ? missionId.trim() : '';
+  if (id.length === 0) return null;
+  return `/autonomous-builder?mission=${encodeURIComponent(id)}`;
+}
+
+/**
+ * The human-facing parent of a route, derived from the SAME destination match
+ * table used for active state — so a page can never claim a hierarchy the
+ * navigation disagrees with.
+ *
+ * "Is its own landing page" is decided by the destination's canonical `route`,
+ * NOT by the match prefixes (a prefix entry declares ownership of a subtree,
+ * not that the exact path is the destination's home). `/career` is therefore
+ * reported as owned by Life, while `/life` reports no parent.
+ *
+ * Returns null when the route is a destination's own landing route.
+ */
+export function owningDestinationForPathname(pathname: string, search = ''): AppDestination | null {
+  const owner = destinationForPathname(pathname, search);
+  if (owner.action !== undefined) return null;
+  if (owner.route === pathname) return null;
+  return owner;
 }

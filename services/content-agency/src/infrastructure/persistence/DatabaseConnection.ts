@@ -49,8 +49,11 @@ export function initializeDatabase(
   if (db) return Promise.resolve(db);
 
   const cfg = dbConfig ?? getDatabaseConfig();
+  // PROD-02A — log safe metadata only. The connection URL (host, port, database
+  // name) is internal topology and must never reach production logs.
   logger.info('Initializing content-agency database connection', {
-    url: cfg.url.replace(/\/\/.*@/, '//***@'),
+    provider: 'postgres',
+    database: 'configured',
   });
 
   client = databaseManager.getPool({

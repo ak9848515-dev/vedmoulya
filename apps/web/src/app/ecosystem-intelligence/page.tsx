@@ -27,6 +27,7 @@ import { Sparkles, GitBranch, ShieldCheck, Database, Radar } from 'lucide-react'
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 import { ErrorBoundary } from '../../components/ErrorBoundary.js';
 import { TaskIntelligencePanel } from './task-panel.js';
 import { GitHubConnectPanel } from './github-panel.js';
@@ -62,6 +63,11 @@ export default function EcosystemIntelligencePage(): React.JSX.Element {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-slide-up">
+      <AIContextBar
+        sectionId="intelligence"
+        pageLabel="Ecosystem Intelligence"
+        pathname="/ecosystem-intelligence"
+      />
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">

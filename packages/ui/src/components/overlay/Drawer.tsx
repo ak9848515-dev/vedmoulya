@@ -55,6 +55,10 @@ export const DrawerContent = forwardRef<
     className={cn(
       'fixed z-[100] top-0 h-full bg-white shadow-[0_10px_15px_rgba(15,23,42,0.07),0_4px_6px_rgba(15,23,42,0.04)]',
       'overflow-y-auto',
+      // UX-09 — never exceed the viewport on phones: a fixed-width drawer (e.g.
+      // 600px 'lg') must clamp to 100vw at 375/414/768px instead of overflowing
+      // horizontally. Callers may still override via `className`.
+      'max-w-[100vw]',
       side === 'right' ? 'right-0' : 'left-0',
       size === 'sm' && 'w-80',
       size === 'md' && 'w-[400px]',

@@ -12,7 +12,7 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Card, Button } from '@vedmoulya/ui';
 import {
   Rocket,
@@ -26,9 +26,10 @@ import {
   Sparkles,
   Wand2,
 } from 'lucide-react';
-import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { PageContextBar } from '../../components/PageContextBar.js';
+import { usePageContext } from '../../lib/use-page-context.js';
 import { CapabilityPlanBuilder } from '../../components/capability/CapabilityPlanBuilder.js';
 import { useFactoryCreate, useFactoryList } from '../../lib/api-client.js';
 import type { FactoryApplicationDTO } from '@vedmoulya/app-factory';
@@ -213,20 +214,17 @@ export default function ApplicationsPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
-  const { setActiveSection, setBreadcrumbs } = useNavigationStore();
   const [applicationId, setApplicationId] = useState<string | null>(null);
   // EPIC-009: the Product Builder (intelligence layer) is the recommended path;
   // EPIC-013: a Capability Plan mode turns the outcome into a capability plan
   // (steps · candidates · automation · approvals) before the factory runs.
   const [mode, setMode] = useState<'intelligence' | 'capability' | 'factory'>('intelligence');
 
-  useEffect(() => {
-    setActiveSection('applications');
-    setBreadcrumbs([
-      { label: 'Enterprise Intelligence', href: '/intelligence' },
-      { label: 'Application Factory' },
-    ]);
-  }, [setActiveSection, setBreadcrumbs]);
+  // UX-01/UX-02 ownership: the Application Factory is a BUILD ENGINE over the
+  // mission journey (goal → plan → build → verify). It is therefore part of
+  // Missions, not a Life area and not a top-level product of its own — which is
+  // also what `navigation-model.ts` needs to say. See UX-AUDIT / closure report.
+  const context = usePageContext({ pathname: '/applications', label: 'Application Factory' });
 
   if (!hydrated || !sessionReady) {
     return (
@@ -265,10 +263,19 @@ export default function ApplicationsPage(): React.JSX.Element {
 
   return (
     <div className="content-container py-6">
+      {/* UX-01/UX-02 — Missions → Application Factory context */}
+      <div className="mb-4">
+        <PageContextBar
+          context={context}
+          label="Application Factory"
+          description="A build engine inside Missions: it turns an approved plan into a working application, then verifies it."
+        />
+      </div>
+
       <header className="mb-6">
         <div className="flex items-center gap-2 text-sm font-medium text-[#2B5FD9]">
           <Sparkles className="h-4 w-4" />
-          EPIC-009 · Product Intelligence & Requirements Engine
+          Part of Missions · Product Intelligence &amp; Requirements Engine
         </div>
         <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">
           Application Factory

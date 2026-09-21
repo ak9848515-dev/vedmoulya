@@ -13,10 +13,16 @@
 // Security:
 //   - No credentials, tokens, API keys, or connection strings
 //   - Safe metadata only (latency, status, counts)
+//   - PROD-03: the database `error` field passes through the SHARED sanitizer
+//     (apps/web/src/lib/health-error.ts) exactly like /health/ready. This
+//     endpoint is unauthenticated, so a driver error carrying a connection
+//     string, hostname or env var name must never be echoed here either.
+//   - Pool counters are aggregates only (no host, port, user or database name)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextResponse } from 'next/server';
 import { databaseManager } from '@vedmoulya/core';
+import { sanitizeDbError } from '../../../lib/health-error.js';
 
 const startupTime = Date.now();
 
@@ -44,10 +50,11 @@ export async function GET(): Promise<NextResponse> {
     dbError = dbHealth.error;
   } catch (error) {
     dbStatus = 'unhealthy';
-    dbError = error instanceof Error ? error.message : String(error);
+    dbError = error instanceof Error ? error.message : undefined;
   }
 
-  // ── Pool utilization stats (safe metadata only — URLs already redacted) ──
+  // ── Pool utilization stats (aggregate counters only — PROD-02A: a pool
+  // snapshot carries no connection details) ───────────────────────────────
   let poolStats:
     { inFlight: number; peak: number; total: number; pools: number; poolMax: number } | undefined;
   try {
@@ -81,7 +88,8 @@ export async function GET(): Promise<NextResponse> {
       database: {
         status: dbStatus,
         latencyMs: dbLatencyMs,
-        error: dbError,
+        // PROD-03 — sanitized in every mode (see lib/health-error.ts).
+        error: sanitizeDbError(dbError),
       },
       pool: poolStats,
     },

@@ -37,6 +37,7 @@ import {
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 import { ErrorBoundary } from '../../components/ErrorBoundary.js';
 import {
   useLiveIntelligenceStart,
@@ -298,6 +299,11 @@ export default function LiveIntelligencePage(): React.JSX.Element {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-slide-up">
+      <AIContextBar
+        sectionId="intelligence"
+        pageLabel="Live Intelligence"
+        pathname="/live-intelligence"
+      />
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
         <div className="p-2.5 rounded-xl bg-[#F0FDF4] dark:bg-[#14532D]/30">

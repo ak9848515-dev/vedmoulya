@@ -85,6 +85,19 @@ export async function probePort(
         ownerCommand: listener.ownerCommand,
       };
     }
+    // Windows: the socket table is authoritative WHEN readable, but netstat may
+    // be unavailable (not on PATH, or blocked). Never treat "could not read the
+    // socket table" as "the port is free" — that is exactly the silent
+    // port-conflict this module exists to prevent. Fall back to the bind probe
+    // (best-effort on Windows) so an occupied port is still reported occupied.
+    const { readable } = await netstatReadable();
+    if (!readable) {
+      const requestedAvailable = await isPortAvailable(port, host, timeoutMs);
+      if (!requestedAvailable) {
+        const owner = await findPortOwner(port);
+        return { port, host, available: false, ...owner };
+      }
+    }
     return { port, host, available: true };
   }
   // SPRINT-073: run the two availability binds SEQUENTIALLY.  A concurrent
@@ -112,25 +125,53 @@ export async function probePort(
 async function findPortListener(
   port: number,
 ): Promise<{ ownerPid?: number; ownerCommand?: string } | null> {
+  const stdout = await readNetstat();
+  if (stdout === null) return null;
+  // Matches 0.0.0.0:PORT, [::]:PORT, 127.0.0.1:PORT, [::1]:PORT on any
+  // LISTENING line (port is a validated integer, never attacker input).
+  // eslint-disable-next-line security/detect-non-literal-regexp
+  const listenerPattern = new RegExp(`[.:]${port}\\s`, 'i');
+  const line = stdout.split(/\r?\n/).find((l) => /LISTENING/i.test(l) && listenerPattern.test(l));
+  if (!line) return null;
+  const pid = parseInt(line.trim().split(/\s+/).pop() ?? '', 10);
+  return Number.isFinite(pid) ? { ownerPid: pid } : {};
+}
+
+/**
+ * Resolve the netstat executable. On Windows `netstat` lives in System32 but is
+ * not always on the process PATH (minimal shells, restricted environments), so
+ * resolve the absolute path explicitly before falling back to the bare name.
+ */
+function netstatCommand(): string {
+  if (process.platform === 'win32' && process.env.SystemRoot) {
+    return `${process.env.SystemRoot}\\System32\\netstat.exe`;
+  }
+  return 'netstat';
+}
+
+/** Read the OS socket table; null when it cannot be read (never throws). */
+async function readNetstat(): Promise<string | null> {
   try {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const run = promisify(execFile);
-    const { stdout } = await run('netstat', ['-ano'], {
+    const { stdout } = await run(netstatCommand(), ['-ano'], {
       timeout: 2000,
       maxBuffer: 4 * 1024 * 1024,
     });
-    // Matches 0.0.0.0:PORT, [::]:PORT, 127.0.0.1:PORT, [::1]:PORT on any
-    // LISTENING line (port is a validated integer, never attacker input).
-    // eslint-disable-next-line security/detect-non-literal-regexp
-    const listenerPattern = new RegExp(`[.:]${port}\\s`, 'i');
-    const line = stdout.split(/\r?\n/).find((l) => /LISTENING/i.test(l) && listenerPattern.test(l));
-    if (!line) return null;
-    const pid = parseInt(line.trim().split(/\s+/).pop() ?? '', 10);
-    return Number.isFinite(pid) ? { ownerPid: pid } : {};
+    return stdout;
   } catch {
     return null;
   }
+}
+
+/**
+ * Can the OS socket table be read at all? When it cannot, availability must fall
+ * back to a bind probe — "cannot inspect" is NOT the same as "available".
+ */
+async function netstatReadable(): Promise<{ readable: boolean }> {
+  const stdout = await readNetstat();
+  return { readable: stdout !== null };
 }
 
 export async function findPortOwner(
@@ -138,10 +179,8 @@ export async function findPortOwner(
 ): Promise<{ ownerPid?: number; ownerCommand?: string }> {
   try {
     if (process.platform === 'win32') {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const run = promisify(execFile);
-      const { stdout } = await run('netstat', ['-ano'], { timeout: 2000 });
+      const stdout = await readNetstat();
+      if (stdout === null) return {};
       const line = stdout
         .split(/\r?\n/)
         // port is a validated integer (not attacker-controlled) — the RegExp

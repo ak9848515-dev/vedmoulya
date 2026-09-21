@@ -86,6 +86,8 @@ export {
 export type {
   MissionControllerOptions,
   MissionStatusDTO,
+  ProviderWaitReconciliationResult,
+  AbandonedExecutionReconciliationResult,
 } from './application/MissionControllerService.js';
 
 // Infrastructure

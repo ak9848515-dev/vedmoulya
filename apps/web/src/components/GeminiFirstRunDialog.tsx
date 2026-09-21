@@ -489,7 +489,7 @@ export function GeminiFirstRunDialog(): React.JSX.Element {
                     // Completion is REAL account state — record it before leaving.
                     markDone();
                     setHidden(true);
-                    router.push('/dashboard');
+                    router.push('/');
                   }}
                   data-testid="gemini-enter"
                   className="inline-flex h-10 items-center gap-2 rounded-[14px] bg-[#2B5FD9] px-4 text-[14px] font-medium text-white transition-all hover:bg-[#1E4AA8] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus-visible:ring-offset-2"

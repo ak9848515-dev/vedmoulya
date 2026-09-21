@@ -56,7 +56,13 @@ function messageOf(error: unknown): string {
  * message stays in the logs via logger.warn.
  */
 function sanitizeError(message: string): string {
-  const redacted = message.replace(/(postgres(?:ql)?|redis|rediss):\/\/[^\s@]+@/gi, '$1://***@');
+  const redacted = message
+    // Credentials in any connection URL.
+    .replace(/(postgres(?:ql)?|redis|rediss):\/\/[^\s@]+@/gi, '$1://***@')
+    // PROD-02A — internal topology: driver errors name the host/port they
+    // failed on, and this payload is served by the PUBLIC health endpoint.
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?/g, '<redacted-host>')
+    .replace(/\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?/gi, '<redacted-host>');
   return redacted.length > 200 ? `${redacted.slice(0, 200)}…` : redacted;
 }
 

@@ -108,6 +108,20 @@ export type {
   SchedulerRuntimeStatus,
 } from './observability/scheduler-cadence.js';
 
+// ── Mission Provider-Wait Watchdog (FINAL-04 runtime closure) ────────────────
+
+export {
+  startMissionWatchdog,
+  stopMissionWatchdog,
+  getMissionWatchdog,
+} from './observability/mission-watchdog.js';
+export type {
+  MissionWatchdogDriver,
+  MissionWatchdogOptions,
+  MissionWatchdogTickResult,
+  MissionWatchdogStatus,
+} from './observability/mission-watchdog.js';
+
 // ── Router Registry ─────────────────────────────────────────────────────────
 
 export { createAppRouter, router, publicProcedure } from './services/RouterRegistry.js';

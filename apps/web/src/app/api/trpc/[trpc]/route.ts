@@ -170,6 +170,11 @@ function startEagerHydration(api: ApiModule): void {
       // first os.dashboard pass queries it.
       api.startOSHealthScheduler();
       api.startSchedulerCadenceDriver();
+      // FINAL-04 — the provider-wait watchdog rides the same boot boundary:
+      // persisted WAITING_FOR_PROVIDER missions are reconciled on a bounded
+      // heartbeat so a provider returning after the hold can resume them
+      // without a human re-prompting. State-based, so it is restart-safe.
+      api.startMissionWatchdog();
       api.getServices().setSchedulerRuntimeStatusSource(
         () =>
           api.getSchedulerCadenceDriver()?.status() ?? {

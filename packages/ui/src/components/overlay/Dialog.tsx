@@ -59,8 +59,11 @@ export const DialogContent = forwardRef<
     className={cn(
       'fixed z-[100] left-[50%] top-[50%] translate-x-[-50%] translate-y-[-50%]',
       'bg-white rounded-[28px] shadow-[0_10px_15px_rgba(15,23,42,0.07),0_4px_6px_rgba(15,23,42,0.04)]',
-      'p-10 max-h-[85vh] overflow-y-auto',
-      'w-full',
+      // UX-09 — on a phone a dialog must keep a viewport gutter and use mobile
+      // padding so p-10 (40px) does not squeeze the content to nothing against
+      // a 375px edge; wider viewports keep the original 40px rhythm.
+      'p-6 md:p-10 max-h-[85vh] overflow-y-auto',
+      'w-[calc(100vw-24px)]',
       size === 'sm' && 'max-w-sm',
       size === 'md' && 'max-w-lg',
       size === 'lg' && 'max-w-2xl',
@@ -135,7 +138,8 @@ export function DialogFooter({
   return (
     <div
       className={cn(
-        'flex items-center justify-end gap-3 mt-8 pt-6 border-t border-[#E8EDF5]',
+        // UX-09 — footer actions wrap on narrow viewports instead of overflowing.
+        'flex flex-wrap items-center justify-end gap-3 mt-8 pt-6 border-t border-[#E8EDF5]',
         className,
       )}
       {...props}

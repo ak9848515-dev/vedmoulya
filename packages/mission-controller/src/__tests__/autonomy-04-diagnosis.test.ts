@@ -84,6 +84,52 @@ describe('AUTONOMY-04: Failure Diagnosis + Repair', () => {
       expect(diagnosis.rootCause).toBeUndefined();
       expect(diagnosis.confidence).toBe('LOW');
     });
+
+    // FINAL-03A — a NAMED command that really exited non-zero is a real command
+    // failure even when the governed subprocess captured no output text (the
+    // child died before writing any). The process evidence itself is the signal,
+    // so a diagnosable, governed repair stays possible instead of degrading to
+    // an unclassifiable blind retry.
+    it('classifies a non-zero command exit with no captured output as a test failure', () => {
+      const evidence = createEvidence({
+        command: 'npm test',
+        exitCode: 1,
+        stdout: '',
+        stderr: '',
+        timedOut: false,
+      });
+
+      const diagnosis = createDiagnosis({
+        evidence,
+        objective: 'Fix the failing test in the repository',
+        missionContext: 'Repository development mission',
+      });
+
+      expect(diagnosis.rootCause?.category).toBe('TEST_FAILURE');
+      expect(diagnosis.confidence).toBe('HIGH');
+      // The selected strategy is a GOVERNED workspace mutation, never a
+      // fabricated repair and never an unclassifiable retry.
+      expect(diagnosis.suggestedRepair).toBe('MODIFY_TEST');
+      expect(selectRepairStrategy(diagnosis)).toBe('MODIFY_TEST');
+    });
+
+    it('a zero exit with a named command is never invented into a failure', () => {
+      const evidence = createEvidence({
+        command: 'npm test',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      });
+
+      const diagnosis = createDiagnosis({
+        evidence,
+        objective: 'Run command',
+        missionContext: 'Test mission',
+      });
+
+      expect(diagnosis.rootCause).toBeUndefined();
+      expect(diagnosis.confidence).toBe('MEDIUM');
+    });
   });
 
   describe('TEST 2 — REPAIR STRATEGY SELECTION', () => {

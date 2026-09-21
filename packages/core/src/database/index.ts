@@ -6,4 +6,5 @@ export type {
   DatabaseManagerSnapshot,
   DatabasePoolAccessOptions,
   DatabasePoolStats,
+  DatabaseTargetMetadata,
 } from './DatabaseManager.js';

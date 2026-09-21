@@ -45,4 +45,20 @@ export interface ExecutionMemoryObserver {
     query: import('../types/execution-memory-types.js').MemoryQuery,
     count: number,
   ): void;
+  /**
+   * FINAL-04 — recorded when a DURABLE store write fails.
+   *
+   * Learning must never silently claim persistence succeeded: the failure is
+   * surfaced to the observer (the production composition logs it) and the
+   * error is then rethrown, so the caller sees the honest outcome. The
+   * observer holds no authority — it can only observe.
+   */
+  onPersistenceFailure?(
+    error: unknown,
+    context: {
+      operation: 'save' | 'delete';
+      entryId?: string;
+      fingerprint?: string;
+    },
+  ): void;
 }

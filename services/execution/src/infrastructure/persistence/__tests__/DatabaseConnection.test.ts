@@ -110,8 +110,14 @@ describe('Execution DatabaseConnection', () => {
     });
     // initializeDatabase() is synchronous: it throws directly rather than rejecting.
     expect(() => initializeDatabase()).toThrow('connection refused');
+    // PROD-03 — DatabaseManager re-wraps a synchronous pool-construction failure
+    // so a driver error (which can carry the whole DSN in `error.input`) never
+    // reaches a log. The underlying reason survives; only the exact phrasing is
+    // no longer asserted.
     expect(mockLogger.error).toHaveBeenCalledWith('Failed to initialize execution database', {
-      error: 'connection refused',
+      error: expect.stringContaining('connection refused'),
     });
+    const logged = mockLogger.error.mock.calls.at(-1)?.[1] as { error: string };
+    expect(logged.error).not.toMatch(/postgres(?:ql)?:\/\/[^\s@]+@/i);
   });
 });

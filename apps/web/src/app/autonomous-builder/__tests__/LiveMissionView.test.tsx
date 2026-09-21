@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { LiveMissionView } from '../LiveMissionView.js';
 import type { MissionStatusView } from '../../../lib/api-client.js';
@@ -122,16 +122,23 @@ describe('LiveMissionView — honest state display (BLD-024)', () => {
     );
     expect(screen.getByTestId('approval-risk').textContent).toContain('operator approval');
     // Operator-supplied callback only — the UI cannot grant authority itself.
-    fireEvent.click(screen.getByTestId('approve-btn'));
-    await vi.waitFor(() => expect(onApprove).toHaveBeenCalled());
+    // The handler flips `busy` back in a `finally` after the operator action
+    // settles; awaiting the click inside act() drains that microtask in scope.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('approve-btn'));
+    });
+    expect(onApprove).toHaveBeenCalled();
   });
 
   it('WAITING_FOR_APPROVAL: REJECT reaches the operator rejection callback', async () => {
     const onReject = vi.fn(async () => {});
     renderView({ state: 'WAITING_FOR_APPROVAL' }, { onReject });
     expect(screen.getByTestId('approval-panel')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('reject-btn'));
-    await vi.waitFor(() => expect(onReject).toHaveBeenCalled());
+    // Await the click inside act() so the handler's `busy` reset is drained in scope.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('reject-btn'));
+    });
+    expect(onReject).toHaveBeenCalled();
   });
 
   it('WAITING_FOR_APPROVAL: the panel shows the RUNTIME-recorded reason (outcomeReason) verbatim', () => {
@@ -335,7 +342,7 @@ describe('LiveMissionView — honest state display (BLD-024)', () => {
     expect(screen.getByTestId('fact-model').textContent).toBe('qwen2.5-coder:3b');
   });
 
-  it('CANCEL requires explicit confirmation before invoking the backend', () => {
+  it('CANCEL requires explicit confirmation before invoking the backend', async () => {
     const onCancel = vi.fn(async () => {});
     renderView({ state: 'RUNNING' }, { onCancel });
     fireEvent.click(screen.getByTestId('cancel-btn'));
@@ -344,6 +351,8 @@ describe('LiveMissionView — honest state display (BLD-024)', () => {
     expect(onCancel).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('cancel-confirm-btn'));
     expect(onCancel).toHaveBeenCalled();
+    // Flush the handler's pending `busy` reset inside act().
+    await act(async () => {});
   });
 
   it('displays the real activity log; empty log says so instead of fabricating', () => {

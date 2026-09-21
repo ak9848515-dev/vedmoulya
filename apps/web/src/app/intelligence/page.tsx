@@ -48,6 +48,7 @@ import {
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 import type { PipelineDTO, PipelineSummaryDTO, EngineStatusDTO } from '@vedmoulya/intelligence';
 // Deep import (not the package barrel): PIPELINE_CATALOG lives in a pure
 // constant module. Importing it through the barrel would pull the full
@@ -100,6 +101,7 @@ export default function IntelligencePage(): React.JSX.Element {
 
   return (
     <div className="space-y-6">
+      <AIContextBar sectionId="intelligence" pageLabel="Intelligence" pathname="/intelligence" />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3 mb-1">

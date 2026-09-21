@@ -1,0 +1,12 @@
+export { AccountSection } from './AccountSection.js';
+export { ProfileSection } from './ProfileSection.js';
+export { AppearanceSection } from './AppearanceSection.js';
+export { NotificationsSection } from './NotificationsSection.js';
+export { AIPreferencesSection } from './AIPreferencesSection.js';
+export { ConnectedServicesSection } from './ConnectedServicesSection.js';
+export { SecuritySection } from './SecuritySection.js';
+export { DataSection } from './DataSection.js';
+export { PrivacySection } from './PrivacySection.js';
+export { AdvancedSection } from './AdvancedSection.js';
+export { LinkedSurfaceSection } from './LinkedSurfaceSection.js';
+export { SettingsNotice } from './SettingsNotice.js';

@@ -305,7 +305,8 @@ describe('VoicePanel', () => {
     expect(MAX_RECORDING_MS).toBeLessThanOrEqual(60_000);
   });
 
-  it('is keyboard accessible — the mic button is a real focusable <button>', () => {
+  it('is keyboard accessible — the mic button is a real focusable <button>', async () => {
+    mocks.getUserMedia.mockResolvedValue({ getTracks: () => [] } as unknown as MediaStream);
     render(<VoicePanel />);
     const mic = screen.getByLabelText('Start voice input');
     expect(mic.tagName).toBe('BUTTON');
@@ -314,5 +315,10 @@ describe('VoicePanel', () => {
     expect(document.activeElement).toBe(mic);
     fireEvent.click(mic);
     expect(mocks.getUserMedia).toHaveBeenCalled(); // activation starts listening
+    // Await the settled listening state so the async state update is flushed
+    // inside act() rather than landing after the test completes.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Stop recording')).toBeDefined();
+    });
   });
 });

@@ -170,4 +170,23 @@ describe('Tabs primitives', () => {
     expect(screen.getByText('Tab B')).toBeDefined();
     expect(screen.getByText('Content A')).toBeDefined();
   });
+
+  // UX-09 — a 5-tab strip (Missions detail) must stay reachable on a 375px
+  // phone instead of overflowing; the list scrolls horizontally, clamped.
+  it('UX-09 TabsList is scroll-clamped so long tab strips do not overflow', () => {
+    render(
+      <TabsRoot defaultValue="overview">
+        <TabsList aria-label="Mission detail sections">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="plan">Plan</TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
+          <TabsTrigger value="result">Result</TabsTrigger>
+          <TabsTrigger value="advanced">Advanced</TabsTrigger>
+        </TabsList>
+      </TabsRoot>,
+    );
+    const list = screen.getByRole('tablist');
+    expect(list.className).toContain('max-w-full');
+    expect(list.className).toContain('overflow-x-auto');
+  });
 });

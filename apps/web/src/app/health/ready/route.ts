@@ -42,6 +42,7 @@
 
 import { NextResponse } from 'next/server';
 import { databaseManager } from '@vedmoulya/core';
+import { sanitizeDbError } from '../../../lib/health-error.js';
 
 const startupTime = Date.now();
 
@@ -67,30 +68,6 @@ async function ensureGateway(): Promise<void> {
   }
 }
 
-/**
- * Sanitize a database error message for client-facing responses.
- * Strips env var names, connection strings, and infrastructure details
- * while preserving actionable status information.
- */
-function sanitizeDbError(error: string | undefined): string | undefined {
-  if (!error) return undefined;
-  // Collapse common infrastructure errors into safe, generic messages
-  if (/REDIS_URL|redis/i.test(error)) {
-    return 'Required infrastructure not configured';
-  }
-  if (/IDENTITY_DATABASE_URL|DATABASE_URL|database/i.test(error)) {
-    return 'Database connection unavailable';
-  }
-  if (/connection refused|ECONNREFUSED|ETIMEDOUT/i.test(error)) {
-    return 'Database unreachable';
-  }
-  if (/password authentication failed/i.test(error)) {
-    return 'Database authentication failed';
-  }
-  // For any other error, return a safe generic message
-  return 'Database health check failed';
-}
-
 export async function GET(): Promise<NextResponse> {
   await ensureGateway();
 
@@ -113,7 +90,7 @@ export async function GET(): Promise<NextResponse> {
     dbError = dbHealth.error;
   } catch (error) {
     dbStatus = 'unhealthy';
-    dbError = error instanceof Error ? error.message : String(error);
+    dbError = error instanceof Error ? error.message : undefined;
   }
 
   // ── Verdict ──────────────────────────────────────────────────────────
@@ -135,9 +112,12 @@ export async function GET(): Promise<NextResponse> {
       database: {
         status: dbStatus,
         latencyMs: dbLatencyMs,
-        // SECURITY — sanitize error messages to never expose infrastructure
-        // config (env var names, connection strings, Redis/DB URLs) to clients.
-        error: isStrict ? sanitizeDbError(dbError) : dbError,
+        // SECURITY — PROD-03: the error field is ALWAYS sanitized, in every
+        // mode. A development deployment must not be the only path that keeps
+        // a connection string out of an unauthenticated response, and a
+        // configuration accidentally run with NODE_ENV=development in front of
+        // real infrastructure must not leak either.
+        error: sanitizeDbError(dbError),
       },
     },
   };

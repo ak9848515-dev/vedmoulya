@@ -20,6 +20,8 @@ import { useContentAgencyDashboard } from '../../lib/api-client.js';
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { PageContextBar } from '../../components/PageContextBar.js';
+import { usePageContext } from '../../lib/use-page-context.js';
 import { AgencySubNav } from './_components/AgencySubNav.js';
 
 const STATUS_STYLES: Record<string, { label: string; className: string }> = {
@@ -47,12 +49,16 @@ export default function ContentAgencyPage(): React.JSX.Element {
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
   const dashboard = useContentAgencyDashboard(userId);
-  const { setActiveSection, setBreadcrumbs } = useNavigationStore();
+  const { setActiveSection } = useNavigationStore();
+
+  // UX-01/UX-05 ownership: Content Agency is the REVENUE WORKSPACE of
+  // Life → Business (clients, brands, projects, invoicing, analytics), so it
+  // presents itself as a Business sub-experience rather than a product.
+  const context = usePageContext({ pathname: '/content-agency', label: 'Content Agency' });
 
   useEffect(() => {
     setActiveSection('content-agency');
-    setBreadcrumbs([{ label: 'Content Agency', href: '/content-agency' }, { label: 'Dashboard' }]);
-  }, [setActiveSection, setBreadcrumbs]);
+  }, [setActiveSection]);
 
   if (!hydrated || !sessionReady) {
     return (
@@ -78,19 +84,26 @@ export default function ContentAgencyPage(): React.JSX.Element {
 
   return (
     <div className="space-y-6">
+      {/* UX-01/UX-05 — Life → Business → Content Agency context */}
+      <PageContextBar
+        context={context}
+        label="Content Agency"
+        description="The revenue workspace for your Business area: clients, brands, content, invoices and results."
+      />
+
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-[28px] font-heading font-bold text-[#111827] dark:text-[#F1F5F9]">
-              AI Content Agency
+              Content Agency
             </h1>
             <Badge variant="info" size="sm">
-              Revenue Module
+              Part of Business
             </Badge>
           </div>
           <p className="text-[15px] text-[#64748B] dark:text-[#94A3B8]">
-            Clients, brands, and AI-generated content — end to end.
+            Clients, brands, and AI-generated content — the revenue side of your business.
           </p>
         </div>
         <Link

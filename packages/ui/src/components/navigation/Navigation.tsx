@@ -22,7 +22,14 @@ export const TabsList = forwardRef<
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
-    className={cn('inline-flex h-10 items-center gap-1 rounded-lg bg-[#F1F5F9] p-1', className)}
+    className={cn(
+      // UX-09 — a tab strip must stay reachable on a 375px phone instead of
+      // overflowing its container: allow it to scroll horizontally (no wrap),
+      // clamped to the available width. Wide viewports are unaffected.
+      'inline-flex h-10 max-w-full items-center gap-1 overflow-x-auto rounded-lg bg-[#F1F5F9] p-1',
+      '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+      className,
+    )}
     {...props}
   />
 ));

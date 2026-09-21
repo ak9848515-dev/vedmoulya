@@ -262,6 +262,26 @@ export function analyzeRootCause(evidence: CommandFailureEvidence): RootCause | 
     };
   }
 
+  // Structural fallback (FINAL-03A): a NAMED command that really exited
+  // non-zero is a real command failure even when the governed subprocess
+  // captured no stderr/stdout text (e.g. the child died before writing any
+  // output). Text heuristics above stay authoritative whenever text exists;
+  // this only fires when the process evidence itself — not a pattern — is the
+  // whole observable signal, so a diagnosable governed repair is still
+  // possible instead of degrading to an unclassifiable blind retry.
+  // Evidence with no command and no exit status at all is STILL unknown
+  // (never invented), preserving the frozen AUTONOMY-04 behavior.
+  if (
+    evidence.command !== undefined &&
+    evidence.exitCode !== undefined &&
+    evidence.exitCode !== 0
+  ) {
+    return {
+      category: 'TEST_FAILURE',
+      description: `Command exited with code ${String(evidence.exitCode)}`,
+    };
+  }
+
   return undefined;
 }
 

@@ -153,12 +153,23 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
     persistLastTab(tab.id);
   }, [pathname, clientSearch]);
 
-  // Keep the store's session view (active section + breadcrumb) in step with
-  // the URL — consumers read from here, so it must never lag the route.
+  // Keep the store's session view (active section) in step with the URL —
+  // consumers read from here, so it must never lag the route.
+  //
+  // UX-01/UX-02 fix: the shell owns the FALLBACK breadcrumb only. It used to
+  // unconditionally overwrite the trail on every route change, which silently
+  // discarded the richer trail a page had already declared (Life → Career,
+  // AI → Providers, Missions → mission title). Pages that describe their own
+  // place in the hierarchy now keep it; pages that do not still get the
+  // destination label from here.
   useEffect(() => {
     setActiveSection(activeDestination.id);
-    setBreadcrumbs([{ label: activeDestination.label }]);
-  }, [activeDestination, setActiveSection, setBreadcrumbs]);
+    const declared = useNavigationStore.getState().breadcrumbs;
+    const declaredForThisRoute = declared[0]?.href === pathname;
+    if (!declaredForThisRoute) {
+      setBreadcrumbs([{ label: activeDestination.label, href: pathname }]);
+    }
+  }, [activeDestination, pathname, setActiveSection, setBreadcrumbs]);
 
   // Auth screens (login / signup / OAuth callback) and the client portal
   // (AC-002, Module 7) render full-screen without the app chrome (MOB-001).

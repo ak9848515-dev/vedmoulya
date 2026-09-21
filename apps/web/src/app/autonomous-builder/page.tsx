@@ -13,13 +13,16 @@
 
 import React, { useEffect, useState } from 'react';
 import { Card, Button } from '@vedmoulya/ui';
+import { Sparkles as SparklesIcon } from 'lucide-react';
 import { ErrorBoundary } from '../../components/ErrorBoundary.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
+import { useUIStore } from '../../stores/ui-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
 import {
   useMissionStatus,
   useMissionHistory,
   useMissionCreateAndRun,
+  useMissionStart,
   useMissionPause,
   useMissionResume,
   useMissionCancel,
@@ -27,12 +30,15 @@ import {
   useMissionReject,
   type MissionHistoryEntry,
 } from '../../lib/api-client.js';
-import { LiveMissionView } from './LiveMissionView.js';
+import { MissionDetailTabs } from '../missions/_components/MissionDetailTabs.js';
 
 function AutonomousBuilderInner(): React.JSX.Element {
   const { user } = useAuthStore();
   const hydrated = useAuthHydrated();
   const userId = user?.userId ?? '';
+  // UX-08 — the contextual Ask entry opens the canonical experience.
+  const setAiPanelOpen = useUIStore((s) => s.setAiPanelOpen);
+  const setPendingQuestion = useUIStore((s) => s.setPendingQuestion);
 
   // ── Form state ──────────────────────────────────────────────────────
   const [title, setTitle] = useState('Build VedMoulya into a powerful autonomous AI platform');
@@ -51,6 +57,7 @@ function AutonomousBuilderInner(): React.JSX.Element {
   const status = useMissionStatus(userId, missionId);
   const history = useMissionHistory(userId);
   const createAndRun = useMissionCreateAndRun();
+  const start = useMissionStart();
   const pause = useMissionPause();
   const resume = useMissionResume();
   const cancel = useMissionCancel();
@@ -104,6 +111,20 @@ function AutonomousBuilderInner(): React.JSX.Element {
     }
   };
 
+  /**
+   * UX-08 — contextual Ask: open the ONE canonical Ask experience with a
+   * question about THIS mission. It only queues a question and opens the panel;
+   * it never fabricates context or triggers execution.
+   */
+  const handleAskAboutMission = (): void => {
+    if (statusView) {
+      setPendingQuestion(
+        `Help me understand my mission “${statusView.title}” and what to do next.`,
+      );
+    }
+    setAiPanelOpen(true);
+  };
+
   const runCommand = async (mutation: {
     mutateAsync: (input: { userId: string; missionId: string }) => Promise<unknown>;
   }): Promise<void> => {
@@ -125,6 +146,20 @@ function AutonomousBuilderInner(): React.JSX.Element {
 
   const statusView = status.data ?? null;
   const histories: MissionHistoryEntry[] = history.data ?? [];
+
+  // UX-04: `loopPending` is what the live view uses to say "the mission loop is
+  // being driven right now". It must therefore reflect the REAL loop state —
+  // the initial create+run being in flight, or any of the mission's own
+  // control mutations (pause/resume/cancel/approve/reject/start) running.
+  // Backend semantics are untouched: this only reads existing mutation states.
+  const loopPending =
+    createAndRun.isPending ||
+    start.isPending ||
+    pause.isPending ||
+    resume.isPending ||
+    cancel.isPending ||
+    approve.isPending ||
+    reject.isPending;
 
   return (
     <main id="main-content" className="mx-auto w-full max-w-5xl space-y-8 p-6">
@@ -221,22 +256,30 @@ function AutonomousBuilderInner(): React.JSX.Element {
         </div>
       </Card>
 
-      {/* ── Live mission view ─────────────────────────────────────────── */}
+      {/* ── Mission view ─────────────────────────────────────────────────── */}
       {missionId && statusView ? (
-        <Card data-testid="live-mission-card" padding="lg">
-          <h2 className="mb-4 text-base font-semibold">Mission status</h2>
-          <ErrorBoundary>
-            <LiveMissionView
-              status={statusView}
-              loopPending={createAndRun.isPending}
-              onPause={() => runCommand(pause)}
-              onResume={() => runCommand(resume)}
-              onCancel={() => runCommand(cancel)}
-              onApprove={() => runCommand(approve)}
-              onReject={() => runCommand(reject)}
-            />
-          </ErrorBoundary>
-        </Card>
+        <ErrorBoundary>
+          <div className="mb-3 flex justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="ask-about-mission"
+              onClick={handleAskAboutMission}
+            >
+              <SparklesIcon className="h-4 w-4" /> Ask VedMoulya about this mission
+            </Button>
+          </div>
+          <MissionDetailTabs
+            status={statusView}
+            onStart={() => runCommand(start)}
+            onPause={() => runCommand(pause)}
+            onResume={() => runCommand(resume)}
+            onCancel={() => runCommand(cancel)}
+            onApprove={() => runCommand(approve)}
+            onReject={() => runCommand(reject)}
+            loopPending={loopPending}
+          />
+        </ErrorBoundary>
       ) : null}
       {missionId && status.isLoading && !statusView ? (
         <p className="text-sm text-slate-500" data-testid="status-loading">

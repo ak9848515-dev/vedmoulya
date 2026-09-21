@@ -54,6 +54,7 @@ import {
 import { useNavigationStore } from '../../stores/navigation-store.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
+import { AIContextBar } from '../ai/_components/AIContextBar.js';
 import type {
   ContextItemDTO,
   ContextRegistrySummaryDTO,
@@ -173,6 +174,7 @@ export default function ContextPage(): React.JSX.Element {
 
   return (
     <div className="space-y-6">
+      <AIContextBar sectionId="context" pageLabel="Context" pathname="/context" />
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>

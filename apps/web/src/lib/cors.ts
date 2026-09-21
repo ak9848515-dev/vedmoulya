@@ -3,13 +3,20 @@
 // MOB-001 — Mobile Authentication
 // The Capacitor WebView serves the app from https://localhost, so every
 // cross-origin call to the deployed server (gateway + identity auth REST)
-// must be answered with CORS headers. Origin policy mirrors the identity
-// service: API_CORS_ORIGIN (comma-separated) when set, otherwise '*' (the
-// dev default that keeps local development working).
+// must be answered with CORS headers.
+//
+// PROD-03 — the origin policy now comes from the ONE canonical resolver in
+// @vedmoulya/core (resolveCorsOrigins), shared with the Hono service routers:
+//   • development/test — API_CORS_ORIGIN when set, otherwise '*' (unchanged).
+//   • production/staging — an explicit allow-list is required; an absent or
+//     '*'-only value DENIES cross-origin instead of reflecting any Origin, and
+//     loopback entries are rejected by the fail-fast config loader.
 //
 // Consumed exclusively by server route handlers (never imported from client
 // code), so it ships only in the server bundle.
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { resolveCorsOrigins } from '@vedmoulya/core';
 
 /**
  * Resolve the origin we are allowed to echo back, or null when the request
@@ -17,19 +24,17 @@
  * headers and the browser will block it).
  */
 export function resolveCorsOrigin(request: Request): string | null {
-  const configured = (process.env.API_CORS_ORIGIN ?? '*')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const configured = resolveCorsOrigins();
   const origin = request.headers.get('origin');
 
-  if (configured.length === 0 || configured.includes('*')) {
-    // Permissive mode is still credential-safe: echo the request's Origin
-    // header instead of a literal '*' (browsers reject credentialed
-    // responses carrying `Access-Control-Allow-Origin: *`).
+  if (configured.includes('*')) {
+    // Permissive mode (development/test only) is still credential-safe: echo
+    // the request's Origin header instead of a literal '*' (browsers reject
+    // credentialed responses carrying `Access-Control-Allow-Origin: *`).
     return origin ?? '*';
   }
 
+  // Production/staging: an empty allow-list denies every cross-origin request.
   return origin && configured.includes(origin) ? origin : null;
 }
 

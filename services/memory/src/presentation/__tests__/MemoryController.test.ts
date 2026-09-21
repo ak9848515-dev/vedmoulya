@@ -461,3 +461,54 @@ describe('MemoryRoutes CORS configuration', () => {
     expect(res.status).toBe(200);
   });
 });
+
+// PROD-03 — the CORS policy is environment-aware: production/staging never fall
+// back to a permissive wildcard and never accept a loopback allow-list. The
+// canonical resolver lives in @vedmoulya/core (config/cors.ts).
+describe('MemoryRoutes CORS configuration — strict modes', () => {
+  const originalOrigin = process.env.API_CORS_ORIGIN;
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    if (originalOrigin === undefined) delete process.env.API_CORS_ORIGIN;
+    else process.env.API_CORS_ORIGIN = originalOrigin;
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it('denies cross-origin entirely when production has no allow-list (never a wildcard)', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    delete process.env.API_CORS_ORIGIN;
+    const router = createMemoryRouter(createMockService().service);
+    const res = await router.request('/health', {
+      headers: { origin: 'https://evil.example.com' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('never reflects a wildcard-configured origin in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    process.env.API_CORS_ORIGIN = '*';
+    const router = createMemoryRouter(createMockService().service);
+    const res = await router.request('/health', {
+      headers: { origin: 'https://evil.example.com' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('drops loopback entries from a production allow-list', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    process.env.API_CORS_ORIGIN = 'http://localhost:3000,https://app.vedmoulya.com';
+    const router = createMemoryRouter(createMockService().service);
+    const denied = await router.request('/health', {
+      headers: { origin: 'http://localhost:3000' },
+    });
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+    const allowed = await router.request('/health', {
+      headers: { origin: 'https://app.vedmoulya.com' },
+    });
+    expect(allowed.headers.get('access-control-allow-origin')).toBe('https://app.vedmoulya.com');
+  });
+});
