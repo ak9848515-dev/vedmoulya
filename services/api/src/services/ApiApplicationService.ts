@@ -2371,7 +2371,8 @@ export class ApiApplicationService {
     return Boolean(
       process.env.DATABASE_URL?.trim() ||
       process.env.POSTGRES_URL?.trim() ||
-      process.env.NEON_DATABASE_URL?.trim(),
+      process.env.NEON_DATABASE_URL?.trim() ||
+      process.env.IDENTITY_DATABASE_URL?.trim(),
     );
   }
 
