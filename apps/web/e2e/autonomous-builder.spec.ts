@@ -40,7 +40,10 @@ test.describe('Autonomous Builder (BLD-024)', () => {
     // Either the RUN succeeds and a live view appears, or an honest error is
     // displayed (e.g. no providers registered in this environment). The UI
     // must never show fake progress in either case.
-    const liveCard = page.getByTestId('live-mission-card');
+    // The live mission view's test id is `live-mission-view` (LiveMissionView.tsx).
+    // The spec previously looked for `live-mission-card`, which exists NOWHERE in
+    // the app — so the poll could never resolve, even when the UI was correct.
+    const liveCard = page.getByTestId('live-mission-view');
     const runError = page.getByTestId('run-error');
     await expect
       .poll(async () => (await liveCard.isVisible()) || (await runError.isVisible()), {
@@ -69,7 +72,7 @@ test.describe('Autonomous Builder (BLD-024)', () => {
 
     // ── Browser refresh: must NOT create a duplicate mission or reset state ──
     await page.reload();
-    await expect(page.getByTestId('live-mission-card')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('live-mission-view')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('mission-state')).toBeVisible();
 
     // The same mission is still being observed (URL carries ?mission=…).
@@ -77,13 +80,13 @@ test.describe('Autonomous Builder (BLD-024)', () => {
 
     // Duplicate RUN guard: the backend serializes per mission; a second
     // start of the same mission must not create a second live card.
-    const cardCountBefore = await page.getByTestId('live-mission-card').count();
+    const cardCountBefore = await page.getByTestId('live-mission-view').count();
     await page
       .getByTestId('run-mission-btn')
       .click()
       .catch(() => undefined);
     await page.waitForTimeout(2_000);
-    expect(await page.getByTestId('live-mission-card').count()).toBe(cardCountBefore);
+    expect(await page.getByTestId('live-mission-view').count()).toBe(cardCountBefore);
   });
 
   test('mission history lists previously created missions for the session user', async ({

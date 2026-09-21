@@ -16,7 +16,7 @@
 
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useNavigationStore } from '../stores/navigation-store.js';
 import {
   destinationForPathname,
@@ -62,6 +62,27 @@ export function usePageContext({
 
   const isOwnerLanding = owner.route === pathname;
 
+  // `trailing` defaults to a fresh `[]` literal on every render, so using the
+  // array itself as an effect dependency made this effect re-run on EVERY
+  // render. Each run calls `setBreadcrumbs([...])`, which publishes a new array
+  // into the navigation store and re-renders every subscriber — an unbounded
+  // render loop that React aborts with error #185 "Maximum update depth
+  // exceeded".
+  //
+  // That loop is what crashed the AI surfaces that render AIContextBar (which
+  // calls this hook without `trailing`): /ai-world, /brain,
+  // /ecosystem-intelligence, /capability-marketplace and /live-intelligence.
+  // Each crashed into its ErrorBoundary, so G8 saw "Unable to load page"
+  // instead of the expected heading and never reached the rest of the journey.
+  //
+  // Depend on a stable structural signature of the trail's CONTENTS instead of
+  // the identity of the array that happens to carry them.
+  const trailingKey = trailing
+    .map((crumb) => `${crumb.label}\u0000${crumb.href ?? ''}`)
+    .join('\u0001');
+  const trailingRef = useRef(trailing);
+  trailingRef.current = trailing;
+
   useEffect(() => {
     if (activeId !== undefined) {
       setActiveSection(activeId);
@@ -71,7 +92,7 @@ export function usePageContext({
     setBreadcrumbs([
       { label: owner.label, href: owner.route },
       ...(isOwnerLanding ? [] : [{ label, href: pathname }]),
-      ...trailing.map((crumb) => ({ label: crumb.label, href: crumb.href })),
+      ...trailingRef.current.map((crumb) => ({ label: crumb.label, href: crumb.href })),
     ]);
   }, [
     activeId,
@@ -83,7 +104,7 @@ export function usePageContext({
     pathname,
     setActiveSection,
     setBreadcrumbs,
-    trailing,
+    trailingKey,
   ]);
 
   return {

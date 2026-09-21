@@ -152,46 +152,79 @@ test.describe('Identity — Application Shell', () => {
 // Verify the dashboard loads, sections render, and data flows correctly
 // ─────────────────────────────────────────────────────────────────────────────
 
+// NOTE (UX-03): apps/web/src/app/page.tsx was rewritten by commit 46a525f
+// ("freeze production deployment baseline", 249+/307-). The dashboard IA is
+// now: Greeting → Today's Priority → Primary Mission → VedMoulya Insight →
+// Life Momentum → Recent Activity → Ask VedMoulya, with a progressive-
+// disclosure "Explore more" <details> at the end. The assertions below still
+// covered the PRE-rewrite dashboard ('Continue Your Journey', 'Life Score',
+// a 'Quick Actions' section, and a capitalised 'Good Morning' greeting that
+// now renders lowercase from timeGreeting()), so every one of them timed out.
+// They are re-pointed at the real UX-03 surfaces, keeping each test's intent.
 test.describe('Dashboard — Home Page', () => {
   test('should display the dashboard heading', async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
-    // The hero section should contain a greeting. Wait for client-side
-    // hydration to complete (the dashboard is a client component gated on
-    // auth hydration + session restore) — networkidle can resolve before
-    // the Zustand store finishes rehydrating from localStorage.
-    const greeting = page.getByText(/Good (Morning|Afternoon|Evening)/);
+    // The hero <h1> is the time-of-day greeting: `{timeGreeting()}, {name}`
+    // e.g. "Good afternoon, E2E User". timeGreeting() returns the second word
+    // LOWERCASE ('Good morning' | 'Good afternoon' | 'Good evening'), so match
+    // case-insensitively rather than against the old capitalised wording.
+    //
+    // Assert on the accessible ROLE (heading) instead of getByText: the <h1>
+    // mixes a text node with a <span> for the name, and role+name is the
+    // stable contract. Wait first — the dashboard is a client component gated
+    // on auth hydration + session restore, which can resolve after networkidle.
+    const greeting = page.getByRole('heading', {
+      level: 1,
+      name: /Good (morning|afternoon|evening)/i,
+    });
     await greeting.waitFor({ state: 'visible', timeout: 30_000 });
     await expect(greeting).toBeVisible();
   });
 
-  test('should render action buttons in the hero', async ({ page }) => {
+  test('should render the hero priority and its continue action', async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
-    // Continue Your Journey button
-    await expect(page.getByText('Continue Your Journey')).toBeVisible();
+    // UX-03 replaces the old hero buttons ('Continue Your Journey' / 'AI
+    // Summary') with Today's Priority. The hero always renders a heading and
+    // the greeting <h1> that owns it, whether or not a mission is active, so
+    // assert the hero header via its own h1 (unambiguous — a bare `header`
+    // locator could also match a mission card header lower down the page).
+    const heroHeader = page.locator('header:has(h1)').first();
+    await heroHeader.waitFor({ state: 'visible', timeout: 30_000 });
+    await expect(heroHeader.getByRole('heading', { level: 1 })).toBeVisible();
 
-    // AI Summary button — use getByRole to disambiguate from the <p> heading
-    // in the AI Summary section which also contains the text 'AI Summary'.
-    await expect(page.getByRole('button', { name: 'AI Summary' })).toBeVisible();
+    // Today's Priority is the hero's action surface — present in both the
+    // active-mission and the caught-up states.
+    await expect(page.getByText(/Today's Priority/)).toBeVisible();
   });
 
-  test('should display the Life Score metric', async ({ page }) => {
+  test('should display the Life Momentum metrics', async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
-    // Life score indicator — appears in both the hero stats row and the AI
-    // Insights section, so use .first() to avoid strict-mode violation.
-    await expect(page.getByText(/Life Score/).first()).toBeVisible();
+    // UX-03 replaces the old 'Life Score' hero metric with the Life Momentum
+    // region (career · learning · business), which is the dashboard's current
+    // metrics surface. It is data-independent: the region renders with the
+    // module statuses even for a brand-new session.
+    const momentum = page.getByRole('region', { name: /Life Momentum/i });
+    await momentum.waitFor({ state: 'visible', timeout: 30_000 });
+    await expect(momentum).toBeVisible();
   });
 
-  test('should render Quick Actions section', async ({ page }) => {
+  test('should render the progressive-disclosure detail section', async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
-    // Quick actions are inside a collapsed <details> element (SPRINT-043C
-    // progressive-disclosure IA). Expand it first, then assert visibility.
-    await page.locator('summary').filter({ hasText: 'Deep dive' }).click();
-    const quickActions = page.locator('section').filter({ hasText: 'Quick Actions' });
-    await expect(quickActions).toBeVisible();
+    // UX-03 keeps the SPRINT-043C progressive-disclosure pattern but renamed
+    // the collapsed <details> from 'Deep dive' to 'Explore more — journey,
+    // execution, modules, recommendations'. Expand it, then assert its
+    // detail content is revealed.
+    const disclosure = page.locator('summary').filter({ hasText: 'Explore more' });
+    await disclosure.waitFor({ state: 'visible', timeout: 30_000 });
+    await disclosure.click();
+
+    // The revealed body is the <details>' following sibling container. Assert on
+    // real content that only exists inside it — Journey Overview always renders.
+    await expect(page.getByText('Journey Overview')).toBeVisible();
   });
 });
 
