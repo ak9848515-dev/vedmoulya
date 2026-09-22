@@ -280,6 +280,15 @@ describe('ProvidersOverview (simplified AI Providers screen)', () => {
     expect(onAddAIOpenChange).toHaveBeenCalledWith(true);
   });
 
+  it('explains an empty registry instead of claiming it is still loading', async () => {
+    renderOverview({ providers: [], addAIOpen: true });
+
+    expect(await screen.findByTestId('add-ai-registry-empty', {}, { timeout: 5000 })).toBeDefined();
+    expect(screen.getByText(/has not been seeded yet/i)).toBeDefined();
+    // The misleading "still loading" copy must not appear for an empty registry.
+    expect(screen.queryByText(/still loading its provider registry/i)).toBeNull();
+  });
+
   it('walks the ⋮ menu with the keyboard and returns focus on Escape', async () => {
     renderOverview();
     const trigger = screen.getByRole('button', { name: /more actions for gemini/i });

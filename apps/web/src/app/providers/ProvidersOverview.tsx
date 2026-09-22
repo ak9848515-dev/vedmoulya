@@ -440,6 +440,9 @@ export function ProvidersOverview({
         // whole app — the new AI simply appears in the list.
         onRefresh();
       }}
+      // An EMPTY list is an empty registry (the dialog only mounts once the
+      // registry loaded), so offer an actionable retry instead of a loading copy.
+      onRetry={onRefresh}
     />
   );
 

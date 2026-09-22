@@ -5,7 +5,8 @@
 // Proves the preset-driven Simple mode contract:
 //   - Google/OpenAI/Anthropic/DeepSeek show ONLY credential + model + actions
 //     (no endpoint URL, no protocol, no deployment fields, no adapter ids)
-//   - Ollama shows a server URL instead of a key
+//   - Ollama detects local models on open (no key, no endpoint field first) and
+//     lets the user pick from the discovered list
 //   - the model dropdown is populated ONLY from real discovery results
 //   - Test Connection → Save & Enable records enable + preferred model via
 //     the EXISTING owner-scoped provider preferences service (no credential
@@ -62,6 +63,10 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
     mocks.runtimeProviders = [];
     mocks.setEnabledMutate.mockResolvedValue({});
     mocks.setPrefsMutate.mockResolvedValue({});
+    // Local providers auto-detect on open. Default to a pending probe so tests
+    // that don't exercise discovery see no late state updates; tests that do
+    // override this with a resolved/rejected value.
+    mocks.connectMutate.mockImplementation(() => new Promise(() => {}));
   });
 
   // ── Field minimality per provider (Phase 3) ──────────────────────────────
@@ -88,18 +93,36 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
       },
     );
 
-    it('ollama: asks for a server URL, never an API key', () => {
+    it('ollama: detects local models on open — no API key, no endpoint field first', async () => {
+      mocks.connectMutate.mockResolvedValue(
+        connectedResult({
+          message: 'Connected successfully — 1 model available on Ollama.',
+          modelCount: 1,
+          models: [{ id: 'llama3.2', name: 'llama3.2' }],
+        }),
+      );
       render(<SimpleProviderConfig userId="u1" presetId="ollama" />);
 
-      expect(screen.getByTestId('simple-provider-server-url')).toBeDefined();
-      expect((screen.getByTestId('simple-provider-server-url') as HTMLInputElement).value).toBe(
+      // A local server never asks for a credential.
+      expect(screen.queryByTestId('simple-provider-key')).toBeNull();
+      // The running server is named; the raw endpoint stays behind a disclosure.
+      expect(screen.getByTestId('simple-provider-server-current').textContent).toBe(
         'http://localhost:11434',
       );
-      expect(screen.queryByTestId('simple-provider-key')).toBeNull();
+      expect(screen.queryByTestId('simple-provider-server-url')).toBeNull();
+
+      // Discovery runs automatically — the user only has to pick from the list.
+      const dropdown = await waitFor(() => screen.getByTestId('simple-provider-model'));
+      expect((dropdown as HTMLSelectElement).value).toBe('llama3.2');
+      expect(mocks.connectMutate).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'u1', family: 'ollama' }),
+      );
     });
 
-    it('pre-fills the Ollama server URL from the preset default endpoint', () => {
+    it('ollama: reveals the address field on demand, pre-filled with the preset default', () => {
       render(<SimpleProviderConfig userId="u1" presetId="ollama" />);
+
+      fireEvent.click(screen.getByTestId('simple-provider-server-toggle'));
       const input = screen.getByTestId('simple-provider-server-url') as HTMLInputElement;
       expect(input.value).toBe('http://localhost:11434');
     });
@@ -311,6 +334,96 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
       render(<SimpleProviderConfig userId="u1" presetId="openai" />);
       // The openai preset has discovery; assert the manual input is NOT used.
       expect(screen.queryByTestId('simple-provider-model-manual')).toBeNull();
+    });
+  });
+
+  // ── Ollama end-to-end: auto-detect → choose → Save & Enable ──────────────
+  describe('Ollama end-to-end (no key, no manual test step)', () => {
+    const localModels = [
+      { id: 'llama3.2', name: 'Llama 3.2' },
+      { id: 'qwen2.5:7b', name: 'Qwen 2.5 7B' },
+    ];
+
+    it('auto-detects local models, then saves the chosen one through the gateway', async () => {
+      mocks.connectMutate.mockResolvedValue(
+        connectedResult({
+          message: 'Connected successfully — 2 models available on Ollama.',
+          modelCount: 2,
+          models: localModels,
+        }),
+      );
+      const onConfigured = vi.fn();
+      render(<SimpleProviderConfig userId="u1" presetId="ollama" onConfigured={onConfigured} />);
+
+      // 1. Auto-detection fires on open — against the local endpoint, no key.
+      await waitFor(() => {
+        expect(mocks.connectMutate).toHaveBeenCalledTimes(1);
+      });
+      const probe = mocks.connectMutate.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(probe).toMatchObject({
+        userId: 'u1',
+        family: 'ollama',
+        endpointUrl: 'http://localhost:11434',
+      });
+      expect(probe.apiKey).toBeUndefined();
+
+      // 2. The dropdown is populated from the REAL discovered models, with the
+      //    preset default preselected because Ollama really offers it.
+      const dropdown = (await waitFor(() =>
+        screen.getByTestId('simple-provider-model'),
+      )) as HTMLSelectElement;
+      expect(dropdown.options.length).toBe(2);
+      expect(dropdown.value).toBe('llama3.2');
+
+      // 3. The user only has to pick a model…
+      fireEvent.change(dropdown, { target: { value: 'qwen2.5:7b' } });
+      expect(dropdown.value).toBe('qwen2.5:7b');
+
+      // 4. …and Save & Enable records the owner-scoped, non-secret config.
+      const save = screen.getByTestId('simple-provider-save') as HTMLButtonElement;
+      expect(save.disabled).toBe(false);
+      fireEvent.click(save);
+
+      await waitFor(() => {
+        expect(mocks.setEnabledMutate).toHaveBeenCalledWith({
+          userId: 'u1',
+          providerId: 'ollama',
+          enabled: true,
+        });
+      });
+      expect(mocks.setPrefsMutate).toHaveBeenCalledWith({
+        userId: 'u1',
+        preferredProviderId: 'ollama',
+        preferredModelId: 'qwen2.5:7b',
+      });
+      await waitFor(() => expect(onConfigured).toHaveBeenCalledWith('Qwen 2.5 7B'));
+    });
+
+    it('re-scans the edited address when the user changes the local server', async () => {
+      mocks.connectMutate.mockResolvedValue(
+        connectedResult({
+          message: 'Connected successfully — 1 model available on Ollama.',
+          modelCount: 1,
+          models: [{ id: 'llama3.2', name: 'llama3.2' }],
+        }),
+      );
+      render(<SimpleProviderConfig userId="u1" presetId="ollama" />);
+      await waitFor(() => screen.getByTestId('simple-provider-model'));
+
+      fireEvent.click(screen.getByTestId('simple-provider-server-toggle'));
+      fireEvent.change(screen.getByTestId('simple-provider-server-url'), {
+        target: { value: 'http://192.168.1.50:11434' },
+      });
+      fireEvent.click(screen.getByTestId('simple-provider-test'));
+
+      await waitFor(() => {
+        expect(mocks.connectMutate).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            family: 'ollama',
+            endpointUrl: 'http://192.168.1.50:11434',
+          }),
+        );
+      });
     });
   });
 

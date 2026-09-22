@@ -35,6 +35,8 @@ export function AddAIDialog({
   userId,
   onSelect,
   onProviderAdded,
+  loading = false,
+  onRetry,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -44,6 +46,15 @@ export function AddAIDialog({
   onSelect: (family: string) => void;
   /** Fired after a custom provider is registered. */
   onProviderAdded?: () => void;
+  /**
+   * True while the registry read is still in flight. The dialog is normally
+   * mounted only once the registry has loaded, so an empty list means an EMPTY
+   * registry — never "still loading". Callers that can render during a read
+   * pass this so the two states are never conflated.
+   */
+  loading?: boolean;
+  /** Re-read the provider registry (offered with the empty-registry message). */
+  onRetry?: () => void;
 }): React.JSX.Element {
   const [customOpen, setCustomOpen] = useState(false);
 
@@ -86,9 +97,39 @@ export function AddAIDialog({
         ) : (
           <div className="space-y-2">
             {options.length === 0 ? (
-              <p className="py-4 text-center text-[13px] text-[#64748B] dark:text-[#94A3B8]">
-                VedMoulya is still loading its provider registry. Try again in a moment.
-              </p>
+              loading ? (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className="py-4 text-center text-[13px] text-[#64748B] dark:text-[#94A3B8]"
+                >
+                  VedMoulya is still loading its provider registry. Try again in a moment.
+                </p>
+              ) : (
+                <div
+                  role="alert"
+                  data-testid="add-ai-registry-empty"
+                  className="space-y-2.5 py-4 text-center"
+                >
+                  <p className="text-[13px] font-semibold text-[#374151] dark:text-[#E2E8F0]">
+                    No built-in AI providers are available.
+                  </p>
+                  <p className="text-[12.5px] text-[#64748B] dark:text-[#94A3B8]">
+                    This deployment&apos;s provider registry is empty — the platform provider
+                    catalog has not been seeded yet.
+                  </p>
+                  {onRetry ? (
+                    <button
+                      type="button"
+                      onClick={onRetry}
+                      data-testid="add-ai-retry"
+                      className="inline-flex h-9 items-center rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-3.5 text-[13px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:border-[#2B5FD9]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] transition-colors"
+                    >
+                      Try again
+                    </button>
+                  ) : null}
+                </div>
+              )
             ) : (
               <ul className="space-y-2" data-testid="add-ai-options">
                 {options.map((option) => {

@@ -18,9 +18,9 @@ import {
   createProviderCredentialCipher,
 } from '@vedmoulya/providers';
 import type { CapabilityRepository } from '@vedmoulya/capabilities';
-import { PostgresCapabilityRepository } from '@vedmoulya/capabilities';
+import { PostgresCapabilityRepository, createCatalogCapabilities } from '@vedmoulya/capabilities';
 import type { ContextRepository } from '@vedmoulya/context';
-import { PostgresContextRepository } from '@vedmoulya/context';
+import { PostgresContextRepository, createCatalogContext } from '@vedmoulya/context';
 import type { ExecutionStrategyRepository } from '@vedmoulya/execution-strategy';
 import {
   InMemoryExecutionStrategyRepository,
@@ -28,7 +28,11 @@ import {
   createCatalogStrategies,
 } from '@vedmoulya/execution-strategy';
 import type { GoalRepository, TaskRepository } from '@vedmoulya/goals';
-import { PostgresGoalRepository, PostgresTaskRepository } from '@vedmoulya/goals';
+import {
+  PostgresGoalRepository,
+  PostgresTaskRepository,
+  createCatalogGoals,
+} from '@vedmoulya/goals';
 import type { PipelineRepository } from '@vedmoulya/intelligence';
 import { PostgresPipelineRepository } from '@vedmoulya/intelligence';
 import type { LearningRepository } from '@vedmoulya/learning-intelligence';
@@ -206,12 +210,23 @@ export function createEISql(applicationName: string): ReturnType<typeof postgres
 interface DeferredTable {
   repo: { ensureTable(): Promise<void> };
   label: string;
+  /**
+   * Optional idempotent bootstrap run ONCE immediately after ensureTable()
+   * succeeds (e.g. seeding an empty platform catalog). It rides the same
+   * sequential boot pass as the DDL, so a query can never observe a
+   * created-but-unseeded registry.
+   */
+  seed?: () => Promise<void>;
 }
 const deferredTables: DeferredTable[] = [];
 
-function ensureTable(repo: { ensureTable(): Promise<void> }, label: string): void {
+function ensureTable(
+  repo: { ensureTable(): Promise<void> },
+  label: string,
+  seed?: () => Promise<void>,
+): void {
   if (isTestEnv()) return;
-  deferredTables.push({ repo, label });
+  deferredTables.push(seed ? { repo, label, seed } : { repo, label });
 }
 
 /**
@@ -253,12 +268,13 @@ export async function awaitAllEngineEnsureTables(): Promise<void> {
   ddlInProgress = true;
   engineTablesRunCount = count;
   engineTablesPromise = (async (): Promise<void> => {
-    for (const { repo, label } of deferredTables) {
+    for (const { repo, label, seed } of deferredTables) {
       try {
         await repo.ensureTable();
+        if (seed) await seed();
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
-        logger.error(`${label} table creation failed`, { error: message });
+        logger.error(`${label} table initialization failed`, { error: message });
       }
     }
     ddlInProgress = false;
@@ -426,10 +442,62 @@ export function createProductionProviderRepository(): ProviderRepository {
 
   const sql = createEISql('vedmoulya-provider-registry');
   const repo = new PostgresProviderRepository(sql);
-  ensureTable(repo, 'Provider registry');
+  // A fresh strict-environment registry is EMPTY: ensureTable() only runs DDL.
+  // Without seeding it, the AI Providers screen (and every routing path that
+  // reads the registry) sees zero built-in providers — the "still loading its
+  // provider registry" state on Add AI. Seed the SAME authoritative platform
+  // catalog the development/test registry is seeded with
+  // (InMemoryProviderRepository(createCatalogProviders())), but ONLY when the
+  // table has no rows so an operator-managed registry is never overwritten.
+  ensureTable(repo, 'Provider registry', async () => {
+    await seedProviderRegistryIfEmpty(repo);
+  });
 
   providerRegistrySlot.instance = repo;
   return repo;
+}
+
+/**
+ * Seed a platform catalog into a registry that has NO rows.
+ *
+ * Idempotent by construction — a registry that already holds rows is left
+ * untouched (returns 0), so an operator-managed registry is never overwritten.
+ * It rides the same sequential boot DDL pass as ensureTable(), so no query can
+ * observe a created-but-unseeded registry, and it consumes the existing
+ * repository contract + the existing catalog — never a second source of truth.
+ *
+ * @returns the number of rows written (0 when the registry was non-empty).
+ */
+export async function seedRegistryIfEmpty<T>(
+  count: () => Promise<number>,
+  catalog: readonly T[],
+  saveEach: (items: readonly T[]) => Promise<void>,
+): Promise<number> {
+  if ((await count()) > 0) return 0;
+  await saveEach(catalog);
+  return catalog.length;
+}
+
+/**
+ * Seed the platform provider catalog into a registry that has NO rows.
+ *
+ * This is the strict-environment counterpart of the development/test registry
+ * seeding in createProductionProviderRepository() and mirrors the
+ * operator-facing `npm run seed:ei` migration.
+ *
+ * @returns the number of providers written (0 when the registry was non-empty).
+ */
+export async function seedProviderRegistryIfEmpty(
+  repo: Pick<ProviderRepository, 'count' | 'save'>,
+  catalog: ReturnType<typeof createCatalogProviders> = createCatalogProviders(),
+): Promise<number> {
+  return seedRegistryIfEmpty(
+    () => repo.count(),
+    catalog,
+    async (items) => {
+      for (const provider of items) await repo.save(provider);
+    },
+  );
 }
 
 /**
@@ -504,7 +572,17 @@ export function createProductionCapabilityRepository(): CapabilityRepository {
 
   const sql = createEISql('vedmoulya-capability-registry');
   const repo = new PostgresCapabilityRepository(sql);
-  ensureTable(repo, 'Capability registry');
+  // A fresh registry only gets DDL from ensureTable(), so seed the platform
+  // catalog when it is empty (same convention as the provider registry).
+  ensureTable(repo, 'Capability registry', async () => {
+    await seedRegistryIfEmpty(
+      () => repo.count(),
+      createCatalogCapabilities(),
+      async (items) => {
+        for (const capability of items) await repo.save(capability);
+      },
+    );
+  });
 
   capabilityRegistrySlot.instance = repo;
   return repo;
@@ -521,7 +599,15 @@ export function createProductionContextRepository(): ContextRepository {
 
   const sql = createEISql('vedmoulya-context-registry');
   const repo = new PostgresContextRepository(sql);
-  ensureTable(repo, 'Context registry');
+  // Seed the platform context catalog into an empty registry (see provider
+  // registry — a fresh Postgres table otherwise stays empty after ensureTable).
+  ensureTable(repo, 'Context registry', async () => {
+    await seedRegistryIfEmpty(
+      () => repo.count(),
+      createCatalogContext(),
+      (items) => repo.saveMany([...items]),
+    );
+  });
 
   contextRegistrySlot.instance = repo;
   return repo;
@@ -552,7 +638,15 @@ export function createProductionExecutionStrategyRepository(): ExecutionStrategy
 
   const sql = createEISql('vedmoulya-execution-strategy');
   const repo = new PostgresExecutionStrategyRepository(sql);
-  ensureTable(repo, 'Execution strategy registry');
+  // Seed the platform strategy catalog into an empty registry (strict
+  // environments use Postgres, where ensureTable() only runs DDL).
+  ensureTable(repo, 'Execution strategy registry', async () => {
+    await seedRegistryIfEmpty(
+      () => repo.count(),
+      createCatalogStrategies(),
+      (items) => repo.saveMany([...items]),
+    );
+  });
 
   strategyRegistrySlot.instance = repo;
   return repo;
@@ -569,7 +663,17 @@ export function createProductionGoalRepository(): GoalRepository {
 
   const sql = createEISql('vedmoulya-goal-registry');
   const repo = new PostgresGoalRepository(sql);
-  ensureTable(repo, 'Goal registry');
+  // Seed the platform goal catalog into an empty registry. GoalRepository has
+  // no count(), so emptiness is read from listAll().
+  ensureTable(repo, 'Goal registry', async () => {
+    await seedRegistryIfEmpty(
+      async () => (await repo.listAll()).length,
+      createCatalogGoals(),
+      async (items) => {
+        for (const goal of items) await repo.save(goal);
+      },
+    );
+  });
 
   goalRegistrySlot.instance = repo;
   return repo;

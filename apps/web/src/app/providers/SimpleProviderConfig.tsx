@@ -23,7 +23,7 @@
 
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Loader2,
   CheckCircle2,
@@ -78,11 +78,17 @@ export function SimpleProviderConfig({
   );
   const serverManagedAvailable =
     preset.presetId === 'google' && runtimeByFamily.get('google')?.status === 'CONFIGURED';
+  // Local providers (Ollama) need no credential and their models can be read
+  // straight from the running server — so the panel can detect them on open
+  // and the user only has to scroll the model list and pick one.
+  const isLocalProvider = preset.credentialType === 'none_local';
+  const autoDetected = useRef(false);
 
   const [useOwnKey, setUseOwnKey] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [serverUrl, setServerUrl] = useState(preset.defaultEndpoint);
+  const [showServerUrl, setShowServerUrl] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<ProviderConnectionResultDTO | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -129,6 +135,23 @@ export function SimpleProviderConfig({
       setTesting(false);
     }
   }, [connect, userId, preset, apiKey, serverUrl, serverManagedAvailable, useOwnKey]);
+
+  // Local providers: detect the available models as soon as the panel opens so
+  // the user never has to press "Test Connection" first — they just choose from
+  // the list. Cloud providers keep the explicit step (a key must be supplied).
+  useEffect(() => {
+    if (!isLocalProvider || autoDetected.current) return;
+    autoDetected.current = true;
+    void handleTest();
+  }, [isLocalProvider, handleTest]);
+
+  // If the local server cannot be reached (or answers with an error), surface
+  // the address field so the user can correct it and scan again.
+  useEffect(() => {
+    if (isLocalProvider && (requestError !== null || (result !== null && !result.connected))) {
+      setShowServerUrl(true);
+    }
+  }, [isLocalProvider, requestError, result]);
 
   const canSave = Boolean(result?.connected);
 
@@ -257,22 +280,43 @@ export function SimpleProviderConfig({
           </label>
         )
       ) : (
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[12px] font-medium text-[#374151] dark:text-[#E2E8F0]">
-            Server URL
-          </span>
-          <input
-            type="text"
-            value={serverUrl}
-            onChange={(e) => {
-              setServerUrl(e.target.value);
-            }}
-            placeholder="http://localhost:11434"
-            data-testid="simple-provider-server-url"
-            className="w-full h-10 rounded-[12px] border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] px-3 text-[13px] text-[#111827] dark:text-[#F8FAFC] focus:outline-none focus:border-[#2B5FD9]"
-          />
+        <div className="flex flex-col gap-1.5" data-testid="simple-provider-local-server">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[12px] font-medium text-[#374151] dark:text-[#E2E8F0]">
+              Local server
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setShowServerUrl((prev) => !prev);
+              }}
+              data-testid="simple-provider-server-toggle"
+              className="text-[11.5px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] rounded"
+            >
+              {showServerUrl ? 'Done' : 'Change address'}
+            </button>
+          </div>
+          {showServerUrl ? (
+            <input
+              type="text"
+              value={serverUrl}
+              onChange={(e) => {
+                setServerUrl(e.target.value);
+              }}
+              placeholder="http://localhost:11434"
+              data-testid="simple-provider-server-url"
+              className="w-full h-10 rounded-[12px] border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] px-3 text-[13px] text-[#111827] dark:text-[#F8FAFC] focus:outline-none focus:border-[#2B5FD9]"
+            />
+          ) : (
+            <p
+              data-testid="simple-provider-server-current"
+              className="text-[12.5px] text-[#374151] dark:text-[#E2E8F0]"
+            >
+              {serverUrl}
+            </p>
+          )}
           <span className="text-[11px] text-[#94A3B8]">{preset.credentialHelp}</span>
-        </label>
+        </div>
       )}
 
       {preset.presetId === 'google' && serverManagedAvailable && !useOwnKey ? (
@@ -333,8 +377,9 @@ export function SimpleProviderConfig({
         )}
         {discoveryAvailable && discovered.length === 0 && !testing ? (
           <span className="text-[11px] text-[#94A3B8]">
-            This provider exposes its model list over the API — the dropdown fills in automatically
-            after a successful connection test.
+            {isLocalProvider
+              ? 'Start your Ollama server and the models it has pulled appear here automatically.'
+              : 'This provider exposes its model list over the API — the dropdown fills in automatically after a successful connection test.'}
           </span>
         ) : null}
       </label>
@@ -409,7 +454,7 @@ export function SimpleProviderConfig({
           className="inline-flex h-10 items-center gap-2 rounded-[14px] border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-4 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0] hover:border-[#2B5FD9]/40 hover:text-[#2B5FD9] dark:hover:text-[#6B8FEF] transition-colors disabled:opacity-50"
         >
           {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-          Test Connection
+          {isLocalProvider ? 'Scan again' : 'Test Connection'}
         </button>
         <button
           type="button"
