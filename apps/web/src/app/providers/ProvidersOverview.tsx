@@ -346,6 +346,30 @@ function ProviderCard({
 
 // ── Overview ────────────────────────────────────────────────────────────────
 
+/**
+ * The runtime status the connection display should use for one provider.
+ *
+ * PROVIDER-01 — `readProviderRuntimeState` is derived from DEPLOYMENT env keys
+ * only, so a provider the user connected with their OWN key still reports
+ * NOT_CONFIGURED (it reports 'No key set'). When the user really holds a
+ * credential for the family (credentialSource === 'USER'), the runtime CAN
+ * execute it, so we present that as CONFIGURED — the same status a deployment
+ * key would produce. Every other status is passed through untouched, and a
+ * provider with no credential is never upgraded (no fake READY).
+ */
+export function effectiveRuntimeStatus(
+  provider: Pick<ProviderExperienceRowDTO, 'credentialSource'>,
+  runtimeStatus: string | undefined,
+): string | undefined {
+  if (provider.credentialSource === 'USER') {
+    // A user credential is usable regardless of the deployment's env keys;
+    // MOCK is left as-is (already configured), and a genuinely failing
+    // runtime (ERROR) is still surfaced honestly rather than masked.
+    if (runtimeStatus === undefined || runtimeStatus === 'NOT_CONFIGURED') return 'CONFIGURED';
+  }
+  return runtimeStatus;
+}
+
 export function ProvidersOverview({
   userId,
   providers,
@@ -369,7 +393,13 @@ export function ProvidersOverview({
 
   const statusOf = (provider: ProviderExperienceRowDTO): ProviderStatusDisplay =>
     providerStatusDisplay(
-      runtimeByFamily.get(provider.family)?.status,
+      // PROVIDER-01 — the deployment runtime registry only knows about
+      // DEPLOYMENT credentials (env keys); a key the USER supplied is invisible
+      // to it. A family the user has really connected (a stored, verified
+      // credential) is therefore as usable as a runtime-configured one, so the
+      // connection display derives from BOTH — never from the runtime registry
+      // alone, which would leave a working Gemini reading "Not connected".
+      effectiveRuntimeStatus(provider, runtimeByFamily.get(provider.family)?.status),
       providerIdentity(provider.family, provider.name).name,
       // PROVIDER-01 — the user's enable preference is part of the state:
       // a configured-but-disabled provider must never read "Connected".

@@ -31,9 +31,17 @@ interface ExperienceRow {
   family: string;
   name: string;
   enabled: boolean;
+  credentialSource?: 'USER' | 'PLATFORM' | 'NONE';
 }
 
-function buildGateway() {
+function buildGateway(
+  options: {
+    resolveCredentialSource?: (
+      userId: string,
+      family: string,
+    ) => Promise<'USER' | 'PLATFORM' | 'NONE'>;
+  } = {},
+) {
   const repository = new InMemoryProviderRepository(createCatalogProviders());
   const providers = new ProviderApplicationService(repository);
   // The preferences service validates against the SAME catalog (as the gateway
@@ -48,6 +56,9 @@ function buildGateway() {
     {} as unknown as ModelSelectionIntelligence,
     new CostLedger(),
     { list: () => [] } as unknown as TraceStore,
+    options.resolveCredentialSource
+      ? { resolveCredentialSource: options.resolveCredentialSource }
+      : {},
   );
   return createProvidersRouter(providers, experience);
 }
@@ -96,5 +107,33 @@ describe('providers.getExperience (real seeded catalog)', () => {
     expect(result.data?.usage.tokenBudget).toBeGreaterThan(0);
     expect(result.data?.usage.tokensUsed).toBe(0);
     expect(result.data?.preferences.userId).toBe(ctx.userId);
+  });
+
+  it('reports credentialSource NONE for every provider when no credential source is resolved', async () => {
+    const router = buildGateway();
+    const result = (await router.getExperience({ userId: ctx.userId }, ctx)) as ApiResponse<{
+      providers: ExperienceRow[];
+    }>;
+    for (const provider of result.data?.providers ?? []) {
+      expect(provider.credentialSource).toBe('NONE');
+    }
+  });
+
+  it('surfaces a USER credential per family so the overview can read it as connected', async () => {
+    // Only Gemini has a user-supplied (verified) credential — the deployment
+    // runtime registry cannot see it, so the experience view model must carry
+    // the honest source or the overview would keep showing "Not connected".
+    const router = buildGateway({
+      resolveCredentialSource: async (_userId, family) => (family === 'google' ? 'USER' : 'NONE'),
+    });
+
+    const result = (await router.getExperience({ userId: ctx.userId }, ctx)) as ApiResponse<{
+      providers: ExperienceRow[];
+    }>;
+    const rows = result.data?.providers ?? [];
+    const google = rows.find((p) => p.family === 'google');
+    const openai = rows.find((p) => p.family === 'openai');
+    expect(google?.credentialSource).toBe('USER');
+    expect(openai?.credentialSource).toBe('NONE');
   });
 });

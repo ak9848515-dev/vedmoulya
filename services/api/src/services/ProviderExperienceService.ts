@@ -42,6 +42,14 @@ export interface ProviderExperienceRow {
   providerId: string;
   name: string;
   family: string;
+  /**
+   * PROVIDER-01 — WHICH credential can authenticate this provider for THIS
+   * user: their OWN stored (verified) credential ('USER'), this deployment's
+   * ('PLATFORM'), or none ('NONE'). Never the secret itself. The overview uses
+   * it so a user-supplied key that the runtime registry cannot see still reads
+   * as connected once the user has enabled the AI.
+   */
+  credentialSource: 'USER' | 'PLATFORM' | 'NONE';
   /** Selected/default model for this user (preferred model or best fit). */
   selectedModel: { id: string; name: string } | null;
   /** Every model the registry knows for this provider (never hardcoded). */
@@ -187,6 +195,16 @@ export interface ProviderExperienceServiceOptions {
   openaiOrgEnv?: Record<string, string | undefined>;
   openaiOrgFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   openaiOrgNow?: () => Date;
+  /**
+   * PROVIDER-01 — resolve WHICH credential source can authenticate a family
+   * for a user (user → platform → none), WITHOUT any secret material. Absent
+   * in tests/embedders that do not model credentials: every row then reports
+   * 'NONE' and the overview falls back to the deployment runtime truth alone.
+   */
+  resolveCredentialSource?: (
+    userId: string,
+    family: string,
+  ) => Promise<'USER' | 'PLATFORM' | 'NONE'>;
 }
 
 export class ProviderExperienceService {
@@ -222,6 +240,22 @@ export class ProviderExperienceService {
     // mandatory-provider invariant is evaluated against.
     const catalogIds = marketplace.data.providers.map((provider) => provider.id);
 
+    // Resolve each family's credential source ONCE (user → platform → none),
+    // in parallel, and never any secret material.
+    const credentialSources = new Map<string, 'USER' | 'PLATFORM' | 'NONE'>();
+    if (this.options.resolveCredentialSource) {
+      const resolve = this.options.resolveCredentialSource;
+      await Promise.all(
+        marketplace.data.providers.map(async (provider) => {
+          try {
+            credentialSources.set(provider.family, await resolve(userId, provider.family));
+          } catch {
+            credentialSources.set(provider.family, 'NONE');
+          }
+        }),
+      );
+    }
+
     const providers: ProviderExperienceRow[] = marketplace.data.providers.map((provider) => {
       const models: ProviderModelExperience[] = provider.models.map((m) => ({
         id: m.id,
@@ -244,6 +278,7 @@ export class ProviderExperienceService {
         providerId: provider.id,
         name: provider.name,
         family: provider.family,
+        credentialSource: credentialSources.get(provider.family) ?? 'NONE',
         selectedModel,
         models,
         availability: deriveAvailability(provider, prefs),

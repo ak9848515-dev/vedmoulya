@@ -40,6 +40,7 @@ import {
   InMemoryProviderIntelligenceStore,
   InMemoryLocalModelDiscovery,
   ProviderPreferencesService,
+  resolvePlatformCredential,
 } from '@vedmoulya/providers';
 import type { ProviderCredentialService, ProviderRepository } from '@vedmoulya/providers';
 import { ContextApplicationService } from '@vedmoulya/context';
@@ -1424,6 +1425,24 @@ export class ApiApplicationService {
       this.modelSelection,
       new CostLedger(),
       this.traceProvider.getStore(),
+      // PROVIDER-01 — honest credential availability per family (user →
+      // platform → none), the SAME resolution connectProvider uses. Lets the
+      // overview reflect a user-supplied key the runtime registry cannot see.
+      // No secret material is ever exposed; only the source name.
+      {
+        resolveCredentialSource: async (
+          userId: string,
+          family: string,
+        ): Promise<'USER' | 'PLATFORM' | 'NONE'> => {
+          if (!this.providerCredentialService) return 'NONE';
+          const outcome = await this.providerCredentialService.resolve(
+            userId,
+            family,
+            resolvePlatformCredential(family, process.env),
+          );
+          return outcome.source;
+        },
+      },
     );
 
     // ── Create The VedMoulya Brain (EPIC-016) ────────────────────────────

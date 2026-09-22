@@ -139,6 +139,12 @@ export interface ProviderExperienceRowDTO {
   providerId: string;
   name: string;
   family: string;
+  /**
+   * PROVIDER-01 — which credential can authenticate this family for this user:
+   * their OWN verified key ('USER'), this deployment's ('PLATFORM'), or none.
+   * Absent on older responses — treated as 'NONE'.
+   */
+  credentialSource?: 'USER' | 'PLATFORM' | 'NONE';
   selectedModel: { id: string; name: string } | null;
   models: Array<{ id: string; name: string; capabilities: string[] }>;
   availability: 'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE' | 'LOCAL' | 'UNKNOWN';
@@ -598,8 +604,33 @@ export function useProviderPreferences(userId: string) {
   return { ...q, data: unwrap<ProviderPreferencesDTO>(q.data) };
 }
 
+// ── Provider state cache invalidation (PROVIDER-UX) ─────────────────────────
+// The provider data is cached for 5 minutes (Providers.tsx staleTime) and no
+// global mutation invalidation exists, so a successful connect / enable /
+// preference write used to leave the overview (getExperience) and the
+// connection chip (getRuntimeStatus) reading the PRE-write snapshot — the user
+// returned from "Save & Enable" still seeing "Not connected". Every provider
+// mutation therefore invalidates the exact queries it can change; the screens'
+// own refetch/invalidate then reconciles against the server, with no page
+// reload and no optimistic fabrication.
+function useProviderMutationInvalidation(): () => Promise<void> {
+  const utils = api.useUtils();
+  return async (): Promise<void> => {
+    await Promise.all([
+      utils.providers.getExperience.invalidate(),
+      utils.providers.getRuntimeStatus.invalidate(),
+      utils.providers.getPreferences.invalidate(),
+    ]);
+  };
+}
+
 export function useSetProviderPreferences() {
-  const mutation = api.providers.setPreferences.useMutation();
+  const invalidateProviders = useProviderMutationInvalidation();
+  const mutation = api.providers.setPreferences.useMutation({
+    onSuccess: () => {
+      void invalidateProviders();
+    },
+  });
   return {
     ...mutation,
     data: unwrap<ProviderPreferencesDTO>(mutation.data),
@@ -608,7 +639,12 @@ export function useSetProviderPreferences() {
 }
 
 export function useSetProviderEnabled() {
-  const mutation = api.providers.setProviderEnabled.useMutation();
+  const invalidateProviders = useProviderMutationInvalidation();
+  const mutation = api.providers.setProviderEnabled.useMutation({
+    onSuccess: () => {
+      void invalidateProviders();
+    },
+  });
   return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
 }
 
@@ -667,7 +703,14 @@ export type ConnectProviderFamily =
   'google' | 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'openai-compatible';
 
 export function useConnectProvider() {
-  const mutation = api.providers.connectProvider.useMutation();
+  const invalidateProviders = useProviderMutationInvalidation();
+  // A successful connect may have stored a USER credential server-side, which
+  // changes what the overview can honestly claim about this AI's connection.
+  const mutation = api.providers.connectProvider.useMutation({
+    onSuccess: () => {
+      void invalidateProviders();
+    },
+  });
   return {
     ...mutation,
     data: unwrap<ProviderConnectionResultDTO>(mutation.data),

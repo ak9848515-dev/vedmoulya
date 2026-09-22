@@ -59,7 +59,9 @@ import {
   useProviderUsageDetail,
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
+import { providerPreset } from '@vedmoulya/shared';
 import { ProvidersOverview } from './ProvidersOverview.js';
+import { SimpleProviderConfig } from './SimpleProviderConfig.js';
 import { OpenAIOrgUsagePanel } from './OpenAIOrgUsagePanel.js';
 import { AIBalanceWidget } from './AIBalanceWidget.js';
 import {
@@ -216,6 +218,21 @@ type ProvidersView =
   | { kind: 'configure'; providerId: string }
   | { kind: 'details'; providerId: string }
   | { kind: 'usage' };
+
+/**
+ * PROVIDER-UX (Ollama) — which configuration experience a provider's
+ * Configure/Add-AI step must open.
+ *
+ * A LOCAL provider (no credential, models read from a locally running server)
+ * needs the auto-detect flow in SimpleProviderConfig; the cloud-oriented
+ * ProviderConfigScreen cannot discover local models. Everything else keeps the
+ * ProviderConfigScreen experience the built-in cloud providers already use.
+ * Pure and total, so the routing decision is unit-testable without rendering
+ * the whole page.
+ */
+export function configureExperienceFor(family: string): 'simple-local' | 'config-screen' {
+  return providerPreset(family).credentialType === 'none_local' ? 'simple-local' : 'config-screen';
+}
 
 export default function ProvidersPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();
@@ -414,6 +431,34 @@ function ProviderConfigLoader({
         title="This AI isn't in your provider registry"
         description="It may have been removed. Go back and choose another AI."
       />
+    );
+  }
+
+  // PROVIDER-UX (Ollama) — a LOCAL provider needs its own flow: auto-detect the
+  // local server, list the models it really has, choose one, Save & Enable. The
+  // cloud-oriented ProviderConfigScreen cannot do that. Local presets therefore
+  // open the existing SimpleProviderConfig (FINAL-02 Simple mode) — the same
+  // component the provider detail view already uses — with the server address
+  // kept behind "Change address". No new configuration logic is introduced.
+  if (configureExperienceFor(provider.family) === 'simple-local') {
+    return (
+      <div className="space-y-4 animate-slide-up">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
+        >
+          ← AI Providers
+        </button>
+        <SimpleProviderConfig
+          userId={userId}
+          presetId={provider.family}
+          variant="panel"
+          onConfigured={() => {
+            void refetch();
+          }}
+        />
+      </div>
     );
   }
 

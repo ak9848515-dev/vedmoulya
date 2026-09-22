@@ -14,8 +14,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
-import { ProvidersOverview } from '../ProvidersOverview.js';
+import { ProvidersOverview, effectiveRuntimeStatus } from '../ProvidersOverview.js';
 import type { ProviderExperienceRowDTO, ProviderRuntimeStateDTO } from '../../../lib/api-client.js';
+
+// PROVIDER-UX — a user-supplied (USER) credential makes a family usable even
+// though the deployment runtime registry reports NOT_CONFIGURED for it.
+describe('effectiveRuntimeStatus (PROVIDER-01)', () => {
+  it('treats a USER-connected family as CONFIGURED despite a NOT_CONFIGURED runtime', () => {
+    expect(effectiveRuntimeStatus({ credentialSource: 'USER' }, 'NOT_CONFIGURED')).toBe(
+      'CONFIGURED',
+    );
+    expect(effectiveRuntimeStatus({ credentialSource: 'USER' }, undefined)).toBe('CONFIGURED');
+  });
+
+  it('never upgrades a family without a user credential', () => {
+    expect(effectiveRuntimeStatus({ credentialSource: 'NONE' }, 'NOT_CONFIGURED')).toBe(
+      'NOT_CONFIGURED',
+    );
+    expect(effectiveRuntimeStatus({}, 'NOT_CONFIGURED')).toBe('NOT_CONFIGURED');
+    expect(effectiveRuntimeStatus({ credentialSource: 'PLATFORM' }, 'NOT_CONFIGURED')).toBe(
+      'NOT_CONFIGURED',
+    );
+  });
+
+  it('passes through genuinely failing or configured runtimes untouched', () => {
+    expect(effectiveRuntimeStatus({ credentialSource: 'USER' }, 'ERROR')).toBe('ERROR');
+    expect(effectiveRuntimeStatus({ credentialSource: 'USER' }, 'MOCK')).toBe('MOCK');
+    expect(effectiveRuntimeStatus({ credentialSource: 'USER' }, 'CONFIGURED')).toBe('CONFIGURED');
+  });
+});
 
 vi.mock('../../../lib/trpc.js', () => ({
   api: {
@@ -166,6 +193,49 @@ describe('ProvidersOverview (simplified AI Providers screen)', () => {
     const claude = screen.getByTestId('provider-card-anthropic');
     expect(claude.textContent).toMatch(/Claude/);
     expect(claude.textContent).toMatch(/○Not connected/);
+  });
+
+  it('reads Connected for a family the user connected with their OWN credential', () => {
+    // The deployment runtime registry says google is NOT_CONFIGURED (no env key),
+    // but the user holds a verified key for it: the card must read Connected and
+    // ACTIVE — never "Not connected" — once it is switched on.
+    const runtimeNoGoogleKey = new Map<string, ProviderRuntimeStateDTO>(RUNTIME);
+    runtimeNoGoogleKey.set('google', {
+      family: 'google',
+      name: 'google',
+      status: 'NOT_CONFIGURED',
+      reason: 'No key set (AI_GOOGLE_API_KEY)',
+      adapterImplemented: true,
+      registered: false,
+      canExecute: true,
+      freeTier: true,
+      defaultEligible: true,
+      envKeys: ['AI_GOOGLE_API_KEY'],
+    });
+
+    render(
+      <ProvidersOverview
+        userId="u1"
+        providers={PROVIDERS.map((p) =>
+          p.providerId === 'google' ? { ...p, credentialSource: 'USER' as const } : p,
+        )}
+        runtimeByFamily={runtimeNoGoogleKey}
+        preferences={{ disabledProviderIds: ['openai'] }}
+        updatingProviderId={null}
+        onConfigure={vi.fn()}
+        onOpenDetails={vi.fn()}
+        onToggle={vi.fn()}
+        onSetPrimary={vi.fn()}
+        onRefresh={vi.fn()}
+        addAIOpen={false}
+        onAddAIOpenChange={vi.fn()}
+      />,
+    );
+
+    const primary = screen.getByTestId('primary-provider-google');
+    expect(primary.textContent).toMatch(/Connected/);
+    expect(primary.textContent).not.toMatch(/Not connected/);
+    expect(primary.textContent).toMatch(/ACTIVE/);
   });
 
   it('reads Connected for a configured, switched-on AI that is not the primary', () => {
