@@ -14,6 +14,17 @@ import type { MissionStatusView } from '../../../lib/api-client.js';
 import { ObjectiveTimeline } from '../../autonomous-builder/ObjectiveTimeline.js';
 import { Target, Activity, ArrowRight } from 'lucide-react';
 
+// ── Test id namespacing (G8 regression) ──────────────────────────────────────
+// MissionDetailTabs' Overview tab renders THIS summary AND the production
+// LiveMissionView in the same DOM, and both describe the same mission. The
+// generic ids (`mission-state`, `mission-outcome`, `approval-panel`, plus the
+// embedded ObjectiveTimeline's `objective-timeline`) therefore resolved to two
+// elements each, which is a Playwright strict-mode violation — G8 failed on
+// `getByTestId('mission-state')` and every future consumer of those ids would
+// fail the same way. The live view keeps the canonical ids (its unit tests and
+// the E2E spec assert the RAW backend state through them); this human summary
+// uses `overview-*` so each region is addressable unambiguously.
+
 const STATE_LABELS: Record<string, { label: string; badge: string }> = {
   CREATED: {
     label: 'Draft',
@@ -119,7 +130,7 @@ export function MissionOverview({
             <div className="mb-1 flex flex-wrap items-center gap-2">
               <span
                 className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${stateMeta.badge}`}
-                data-testid="mission-state"
+                data-testid="overview-state"
               >
                 {stateMeta.label}
               </span>
@@ -130,7 +141,7 @@ export function MissionOverview({
                       ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
                       : 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300'
                   }`}
-                  data-testid="mission-outcome"
+                  data-testid="overview-outcome"
                 >
                   {status.outcome}
                 </span>
@@ -188,13 +199,18 @@ export function MissionOverview({
           <Target className="h-4 w-4 text-[#2B5FD9]" />
           Objective Timeline
         </h2>
-        <ObjectiveTimeline objectives={status.objectives} />
+        {/* Namespaced ids — the live view below renders this timeline too. */}
+        <ObjectiveTimeline
+          objectives={status.objectives}
+          testId="overview-objective-timeline"
+          emptyTestId="overview-timeline-empty"
+        />
       </div>
 
       {status.state === 'WAITING_FOR_APPROVAL' ? (
         <div
           className="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/40"
-          data-testid="approval-panel"
+          data-testid="overview-approval-panel"
         >
           <h3 className="text-sm font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
             Your approval is needed

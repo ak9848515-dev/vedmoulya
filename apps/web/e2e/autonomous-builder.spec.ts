@@ -64,7 +64,15 @@ test.describe('Autonomous Builder (BLD-024)', () => {
     }
 
     // Mission state chip reflects REAL backend state (never fabricated %).
-    await expect(page.getByTestId('mission-state')).toHaveText(
+    // SCOPE TO THE LIVE VIEW. The Overview tab renders BOTH the human summary
+    // (MissionOverview → `overview-state`, e.g. "Running") and the live view's
+    // raw backend state chip (`mission-state`, e.g. "RUNNING") — a bare
+    // page-level `getByTestId('mission-state')` is ambiguous the moment any
+    // other surface reuses the id, and it was exactly that strict-mode
+    // violation that failed G8. The raw uppercase state is what this regex
+    // asserts, so anchor to the live view that owns it.
+    const liveState = liveCard.getByTestId('mission-state');
+    await expect(liveState).toHaveText(
       /CREATED|RUNNING|PAUSED|WAITING_FOR_APPROVAL|WAITING_FOR_PROVIDER|BLOCKED|COMPLETED|FAILED|CANCELLED/,
     );
     // No fake progress percentages anywhere.
@@ -73,7 +81,7 @@ test.describe('Autonomous Builder (BLD-024)', () => {
     // ── Browser refresh: must NOT create a duplicate mission or reset state ──
     await page.reload();
     await expect(page.getByTestId('live-mission-view')).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId('mission-state')).toBeVisible();
+    await expect(liveState).toBeVisible();
 
     // The same mission is still being observed (URL carries ?mission=…).
     expect(page.url()).toContain('mission=');

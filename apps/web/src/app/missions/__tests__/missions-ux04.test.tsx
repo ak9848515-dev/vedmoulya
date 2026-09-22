@@ -232,6 +232,34 @@ describe('UX-04 — mission filtering and history', () => {
       expect(screen.getByRole('heading', { name: /Mission controls & live status/ })).toBeDefined();
     });
 
+    // G8 regression. The Overview tab renders the human summary (MissionOverview)
+    // AND the live view side by side, and both describe the same mission. They
+    // previously published the SAME ids (`mission-state`, `mission-outcome`,
+    // `approval-panel`, `objective-timeline`), so a page-level
+    // `getByTestId('mission-state')` resolved to two elements — a Playwright
+    // strict-mode violation that failed the E2E gate. Each region must own a
+    // unique id, so this test fails if a future edit reintroduces a collision.
+    it('publishes unique test ids for the summary and the live view', () => {
+      renderTabs({
+        objectives: [
+          {
+            objectiveId: 'o1',
+            title: 'First',
+            state: 'VERIFIED',
+            reason: 'Verified by the runtime',
+            evidence: [],
+            retryCount: 0,
+          },
+        ] as MissionStatusView['objectives'],
+      });
+      // The live view keeps the canonical ids the E2E spec asserts on...
+      expect(screen.getAllByTestId('mission-state')).toHaveLength(1);
+      expect(screen.getAllByTestId('objective-timeline')).toHaveLength(1);
+      // ...and the Overview summary is namespaced separately.
+      expect(screen.getAllByTestId('overview-state')).toHaveLength(1);
+      expect(screen.getAllByTestId('overview-objective-timeline')).toHaveLength(1);
+    });
+
     it('Overview shows the real objective and truthful progress', () => {
       renderTabs({
         // Real MissionObjectiveView shape.

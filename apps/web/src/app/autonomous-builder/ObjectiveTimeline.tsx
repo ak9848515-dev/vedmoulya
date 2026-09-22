@@ -12,20 +12,32 @@
 import React from 'react';
 import type { MissionObjectiveView } from '../../lib/api-client.js';
 
+// `testId` / `emptyTestId` exist because this component is rendered MORE THAN
+// ONCE on a single page: MissionDetailTabs' Overview tab shows the human
+// MissionOverview summary AND the production LiveMissionView side by side, and
+// both embed this timeline. Two identical test ids in one DOM make every
+// Playwright `getByTestId` for them a strict-mode violation (G8 failed on
+// exactly that for the mission-state chip). Callers that already own the ids
+// (`objective-timeline` / `timeline-empty` in LiveMissionView) keep the
+// defaults; the Overview summary passes its own namespaced ids.
 export function ObjectiveTimeline({
   objectives,
+  testId = 'objective-timeline',
+  emptyTestId = 'timeline-empty',
 }: {
   objectives: MissionObjectiveView[];
+  testId?: string;
+  emptyTestId?: string;
 }): React.JSX.Element {
   if (objectives.length === 0) {
     return (
-      <p className="text-sm text-[--muted-fg,theme(colors.slate.500)]" data-testid="timeline-empty">
+      <p className="text-sm text-[--muted-fg,theme(colors.slate.500)]" data-testid={emptyTestId}>
         No objectives yet — the runtime selects the first objective after RUN.
       </p>
     );
   }
   return (
-    <ol className="space-y-2" data-testid="objective-timeline">
+    <ol className="space-y-2" data-testid={testId}>
       {objectives.map((objective) => {
         const symbol =
           objective.state === 'VERIFIED'
