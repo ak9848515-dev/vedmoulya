@@ -59,7 +59,6 @@ import {
   useProviderUsageDetail,
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
-import { providerPreset } from '@vedmoulya/shared';
 import { ProvidersOverview } from './ProvidersOverview.js';
 import { SimpleProviderConfig } from './SimpleProviderConfig.js';
 import { OpenAIOrgUsagePanel } from './OpenAIOrgUsagePanel.js';
@@ -70,7 +69,7 @@ import {
   type UsageWidgetRow,
 } from './UsageAvailabilityWidget.js';
 import { providerReadiness, type ProviderReadiness } from './provider-readiness.js';
-import { providerIdentity } from './provider-ux.js';
+import { configureExperienceFor, providerIdentity } from './provider-ux.js';
 
 // ── Lazy-loaded views (progressive disclosure + a lean first load) ──────────
 // The provider list is what opens first. The configuration experience, the
@@ -218,21 +217,6 @@ type ProvidersView =
   | { kind: 'configure'; providerId: string }
   | { kind: 'details'; providerId: string }
   | { kind: 'usage' };
-
-/**
- * PROVIDER-UX (Ollama) — which configuration experience a provider's
- * Configure/Add-AI step must open.
- *
- * A LOCAL provider (no credential, models read from a locally running server)
- * needs the auto-detect flow in SimpleProviderConfig; the cloud-oriented
- * ProviderConfigScreen cannot discover local models. Everything else keeps the
- * ProviderConfigScreen experience the built-in cloud providers already use.
- * Pure and total, so the routing decision is unit-testable without rendering
- * the whole page.
- */
-export function configureExperienceFor(family: string): 'simple-local' | 'config-screen' {
-  return providerPreset(family).credentialType === 'none_local' ? 'simple-local' : 'config-screen';
-}
 
 export default function ProvidersPage(): React.JSX.Element {
   const hydrated = useAuthHydrated();

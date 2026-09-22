@@ -113,6 +113,22 @@ export function isBuiltInProvider(family: string): boolean {
 }
 
 /**
+ * PROVIDER-UX (Ollama) — which configuration experience a provider's
+ * Configure/Add-AI step must open.
+ *
+ * A LOCAL provider (no credential, models read from a locally running server)
+ * needs the auto-detect flow in SimpleProviderConfig; the cloud-oriented
+ * ProviderConfigScreen cannot discover local models. Everything else keeps the
+ * ProviderConfigScreen experience the built-in cloud providers already use.
+ * Pure and total, so the routing decision is unit-testable without rendering
+ * the whole page. It lives here (not in page.tsx) because a Next.js page module
+ * may only export its page fields.
+ */
+export function configureExperienceFor(family: string): 'simple-local' | 'config-screen' {
+  return providerPreset(family).credentialType === 'none_local' ? 'simple-local' : 'config-screen';
+}
+
+/**
  * OAuth availability. The ONLY provider OAuth in this codebase is the Google
  * identity authorization (services/identity — consumed through the existing
  * `beginGoogleSignIn` session manager). No other provider OAuth exists, so the

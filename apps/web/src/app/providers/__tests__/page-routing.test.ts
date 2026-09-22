@@ -9,7 +9,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest';
-import { configureExperienceFor } from '../page.js';
+import { configureExperienceFor } from '../provider-ux.js';
 
 describe('configureExperienceFor (Ollama local routing)', () => {
   it('routes the local provider (ollama) to the SimpleProviderConfig flow', () => {
