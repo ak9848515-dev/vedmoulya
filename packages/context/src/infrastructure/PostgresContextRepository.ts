@@ -59,9 +59,12 @@ export class PostgresContextRepository implements ContextRepository {
   }
 
   private itemToRow(item: ContextItem): Record<string, unknown> {
+    // Bind via sql.json(...): the driver serializes exactly once for jsonb OID
+    // 3802. A JSON.stringify(...) string is stored as a JSON STRING SCALAR,
+    // corrupting jsonb @>/-> queries (same trap update() already guards against).
     return {
       id: item.contextId,
-      data: JSON.stringify(item),
+      data: this.sql.json(item as unknown as JsonParam),
       updated_at: new Date(item.createdAt).toISOString(),
     };
   }

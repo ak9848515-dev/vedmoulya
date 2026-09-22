@@ -20,6 +20,9 @@ import type { ExecutionStrategyRepository } from '../domain/repository/Execution
 import type { StrategyId } from '../domain/value-objects/StrategyId.js';
 import type postgres from 'postgres';
 
+/** postgres.js's json() parameter type (not exported by the driver). */
+type JsonParam = Parameters<postgres.Sql['json']>[0];
+
 interface StrategyRow {
   id: string;
   data: unknown;
@@ -55,9 +58,12 @@ export class PostgresExecutionStrategyRepository implements ExecutionStrategyRep
   }
 
   private strategyToRow(strategy: ExecutionStrategy): Record<string, unknown> {
+    // Bind via sql.json(...): the driver serializes exactly once for jsonb OID
+    // 3802. A JSON.stringify(...) string is stored as a JSON STRING SCALAR,
+    // corrupting jsonb @>/-> queries (the update()/findByTag convention).
     return {
       id: strategy.strategyId,
-      data: JSON.stringify(strategy),
+      data: this.sql.json(strategy as unknown as JsonParam),
       updated_at: new Date(strategy.updatedAt).toISOString(),
     };
   }

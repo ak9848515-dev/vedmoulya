@@ -12,6 +12,9 @@ import type { GoalRepository } from '../domain/repository/GoalRepository.js';
 import type { GoalId } from '../domain/value-objects/Identifiers.js';
 import type postgres from 'postgres';
 
+/** postgres.js's json() parameter type (not exported by the driver). */
+type JsonParam = Parameters<postgres.Sql['json']>[0];
+
 interface GoalRow {
   id: string;
   data: unknown;
@@ -44,9 +47,12 @@ export class PostgresGoalRepository implements GoalRepository {
   }
 
   private goalToRow(goal: Goal): Record<string, unknown> {
+    // Bind via sql.json(...): the driver serializes exactly once for jsonb OID
+    // 3802. A JSON.stringify(...) string is stored as a JSON STRING SCALAR,
+    // corrupting jsonb @>/-> queries (the update()/findByTag convention).
     return {
       id: goal.goalId,
-      data: JSON.stringify(goal),
+      data: this.sql.json(goal as unknown as JsonParam),
       updated_at: new Date(goal.updatedAt).toISOString(),
     };
   }

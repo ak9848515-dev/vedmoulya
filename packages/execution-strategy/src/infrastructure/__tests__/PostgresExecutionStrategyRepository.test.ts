@@ -25,6 +25,9 @@ function makeFakeSql(results: Array<() => unknown>): postgres.Sql {
   };
   const sql = vi.fn(() => next()) as unknown as postgres.Sql;
   sql.unsafe = vi.fn(() => next());
+  // The repo binds JSONB documents via sql.json() — the fake returns the raw
+  // value (the real driver wraps it in a Parameter for OID 3802).
+  sql.json = ((value: unknown): unknown => value) as never;
   return sql;
 }
 

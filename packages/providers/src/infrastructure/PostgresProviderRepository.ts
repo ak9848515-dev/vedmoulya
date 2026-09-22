@@ -133,25 +133,31 @@ export class PostgresProviderRepository implements ProviderRepository {
   }
 
   private providerToRow(provider: Provider): Record<string, unknown> {
+    // Bind JSONB columns via sql.json(): the driver serializes exactly once for
+    // jsonb OID 3802. Passing a JSON.stringify(...) string instead stores a JSON
+    // STRING SCALAR (e.g. "[\"coding\"]" rather than ["coding"]), which corrupts
+    // every jsonb_array_elements*/@> query (jsonb_typeof => 'string'). This is
+    // the same double-encoding bug update()/findByCapability/findByTag already
+    // guard against — save() must stay consistent with them.
     return {
       id: provider.id,
       family: provider.family,
       name: provider.name,
       description: provider.description,
       owner: provider.owner,
-      models: JSON.stringify([...provider.models]),
-      capabilities: JSON.stringify([...provider.capabilities]),
-      supported_modalities: JSON.stringify([...provider.supportedModalities]),
-      cost: JSON.stringify(provider.cost),
-      latency: JSON.stringify(provider.latency),
-      rate_limits: JSON.stringify(provider.rateLimits),
+      models: this.sql.json([...provider.models] as unknown as JsonParam),
+      capabilities: this.sql.json([...provider.capabilities]),
+      supported_modalities: this.sql.json([...provider.supportedModalities]),
+      cost: this.sql.json(provider.cost as unknown as JsonParam),
+      latency: this.sql.json(provider.latency as unknown as JsonParam),
+      rate_limits: this.sql.json(provider.rateLimits as unknown as JsonParam),
       availability: provider.availability,
-      health: JSON.stringify(provider.health),
+      health: this.sql.json(provider.health as unknown as JsonParam),
       lifecycle_status: provider.lifecycleStatus.value,
       version: provider.version.toString(),
-      tags: JSON.stringify([...provider.tags]),
+      tags: this.sql.json([...provider.tags]),
       documentation_url: provider.documentationUrl ?? null,
-      matrix: JSON.stringify([...provider.matrix]),
+      matrix: this.sql.json([...provider.matrix] as unknown as JsonParam),
       created_at: provider.createdAt.toISOString(),
       updated_at: provider.updatedAt.toISOString(),
     };

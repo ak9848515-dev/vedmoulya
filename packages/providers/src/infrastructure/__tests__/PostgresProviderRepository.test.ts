@@ -301,6 +301,37 @@ describe('PostgresProviderRepository (mocked postgres)', () => {
       await expect(repo.save(provider)).resolves.toBeUndefined();
     });
 
+    it('binds JSONB columns via sql.json() — never a JSON.stringified string', async () => {
+      // Regression: save() previously passed JSON.stringify(...) strings for the
+      // JSONB columns, which the real driver stores as JSON STRING SCALARS
+      // (jsonb_typeof => 'string'). Every jsonb_array_elements*/@> query then
+      // failed with "cannot extract elements from a scalar" — the HTTP 500 that
+      // broke G8 (brain.dashboard → providers.getMarketplace → countByCapability)
+      // the moment the boot seed started calling save() in a strict environment.
+      const provider = makeProvider('pg_save_jsonb');
+      fakeSql = makeFakeSql([() => undefined, () => undefined]);
+      repo = new PostgresProviderRepository(fakeSql);
+      await repo.save(provider);
+
+      // The inner `sql(row)` fragment call carries the row the driver serializes.
+      const rowArg = (fakeSql as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0] as
+        Record<string, unknown> | undefined;
+      expect(rowArg).toBeDefined();
+      for (const column of [
+        'models',
+        'capabilities',
+        'supported_modalities',
+        'cost',
+        'latency',
+        'rate_limits',
+        'health',
+        'tags',
+        'matrix',
+      ]) {
+        expect(typeof rowArg?.[column]).not.toBe('string');
+      }
+    });
+
     it('updates a provider', async () => {
       fakeSql = makeFakeSql([() => undefined]);
       repo = new PostgresProviderRepository(fakeSql);

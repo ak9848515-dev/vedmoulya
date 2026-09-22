@@ -119,9 +119,12 @@ export class PostgresCapabilityRepository implements CapabilityRepository {
   }
 
   private capabilityToRow(capability: Capability): Record<string, unknown> {
+    // Bind via sql.json(...): the driver serializes exactly once for jsonb OID
+    // 3802. A JSON.stringify(...) string is stored as a JSON STRING SCALAR,
+    // corrupting jsonb @>/-> queries (same trap update() already guards against).
     return {
       id: capability.id,
-      data: JSON.stringify(this.capabilityToSnapshot(capability)),
+      data: this.sql.json(this.capabilityToSnapshot(capability) as unknown as JsonParam),
       updated_at: new Date(capability.updatedAt).toISOString(),
     };
   }
