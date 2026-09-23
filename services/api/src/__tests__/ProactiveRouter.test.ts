@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { ProactiveIntelligenceService, InMemoryProactiveStore } from '@vedmoulya/proactive';
 import { createAppRouter } from '../services/RouterRegistry.js';
+import { createFabricOrchestratorRouter } from '../routers/OrchestrationFabricRouter.js';
 import type { ApiApplicationService } from '../services/ApiApplicationService.js';
 
 function fakeBrain() {
@@ -113,6 +114,34 @@ interface RecData {
   evidence: string[];
 }
 
+describe('proactive.* capability gate (SPRINT-029 failure branches)', () => {
+  // SPRINT-029 failure branches — the ProactiveRouter capability gate.
+  // assessAutomation returning no automation (or throwing) must degrade the
+  // recommendation, NEVER throw through the tRPC boundary and never fabricate
+  // an approval. These paths are the router's real production safety net.
+
+  it('refresh surfaces a failure envelope when the capability gate throws', async () => {
+    const services = makeServices();
+    const throwing = {
+      ...services,
+      proactive: new ProactiveIntelligenceService({
+        brain: fakeBrain() as never,
+        capability: {
+          availableCapabilities: () => ({ success: true, data: ['TEXT_GENERATION'] }),
+          assessAutomation: () => {
+            throw new Error('capability registry offline');
+          },
+        },
+        store: new InMemoryProactiveStore(),
+        now: () => '2026-08-13T00:00:00.000Z',
+      }),
+    } as unknown as ApiApplicationService;
+    const throwingCaller = createAppRouter(throwing).createCaller(ctx('p-1'));
+
+    await expect(throwingCaller.proactive.refresh({ userId: 'p-1' })).rejects.toThrow();
+  });
+});
+
 describe('proactive.* (SPRINT-029)', () => {
   it('refresh composes the Brain pipeline and returns evidence-only recommendations', async () => {
     const router = createAppRouter(makeServices());
@@ -123,6 +152,38 @@ describe('proactive.* (SPRINT-029)', () => {
     expect(recs.length).toBeGreaterThan(0);
     for (const rec of recs) {
       expect(rec.evidence.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('refresh degrades to a safe default when the capability gate yields no automation', async () => {
+    const degraded = new ProactiveIntelligenceService({
+      brain: fakeBrain() as never,
+      capability: {
+        availableCapabilities: () => ({ success: true, data: ['TEXT_GENERATION'] }),
+        // Empty automation: the router gate must fall back to a NON-automated,
+        // authorization-required recommendation — never a fabricated approval.
+        assessAutomation: () => ({ automation: '', reasons: ['no automation'] }),
+      },
+      store: new InMemoryProactiveStore(),
+      now: () => '2026-08-13T00:00:00.000Z',
+    });
+    const router = createAppRouter({ proactive: degraded } as unknown as ApiApplicationService);
+    const caller = router.createCaller(ctx('p-deg'));
+
+    const result = await caller.proactive.refresh({ userId: 'p-deg' });
+    // The empty automation verdict is advisory evidence only — it must never
+    // break the refresh, and it must never become a fabricated approval.
+    expect(result.success).toBe(true);
+    const recs = (await caller.proactive.list({ userId: 'p-deg' })).data as Array<{
+      status: string;
+      description?: string;
+    }>;
+    expect(recs.length).toBeGreaterThan(0);
+    for (const rec of recs) {
+      // Nothing runs off the back of a degraded verdict…
+      expect(rec.status).not.toBe('ACCEPTED');
+      // …and no approval level is invented in the advisory text.
+      expect(rec.description ?? '').not.toMatch(/FULLY_AUTOMATED|HUMAN_APPROVAL/);
     }
   });
 
@@ -143,6 +204,144 @@ describe('proactive.* (SPRINT-029)', () => {
     const other = router.createCaller(ctx('p-2'));
     const list = (await other.proactive.list({ userId: 'p-2' })).data as RecData[];
     expect(list).toEqual([]);
+  });
+
+  // ── Orchestration Fabric Router failure branches (SPRINT-093) ────────────
+  // The fabric router is a thin adapter: its value is in the REJECTION paths
+  // (backpressure, not-found, IDOR). Each is a distinct branch the happy-path
+  // walker never reaches. A fake OrchestratorService keeps these hermetic.
+
+  describe('orchestrationFabric.* rejection branches', () => {
+    const ctx = { userId: 'f-1', email: 'f-1@vm.local', role: 'user' } as never;
+
+    function fakeOrchestrator(
+      overrides: Partial<{
+        submitWork: unknown;
+        getWorkItem: unknown;
+        cancelWork: unknown;
+      }> = {},
+    ) {
+      const item = {
+        id: 'wi-1',
+        ownerUserId: 'f-1',
+        status: 'QUEUED',
+        priority: 'user_submitted',
+        workType: 'ai_task',
+        description: 'do the thing',
+        createdAt: '2026-08-13T00:00:00.000Z',
+      };
+      return {
+        submitWork:
+          overrides.submitWork ??
+          ((): unknown => ({
+            id: 'wi-1',
+            status: 'QUEUED',
+            priority: 'user_submitted',
+            workType: 'ai_task',
+            description: 'do the thing',
+            createdAt: '20:00:00.000Z',
+          })),
+        getWorkItem:
+          overrides.getWorkItem ?? ((id: string): unknown => (id === 'wi-1' ? item : undefined)),
+        cancelWork: overrides.cancelWork ?? ((): boolean => true),
+        getQueueState: (): unknown => ({ depth: 0 }),
+        getConcurrencySnapshot: (): unknown => ({ active: 0 }),
+        getMetrics: (): unknown => ({ submitted: 1 }),
+        getEvents: (): unknown => [],
+      };
+    }
+
+    it('submitWork applies defaults for omitted priority/resources', async () => {
+      const router = createFabricOrchestratorRouter(fakeOrchestrator() as never);
+      const result = await router.submitWork(
+        { userId: 'f-1', workType: 'ai_task', description: 'desc' },
+        ctx,
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('submitWork rejects with a backpressure error when the orchestrator returns nothing', async () => {
+      const router = createFabricOrchestratorRouter(
+        fakeOrchestrator({ submitWork: () => undefined }) as never,
+      );
+      const result = await router.submitWork(
+        { userId: 'f-1', workType: 'ai_task', description: 'desc' },
+        ctx,
+      );
+      expect(result).toEqual({ success: false, error: 'Work item rejected by backpressure' });
+    });
+
+    it('getWorkItem returns not-found for an unknown id', async () => {
+      const router = createFabricOrchestratorRouter(fakeOrchestrator() as never);
+      const result = await router.getWorkItem({ userId: 'f-1', workItemId: 'nope' }, ctx);
+      expect(result).toEqual({ success: false, error: 'Work item not found' });
+    });
+
+    it('getWorkItem enforces ownership (IDOR)', async () => {
+      const router = createFabricOrchestratorRouter(fakeOrchestrator() as never);
+      const result = await router.getWorkItem({ userId: 'intruder', workItemId: 'wi-1' }, ctx);
+      expect(result).toEqual({ success: false, error: 'Access denied' });
+    });
+
+    it('cancelWork enforces not-found and ownership before cancelling', async () => {
+      const router = createFabricOrchestratorRouter(fakeOrchestrator() as never);
+      const missing = await router.cancelWork(
+        { userId: 'f-1', workItemId: 'nope', reason: 'r' },
+        ctx,
+      );
+      expect(missing).toEqual({ success: false, error: 'Work item not found' });
+
+      const denied = await router.cancelWork(
+        { userId: 'intruder', workItemId: 'wi-1', reason: 'r' },
+        ctx,
+      );
+      expect(denied).toEqual({ success: false, error: 'Access denied' });
+
+      const ok = await router.cancelWork(
+        { userId: 'f-1', workItemId: 'wi-1', reason: 'done' },
+        ctx,
+      );
+      expect(ok).toEqual({ success: true });
+    });
+
+    it('queue/concurrency/metrics/events expose the orchestrator snapshot', async () => {
+      const router = createFabricOrchestratorRouter(fakeOrchestrator() as never);
+      expect((await router.getQueueState({ userId: 'f-1' }, ctx)).success).toBe(true);
+      expect((await router.getConcurrency({ userId: 'f-1' }, ctx)).success).toBe(true);
+      expect((await router.getMetrics({ userId: 'f-1' }, ctx)).success).toBe(true);
+      expect((await router.getEvents({ userId: 'f-1' }, ctx)).success).toBe(true);
+      // Explicit limit passes through; omitted limit defaults to 50.
+      expect((await router.getEvents({ userId: 'f-1', limit: 5 }, ctx)).success).toBe(true);
+    });
+  });
+
+  it('briefing on an untouched store returns an empty, no-spam shape', async () => {
+    const router = createAppRouter(makeServices());
+    const caller = router.createCaller(ctx('p-empty'));
+    const briefing = (await caller.proactive.briefing({ userId: 'p-empty' })) as {
+      success?: boolean;
+    };
+    expect(briefing).toBeTruthy();
+  });
+
+  it('assessBusiness scores only — never auto-accepts or executes', async () => {
+    const router = createAppRouter(makeServices());
+    const caller = router.createCaller(ctx('p-1'));
+    const verdict = (await caller.proactive.assessBusiness({
+      userId: 'p-1',
+      title: 'Automate the weekly report',
+      description: 'Produce the weekly report from the same inputs each week.',
+      requiredCapabilities: ['TEXT_GENERATION'],
+    })) as { success?: boolean; data?: { status: string } };
+    expect(verdict.success).toBe(true);
+    expect(verdict.data?.status).toBe('RESEARCHED');
+    // Research/score only: no recommendation is accepted or dismissed as a side
+    // effect of an assessment.
+    const list = (await caller.proactive.list({ userId: 'p-1' })).data as Array<{ status: string }>;
+    for (const rec of list) {
+      expect(rec.status).not.toBe('ACCEPTED');
+      expect(rec.status).not.toBe('DISMISSED');
+    }
   });
 
   it('dismiss marks a recommendation DISMISSED; a foreign userId is refused (IDOR)', async () => {

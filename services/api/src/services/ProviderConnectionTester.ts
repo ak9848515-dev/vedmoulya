@@ -376,8 +376,16 @@ interface GenerationPlan {
 
 function firstMessagePart(value: unknown): string {
   const content = (value as { content?: unknown }).content;
-  if (!Array.isArray(content)) return '';
-  return content
+  // Two real provider shapes share this reader: Anthropic puts the parts array
+  // directly on `.content` (`content: [{ text }]`), while Gemini nests it one
+  // level deeper on `candidate.content.parts`. Reading only the flat shape made
+  // every Gemini validation look like "the provider produced no reply" even on
+  // a real completion, so the nested shape is accepted here.
+  const parts = Array.isArray(content)
+    ? content
+    : (content as { parts?: unknown } | undefined)?.parts;
+  if (!Array.isArray(parts)) return '';
+  return parts
     .map((part) =>
       typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : '',
     )
@@ -402,9 +410,7 @@ function generationPlanFor(
         parse: (body): boolean => {
           const candidates = (body as { candidates?: Array<Record<string, unknown>> }).candidates;
           const first = candidates?.[0];
-          return first
-            ? firstMessagePart((first as { content?: unknown }).content).trim() !== ''
-            : false;
+          return first ? firstMessagePart(first).trim() !== '' : false;
         },
       };
     case 'anthropic':
