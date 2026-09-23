@@ -13,6 +13,10 @@ import {
   type TestableProviderFamily,
 } from '../services/ProviderConnectionTester.js';
 import type { OpenAIOrgPeriod } from '../services/ProviderUsageIngestor.js';
+import {
+  ProviderSetupOrchestrator,
+  type ProviderStatus,
+} from '../services/ProviderSetupOrchestrator.js';
 import type { TRPCContext } from '../router.js';
 import {
   fromServiceResult,
@@ -165,12 +169,39 @@ export interface ProvidersHandlers {
     input: { userId: string; endpointUrl: string; apiKey: string; protocol: string },
     _ctx: TRPCContext,
   ) => Promise<ApiResponse>;
+  /**
+   * G9 — ONE-CLICK PROVIDER SETUP. The whole pipeline (probe → authenticate →
+   * discover → choose default model → real validation → encrypted persistence →
+   * enable → preferred → refresh) runs behind this single call, so the UI never
+   * has to orchestrate Scan/Test/Save/Enable itself and can never report a
+   * half-finished setup as "not configured".
+   */
+  setupProvider: (
+    input: {
+      userId: string;
+      family: string;
+      apiKey?: string;
+      endpointUrl?: string;
+      oauthCompleted?: boolean;
+    },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
+  /**
+   * G9 — the ONE authoritative provider status (DISCONNECTED / CONNECTING /
+   * CONNECTED / ERROR) resolved from the credential service + runtime registry +
+   * preferences. Every surface renders this instead of deriving its own.
+   */
+  getSetupStatus: (
+    input: { userId: string; family: string },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
 }
 
 export function createProvidersRouter(
   providersService: ProviderApplicationService,
   experienceService?: ProviderExperienceService,
   credentialService?: ProviderCredentialService,
+  setupOrchestrator?: ProviderSetupOrchestrator,
 ): ProvidersHandlers {
   const svc = providersService;
   const exp = experienceService;
@@ -420,6 +451,50 @@ export function createProvidersRouter(
       }
       await credentials.delete(input.userId, input.family);
       return successResponse({ family: input.family, removed: true, supported: true });
+    },
+
+    // ── G9 — ONE-CLICK PROVIDER SETUP (the consolidation) ──────────────────
+    // Steps 1–10 of the mission's flow run behind this single handler. The
+    // result is ALWAYS the typed ProviderSetupResult: a failure names the stage,
+    // so the UI can never fall back to a vague "not configured".
+    setupProvider: async (input, _ctx): Promise<ApiResponse> => {
+      const orchestrator =
+        setupOrchestrator ??
+        new ProviderSetupOrchestrator(credentials !== undefined ? { credentials } : {});
+      const result = await orchestrator.setup({
+        userId: input.userId,
+        family: input.family,
+        ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
+        ...(input.endpointUrl !== undefined ? { endpointUrl: input.endpointUrl } : {}),
+        ...(input.oauthCompleted !== undefined ? { oauthCompleted: input.oauthCompleted } : {}),
+      });
+      return successResponse(result);
+    },
+
+    // ── G9 — the ONE resolved provider status ─────────────────────────────
+    // Credential source, runtime truth and preferences are combined HERE, once.
+    // The browser renders this and nothing else, so two screens can no longer
+    // disagree about whether an AI is connected.
+    getSetupStatus: async (input, _ctx): Promise<ApiResponse> => {
+      const orchestrator =
+        setupOrchestrator ??
+        new ProviderSetupOrchestrator(credentials !== undefined ? { credentials } : {});
+      const runtime = runtimeStatus();
+      const rows = (runtime.data as { providers?: Array<Record<string, unknown>> }).providers ?? [];
+      const row = rows.find((candidate) => candidate.family === input.family) ?? {};
+      const preferences = exp ? await exp.getPreferences(input.userId) : undefined;
+      const prefs = preferences?.success ? preferences.data : undefined;
+      const status: ProviderStatus = await orchestrator.getStatus(input.userId, input.family, {
+        ...(typeof row.status === 'string' ? { runtimeStatus: row.status } : {}),
+        ...(prefs !== undefined
+          ? { enabled: !prefs.disabledProviderIds.includes(input.family) }
+          : {}),
+        ...(prefs?.preferredModelId !== undefined
+          ? { selectedModel: { id: prefs.preferredModelId, name: prefs.preferredModelId } }
+          : {}),
+        capabilities: Array.isArray(row.capabilities) ? (row.capabilities as string[]) : [],
+      });
+      return successResponse(status);
     },
 
     // SPRINT-049 — test connection for custom providers.

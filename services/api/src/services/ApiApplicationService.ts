@@ -201,6 +201,7 @@ import {
   createRagRetrievalPort,
 } from '../infrastructure/RuntimePorts.js';
 import { ProviderExperienceService } from './ProviderExperienceService.js';
+import { ProviderSetupOrchestrator } from './ProviderSetupOrchestrator.js';
 import { RoutingEvidenceService } from './RoutingEvidenceService.js';
 import { ExecutionHealthService } from './ExecutionHealthService.js';
 import { ModelSelectionIntelligence } from '@vedmoulya/services';
@@ -686,6 +687,12 @@ export class ApiApplicationService {
    * never persisted (the platform credential remains the only source).
    */
   readonly providerCredentialService: ProviderCredentialService | undefined;
+  /**
+   * G9 — the ONE provider setup pipeline. Reuses the connection tester, the
+   * credential service and the preferences service; it replaces the multi-step
+   * Scan → Test → Save → Enable sequence the user used to drive by hand.
+   */
+  readonly providerSetupOrchestrator: ProviderSetupOrchestrator;
 
   // ── EPIC-012 — Production Observability & Control Plane ───────────────────
   /** The correlated execution-trace spine (also the engine TelemetryPort). */
@@ -1444,6 +1451,18 @@ export class ApiApplicationService {
         },
       },
     );
+
+    // ── G9 — Provider Setup Orchestrator (one-click configuration) ────────
+    //    Composes the SAME connection tester, encrypted credential service and
+    //    preferences service the manual flow already used, so the consolidated
+    //    pipeline adds no new provider infrastructure and no new credential
+    //    path. Constructed after the experience service it writes through.
+    this.providerSetupOrchestrator = new ProviderSetupOrchestrator({
+      ...(this.providerCredentialService !== undefined
+        ? { credentials: this.providerCredentialService }
+        : {}),
+      preferences: this.preferencesService,
+    });
 
     // ── Create The VedMoulya Brain (EPIC-016) ────────────────────────────
     //    The central intelligence & orchestration coordinator. Consumes the

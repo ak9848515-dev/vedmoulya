@@ -30,6 +30,13 @@ const mocks = vi.hoisted(() => ({
   refreshIntelligenceMutate: vi.fn(),
   beginGoogleSignIn: vi.fn(),
   intelligence: null as unknown,
+  // The AddProviderPanel (the custom/OpenAI-compatible registration surface)
+  // talks to the gateway through the tRPC client, so those two mutations are
+  // controllable doubles too.
+  testConnectionMutate: vi.fn(),
+  registerProviderMutate: vi.fn(),
+  // Model-discovery pending state (drives the discover button's spinner).
+  refreshPending: false,
 }));
 
 vi.mock('../../../lib/api-client.js', () => ({
@@ -37,7 +44,7 @@ vi.mock('../../../lib/api-client.js', () => ({
   useSetProviderPreferences: () => ({ mutateAsync: mocks.setPrefsMutate }),
   useRefreshProviderIntelligence: () => ({
     mutateAsync: mocks.refreshIntelligenceMutate,
-    isPending: false,
+    isPending: mocks.refreshPending,
   }),
   useProviderIntelligenceStatus: () => mocks.intelligence ?? { data: undefined, isLoading: false },
 }));
@@ -51,8 +58,8 @@ vi.mock('../../../auth/session-manager.js', () => ({
 vi.mock('../../../lib/trpc.js', () => ({
   api: {
     providers: {
-      testConnection: { useMutation: () => ({ mutateAsync: vi.fn() }) },
-      registerProvider: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      testConnection: { useMutation: () => ({ mutateAsync: mocks.testConnectionMutate }) },
+      registerProvider: { useMutation: () => ({ mutateAsync: mocks.registerProviderMutate }) },
     },
   },
 }));
@@ -91,6 +98,46 @@ const CUSTOM_PROVIDER: ProviderExperienceRowDTO = {
   selectedModel: { id: 'acme-1', name: 'Acme 1' },
   models: [{ id: 'acme-1', name: 'Acme 1', capabilities: ['Reasoning'] }],
 };
+
+// A REGISTRY-only family: not part of the gateway's closed connect contract,
+// so the advanced screen probes it as an OpenAI-compatible endpoint.
+const OPENROUTER_PROVIDER: ProviderExperienceRowDTO = {
+  ...GOOGLE_PROVIDER,
+  providerId: 'openrouter',
+  name: 'OpenRouter',
+  family: 'openrouter',
+  selectedModel: { id: 'openrouter/auto', name: 'OpenRouter Auto' },
+  models: [{ id: 'openrouter/auto', name: 'OpenRouter Auto', capabilities: ['Reasoning'] }],
+};
+
+// A built-in whose preset DECLARES a user-configurable endpoint — the only
+// shipped case where the probe carries the preset's own endpoint URL.
+const OLLAMA_PROVIDER: ProviderExperienceRowDTO = {
+  ...GOOGLE_PROVIDER,
+  providerId: 'ollama',
+  name: 'Ollama (Local)',
+  family: 'ollama',
+  selectedModel: { id: 'llama3.2', name: 'llama3.2' },
+  models: [{ id: 'llama3.2', name: 'llama3.2', capabilities: ['Reasoning'] }],
+  availability: 'LOCAL',
+};
+
+/** A successful probe result, so tests only state what they care about. */
+function connectedResult(
+  overrides: Partial<ProviderConnectionResultDTO> = {},
+): ProviderConnectionResultDTO {
+  return {
+    connected: true,
+    status: 'connected',
+    message: 'Connected',
+    latencyMs: 120,
+    models: [],
+    testedAt: '2026-09-23T00:00:00.000Z',
+    serverManagedKey: false,
+    runtimeConfigured: true,
+    ...overrides,
+  };
+}
 
 const CONFIGURED_RUNTIME: ProviderRuntimeStateDTO = {
   family: 'google',
@@ -185,10 +232,17 @@ describe('ProviderConfigScreen (simplified Configure AI)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.history.replaceState({}, '', '/providers?provider=google');
+    // The OAuth round trip persists a device-local marker, and jsdom keeps
+    // localStorage across tests in a file — clear it so no test inherits a
+    // previous test's "already authorised" state.
+    window.localStorage.clear();
     mocks.intelligence = intelligenceWithTwoModels();
     mocks.setPrefsMutate.mockResolvedValue({});
     mocks.refreshIntelligenceMutate.mockResolvedValue({});
     mocks.beginGoogleSignIn.mockResolvedValue({ ok: true });
+    mocks.testConnectionMutate.mockResolvedValue({ connected: true, message: 'ok' });
+    mocks.registerProviderMutate.mockResolvedValue({ success: true });
+    mocks.refreshPending = false;
   });
 
   // ── Structure ────────────────────────────────────────────────────────────
@@ -502,5 +556,398 @@ describe('ProviderConfigScreen (simplified Configure AI)', () => {
     const panel = screen.getByTestId('provider-advanced-panel');
     expect(panel.textContent).toMatch(/endpoint/i);
     expect(panel.textContent).toMatch(/protocol/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADVANCED / OpenAI-compatible path.
+//
+// This screen is the deliberate advanced path for a family the gateway's
+// one-click contract does not cover. These tests pin the contract mapping (a
+// registry-only family probes as `openai-compatible`, never as a raw registry
+// id), the endpoint rule, the model-discovery fallbacks and every failure
+// branch — so the advanced path is as verified as the primary one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ProviderConfigScreen (advanced / OpenAI-compatible path)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.history.replaceState({}, '', '/providers?provider=google');
+    mocks.intelligence = intelligenceWithTwoModels();
+    mocks.setPrefsMutate.mockResolvedValue({});
+    mocks.refreshIntelligenceMutate.mockResolvedValue({});
+    mocks.beginGoogleSignIn.mockResolvedValue({ ok: true });
+    mocks.testConnectionMutate.mockResolvedValue({ connected: true, message: 'ok' });
+    mocks.registerProviderMutate.mockResolvedValue({ success: true });
+  });
+
+  // ── The connect contract mapping ─────────────────────────────────────────
+  it('probes a registry-only provider as the OpenAI-compatible contract family', async () => {
+    mocks.connectMutate.mockResolvedValue(connectedResult());
+    renderScreen({ provider: OPENROUTER_PROVIDER, runtime: null });
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'sk-test-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    await waitFor(() => expect(mocks.connectMutate).toHaveBeenCalledTimes(1));
+    const payload = mocks.connectMutate.mock.calls[0]?.[0];
+    // The gateway only accepts its closed contract — the registry id is mapped.
+    expect(payload.family).toBe('openai-compatible');
+    // …and no endpoint is invented: this preset declares no default endpoint.
+    expect(payload).not.toHaveProperty('endpointUrl');
+  });
+
+  it('keeps a contract provider on its own family and sends its preset endpoint', async () => {
+    mocks.connectMutate.mockResolvedValue(connectedResult());
+    renderScreen({ provider: OLLAMA_PROVIDER, runtime: null });
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'sk-test-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    await waitFor(() => expect(mocks.connectMutate).toHaveBeenCalledTimes(1));
+    expect(mocks.connectMutate.mock.calls[0]?.[0]).toMatchObject({
+      family: 'ollama',
+      apiKey: 'sk-test-key',
+      endpointUrl: 'http://localhost:11434',
+    });
+  });
+
+  it('switches a registry-only provider on once the advanced probe succeeds', async () => {
+    mocks.connectMutate.mockResolvedValue(connectedResult({ latencyMs: 88 }));
+    const { onToggle, onChanged } = renderScreen({
+      provider: OPENROUTER_PROVIDER,
+      runtime: null,
+      enabled: false,
+    });
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'sk-test-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    const success = await waitFor(() => screen.getByTestId('provider-connection-success'));
+    expect(success.textContent).toMatch(/88 ms/);
+    expect(onToggle).toHaveBeenCalledWith('openrouter', true);
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  // ── Model discovery / fallbacks ─────────────────────────────────────────
+  it('falls back to the registry model list while intelligence has no profile', () => {
+    mocks.intelligence = { data: { record: { profile: { models: [] } } }, isLoading: false };
+    renderScreen({
+      provider: {
+        ...GOOGLE_PROVIDER,
+        models: [
+          { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', capabilities: ['Reasoning'] },
+          { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', capabilities: ['Vision'] },
+        ],
+      },
+    });
+
+    const group = screen.getByTestId('provider-model-choices');
+    expect(within(group).getByText('Gemini 2.5 Pro')).toBeDefined();
+    // Subtitle comes from the registry capability data, never from marketing copy.
+    expect(group.textContent).toMatch(/Thinking & reasoning/);
+    expect(group.textContent).toMatch(/Understanding images/);
+  });
+
+  it('offers model discovery when nothing is known yet, and reads the registry on demand', async () => {
+    mocks.intelligence = { data: { record: { profile: { models: [] } } }, isLoading: false };
+    renderScreen({ provider: { ...GOOGLE_PROVIDER, models: [] } });
+
+    expect(screen.queryByTestId('provider-model-choices')).toBeNull();
+    expect(screen.queryByTestId('provider-model-single')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('provider-discover-models'));
+    await waitFor(() =>
+      expect(mocks.refreshIntelligenceMutate).toHaveBeenCalledWith({ userId: 'u1', id: 'google' }),
+    );
+  });
+
+  it('says so when model discovery fails instead of staying silent', async () => {
+    mocks.intelligence = { data: { record: { profile: { models: [] } } }, isLoading: false };
+    mocks.refreshIntelligenceMutate.mockRejectedValue(new Error('gateway ECONNREFUSED'));
+    renderScreen({ provider: { ...GOOGLE_PROVIDER, models: [] } });
+
+    fireEvent.click(screen.getByTestId('provider-discover-models'));
+
+    const alert = await waitFor(() => screen.getByRole('alert'));
+    expect(alert.textContent).toMatch(/Couldn't refresh this AI's models/);
+    expect(alert.textContent).not.toMatch(/ECONNREFUSED/);
+  });
+
+  it('shows the loading shell while model intelligence is still loading', () => {
+    mocks.intelligence = { data: undefined, isLoading: true };
+    renderScreen({ provider: { ...GOOGLE_PROVIDER, models: [] } });
+
+    expect(screen.queryByTestId('config-section-connection')).toBeNull();
+    expect(document.body.textContent).toMatch(/Loading this AI/);
+  });
+
+  // ── Model + usage interactions ───────────────────────────────────────────
+  it('names the stored model in the routing summary', () => {
+    renderScreen({ preferredProviderId: 'google', preferredModelId: 'gemini-2.5-pro' });
+    expect(screen.getByTestId('config-section-usage').textContent).toMatch(/Gemini 2.5 Pro/);
+    // …and the stored choice is what the radio group shows as selected.
+    const group = screen.getByTestId('provider-model-choices');
+    const radios = within(group).getAllByRole('radio') as HTMLInputElement[];
+    expect(radios.filter((radio) => radio.checked)).toHaveLength(1);
+    expect(radios[0]?.checked).toBe(false);
+  });
+
+  it('returns to Automatic without touching which AI is primary', async () => {
+    renderScreen({ preferredProviderId: 'google', preferredModelId: 'gemini-2.5-pro' });
+
+    fireEvent.click(within(screen.getByTestId('provider-model-choices')).getByText('Automatic'));
+
+    await waitFor(() =>
+      expect(mocks.setPrefsMutate).toHaveBeenCalledWith({ userId: 'u1', preferredModelId: null }),
+    );
+  });
+
+  it('reports a failed model save in plain language', async () => {
+    mocks.setPrefsMutate.mockRejectedValue(new Error('constraint violated'));
+    renderScreen();
+
+    fireEvent.click(
+      within(screen.getByTestId('provider-model-choices')).getByText('Gemini 2.5 Pro'),
+    );
+
+    const alert = await waitFor(() => screen.getByRole('alert'));
+    expect(alert.textContent).toMatch(/Couldn't save that model/);
+    expect(alert.textContent).not.toMatch(/constraint/);
+  });
+
+  it('explains that choosing a model also makes this AI primary', () => {
+    renderScreen({ preferredProviderId: 'openai' });
+    expect(screen.getByTestId('config-section-model').textContent).toMatch(
+      /Choosing a specific model makes this AI your primary AI/,
+    );
+  });
+
+  // ── Usage switches ───────────────────────────────────────────────────────
+  it('switches this AI off through the existing preferences service', () => {
+    const { onToggle } = renderScreen();
+    fireEvent.click(document.getElementById('provider-enabled') as HTMLElement);
+    expect(onToggle).toHaveBeenCalledWith('google', false);
+  });
+
+  it('unsets the stored primary through the preferences service', async () => {
+    renderScreen({ preferredProviderId: 'google' });
+
+    const primary = document.getElementById('provider-primary') as HTMLButtonElement;
+    expect(primary).not.toBeNull();
+    fireEvent.click(primary);
+
+    await waitFor(() =>
+      expect(mocks.setPrefsMutate).toHaveBeenCalledWith({
+        userId: 'u1',
+        preferredProviderId: null,
+        preferredModelId: null,
+      }),
+    );
+  });
+
+  it('surfaces a failed primary change instead of pretending it worked', async () => {
+    mocks.setPrefsMutate.mockRejectedValue(new Error('nope'));
+    renderScreen({ preferredProviderId: 'google' });
+
+    fireEvent.click(document.getElementById('provider-primary') as HTMLElement);
+
+    const alert = await waitFor(() => screen.getByRole('alert'));
+    expect(alert.textContent).toMatch(/Couldn't update the primary AI/);
+  });
+
+  // ── Connection: key handling + OAuth failure ─────────────────────────────
+  it('can reveal and re-hide the pasted key', () => {
+    renderScreen({ runtime: null });
+
+    expect((screen.getByTestId('provider-api-key-input') as HTMLInputElement).type).toBe(
+      'password',
+    );
+    fireEvent.click(screen.getByLabelText('Show API key'));
+    expect((screen.getByTestId('provider-api-key-input') as HTMLInputElement).type).toBe('text');
+    fireEvent.click(screen.getByLabelText('Hide API key'));
+    expect((screen.getByTestId('provider-api-key-input') as HTMLInputElement).type).toBe(
+      'password',
+    );
+  });
+
+  it('lets the user switch from the server credential to their own key', () => {
+    renderScreen();
+
+    expect(screen.getByTestId('config-section-connection').textContent).toMatch(
+      /server already holds a working credential/,
+    );
+    expect(screen.queryByTestId('provider-api-key-input')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('provider-use-own-key'));
+
+    expect(screen.getByTestId('provider-api-key-input')).toBeDefined();
+    expect(screen.getByTestId('provider-use-own-key').textContent).toMatch(
+      /Use the configured credential/,
+    );
+  });
+
+  it('turns a transport failure into a friendly message, never raw text', async () => {
+    mocks.connectMutate.mockRejectedValue(new Error('ECONNREFUSED 127.0.0.1:4000'));
+    renderScreen({ runtime: null });
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'sk-test-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    const error = await waitFor(() => screen.getByTestId('provider-connection-error'));
+    expect(error.textContent).toMatch(/Couldn't connect to Gemini\./);
+    expect(error.textContent).not.toMatch(/ECONNREFUSED/);
+  });
+
+  it('announces an OAuth failure instead of leaving the user guessing', async () => {
+    mocks.beginGoogleSignIn.mockResolvedValue({ ok: false, error: 'offline' });
+    renderScreen();
+
+    fireEvent.click(screen.getByTestId('auth-option-oauth'));
+    fireEvent.click(screen.getByTestId('provider-oauth-connect'));
+
+    const alert = await waitFor(() => screen.getByRole('alert'));
+    expect(alert.textContent).toMatch(/You appear to be offline/);
+  });
+
+  // ── Advanced: custom AI registration + detail hand-off ───────────────────
+  it('registers a custom AI and refreshes the view model', async () => {
+    const { onChanged } = renderScreen({ provider: CUSTOM_PROVIDER, runtime: null });
+    fireEvent.click(screen.getByTestId('provider-advanced-toggle'));
+
+    fireEvent.change(screen.getByPlaceholderText('e.g., My Company AI'), {
+      target: { value: 'My AI' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('https://api.example.com/v1'), {
+      target: { value: 'https://ai.example.com/v1' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('e.g., gpt-4o, claude-3-sonnet, custom-model'), {
+      target: { value: 'my-model' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Save Provider/ }));
+
+    await waitFor(() => expect(mocks.registerProviderMutate).toHaveBeenCalledTimes(1));
+    // The chosen protocol maps onto a family the registry really supports —
+    // never a fabricated custom family.
+    expect(mocks.registerProviderMutate.mock.calls[0]?.[0]).toMatchObject({
+      userId: 'u1',
+      family: 'openai',
+    });
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it('opens the full provider detail view from Advanced', () => {
+    const { onOpenDetails } = renderScreen();
+
+    fireEvent.click(screen.getByTestId('provider-advanced-toggle'));
+    fireEvent.click(screen.getByText('Open provider details'));
+
+    expect(onOpenDetails).toHaveBeenCalledWith('google');
+  });
+
+  // ── Probe result rendering ───────────────────────────────────────────────
+  it('counts several discovered models in plain language', async () => {
+    mocks.connectMutate.mockResolvedValue(
+      connectedResult({
+        models: [
+          { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+          { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        ],
+      }),
+    );
+    renderScreen({ runtime: null });
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'sk-test-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    const success = await waitFor(() => screen.getByTestId('provider-connection-success'));
+    expect(success.textContent).toMatch(/2 models available/);
+  });
+
+  it('still reports a passed check when the probe returns no latency or model list', async () => {
+    mocks.connectMutate.mockResolvedValue(
+      connectedResult({ latencyMs: undefined, models: undefined }),
+    );
+    renderScreen({ runtime: null });
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'sk-test-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    const success = await waitFor(() => screen.getByTestId('provider-connection-success'));
+    expect(success.textContent).toMatch(/Connected/);
+    // Nothing is invented from a measurement that was not reported.
+    expect(success.textContent).not.toMatch(/ms/);
+    expect(success.textContent).not.toMatch(/model/);
+  });
+
+  // ── Capability edges (never fabricate a subtitle) ─────────────────────────
+  it('treats a profile model with no capability list as having none', () => {
+    mocks.intelligence = {
+      data: {
+        record: {
+          profile: {
+            models: [
+              { modelId: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', capabilities: {} },
+              {
+                modelId: 'gemini-2.5-flash',
+                name: 'Gemini 2.5 Flash',
+                capabilities: { value: ['reasoning'] },
+              },
+            ],
+          },
+        },
+      },
+      isLoading: false,
+    };
+    renderScreen();
+
+    const group = screen.getByTestId('provider-model-choices');
+    expect(within(group).getByText('Gemini 2.5 Pro')).toBeDefined();
+    // The one that really reports capabilities still gets plain-language text.
+    expect(group.textContent).toMatch(/Thinking & reasoning/);
+  });
+
+  it('renders registry models without inventing subtitles for missing capabilities', () => {
+    mocks.intelligence = { data: { record: { profile: { models: [] } } }, isLoading: false };
+    renderScreen({
+      provider: {
+        ...GOOGLE_PROVIDER,
+        models: [
+          { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', capabilities: ['Reasoning'] },
+          { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', capabilities: [] },
+        ],
+      },
+    });
+
+    const group = screen.getByTestId('provider-model-choices');
+    expect(within(group).getByText('Gemini 2.5 Flash')).toBeDefined();
+    expect(group.textContent).toMatch(/Thinking & reasoning/);
+  });
+
+  it('names a stored model the provider no longer offers instead of guessing', () => {
+    renderScreen({ preferredProviderId: 'google', preferredModelId: 'retired-model' });
+    expect(screen.getByTestId('config-section-usage').textContent).toMatch(/Selected model/);
+  });
+
+  it('disables model discovery while a refresh is already in flight', () => {
+    mocks.intelligence = { data: { record: { profile: { models: [] } } }, isLoading: false };
+    mocks.refreshPending = true;
+    renderScreen({ provider: { ...GOOGLE_PROVIDER, models: [] } });
+
+    expect((screen.getByTestId('provider-discover-models') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 });

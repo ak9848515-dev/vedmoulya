@@ -12,9 +12,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   MAX_CAPABILITY_PHRASES,
+  PROVIDER_CONTRACT_FAMILIES,
   capabilityPhrases,
+  connectProviderFamily,
   friendlyConnectionError,
   isBuiltInProvider,
+  isContractProviderFamily,
   isProviderActive,
   modelSubtitle,
   providerIdentity,
@@ -102,15 +105,13 @@ describe('connection status (derived from the runtime-truth registry)', () => {
 
   it('surfaces a real failed verification instead of a green connection', () => {
     const rejected = providerStatusDisplay('CONFIGURED', 'Gemini', true, {
-      ok: false,
-      failureKind: 'invalid_api_key',
+      lastVerification: { ok: false, failureKind: 'invalid_api_key' },
     });
     expect(rejected.connection.key).toBe('issue');
     expect(rejected.connection.label).toBe('Connection issue');
 
     const unreachable = providerStatusDisplay('CONFIGURED', 'Gemini', true, {
-      ok: false,
-      failureKind: 'unreachable',
+      lastVerification: { ok: false, failureKind: 'unreachable' },
     });
     expect(unreachable.connection.key).toBe('issue');
     // The two flavours stay distinguishable through the reason, not the label.
@@ -130,6 +131,25 @@ describe('connection status (derived from the runtime-truth registry)', () => {
       expect(status.connection.label).toBe('Not connected');
       expect(status.configured).toBe(false);
       expect(status.connection.hint).toBeTruthy();
+    }
+  });
+
+  it('reports the LIVE transient stage while a check is running', () => {
+    // The transient lifecycle states are only reachable through the explicit
+    // `activity` option — a surface reporting its own in-flight work. They must
+    // never be mistaken for a settled "Not connected", and they carry the
+    // lifecycle's own label/symbol rather than a second vocabulary.
+    const expected = [
+      ['verifying', 'Verifying'],
+      ['configuring', 'Connecting'],
+    ] as const;
+    for (const [activity, label] of expected) {
+      const display = providerStatusDisplay('NOT_CONFIGURED', 'Gemini', true, { activity });
+      expect(display.connection.key).toBe('not_connected');
+      expect(display.connection.label).toBe(label);
+      expect(display.connection.symbol).toBe('●');
+      expect(display.configured).toBe(false);
+      expect(display.connection.hint).toBeTruthy();
     }
   });
 
@@ -228,5 +248,90 @@ describe('model choice vocabulary', () => {
     expect(supportsAutomaticModel(0)).toBe(false);
     expect(supportsAutomaticModel(1)).toBe(false);
     expect(supportsAutomaticModel(2)).toBe(true);
+  });
+});
+
+describe('connect family (G9 — one closed gateway contract)', () => {
+  // The exact family ids the gateway's setup / connect / disconnect procedures
+  // accept. Everything the screens hand to those procedures goes through here.
+  const CONTRACT_FAMILIES = [
+    'google',
+    'openai',
+    'anthropic',
+    'deepseek',
+    'ollama',
+    'openai-compatible',
+  ] as const;
+
+  it('passes every contract family through untouched', () => {
+    for (const family of CONTRACT_FAMILIES) {
+      expect(connectProviderFamily(family)).toBe(family);
+    }
+  });
+
+  it('maps registry families the pipeline cannot probe natively onto the OpenAI-compatible endpoint', () => {
+    // The registry really carries these (the EI-002 catalog plus user-defined
+    // ids), but the connect contract does not — the gateway probes them as an
+    // OpenAI-compatible endpoint instead of rejecting the request outright.
+    for (const family of ['openrouter', 'mock', 'custom', 'acme-ai']) {
+      expect(connectProviderFamily(family)).toBe('openai-compatible');
+    }
+  });
+
+  it('never widens the contract back to an arbitrary registry id', () => {
+    // Case/spelling differences and blank ids fall back rather than being
+    // passed through as a family the gateway would reject.
+    for (const family of ['', 'OpenAI', 'gemini', 'cogito']) {
+      expect(connectProviderFamily(family)).toBe('openai-compatible');
+    }
+  });
+});
+
+describe('connect gate (G9 — the one-click flow is gated on the contract)', () => {
+  it('accepts exactly the six contract families', () => {
+    expect([...PROVIDER_CONTRACT_FAMILIES]).toEqual([
+      'google',
+      'openai',
+      'anthropic',
+      'deepseek',
+      'ollama',
+      'openai-compatible',
+    ]);
+    for (const family of PROVIDER_CONTRACT_FAMILIES) {
+      expect(isContractProviderFamily(family)).toBe(true);
+    }
+  });
+
+  it('rejects every registry-only family, so the flow is never shown for one', () => {
+    // The registry really carries these (the EI-002 catalog plus user-defined
+    // ids) — they keep the advanced configuration instead of a one-click flow
+    // that would silently probe them as an OpenAI-compatible endpoint.
+    for (const family of ['openrouter', 'mock', 'custom', 'acme-ai']) {
+      expect(isContractProviderFamily(family)).toBe(false);
+    }
+  });
+
+  it('rejects malformed ids and blank input rather than widening the gate', () => {
+    for (const family of ['', 'OpenAI', 'gemini', ' cogito ']) {
+      expect(isContractProviderFamily(family)).toBe(false);
+    }
+  });
+
+  it('the mapping fallback and the gate agree: only gated-out ids become openai-compatible', () => {
+    const all = [
+      ...PROVIDER_CONTRACT_FAMILIES,
+      'openrouter',
+      'mock',
+      'custom',
+      'acme-ai',
+      '',
+    ] as const;
+    for (const family of all) {
+      const mapped = connectProviderFamily(family);
+      // A contract family is passed through; everything the gate rejects is
+      // explicitly mapped onto the OpenAI-compatible advanced path.
+      if (isContractProviderFamily(family)) expect(mapped).toBe(family);
+      else expect(mapped).toBe('openai-compatible');
+    }
   });
 });

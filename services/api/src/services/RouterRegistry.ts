@@ -544,6 +544,27 @@ const providerDisconnectInput = z.object({
   family: z.enum(['google', 'openai', 'anthropic', 'deepseek', 'ollama', 'openai-compatible']),
 });
 
+// G9 — one-click provider setup. The key (when the provider needs one) is used
+// for the probe and then stored ENCRYPTED at rest; it is never logged, never
+// echoed back, and never persisted when the provider rejected it.
+const providerSetupInput = z.object({
+  userId: z.string().min(1),
+  family: z.enum(['google', 'openai', 'anthropic', 'deepseek', 'ollama', 'openai-compatible']),
+  apiKey: z.string().max(4096).optional(),
+  endpointUrl: z.string().max(2000).optional(),
+  /**
+   * Google only — the OAuth callback already completed for this user. It marks
+   * the AUTHENTICATE stage as done; the pipeline still validates Gemini before
+   * anything is reported as connected.
+   */
+  oauthCompleted: z.boolean().optional(),
+});
+
+const providerSetupStatusInput = z.object({
+  userId: z.string().min(1),
+  family: z.string().min(1).max(200),
+});
+
 const providerExplainSelectionInput = z.object({
   userId: z.string().min(1),
   capability: capabilityAIFeatureEnum,
@@ -3579,6 +3600,34 @@ export function createAppRouter(services: ApiApplicationService) {
             services.providerExperience,
             services.providerCredentialService,
           ).disconnectProvider(input, ctx),
+        ),
+
+      // ── G9 — ONE-CLICK PROVIDER SETUP ─────────────────────────────────────
+      // "Add AI → choose provider → Connect → done". ONE call runs the whole
+      // pipeline (probe, authenticate, discover, choose default model, real
+      // validation, encrypted persistence, enable, preferred, refresh) and
+      // returns a typed result that names the exact stage of any failure.
+      setupProvider: standardProcedure
+        .input(providerSetupInput)
+        .mutation(({ input, ctx }) =>
+          createProvidersRouter(
+            services.providers,
+            services.providerExperience,
+            services.providerCredentialService,
+            services.providerSetupOrchestrator,
+          ).setupProvider(input, ctx),
+        ),
+
+      // G9 — the ONE authoritative provider status every surface renders.
+      getSetupStatus: standardProcedure
+        .input(providerSetupStatusInput)
+        .query(({ input, ctx }) =>
+          createProvidersRouter(
+            services.providers,
+            services.providerExperience,
+            services.providerCredentialService,
+            services.providerSetupOrchestrator,
+          ).getSetupStatus(input, ctx),
         ),
 
       // EPIC-012A — Provider Experience (Phases 4–6 / 12–17): owner-scoped

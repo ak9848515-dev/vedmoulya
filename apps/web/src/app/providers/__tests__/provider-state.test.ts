@@ -259,8 +259,7 @@ describe('connection display — a projection of the one lifecycle', () => {
 
   it('surfaces a failed verification instead of a green connection', () => {
     const failed = providerStatusDisplay('CONFIGURED', 'Gemini', true, {
-      ok: false,
-      failureKind: 'invalid_api_key',
+      lastVerification: { ok: false, failureKind: 'invalid_api_key' },
     });
     expect(failed.connection.key).toBe('issue');
     expect(failed.connection.hint).not.toMatch(/AI_[A-Z_]*API_KEY/);

@@ -60,6 +60,8 @@ import {
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
 import { ProvidersOverview } from './ProvidersOverview.js';
+import { ProviderConnectFlow } from './ProviderConnectFlow.js';
+import { ProviderConfigureExperience } from './ProviderConfigureExperience.js';
 import { SimpleProviderConfig } from './SimpleProviderConfig.js';
 import { OpenAIOrgUsagePanel } from './OpenAIOrgUsagePanel.js';
 import { AIBalanceWidget } from './AIBalanceWidget.js';
@@ -69,7 +71,12 @@ import {
   type UsageWidgetRow,
 } from './UsageAvailabilityWidget.js';
 import { providerReadiness, type ProviderReadiness } from './provider-readiness.js';
-import { configureExperienceFor, providerIdentity } from './provider-ux.js';
+import {
+  configureExperienceFor,
+  connectProviderFamily,
+  isContractProviderFamily,
+  providerIdentity,
+} from './provider-ux.js';
 
 // ── Lazy-loaded views (progressive disclosure + a lean first load) ──────────
 // The provider list is what opens first. The configuration experience, the
@@ -356,6 +363,18 @@ function ProviderConfigLoader({
   const setEnabledMutation = useSetProviderEnabled();
   const setPrefsMutation = useSetProviderPreferences();
   const [actionError, setActionError] = useState<string | null>(null);
+  // G9 — the pre-existing (still useful) configuration screens are disclosed
+  // behind [Advanced]; the normal path is the one-click Connect flow.
+  const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
+  // The Google consent round trip returns to ?provider=google&oauth=google. That
+  // marker proves the authorization finished, so the setup pipeline runs without
+  // the user pressing Connect twice.
+  const [oauthJustCompleted, setOauthJustCompleted] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setOauthJustCompleted(params.get('oauth') === 'google');
+  }, []);
 
   const handleToggle = useCallback(
     (id: string, enabled: boolean) => {
@@ -418,12 +437,30 @@ function ProviderConfigLoader({
     );
   }
 
+  const identity = providerIdentity(provider.family, provider.name);
+  const runtimeRow = (runtimeStatus.data?.providers ?? []).find(
+    (entry) => entry.family === provider.family,
+  );
+
+  // G9 GATE — the one-click Connect pipeline only covers the gateway's closed
+  // connect contract (PROVIDER_CONTRACT_FAMILIES). A REGISTRY-only family
+  // (openrouter, mock, a user-defined custom endpoint like "acme-ai") cannot be
+  // probed by it, so ProviderConfigureExperience never offers the flow for one:
+  // it says why and shows the existing advanced configuration instead of
+  // silently probing the provider as an OpenAI-compatible endpoint.
+  const oneClickSupported = isContractProviderFamily(provider.family);
+
   // PROVIDER-UX (Ollama) — a LOCAL provider needs its own flow: auto-detect the
   // local server, list the models it really has, choose one, Save & Enable. The
   // cloud-oriented ProviderConfigScreen cannot do that. Local presets therefore
   // open the existing SimpleProviderConfig (FINAL-02 Simple mode) — the same
   // component the provider detail view already uses — with the server address
   // kept behind "Change address". No new configuration logic is introduced.
+  //
+  // G9 — the NORMAL path for every built-in provider is now ONE Connect action
+  // that runs the whole pipeline server-side (ProviderConnectFlow). The
+  // pre-existing configuration screens stay reachable through [Advanced] so
+  // nothing useful is lost; they are no longer steps the user must perform.
   if (configureExperienceFor(provider.family) === 'simple-local') {
     return (
       <div className="space-y-4 animate-slide-up">
@@ -434,20 +471,72 @@ function ProviderConfigLoader({
         >
           ← AI Providers
         </button>
-        <SimpleProviderConfig
+        <ProviderConnectFlow
           userId={userId}
-          presetId={provider.family}
-          variant="panel"
-          onConfigured={() => {
+          family={connectProviderFamily(provider.family)}
+          onConnected={() => {
             void refetch();
           }}
+          onAdvanced={() => {
+            setShowAdvancedConfig(true);
+          }}
         />
+        {showAdvancedConfig ? (
+          <SimpleProviderConfig
+            userId={userId}
+            presetId={provider.family}
+            variant="panel"
+            onConfigured={() => {
+              void refetch();
+            }}
+          />
+        ) : null}
       </div>
     );
   }
 
+  // The pre-existing configuration + usage surfaces, unchanged — disclosed
+  // through [Advanced] for a contract family, and always shown for a
+  // registry-only one (it is the only way to configure such a provider).
+  const advancedSetup = (
+    <ProviderConfigScreen
+      userId={userId}
+      provider={provider}
+      preferences={data.preferences}
+      runtime={runtimeRow}
+      onBack={onBack}
+      onOpenDetails={onOpenDetails}
+      onToggle={handleToggle}
+      onSetPrimary={handleSetPrimary}
+      onChanged={() => {
+        void refetch();
+      }}
+    />
+  );
+
   return (
     <div className="space-y-4">
+      <ProviderConfigureExperience
+        providerName={identity.name}
+        oneClickSupported={oneClickSupported}
+        advancedDisclosed={showAdvancedConfig}
+        advancedSetup={advancedSetup}
+        connectFlow={
+          /* G9 — the NORMAL path: ONE Connect action, the whole pipeline server-side. */
+          <ProviderConnectFlow
+            userId={userId}
+            family={connectProviderFamily(provider.family)}
+            oauthJustCompleted={oauthJustCompleted}
+            onConnected={() => {
+              void refetch();
+            }}
+            onAdvanced={() => {
+              setShowAdvancedConfig(true);
+            }}
+          />
+        }
+      />
+
       {actionError ? (
         <div
           role="alert"
@@ -457,19 +546,6 @@ function ProviderConfigLoader({
           <p className="text-[13px] text-[#92400E] dark:text-[#FCD34D]">{actionError}</p>
         </div>
       ) : null}
-      <ProviderConfigScreen
-        userId={userId}
-        provider={provider}
-        preferences={data.preferences}
-        runtime={(runtimeStatus.data?.providers ?? []).find((p) => p.family === provider.family)}
-        onBack={onBack}
-        onOpenDetails={onOpenDetails}
-        onToggle={handleToggle}
-        onSetPrimary={handleSetPrimary}
-        onChanged={() => {
-          void refetch();
-        }}
-      />
     </div>
   );
 }

@@ -42,13 +42,41 @@ export type ProviderConnectionErrorKind =
   | 'unavailable'
   | 'not_found'
   | 'bad_request'
-  | 'no_credential';
+  | 'no_credential'
+  /**
+   * G9 — the provider IS reachable from the server, but a browser on this
+   * machine cannot reach it (the local runtime's browser-origin policy). This
+   * is an implementation detail of local runtimes: the user is told what is
+   * true ("VedMoulya can see Ollama, browser access is blocked") and given ONE
+   * recovery instruction — never asked to configure networking.
+   */
+  | 'browser_origin_blocked';
 
 export interface DiscoveredProviderModel {
   /** The provider's real model id (e.g. "models/gemini-2.5-flash" → id). */
   id: string;
   /** Human name when the provider reports one; falls back to the id. */
   name: string;
+}
+
+/**
+ * G9 — the outcome of a LIGHTWEIGHT real generation check performed after
+ * discovery (step 5 of the one-click flow: "does this provider actually
+ * answer?"). It is deliberately tiny (a one-token prompt) so setup stays fast
+ * and cheap, and it is only ever attempted on a provider that already
+ * authenticated — never to discover.
+ */
+export interface ProviderGenerationValidation {
+  /** True when the provider produced a real completion. */
+  ok: boolean;
+  /** The model that answered (the chosen default). */
+  modelId: string;
+  /** Measured round-trip of the generation call. */
+  latencyMs: number;
+  /** Friendly, redacted failure message when ok is false. */
+  message?: string;
+  /** Classified failure kind when ok is false. */
+  errorKind?: ProviderConnectionErrorKind;
 }
 
 export interface ProviderConnectionTestResult {
@@ -283,6 +311,271 @@ function parseOllamaModels(body: unknown): DiscoveredProviderModel[] {
     .filter((m) => m.id !== '');
 }
 
+/**
+ * G9 — model metadata for DETERMINISTIC default selection. The tester keeps the
+ * plain `.models` contract (id/name) that existing callers depend on and adds
+ * this optional projection with the extra facts a ranking may use. Ollama
+ * reports the served context window per model; REST list endpoints rarely do,
+ * in which case contextLength is simply absent (never guessed).
+ */
+export function discoverModelMetadata(
+  family: TestableProviderFamily,
+  body: unknown,
+): Array<{ id: string; name: string; contextLength?: number }> {
+  if (family !== 'ollama') {
+    return parseModelsFor(family, body).map((m) => ({ id: m.id, name: m.name }));
+  }
+  const models = (body as { models?: Array<Record<string, unknown>> }).models ?? [];
+  return models
+    .map((m) => {
+      const id = typeof m.name === 'string' ? m.name : '';
+      const raw = m.details as { context_length?: unknown } | undefined;
+      const contextLength =
+        typeof raw?.context_length === 'number' ? raw.context_length : undefined;
+      return contextLength === undefined ? { id, name: id } : { id, name: id, contextLength };
+    })
+    .filter((m) => m.id !== '');
+}
+
+/** The model-list parser for a family (also used by discoverModelMetadata). */
+function parseModelsFor(family: TestableProviderFamily, body: unknown): DiscoveredProviderModel[] {
+  switch (family) {
+    case 'google':
+      return parseGeminiModels(body);
+    case 'anthropic':
+      return parseAnthropicModels(body);
+    case 'ollama':
+      return parseOllamaModels(body);
+    case 'openai':
+    case 'deepseek':
+    case 'openai-compatible':
+    default:
+      return parseOpenAIModels(body);
+  }
+}
+
+// ── G9 — real generation validation (step 5 of the one-click flow) ──────────
+// "Connected" must mean "this AI can answer", not "this AI listed models". So
+// after discovery the orchestrator asks the provider for ONE tiny completion on
+// the model it is about to persist. The probe is intentionally minimal (a
+// one-word answer, a few output tokens) so setup stays fast and cheap.
+
+/** The one-word prompt used for validation (kept trivial on purpose). */
+const VALIDATION_PROMPT = 'Reply with the single word: ok';
+
+/** Output-token cap for the validation call — never a real generation. */
+const VALIDATION_MAX_TOKENS = 5;
+
+interface GenerationPlan {
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+  /** Reads a real completion out of the provider's own response shape. */
+  parse: (body: unknown) => boolean;
+}
+
+function firstMessagePart(value: unknown): string {
+  const content = (value as { content?: unknown }).content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) =>
+      typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : '',
+    )
+    .join('');
+}
+
+/** The validation request for one family + model (provider-shaped, tiny). */
+function generationPlanFor(
+  input: TestProviderConnectionInput,
+  apiKey: string | undefined,
+  modelId: string,
+  env: Record<string, string | undefined>,
+): GenerationPlan {
+  switch (input.family) {
+    case 'google':
+      return {
+        url: `${GOOGLE_GEMINI_ENDPOINT}/v1beta/models/${encodeURIComponent(modelId)}:generateContent`,
+        headers: apiKey
+          ? { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' }
+          : { 'Content-Type': 'application/json' },
+        body: { contents: [{ parts: [{ text: VALIDATION_PROMPT }] }] },
+        parse: (body): boolean => {
+          const candidates = (body as { candidates?: Array<Record<string, unknown>> }).candidates;
+          const first = candidates?.[0];
+          return first
+            ? firstMessagePart((first as { content?: unknown }).content).trim() !== ''
+            : false;
+        },
+      };
+    case 'anthropic':
+      return {
+        url: `${ANTHROPIC_ENDPOINT}/v1/messages`,
+        headers: {
+          'x-api-key': apiKey ?? '',
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        body: {
+          model: modelId,
+          max_tokens: VALIDATION_MAX_TOKENS,
+          messages: [{ role: 'user', content: VALIDATION_PROMPT }],
+        },
+        parse: (body) => firstMessagePart(body).trim() !== '',
+      };
+    case 'ollama': {
+      const base = (
+        input.endpointUrl?.trim() ||
+        env.AI_OLLAMA_BASE_URL?.trim() ||
+        OLLAMA_DEFAULT_ENDPOINT
+      ).replace(/\/+$/, '');
+      return {
+        url: `${base}/api/chat`,
+        headers: { 'Content-Type': 'application/json' },
+        body: {
+          model: modelId,
+          stream: false,
+          messages: [{ role: 'user', content: VALIDATION_PROMPT }],
+        },
+        parse: (body): boolean => {
+          const message = (body as { message?: { content?: unknown } }).message;
+          return typeof message?.content === 'string' && message.content.trim() !== '';
+        },
+      };
+    }
+    case 'openai':
+    case 'deepseek':
+    case 'openai-compatible':
+    default: {
+      const base =
+        input.family === 'openai'
+          ? OPENAI_ENDPOINT
+          : input.family === 'deepseek'
+            ? DEEPSEEK_ENDPOINT
+            : (input.endpointUrl?.trim() ?? '').replace(/\/+$/, '');
+      return {
+        url: `${base}/chat/completions`,
+        headers: { Authorization: `Bearer ${apiKey ?? ''}`, 'Content-Type': 'application/json' },
+        body: {
+          model: modelId,
+          max_tokens: VALIDATION_MAX_TOKENS,
+          messages: [{ role: 'user', content: VALIDATION_PROMPT }],
+        },
+        parse: (body): boolean => {
+          const choices = (body as { choices?: Array<Record<string, unknown>> }).choices;
+          const first = choices?.[0];
+          if (!first) return false;
+          const message = (first as { message?: { content?: unknown } }).message;
+          if (typeof message?.content === 'string' && message.content.trim() !== '') return true;
+          // Reasoning models may return an empty content string but real output.
+          return typeof (first as { finish_reason?: unknown }).finish_reason === 'string';
+        },
+      };
+    }
+  }
+}
+
+/**
+ * G9 — validate that the provider really ANSWERS with the chosen model.
+ *
+ * This is the step that lets the UI say "✓ connected" honestly: model discovery
+ * alone only proves the list endpoint works. A failure here is reported with
+ * the same friendly taxonomy as the probe (never raw provider text, never the
+ * credential).
+ */
+export async function validateProviderGeneration(
+  input: TestProviderConnectionInput & { modelId: string },
+): Promise<ProviderGenerationValidation> {
+  const env = input.env ?? process.env;
+  const fetchFn = input.fetchFn ?? globalThis.fetch;
+  const timeoutMs = input.timeoutMs ?? 10_000;
+  const modelId = input.modelId.trim();
+  if (modelId === '') {
+    return {
+      ok: false,
+      modelId,
+      latencyMs: 0,
+      message: 'No model was available to test.',
+      errorKind: 'no_credential',
+    };
+  }
+
+  const explicit = input.credential;
+  const apiKey =
+    explicit?.source === 'USER'
+      ? explicit.secret
+      : input.apiKey?.trim() || explicit?.secret || resolvePlatformCredential(input.family, env);
+
+  const plan = generationPlanFor(input, apiKey ?? undefined, modelId, env);
+  const startedAt = Date.now();
+  try {
+    const response = await fetchFn(plan.url, {
+      method: 'POST',
+      headers: plan.headers,
+      body: JSON.stringify(plan.body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const latencyMs = Date.now() - startedAt;
+    if (!response.ok) {
+      const { message, errorKind } = mapHttpFailure(response.status, response.statusText);
+      return { ok: false, modelId, latencyMs, message: redactKey(message, apiKey), errorKind };
+    }
+    const body = await response.json();
+    if (!plan.parse(body)) {
+      return {
+        ok: false,
+        modelId,
+        latencyMs,
+        message: 'The AI answered the model list but produced no reply — try another model.',
+        errorKind: 'unavailable',
+      };
+    }
+    return { ok: true, modelId, latencyMs };
+  } catch (error) {
+    const { message, errorKind } = mapNetworkError(error, timeoutMs);
+    return {
+      ok: false,
+      modelId,
+      latencyMs: Date.now() - startedAt,
+      message: redactKey(message, apiKey),
+      errorKind,
+    };
+  }
+}
+
+// ── G9 — local-runtime browser access (implementation detail) ───────────────
+// A local runtime (Ollama) can be reachable from the server while a BROWSER on
+// the same machine is refused, because the runtime only accepts requests from
+// the origins it was told to trust. VedMoulya treats that as an implementation
+// detail: the user is told the true fact and given ONE recovery instruction —
+// never asked to configure networking (OLLAMA_ORIGINS etc.).
+
+/** True when the endpoint is a loopback address (a local runtime). */
+export function isLoopbackEndpoint(endpointUrl: string): boolean {
+  try {
+    const host = new URL(endpointUrl).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Classify a refusal by a local runtime's origin policy. Ollama answers such
+ * requests with HTTP 403 and a body mentioning origins; without a browser there
+ * is nothing else a 403 on a local runtime can mean.
+ */
+export function classifyLocalRuntimeRefusal(
+  status: number,
+  bodyText: string,
+  endpointUrl: string,
+): ProviderConnectionErrorKind | undefined {
+  if (status !== 401 && status !== 403) return undefined;
+  if (isLoopbackEndpoint(endpointUrl)) {
+    return /origin/i.test(bodyText) ? 'browser_origin_blocked' : 'unauthorized';
+  }
+  return status === 401 ? 'invalid_api_key' : 'unauthorized';
+}
+
 /** Readable labels for success messages (never a secret). */
 const PROVIDER_LABELS: Record<TestableProviderFamily, string> = {
   google: 'Google Gemini',
@@ -421,6 +714,31 @@ export async function testProviderConnection(
     });
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
+      // G9 — a local runtime refusing the request because of its BROWSER origin
+      // policy is classified as such (instead of "invalid API key", which
+      // would be a lie for a keyless local server).
+      const bodyText =
+        response.status === 401 || response.status === 403
+          ? await response
+              .clone()
+              .text()
+              .catch(() => '')
+          : '';
+      const refusal = classifyLocalRuntimeRefusal(response.status, bodyText, url);
+      if (refusal === 'browser_origin_blocked') {
+        return {
+          connected: false,
+          status: 'failed',
+          message:
+            'VedMoulya can see your local AI, but browser access is blocked. Restart it and try again.',
+          errorKind: refusal,
+          latencyMs,
+          testedAt,
+          credentialSource,
+          serverManagedKey,
+          ...runtime,
+        };
+      }
       const { message, errorKind } = mapHttpFailure(response.status, response.statusText);
       return {
         connected: false,

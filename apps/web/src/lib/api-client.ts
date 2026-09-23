@@ -702,6 +702,118 @@ export interface ProviderConnectionResultDTO {
 export type ConnectProviderFamily =
   'google' | 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'openai-compatible';
 
+// ── G9 — ONE-CLICK PROVIDER SETUP (the consolidated contract) ───────────────
+// The web app makes ONE call and renders ONE typed result. Mirrors
+// services/api/src/services/ProviderSetupOrchestrator.ts — the web bundle must
+// not import from the API service, so the shapes are restated here.
+
+/** Every way a setup can end. Only SUCCESS may be rendered as connected. */
+export type ProviderSetupOutcome =
+  | 'SUCCESS'
+  | 'AUTH_REQUIRED'
+  | 'ACTION_REQUIRED'
+  | 'VALIDATION_FAILED'
+  | 'MODEL_DISCOVERY_FAILED'
+  | 'PERSISTENCE_FAILED'
+  | 'UNAVAILABLE';
+
+/** Which pipeline stage a result describes. */
+export type ProviderSetupStage =
+  | 'discover'
+  | 'authenticate'
+  | 'validate'
+  | 'discover_models'
+  | 'choose_default_model'
+  | 'persist_credential'
+  | 'enable_provider'
+  | 'set_preferred'
+  | 'refresh_state';
+
+interface ProviderSetupRecoveryDTO {
+  kind: 'start_local_provider' | 'check_credential' | 'retry' | 'go_advanced';
+  actionLabel: string;
+  detail?: string;
+}
+
+export interface ProviderSetupResultDTO {
+  outcome: ProviderSetupOutcome;
+  connected: boolean;
+  providerId: string;
+  stage: ProviderSetupStage;
+  credentialSource: 'USER' | 'PLATFORM' | 'NONE';
+  selectedModel: { id: string; name: string } | null;
+  availableModels: DiscoveredProviderModelDTO[];
+  hasModelChoice: boolean;
+  modelSelectionSource: 'provider_default' | 'capability_rank' | 'first_available' | 'none';
+  validationLatencyMs?: number;
+  message: string;
+  errorKind?: string;
+  recovery?: ProviderSetupRecoveryDTO;
+  preferenceStage?: 'enable_provider' | 'set_preferred';
+  credentialStored: boolean;
+  preferencesApplied: boolean;
+  completedAt: string;
+}
+
+/** The ONE authoritative provider status (single source of truth). */
+export interface ProviderStatusDTO {
+  providerId: string;
+  connectionState: 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
+  credentialSource: 'USER' | 'PLATFORM' | 'NONE';
+  selectedModel: { id: string; name: string } | null;
+  availableModels: DiscoveredProviderModelDTO[];
+  capabilities: string[];
+  lastValidatedAt?: string;
+  actionableError?: { message: string; recovery?: ProviderSetupRecoveryDTO };
+  runtimeConfigured: boolean;
+}
+
+/**
+ * Connect a provider in ONE operation. On success the gateway has already
+ * discovered models, chosen a default, validated a real generation, persisted
+ * the credential ENCRYPTED, enabled the provider and set it as preferred.
+ */
+export function useSetupProvider() {
+  const invalidateProviders = useProviderMutationInvalidation();
+  const mutation = api.providers.setupProvider.useMutation({
+    onSuccess: () => {
+      void invalidateProviders();
+    },
+  });
+  return {
+    ...mutation,
+    data: unwrap<ProviderSetupResultDTO>(mutation.data),
+    mutateAsync: async (input: {
+      userId: string;
+      family: ConnectProviderFamily;
+      apiKey?: string;
+      endpointUrl?: string;
+      oauthCompleted?: boolean;
+    }): Promise<ProviderSetupResultDTO> => {
+      const envelope = (await mutation.mutateAsync(input)) as {
+        success?: boolean;
+        error?: { message?: string } | null;
+        data?: unknown;
+      };
+      if (envelope.success === false) {
+        throw new Error(envelope.error?.message ?? 'Setup failed');
+      }
+      const result = unwrap<ProviderSetupResultDTO>(envelope);
+      if (!result) throw new Error('Setup failed');
+      return result;
+    },
+  };
+}
+
+/** The ONE resolved status for a provider — every surface renders this. */
+export function useProviderSetupStatus(userId: string, family: string) {
+  const q = api.providers.getSetupStatus.useQuery(
+    { userId, family },
+    { enabled: Boolean(userId) && family !== '' },
+  );
+  return { ...q, data: unwrap<ProviderStatusDTO>(q.data) };
+}
+
 export function useConnectProvider() {
   const invalidateProviders = useProviderMutationInvalidation();
   // A successful connect may have stored a USER credential server-side, which

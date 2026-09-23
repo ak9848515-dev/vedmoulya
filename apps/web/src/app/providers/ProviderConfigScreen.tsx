@@ -43,7 +43,6 @@ import {
   useProviderIntelligenceStatus,
   useRefreshProviderIntelligence,
   useSetProviderPreferences,
-  type ConnectProviderFamily,
   type ProviderConnectionResultDTO,
   type ProviderExperienceRowDTO,
   type ProviderRuntimeStateDTO,
@@ -54,6 +53,7 @@ import type { ProviderOverviewPreferences } from './ProvidersOverview.js';
 import { DEFAULT_PRIMARY_PROVIDER_ID } from './ProvidersOverview.js';
 import {
   capabilityPhrases,
+  connectProviderFamily,
   friendlyConnectionError,
   isBuiltInProvider,
   modelSubtitle,
@@ -81,24 +81,6 @@ export interface ProviderConfigScreenProps {
 }
 
 type AuthMethod = 'api_key' | 'oauth';
-
-/**
- * Map a provider family onto the gateway's connection-probe contract. Known
- * families probe natively; anything else (custom endpoints) uses the
- * OpenAI-compatible probe the gateway already ships.
- */
-function connectProviderFamily(family: string): ConnectProviderFamily {
-  switch (family) {
-    case 'google':
-    case 'openai':
-    case 'anthropic':
-    case 'deepseek':
-    case 'ollama':
-      return family;
-    default:
-      return 'openai-compatible';
-  }
-}
 
 interface ModelChoice {
   id: string;
@@ -166,10 +148,6 @@ export function ProviderConfigScreen({
   const identity = providerIdentity(provider.family, provider.name);
   const preset = providerPreset(provider.family);
   const builtIn = isBuiltInProvider(provider.family);
-  // PROVIDER-01 — configured ≠ connected ≠ enabled: the display is derived
-  // from the one canonical lifecycle, so a disabled provider never claims to
-  // be connected.
-  const status = providerStatusDisplay(runtime?.status, identity.name, provider.enabled);
 
   const connect = useConnectProvider();
   const setPreferences = useSetProviderPreferences();
@@ -188,6 +166,15 @@ export function ProviderConfigScreen({
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Announced to assistive tech when a probe fails (the alert is focused).
   const failureRef = useRef<HTMLDivElement>(null);
+
+  // PROVIDER-01 — configured ≠ connected ≠ enabled: the display is derived
+  // from the one canonical lifecycle, so a disabled provider never claims to
+  // be connected. While the probe runs it reports the LIVE check (VERIFYING)
+  // instead of a stale "Not connected" — the transient vocabulary the
+  // lifecycle already defines, so the chip never contradicts the spinner.
+  const status = providerStatusDisplay(runtime?.status, identity.name, provider.enabled, {
+    ...(testing ? { activity: 'verifying' } : {}),
+  });
 
   // The deployment may already hold a working credential for this provider
   // (same rule the Simple mode uses) — then no key is needed from the user.
@@ -279,6 +266,10 @@ export function ProviderConfigScreen({
       const outcome = await connect.mutateAsync({
         userId,
         // The gateway family contract is the provider registry's own family id.
+        // This screen is the ADVANCED/custom-endpoint path: a registry-only
+        // family (openrouter, mock, a user-defined endpoint) deliberately probes
+        // as OpenAI-compatible here. It is never reached from the one-click flow
+        // for such a family — page.tsx gates that on isContractProviderFamily.
         family: connectProviderFamily(provider.family),
         ...(serverManagedAvailable ? {} : { apiKey: apiKey || undefined }),
         ...(preset.endpointUserConfigurable && preset.defaultEndpoint

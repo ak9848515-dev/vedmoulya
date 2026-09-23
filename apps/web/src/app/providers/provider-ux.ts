@@ -25,6 +25,7 @@
    apps/web/src/app/providers/ModelSelector.tsx). */
 
 import { isSimpleProviderPreset, providerPreset } from '@vedmoulya/shared';
+import type { ConnectProviderFamily } from '../../lib/api-client.js';
 import { deriveProviderState } from './provider-state.js';
 
 // ── Provider identity ───────────────────────────────────────────────────────
@@ -129,6 +130,48 @@ export function configureExperienceFor(family: string): 'simple-local' | 'config
 }
 
 /**
+ * The EXACT family ids the gateway's G9 connect contract accepts — the closed
+ * set the setup / connect / disconnect procedures agree on. Stated once here so
+ * the UI can both convert registry ids into it and GATE on membership.
+ */
+export const PROVIDER_CONTRACT_FAMILIES = [
+  'google',
+  'openai',
+  'anthropic',
+  'deepseek',
+  'ollama',
+  'openai-compatible',
+] as const satisfies readonly ConnectProviderFamily[];
+
+/**
+ * True when a REGISTRY family is part of the gateway's connect contract.
+ *
+ * The registry is wider than that contract — it also carries families the
+ * one-click pipeline cannot probe natively (openrouter, mock, user-defined
+ * custom endpoints like "acme-ai"). The one-click Connect flow is GATED on
+ * this predicate so such a provider is never silently probed as an
+ * OpenAI-compatible endpoint: the UI states that it uses the advanced setup
+ * instead.
+ */
+export function isContractProviderFamily(family: string): family is ConnectProviderFamily {
+  return (PROVIDER_CONTRACT_FAMILIES as readonly string[]).includes(family);
+}
+
+/**
+ * Map a REGISTRY family id onto the gateway's G9 connect contract.
+ *
+ * The contract membership test is shared with the gate above, so the fallback
+ * is EXPLICIT rather than a switch default: a registry-only family becomes the
+ * OpenAI-compatible endpoint, which is exactly what the ADVANCED/custom-endpoint
+ * configuration means. The one-click flow never relies on this fallback because
+ * it only renders for families `isContractProviderFamily` accepts. Pure and
+ * total: every input yields a family the gateway accepts.
+ */
+export function connectProviderFamily(family: string): ConnectProviderFamily {
+  return isContractProviderFamily(family) ? family : 'openai-compatible';
+}
+
+/**
  * OAuth availability. The ONLY provider OAuth in this codebase is the Google
  * identity authorization (services/identity — consumed through the existing
  * `beginGoogleSignIn` session manager). No other provider OAuth exists, so the
@@ -173,6 +216,24 @@ export interface ProviderStatusDisplay {
  * operator-facing runtime reasons (env key names, adapter internals) are never
  * shown to the user because the canonical hints never contain them.
  */
+/**
+ * Optional, NON-runtime-truth inputs to the display. They exist so a surface
+ * can report facts the runtime registry cannot know — the outcome of its own
+ * last real check, and the transient stage it is in right now — without the
+ * projection inventing state of its own.
+ */
+export interface ProviderStatusOptions {
+  /** Optional outcome of the last REAL verification for this provider. */
+  lastVerification?: { ok: boolean; failureKind?: string };
+  /**
+   * In-flight flow stage for THIS surface (connect action / test button).
+   * Presentation only, never persisted. It makes the transient lifecycle
+   * states reachable from a screen: while a probe runs the chip says
+   * "Verifying" rather than a stale "Not connected".
+   */
+  activity?: 'configuring' | 'verifying';
+}
+
 export function providerStatusDisplay(
   runtimeStatus: string | undefined,
   providerName: string,
@@ -183,10 +244,14 @@ export function providerStatusDisplay(
    * sites that only hold a status snapshot.
    */
   enabled = true,
-  /** Optional outcome of the last REAL verification for this provider. */
-  lastVerification?: { ok: boolean; failureKind?: string },
+  options: ProviderStatusOptions = {},
 ): ProviderStatusDisplay {
-  const state = deriveProviderState({ runtimeStatus, enabled, lastVerification });
+  const state = deriveProviderState({
+    runtimeStatus,
+    enabled,
+    lastVerification: options.lastVerification,
+    activity: options.activity,
+  });
   const configured = state.runtimeConfigured;
   // The REASON always comes from the canonical lifecycle, so the connection
   // chip, the readiness indicator and the provider card can never disagree

@@ -22,3 +22,14 @@ export type {
   ProviderCredentialType,
   ProviderModelDiscovery,
 } from './providers/providerPresets.js';
+
+// ── Deterministic model selection (G9 — one-click setup) ────────────────────
+// "Which model is the default?" is settled from provider METADATA (the id and
+// the capabilities the provider really reported), so no provider-specific
+// setup logic ever lives in the UI. Also DEPENDENCY-FREE (web bundle).
+export { choosePreferredModel, scorePreferredModel } from './providers/provider-model-selection.js';
+export type {
+  SelectableModel,
+  PreferredModelChoice,
+  PreferredModelSource,
+} from './providers/provider-model-selection.js';
