@@ -4,7 +4,62 @@
 // BLD-016-A — Application Shell & Foundation
 // ─────────────────────────────────────────────────────────────────────────────
 
+/* eslint-disable security/detect-non-literal-fs-filename -- false positive:
+   every path is built from process.cwd() plus fixed literals, and nothing here
+   is derived from request input. */
 import type { NextConfig } from 'next';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deterministic development environment (root-cause fix for the identity DB).
+//
+// Next.js only loads env files from its OWN project directory (apps/web), so a
+// `next dev` / `next start` launched directly (`npm run dev`) never sees the
+// repository's authoritative development values in the ROOT `.env.local`. The
+// identity service then resolved `config.database.url` through
+// `requireExternalUrl('IDENTITY_DATABASE_URL', 'postgres://localhost:5432/…')`,
+// silently fell back to localhost, and every Google-OAuth user lookup failed
+// with a PostgreSQL connection/auth error (28P01) instead of using the
+// configured database.
+//
+// Fix: load the SAME files in the SAME order as the repository's ONE
+// authoritative startup strategy (scripts/lib/probes.ts → loadEnvFilesSafe):
+//   • development / test → root `.env.local`, then `apps/web/.env.local`
+//   • production / staging → NO local file (platform environment only)
+// `process.loadEnvFile` never overwrites an already-set key, so precedence is
+// shell variables > apps/web/.env.local (loaded by Next first) > root
+// `.env.local`. No value is ever logged, and nothing is exposed to the client
+// through NEXT_PUBLIC_* — every key stays server-side.
+function findRepoRoot(start: string): string {
+  let dir = resolve(start);
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (existsSync(join(dir, 'packages', 'core', 'package.json'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return resolve(start);
+}
+
+// `next-env.d.ts` narrows NODE_ENV to a non-nullable union, but next.config is
+// also evaluated by tooling that may not set it — cast to keep the runtime
+// fallback explicit without tripping no-unnecessary-condition.
+const nodeEnv = (process.env.NODE_ENV as string | undefined) ?? 'development';
+if (nodeEnv !== 'production' && nodeEnv !== 'staging') {
+  const repoRoot = findRepoRoot(process.cwd());
+  const envFiles = [join(repoRoot, '.env.local'), join(repoRoot, 'apps', 'web', '.env.local')];
+  for (const file of envFiles) {
+    try {
+      if (existsSync(file) && typeof process.loadEnvFile === 'function') {
+        process.loadEnvFile(file);
+      }
+    } catch {
+      // A malformed/absent file must never break the build — `npm run preflight`
+      // reports environment problems with an actionable, secret-free message.
+    }
+  }
+}
 
 const nextConfig: NextConfig = {
   // ── Mobile static export (RD-001) ───────────────────────────────────────

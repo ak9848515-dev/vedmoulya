@@ -15,6 +15,9 @@ storybook-static/
 .env.staging
 .env.production
 .env.*.local
+# Local backups/copies of env files (never commit a secret-bearing copy).
+.env.local.*
+.env.*.bak
 
 # IDE
 .vscode/settings.json

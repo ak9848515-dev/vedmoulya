@@ -82,6 +82,30 @@ platform environment:
   variables) and the GitHub Actions Environment for the deploy job — never in
   the repository, and never in frontend-visible variables.
 
+### Local development environment (deterministic)
+
+One authoritative file: **root `.env.local`** (gitignored). It supplies the
+database URLs (`IDENTITY_DATABASE_URL`, …), `AUTH_JWT_SECRET`, AI keys and OAuth
+credentials for local development. `apps/web/next.config.ts` loads it (via
+`process.loadEnvFile`, the same built-in loader as `scripts/lib/probes.ts`) so
+the dev server, the preflight and `scripts/startup.sh` all read the SAME
+values. Precedence: shell variables > `apps/web/.env.local` (Next.js loads it
+first) > root `.env.local`. `apps/web/.env.local` is only for app-local
+overrides.
+
+```bash
+cp .env.example .env.local        # then fill in real values
+npm run preflight                 # validates env/DB/redis/AI — never prints secrets
+npm run dev                       # http://localhost:3000
+```
+
+If `IDENTITY_DATABASE_URL` is unset, identity falls back to the development
+localhost default and every login fails at the first user lookup. The preflight
+now names the exact variable and reports a **credential rejection** (e.g.
+PostgreSQL `28P01`) distinctly from a network outage, so a rotated/incorrect
+password is caught at startup rather than at sign-in. Production startup NEVER
+uses these local fallbacks (see the model at the top of this section).
+
 ### Database bootstrap
 
 Repositories apply their own **idempotent** DDL (`CREATE TABLE/INDEX IF NOT
