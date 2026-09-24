@@ -457,6 +457,88 @@ describe('PreflightEngine — service reachability probe', () => {
   });
 });
 
+describe('PreflightEngine — credential rejection (reachable but auth failed)', () => {
+  const prodEnv = {
+    AUTH_JWT_SECRET: 'x'.repeat(48),
+    AI_OPENAI_API_KEY: 'sk-prod-abcdefghijklmnopqrstuvwxyz123456789',
+    IDENTITY_DATABASE_URL: 'postgres://u:p@ep-cloud.neon.tech:5432/neondb',
+    REDIS_URL: 'redis://u:p@redis.prod.internal:6379',
+  };
+
+  it('a rotated/invalid cloud DB password is MISCONFIGURED and BLOCKS production', () => {
+    const report = run(
+      makeEnvironment({
+        mode: 'production',
+        env: prodEnv,
+        dockerAvailable: () => true,
+        productionBuildExists: () => true,
+        serviceReachable: (kind) =>
+          kind === 'database'
+            ? { reachable: true, authFailed: true, error: 'driver code 28P01' }
+            : true,
+      }),
+    );
+    const db = findCheck(report, 'database');
+    expect(db.status).toBe('MISCONFIGURED');
+    expect(db.required).toBe(true);
+    expect(db.detail).toContain('28P01');
+    expect(db.detail).toContain('IDENTITY_DATABASE_URL');
+    expect(db.howToFix).toContain('IDENTITY_DATABASE_URL');
+    expect(report.blocked).toBe(true);
+  });
+
+  it('credential rejection BLOCKS development too — identity has no in-memory fallback', () => {
+    const report = run(
+      makeEnvironment({
+        mode: 'development',
+        env: {
+          AUTH_JWT_SECRET: 'x'.repeat(48),
+          IDENTITY_DATABASE_URL: 'postgres://u:p@cloud:5432/db',
+        },
+        dockerAvailable: () => false,
+        productionBuildExists: () => false,
+        serviceReachable: () => ({ reachable: true, authFailed: true }),
+      }),
+    );
+    const db = findCheck(report, 'database');
+    expect(db.status).toBe('MISCONFIGURED');
+    expect(db.required).toBe(true);
+    expect(report.blocked).toBe(true);
+  });
+
+  it('credential rejection is probed even when Docker is unavailable (managed cloud store)', () => {
+    const report = run(
+      makeEnvironment({
+        mode: 'development',
+        env: {
+          AUTH_JWT_SECRET: 'x'.repeat(48),
+          IDENTITY_DATABASE_URL: 'postgres://u:p@cloud:5432/db',
+        },
+        dockerAvailable: () => false,
+        productionBuildExists: () => false,
+        serviceReachable: () => ({ reachable: true, authFailed: true, error: 'driver code 28P01' }),
+      }),
+    );
+    expect(findCheck(report, 'database').status).toBe('MISCONFIGURED');
+  });
+
+  it('--skip-docker softens an OUTAGE but NEVER a credential rejection (regression guard)', () => {
+    const rejected = new PreflightEngine({
+      environment: makeEnvironment({
+        mode: 'production',
+        env: prodEnv,
+        dockerAvailable: () => false,
+        productionBuildExists: () => true,
+        serviceReachable: () => ({ reachable: true, authFailed: true, error: 'driver code 28P01' }),
+      }),
+      softenInfrastructure: true,
+    }).run();
+    expect(findCheck(rejected, 'database').status).toBe('MISCONFIGURED');
+    expect(findCheck(rejected, 'database').required).toBe(true);
+    expect(rejected.blocked).toBe(true);
+  });
+});
+
 describe('PreflightEngine — --skip-docker softening (startup continues DEGRADED)', () => {
   const prodEnv = {
     AUTH_JWT_SECRET: 'x'.repeat(48),

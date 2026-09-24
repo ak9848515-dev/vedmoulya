@@ -114,11 +114,35 @@ export interface PreflightEnvironment {
   /** Production build present? (apps/web/.next/BUILD_ID) */
   productionBuildExists: () => boolean;
   /**
-   * Optional direct reachability probe for a configured store (TCP connect
-   * to the URL host:port). When omitted the check falls back to the Docker
-   * daemon probe only.
+   * Optional direct reachability probe for a configured store. A plain boolean
+   * means "TCP reachable yes/no" (the legacy contract). A {@link StoreReachability}
+   * result additionally distinguishes a REACHABLE server that REJECTED the
+   * credentials (e.g. PostgreSQL 28P01) from one that is simply down — a wrong
+   * credential is a MISCONFIGURATION, never a transient outage. When omitted the
+   * check falls back to the Docker daemon probe only.
    */
-  serviceReachable?: (kind: 'database' | 'redis') => boolean;
+  serviceReachable?: (kind: 'database' | 'redis') => boolean | StoreReachability;
+}
+
+/**
+ * Richer reachability result (optional — the probe may keep returning a boolean).
+ * `authFailed` marks a credential rejection (`error` is a redacted driver code
+ * such as `28P01`, NEVER a connection string or password).
+ */
+export interface StoreReachability {
+  reachable: boolean;
+  /** True when the server was reached but refused the credentials. */
+  authFailed?: boolean;
+  /** Optional redacted reason (driver code only — never a secret). */
+  error?: string;
+}
+
+/** Normalise the probe result (boolean | StoreReachability) to StoreReachability. */
+function normalizeReachability(
+  result: boolean | StoreReachability | undefined,
+): StoreReachability | undefined {
+  if (result === undefined) return undefined;
+  return typeof result === 'boolean' ? { reachable: result } : result;
 }
 
 export interface PreflightEngineOptions {
@@ -514,8 +538,16 @@ export class PreflightEngine {
         mode,
       };
     }
+    // A managed/cloud store (non-loopback URL) is INDEPENDENT of the local
+    // Docker daemon — probe it directly so a reachable-but-rejecting server
+    // (e.g. a rotated cloud password) is reported even on a Docker-less machine.
+    // This bypass only applies when a probe is actually wired AND the URL is
+    // non-loopback; a loopback store (or a bare caller with no probe) keeps the
+    // original Docker-gated behaviour.
     const reachable = this.options.environment.dockerAvailable();
-    if (!reachable) {
+    const canProbeRegardlessOfDocker =
+      !looksLocalhost && this.options.environment.serviceReachable !== undefined;
+    if (!reachable && !canProbeRegardlessOfDocker) {
       return {
         id: options.id,
         label: options.label,
@@ -538,8 +570,42 @@ export class PreflightEngine {
         mode,
       };
     }
-    // Docker daemon is up — probe the actual service when the probe is wired.
-    const serviceUp = this.options.environment.serviceReachable?.(options.id);
+    // Probe the actual service when the probe is wired (Docker up, or a
+    // non-loopback managed store).
+    const reachability = normalizeReachability(
+      this.options.environment.serviceReachable?.(options.id),
+    );
+    const serviceUp = reachability?.reachable;
+    // CREDENTIAL REJECTION — the server answered but refused the login (e.g.
+    // PostgreSQL 28P01). This is a genuine MISCONFIGURATION, not a transient
+    // outage: identity has NO in-memory fallback, so a broken credential breaks
+    // authentication in EVERY mode. Report it hard (required) in all modes and
+    // name the exact variable the operator must fix — never softened by
+    // --skip-docker. The optional reachability softening only applies to a
+    // store that is DOWN, never to one that rejected our credentials.
+    if (reachability?.authFailed === true) {
+      const credentialKey =
+        options.fallbackEnvKeys.length > 0
+          ? `${options.envKey} (or ${options.fallbackEnvKeys.join(' / ')})`
+          : options.envKey;
+      return {
+        id: options.id,
+        label: options.label,
+        status: 'MISCONFIGURED',
+        required: true,
+        detail:
+          `${options.kindLabel} reached at the configured URL but REJECTED the credentials` +
+          (reachability.error ? ` (${reachability.error})` : '') +
+          `. Check ${credentialKey} — the username/password/database is invalid.`,
+        why: 'The server is up but authentication failed — a wrong or rotated credential, never a transient outage.',
+        continues:
+          'Nothing that uses this store can work until the credential is corrected; identity has no in-memory fallback.',
+        howToFix:
+          `Set a valid ${credentialKey} in your environment (root .env.local in development; the platform environment in production). ` +
+          'A rotated/expired database password must be replaced with the current value. Never commit the credential.',
+        mode,
+      };
+    }
     if (serviceUp !== undefined && !serviceUp) {
       return {
         id: options.id,

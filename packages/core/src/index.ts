@@ -140,6 +140,7 @@ export type {
   PreflightReport,
   PreflightEnvironment,
   PreflightEngineOptions,
+  StoreReachability,
 } from './startup/preflight.js';
 
 // Provider Runtime Truth (EPIC-019 — configuration agrees with the runtime

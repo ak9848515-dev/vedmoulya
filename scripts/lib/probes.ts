@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { getConfig, loadEnvFilesSafe } from '@vedmoulya/core';
-import type { PreflightMode } from '@vedmoulya/core';
+import type { PreflightMode, StoreReachability } from '@vedmoulya/core';
 
 export const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -108,13 +108,20 @@ export function productionBuildExists(allowMissing: boolean): boolean {
 }
 
 /**
- * Direct reachability probe for a configured store: a synchronous TCP connect
- * to the URL's host:port (short 1.5s timeout) via a child Node process (a
- * child keeps the probe synchronous without blocking this process's event
- * loop). Returns true when the URL is unparseable/absent — those cases are
- * already reported by the config check.
+ * Direct reachability probe for a configured store.
+ *
+ *   • database — a REAL authenticated `SELECT 1` via postgres.js in a child Node
+ *     process (keeps the probe synchronous without blocking this process's event
+ *     loop). This distinguishes a REACHABLE server that REJECTED the credentials
+ *     (PostgreSQL 28P01 / 28000 / 3D000 → `authFailed`) from one that is simply
+ *     down — so a wrong/rotated cloud password is caught at STARTUP, not at the
+ *     first user login. Only a redacted driver code is ever surfaced.
+ *   • redis — a plain TCP connect (no auth handshake needed for reachability).
+ *
+ * Returns `true` (reachable) when the URL is absent/unparseable — those cases
+ * are already reported by the config check. Never prints credentials.
  */
-export function serviceReachable(kind: 'database' | 'redis'): boolean {
+export function serviceReachable(kind: 'database' | 'redis'): boolean | StoreReachability {
   const key = kind === 'database' ? 'IDENTITY_DATABASE_URL' : 'REDIS_URL';
   const raw = process.env[key] ?? process.env.DATABASE_URL;
   if (!raw) return true; // Not configured — handled by the config check.
@@ -124,6 +131,11 @@ export function serviceReachable(kind: 'database' | 'redis'): boolean {
   } catch {
     return true; // Unparseable URL — the config check reports it.
   }
+
+  if (kind === 'database') {
+    return probeDatabaseAuth(raw);
+  }
+
   const script =
     'const net=require("net");' +
     `const s=net.connect({host:${JSON.stringify(target.host)},port:${target.port},timeout:1500});` +
@@ -132,6 +144,56 @@ export function serviceReachable(kind: 'database' | 'redis'): boolean {
     's.on("timeout",()=>process.exit(1));';
   const probe = spawnSync(process.execPath, ['-e', script], { stdio: 'ignore', timeout: 2_000 });
   return probe.status === 0;
+}
+
+/**
+ * Real, bounded, credential-safe database probe. Runs `SELECT 1` in a child
+ * process so the check is synchronous; the child prints ONE safe token:
+ *   REACHABLE | AUTH_FAILED | UNREACHABLE
+ * PostgreSQL auth/authorization failures map to AUTH_FAILED (credential
+ * problem); any other driver error maps to UNREACHABLE (host/port/SSL/network).
+ * The child NEVER prints the URL, password or driver message.
+ */
+function probeDatabaseAuth(url: string): StoreReachability {
+  const script =
+    'const postgres=require(' +
+    JSON.stringify(requireResolvePostgres()) +
+    ');' +
+    'const url=process.env.__VM_PROBE_URL;' +
+    'const sql=postgres(url,{max:1,connect_timeout:20,idle_timeout:2});' +
+    'sql.unsafe("SELECT 1 AS ok").then(()=>{console.log("REACHABLE");return sql.end({timeout:2});})' +
+    '.then(()=>process.exit(0))' +
+    '.catch((e)=>{const c=String((e&&e.code)||"");' +
+    'if(c==="28P01"||c==="28000"||c==="3D000"){console.log("AUTH_FAILED:"+c);}' +
+    'else{console.log("UNREACHABLE");}' +
+    'sql.end({timeout:2}).catch(()=>undefined).then(()=>process.exit(0));});';
+  // Bounded, but generous enough for a serverless/managed store to wake up:
+  // Neon (and equivalents) suspend idle compute, and a COLD endpoint can take
+  // >8s to accept a connection. A too-short timeout turns "the endpoint was
+  // asleep" into a false UNREACHABLE — which would block a production start.
+  // A rejected credential (28P01) still fails fast, in well under a second.
+  const probe = spawnSync(process.execPath, ['-e', script], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 30_000,
+    env: { ...process.env, __VM_PROBE_URL: url },
+  });
+  const out = (probe.stdout?.toString() ?? '').trim();
+  if (out.startsWith('AUTH_FAILED')) {
+    const code = out.split(':')[1] ?? 'auth_failed';
+    return { reachable: true, authFailed: true, error: `driver code ${code}` };
+  }
+  if (out === 'REACHABLE') return { reachable: true };
+  // Child failed before printing (crash/timeout) — treat as unreachable.
+  return { reachable: false };
+}
+
+/** Resolve postgres.js from the repo root so the child probe can require it. */
+function requireResolvePostgres(): string {
+  try {
+    return join(REPO_ROOT, 'node_modules', 'postgres');
+  } catch {
+    return 'postgres';
+  }
 }
 
 function parseUrlHostPort(url: string): { host: string; port: number } {
