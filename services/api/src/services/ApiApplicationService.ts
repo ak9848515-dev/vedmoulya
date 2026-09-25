@@ -36,13 +36,16 @@ import { CapabilityApplicationService } from '@vedmoulya/capabilities';
 import type { CapabilityRepository } from '@vedmoulya/capabilities';
 import {
   ProviderApplicationService,
-  InMemoryProviderPreferencesStore,
   InMemoryProviderIntelligenceStore,
   InMemoryLocalModelDiscovery,
   ProviderPreferencesService,
   resolvePlatformCredential,
 } from '@vedmoulya/providers';
-import type { ProviderCredentialService, ProviderRepository } from '@vedmoulya/providers';
+import type {
+  ProviderCredentialService,
+  ProviderPreferencesStore,
+  ProviderRepository,
+} from '@vedmoulya/providers';
 import { ContextApplicationService } from '@vedmoulya/context';
 import type { ContextRepository } from '@vedmoulya/context';
 import { ExecutionStrategyApplicationService } from '@vedmoulya/execution-strategy';
@@ -278,6 +281,7 @@ import {
   createProductionOSIntelligenceRepository,
   createProductionContextFabricRepository,
   createProductionProviderCredentialService,
+  createProductionProviderPreferencesStore,
   createProductionProviderRepository,
   createProductionRagRepository,
   awaitAllEngineEnsureTables,
@@ -354,6 +358,12 @@ export interface ApiApplicationServiceOptions {
    * explicitly (used by tests that must prove the platform-only path).
    */
   providerCredentialService?: ProviderCredentialService | null;
+  /**
+   * EPIC-012A — owner-scoped provider preferences store override. The
+   * production default is Postgres-backed so an enabled/preferred provider
+   * survives a restart; development/test degrade to the in-memory store.
+   */
+  providerPreferencesStore?: ProviderPreferencesStore;
   /**
    * Context repository override. Production default: Postgres-backed
    * Enterprise Context Registry (EI-003, CERT-002 C-04). The registry is
@@ -948,9 +958,11 @@ export class ApiApplicationService {
     //    Per-user preferences (enabled set, preferred model, budget policy)
     //    layered over the global registry. Gateway's authMiddleware sets
     //    the request context so routing discovery immediately respects the
-    //    user's enabled providers. In-memory store is the hermetic default;
-    //    production can inject a Postgres-backed store via options.
-    const preferencesStore = new InMemoryProviderPreferencesStore();
+    //    user's enabled providers. PRODUCTION uses the durable Postgres store so
+    //    an enabled/preferred provider survives a restart; development/test and
+    //    injected options keep the hermetic in-memory default.
+    const preferencesStore =
+      options.providerPreferencesStore ?? createProductionProviderPreferencesStore();
     // MANDATORY-PROVIDER INVARIANT (server-enforced): the preferences
     // service validates every enable/disable/primary-brain change against
     // the SINGLE platform catalog (EI-002) so an account can never reach

@@ -170,6 +170,7 @@ export { InMemoryProviderRepository } from './infrastructure/InMemoryProviderRep
 export { InMemoryProviderPreferencesStore } from './infrastructure/InMemoryProviderPreferencesStore.js';
 export { InMemoryProviderCredentialStore } from './infrastructure/InMemoryProviderCredentialStore.js';
 export { PostgresProviderCredentialStore } from './infrastructure/PostgresProviderCredentialStore.js';
+export { PostgresProviderPreferencesStore } from './infrastructure/PostgresProviderPreferencesStore.js';
 export { PostgresProviderRepository } from './infrastructure/PostgresProviderRepository.js';
 
 // ── Application ───────────────────────────────────────────────────────────

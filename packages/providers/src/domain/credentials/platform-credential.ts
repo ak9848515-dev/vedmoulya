@@ -22,6 +22,7 @@ const PLATFORM_CREDENTIAL_ENV_KEYS: readonly {
   { family: 'openai', envKeys: ['AI_OPENAI_API_KEY', 'OPENAI_API_KEY'] },
   { family: 'deepseek', envKeys: ['AI_DEEPSEEK_API_KEY'] },
   { family: 'anthropic', envKeys: ['AI_ANTHROPIC_API_KEY'] },
+  { family: 'openrouter', envKeys: ['AI_OPENROUTER_API_KEY'] },
   // Ollama is configured by BASE URL (no credential); openai-compatible
   // endpoints are always user-supplied. Neither has a platform credential.
   { family: 'ollama', envKeys: [] },

@@ -582,7 +582,7 @@ describe('ProviderConfigScreen (advanced / OpenAI-compatible path)', () => {
   });
 
   // ── The connect contract mapping ─────────────────────────────────────────
-  it('probes a registry-only provider as the OpenAI-compatible contract family', async () => {
+  it('probes OpenRouter as its own contract family (shared OpenAI-compatible path)', async () => {
     mocks.connectMutate.mockResolvedValue(connectedResult());
     renderScreen({ provider: OPENROUTER_PROVIDER, runtime: null });
 
@@ -593,9 +593,10 @@ describe('ProviderConfigScreen (advanced / OpenAI-compatible path)', () => {
 
     await waitFor(() => expect(mocks.connectMutate).toHaveBeenCalledTimes(1));
     const payload = mocks.connectMutate.mock.calls[0]?.[0];
-    // The gateway only accepts its closed contract — the registry id is mapped.
-    expect(payload.family).toBe('openai-compatible');
-    // …and no endpoint is invented: this preset declares no default endpoint.
+    // OpenRouter is a first-class contract family — the registry id is sent as-is.
+    expect(payload.family).toBe('openrouter');
+    // …and no endpoint is sent from the screen: the endpoint is fixed (not
+    // user-configurable) and resolved server-side by the shared tester.
     expect(payload).not.toHaveProperty('endpointUrl');
   });
 

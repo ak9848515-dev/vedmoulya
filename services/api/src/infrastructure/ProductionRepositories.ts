@@ -7,11 +7,17 @@
 
 import { container, databaseManager, logger } from '@vedmoulya/core';
 import postgres from 'postgres';
-import type { ProviderCredentialStore, ProviderRepository } from '@vedmoulya/providers';
+import type {
+  ProviderCredentialStore,
+  ProviderPreferencesStore,
+  ProviderRepository,
+} from '@vedmoulya/providers';
 import {
   InMemoryProviderCredentialStore,
+  InMemoryProviderPreferencesStore,
   InMemoryProviderRepository,
   PostgresProviderCredentialStore,
+  PostgresProviderPreferencesStore,
   PostgresProviderRepository,
   ProviderCredentialService,
   createCatalogProviders,
@@ -543,6 +549,42 @@ export function createProductionProviderCredentialStore(): ProviderCredentialSto
  * (never in plaintext), and the gateway then simply reports the platform
  * credential as the only source.
  */
+/** Singleton slot for the durable provider preferences store. */
+const providerPreferencesStoreSlot: RepositorySlot<ProviderPreferencesStore> = {};
+
+/**
+ * Resolve the production provider PREFERENCES store.
+ *
+ * A user's enabled/preferred provider choice is OWNER state, so it must survive
+ * a restart. The Postgres store is used whenever a database is actually
+ * configured — including local development — so the choice is genuinely durable
+ * and never an in-memory-only map that silently reverts on restart. It degrades
+ * to the in-memory store ONLY when there is no database to persist to, or under
+ * NODE_ENV=test (hermetic unit tests inject their own store and must not reach
+ * Postgres). Strict environments (production/staging) always use Postgres.
+ */
+export function createProductionProviderPreferencesStore(): ProviderPreferencesStore {
+  if (providerPreferencesStoreSlot.instance) return providerPreferencesStoreSlot.instance;
+
+  // A real deployment (and a local dev server wired to Neon) has a database URL
+  // configured; only a database-less run falls back to the ephemeral store.
+  const hasDatabase =
+    (process.env.IDENTITY_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim()) !== undefined &&
+    (process.env.IDENTITY_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim()) !== '';
+
+  if (isTestEnv() || !hasDatabase) {
+    providerPreferencesStoreSlot.instance = new InMemoryProviderPreferencesStore();
+    return providerPreferencesStoreSlot.instance;
+  }
+
+  const sql = createEISql('vedmoulya-provider-preferences');
+  const store = new PostgresProviderPreferencesStore(sql);
+  ensureTable(store, 'Provider preferences');
+
+  providerPreferencesStoreSlot.instance = store;
+  return store;
+}
+
 export function createProductionProviderCredentialService(): ProviderCredentialService | undefined {
   const keyMaterial = process.env.AI_CREDENTIAL_ENCRYPTION_KEY?.trim();
   if (keyMaterial === undefined || keyMaterial === '') return undefined;

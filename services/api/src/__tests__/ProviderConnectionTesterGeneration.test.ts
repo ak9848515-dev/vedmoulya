@@ -19,6 +19,8 @@ import {
   isLoopbackEndpoint,
   classifyLocalRuntimeRefusal,
   testProviderConnection,
+  DEFAULT_GENERATION_TIMEOUT_MS,
+  DEFAULT_PROBE_TIMEOUT_MS,
 } from '../services/ProviderConnectionTester.js';
 
 /** A fetch double returning `body` as JSON with the given HTTP status. */
@@ -404,6 +406,50 @@ describe('validateProviderGeneration (G9 — "does this provider really answer?"
 
       expect(result.errorKind).toBe('unreachable');
       expect(result.message).toContain('3s');
+    });
+  });
+
+  // ── REGRESSION (shared pipeline) ─────────────────────────────────────────
+  // The generation step loads/answers on the chosen model, so a LOCAL runtime
+  // pays a cold-start on the first attempt (measured ~13s for a small Ollama
+  // model). The old single 10s budget failed that first connect for EVERY local
+  // model and reported it as "the provider is not running". These pin the
+  // shared default so it can never silently shrink back below a real cold start.
+  describe('shared timeout budget (regression)', () => {
+    it('gives generation a budget comfortably above a local model cold start', () => {
+      expect(DEFAULT_GENERATION_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
+      expect(DEFAULT_GENERATION_TIMEOUT_MS).toBeGreaterThan(DEFAULT_PROBE_TIMEOUT_MS);
+    });
+
+    it('uses the generation budget when the caller does not pass a timeout', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      const fetchFn = jsonFetch({ choices: [{ message: { content: 'ok' } }] });
+
+      await validateProviderGeneration({
+        family: 'ollama',
+        modelId: 'qwen2.5-coder:3b',
+        env: {},
+        fetchFn,
+      });
+
+      expect(timeoutSpy).toHaveBeenCalledWith(DEFAULT_GENERATION_TIMEOUT_MS);
+      timeoutSpy.mockRestore();
+    });
+
+    it('honours the deployment-wide AI_PROVIDER_TIMEOUT_MS override', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      const fetchFn = jsonFetch({ choices: [{ message: { content: 'ok' } }] });
+
+      await validateProviderGeneration({
+        family: 'openai',
+        apiKey: 'k',
+        modelId: 'gpt-4o-mini',
+        env: { AI_PROVIDER_TIMEOUT_MS: '90000' },
+        fetchFn,
+      });
+
+      expect(timeoutSpy).toHaveBeenCalledWith(90_000);
+      timeoutSpy.mockRestore();
     });
   });
 

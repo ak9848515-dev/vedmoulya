@@ -259,6 +259,7 @@ describe('connect family (G9 — one closed gateway contract)', () => {
     'openai',
     'anthropic',
     'deepseek',
+    'openrouter',
     'ollama',
     'openai-compatible',
   ] as const;
@@ -273,7 +274,8 @@ describe('connect family (G9 — one closed gateway contract)', () => {
     // The registry really carries these (the EI-002 catalog plus user-defined
     // ids), but the connect contract does not — the gateway probes them as an
     // OpenAI-compatible endpoint instead of rejecting the request outright.
-    for (const family of ['openrouter', 'mock', 'custom', 'acme-ai']) {
+    // OpenRouter is NOT one of them any more: it is a first-class contract family.
+    for (const family of ['mock', 'custom', 'acme-ai']) {
       expect(connectProviderFamily(family)).toBe('openai-compatible');
     }
   });
@@ -288,12 +290,13 @@ describe('connect family (G9 — one closed gateway contract)', () => {
 });
 
 describe('connect gate (G9 — the one-click flow is gated on the contract)', () => {
-  it('accepts exactly the six contract families', () => {
+  it('accepts exactly the seven contract families', () => {
     expect([...PROVIDER_CONTRACT_FAMILIES]).toEqual([
       'google',
       'openai',
       'anthropic',
       'deepseek',
+      'openrouter',
       'ollama',
       'openai-compatible',
     ]);
@@ -306,7 +309,8 @@ describe('connect gate (G9 — the one-click flow is gated on the contract)', ()
     // The registry really carries these (the EI-002 catalog plus user-defined
     // ids) — they keep the advanced configuration instead of a one-click flow
     // that would silently probe them as an OpenAI-compatible endpoint.
-    for (const family of ['openrouter', 'mock', 'custom', 'acme-ai']) {
+    // OpenRouter used to be one of them; it now carries its own contract family.
+    for (const family of ['mock', 'custom', 'acme-ai']) {
       expect(isContractProviderFamily(family)).toBe(false);
     }
   });
@@ -318,14 +322,7 @@ describe('connect gate (G9 — the one-click flow is gated on the contract)', ()
   });
 
   it('the mapping fallback and the gate agree: only gated-out ids become openai-compatible', () => {
-    const all = [
-      ...PROVIDER_CONTRACT_FAMILIES,
-      'openrouter',
-      'mock',
-      'custom',
-      'acme-ai',
-      '',
-    ] as const;
+    const all = [...PROVIDER_CONTRACT_FAMILIES, 'mock', 'custom', 'acme-ai', ''] as const;
     for (const family of all) {
       const mapped = connectProviderFamily(family);
       // A contract family is passed through; everything the gate rejects is

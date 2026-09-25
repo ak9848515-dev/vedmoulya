@@ -49,6 +49,8 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
     expect(byFamily.get('deepseek')?.envKeys).toEqual(['AI_DEEPSEEK_API_KEY']);
     // anthropic → AI_ANTHROPIC_API_KEY, but catalog-only (no adapter)
     expect(byFamily.get('anthropic')?.envKeys).toContain('AI_ANTHROPIC_API_KEY');
+    // openrouter → AI_OPENROUTER_API_KEY (shared OpenAI-compatible adapter)
+    expect(byFamily.get('openrouter')?.envKeys).toContain('AI_OPENROUTER_API_KEY');
   });
 
   it('Anthropic is catalog-only in BOTH tables (honest runtime note, no Simple-mode execution claim)', () => {
@@ -72,13 +74,14 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
     }) as unknown as typeof fetch;
 
     const cases: Array<{
-      family: 'google' | 'openai' | 'deepseek' | 'anthropic' | 'ollama';
+      family: 'google' | 'openai' | 'deepseek' | 'anthropic' | 'openrouter' | 'ollama';
       apiKey?: string;
     }> = [
       { family: 'google', apiKey: 'k' },
       { family: 'openai', apiKey: 'k' },
       { family: 'deepseek', apiKey: 'k' },
       { family: 'anthropic', apiKey: 'k' },
+      { family: 'openrouter', apiKey: 'k' },
       { family: 'ollama' },
     ];
     for (const c of cases) {
@@ -90,6 +93,7 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
       `${PROVIDER_PRESETS.openai.defaultEndpoint}/models`,
       `${PROVIDER_PRESETS.deepseek.defaultEndpoint}/models`,
       `${PROVIDER_PRESETS.anthropic.defaultEndpoint}/v1/models`,
+      `${PROVIDER_PRESETS.openrouter.defaultEndpoint}/models`,
       `${PROVIDER_PRESETS.ollama.defaultEndpoint}/api/tags`,
     ]);
   });
@@ -100,6 +104,7 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
       'openai',
       'anthropic',
       'deepseek',
+      'openrouter',
       'ollama',
     ]);
     for (const id of SIMPLE_PROVIDER_PRESET_IDS) {
@@ -113,7 +118,7 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
   });
 
   it('cloud presets never expose the endpoint field in Simple mode; local/custom always do', () => {
-    for (const id of ['google', 'openai', 'anthropic', 'deepseek'] as const) {
+    for (const id of ['google', 'openai', 'anthropic', 'deepseek', 'openrouter'] as const) {
       expect(PROVIDER_PRESETS[id].endpointUserConfigurable, id).toBe(false);
     }
     expect(PROVIDER_PRESETS.ollama.endpointUserConfigurable).toBe(true);

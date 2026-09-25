@@ -26,12 +26,37 @@ const OPENAI_ENDPOINT = 'https://api.openai.com/v1';
 // Same constant DeepSeekProvider uses (api-docs.deepseek.com).
 const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com';
 const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com';
+// OpenRouter speaks the OpenAI chat-completions contract on its own base URL.
+// Wired through the SHARED OpenAI-compatible path — no provider-specific branch.
+const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1';
 // Same default OllamaProvider/OllamaLocalModelDiscovery use.
 const OLLAMA_DEFAULT_ENDPOINT = 'http://localhost:11434';
 
+/**
+ * Shared timeout budgets for the ONE connection pipeline.
+ *
+ * The generation validation always loads/answers on the chosen model, so a
+ * LOCAL runtime pays a cold-start (model load) on the very first attempt —
+ * measured at ~13s for a small Ollama model on a developer laptop. The old
+ * single 10s budget therefore failed the FIRST connect of every local model and
+ * misreported it as "the provider is not running". The probe is a cheap list
+ * call and keeps a tight budget; the generation gets a real one. Both are
+ * overridable (per call, or deployment-wide with AI_PROVIDER_TIMEOUT_MS).
+ */
+export const DEFAULT_PROBE_TIMEOUT_MS = 15_000;
+export const DEFAULT_GENERATION_TIMEOUT_MS = 60_000;
+
+/** Deployment-wide override (AI_PROVIDER_TIMEOUT_MS), when it is a positive number. */
+function envTimeoutMs(env: Record<string, string | undefined>): number | undefined {
+  const raw = env.AI_PROVIDER_TIMEOUT_MS?.trim();
+  if (raw === undefined || raw === '') return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 /** Families this tester can probe (openai-compatible = user-supplied endpoint). */
 export type TestableProviderFamily =
-  'google' | 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'openai-compatible';
+  'google' | 'openai' | 'anthropic' | 'deepseek' | 'openrouter' | 'ollama' | 'openai-compatible';
 
 /** Friendly failure taxonomy for the UI (rendered with a readable message). */
 export type ProviderConnectionErrorKind =
@@ -244,6 +269,13 @@ function runtimeStateFor(
           ? 'This deployment has a server-managed DeepSeek credential — AI execution is live.'
           : 'No DeepSeek credential is configured for this deployment — set AI_DEEPSEEK_API_KEY server-side to activate AI execution.',
       };
+    case 'openrouter':
+      return {
+        runtimeConfigured: hasPlatformKey,
+        runtimeNote: hasPlatformKey
+          ? 'This deployment has a server-managed OpenRouter credential (AI_OPENROUTER_API_KEY) — AI execution is live.'
+          : 'No OpenRouter credential is configured for this deployment — paste your OpenRouter key, or set AI_OPENROUTER_API_KEY server-side.',
+      };
     case 'ollama':
       return {
         runtimeConfigured: configuredNames.has('AI_OLLAMA_BASE_URL'),
@@ -348,6 +380,7 @@ function parseModelsFor(family: TestableProviderFamily, body: unknown): Discover
       return parseOllamaModels(body);
     case 'openai':
     case 'deepseek':
+    case 'openrouter':
     case 'openai-compatible':
     default:
       return parseOpenAIModels(body);
@@ -450,6 +483,7 @@ function generationPlanFor(
     }
     case 'openai':
     case 'deepseek':
+    case 'openrouter':
     case 'openai-compatible':
     default: {
       const base =
@@ -457,7 +491,9 @@ function generationPlanFor(
           ? OPENAI_ENDPOINT
           : input.family === 'deepseek'
             ? DEEPSEEK_ENDPOINT
-            : (input.endpointUrl?.trim() ?? '').replace(/\/+$/, '');
+            : input.family === 'openrouter'
+              ? OPENROUTER_ENDPOINT
+              : (input.endpointUrl?.trim() ?? '').replace(/\/+$/, '');
       return {
         url: `${base}/chat/completions`,
         headers: { Authorization: `Bearer ${apiKey ?? ''}`, 'Content-Type': 'application/json' },
@@ -493,7 +529,7 @@ export async function validateProviderGeneration(
 ): Promise<ProviderGenerationValidation> {
   const env = input.env ?? process.env;
   const fetchFn = input.fetchFn ?? globalThis.fetch;
-  const timeoutMs = input.timeoutMs ?? 10_000;
+  const timeoutMs = input.timeoutMs ?? envTimeoutMs(env) ?? DEFAULT_GENERATION_TIMEOUT_MS;
   const modelId = input.modelId.trim();
   if (modelId === '') {
     return {
@@ -588,6 +624,7 @@ const PROVIDER_LABELS: Record<TestableProviderFamily, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   deepseek: 'DeepSeek',
+  openrouter: 'OpenRouter',
   ollama: 'Ollama',
   'openai-compatible': 'the endpoint',
 };
@@ -621,6 +658,13 @@ function probeFor(
     case 'deepseek':
       return {
         url: `${DEEPSEEK_ENDPOINT}/models`,
+        headers: { Authorization: `Bearer ${apiKey ?? ''}`, Accept: 'application/json' },
+        parse: parseOpenAIModels,
+      };
+    case 'openrouter':
+      return {
+        // OpenRouter exposes its real catalog at GET /api/v1/models.
+        url: `${OPENROUTER_ENDPOINT}/models`,
         headers: { Authorization: `Bearer ${apiKey ?? ''}`, Accept: 'application/json' },
         parse: parseOpenAIModels,
       };
@@ -667,7 +711,7 @@ export async function testProviderConnection(
 ): Promise<ProviderConnectionTestResult> {
   const env = input.env ?? process.env;
   const fetchFn = input.fetchFn ?? globalThis.fetch;
-  const timeoutMs = input.timeoutMs ?? 10_000;
+  const timeoutMs = input.timeoutMs ?? envTimeoutMs(env) ?? DEFAULT_PROBE_TIMEOUT_MS;
   const testedAt = new Date().toISOString();
   const runtime = runtimeStateFor(input.family, env);
 

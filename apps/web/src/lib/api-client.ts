@@ -700,7 +700,7 @@ export interface ProviderConnectionResultDTO {
 }
 
 export type ConnectProviderFamily =
-  'google' | 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'openai-compatible';
+  'google' | 'openai' | 'anthropic' | 'deepseek' | 'openrouter' | 'ollama' | 'openai-compatible';
 
 // ── G9 — ONE-CLICK PROVIDER SETUP (the consolidated contract) ───────────────
 // The web app makes ONE call and renders ONE typed result. Mirrors

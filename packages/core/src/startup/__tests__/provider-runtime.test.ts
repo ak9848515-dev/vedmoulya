@@ -33,13 +33,32 @@ describe('AI provider runtime registry — dev mode without credentials', () => 
   const env = { AUTH_JWT_SECRET: JWT, NODE_ENV: 'development' };
 
   it('catalog families without an adapter report UNSUPPORTED_RUNTIME (never AVAILABLE)', () => {
-    for (const family of ['anthropic', 'openrouter', 'ollama']) {
+    for (const family of ['anthropic']) {
       const state = stateByFamily(env, 'development', family);
       expect(state.status).toBe('UNSUPPORTED_RUNTIME');
       expect(state.adapterImplemented).toBe(false);
       expect(state.registered).toBe(false);
       expect(state.canExecute).toBe(false);
     }
+  });
+
+  it('Ollama is provisioned by its BASE URL, not a key, and has an execution adapter (BLD-022)', () => {
+    // No base URL configured → not registered (dormant), never UNSUPPORTED.
+    const dormant = stateByFamily(env, 'development', 'ollama');
+    expect(dormant.status).toBe('NOT_CONFIGURED');
+    expect(dormant.adapterImplemented).toBe(true);
+
+    // A configured base URL is NOT a credential: the <32-char placeholder-key
+    // heuristic must not apply, or a working local runtime would report ERROR.
+    const configured = stateByFamily(
+      { ...env, AI_OLLAMA_BASE_URL: 'http://localhost:11434' },
+      'development',
+      'ollama',
+    );
+    expect(configured.status).toBe('CONFIGURED');
+    expect(configured.adapterImplemented).toBe(true);
+    expect(configured.registered).toBe(true);
+    expect(configured.canExecute).toBe(true);
   });
 
   it('Google has an adapter but no key → NOT_CONFIGURED (not UNSUPPORTED_RUNTIME)', () => {
@@ -50,10 +69,11 @@ describe('AI provider runtime registry — dev mode without credentials', () => 
     expect(state.canExecute).toBe(true);
   });
 
-  it('openai/deepseek/google without keys report NOT_CONFIGURED (adapter exists, dormant)', () => {
+  it('openai/deepseek/google/openrouter without keys report NOT_CONFIGURED (adapter exists, dormant)', () => {
     expect(stateByFamily(env, 'development', 'openai').status).toBe('NOT_CONFIGURED');
     expect(stateByFamily(env, 'development', 'deepseek').status).toBe('NOT_CONFIGURED');
     expect(stateByFamily(env, 'development', 'google').status).toBe('NOT_CONFIGURED');
+    expect(stateByFamily(env, 'development', 'openrouter').status).toBe('NOT_CONFIGURED');
   });
 
   it('mock is active in development (registered, executable, free)', () => {
@@ -152,6 +172,20 @@ describe('AI provider runtime registry — unsupported providers', () => {
     const result = validateDefaultProvider(env, 'production');
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/catalog/i);
+  });
+
+  it('OpenRouter has an adapter and consumes AI_OPENROUTER_API_KEY (shared OpenAI-compatible path)', () => {
+    const env = {
+      AUTH_JWT_SECRET: JWT,
+      AI_OPENROUTER_API_KEY: 'sk-or-test-abcdefghijklmnopqrstuvwxyz1234',
+    };
+    const state = stateByFamily(env, 'production', 'openrouter');
+    expect(state.status).toBe('CONFIGURED');
+    expect(state.adapterImplemented).toBe(true);
+    expect(state.registered).toBe(true);
+    expect(state.canExecute).toBe(true);
+    const result = runtimeExecutionReady(env, 'production');
+    expect(result.providers).toContain('openrouter');
   });
 
   it('a Google key with adapter → CONFIGURED (not UNSUPPORTED_RUNTIME)', () => {

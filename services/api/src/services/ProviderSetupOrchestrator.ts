@@ -171,6 +171,7 @@ export const SETUP_FAMILIES: readonly TestableProviderFamily[] = [
   'openai',
   'anthropic',
   'deepseek',
+  'openrouter',
   'ollama',
   'openai-compatible',
 ] as const;
@@ -218,6 +219,7 @@ const SETUP_PROVIDER_NAMES: ReadonlyMap<string, string> = new Map([
   ['openai', 'OpenAI'],
   ['anthropic', 'Claude'],
   ['deepseek', 'DeepSeek'],
+  ['openrouter', 'OpenRouter'],
   ['ollama', 'Ollama'],
   ['openai-compatible', 'this AI'],
 ]);
@@ -235,6 +237,7 @@ const KEYED_FAMILIES: ReadonlySet<string> = new Set([
   'anthropic',
   'deepseek',
   'google',
+  'openrouter',
   'openai-compatible',
 ]);
 

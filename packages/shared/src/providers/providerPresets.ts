@@ -25,7 +25,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Known provider families with a preset (custom = user-defined endpoint). */
-export type ProviderPresetId = 'google' | 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'custom';
+export type ProviderPresetId =
+  'google' | 'openai' | 'anthropic' | 'deepseek' | 'openrouter' | 'ollama' | 'custom';
 
 /** What credential Simple mode asks the user for. */
 export type ProviderCredentialType =
@@ -136,6 +137,23 @@ export const PROVIDER_PRESETS: Readonly<Record<ProviderPresetId, ProviderPreset>
     simpleModeSupported: true,
     docsUrl: 'https://platform.deepseek.com/api_keys',
   },
+  openrouter: {
+    presetId: 'openrouter',
+    displayName: 'OpenRouter',
+    category: 'Cloud AI',
+    credentialType: 'api_key',
+    credentialLabel: 'API Key',
+    credentialHelp:
+      'Create a key at openrouter.ai/keys. OpenRouter serves many vendors behind one endpoint.',
+    // OpenRouter speaks the OpenAI chat-completions contract on its own base URL.
+    defaultEndpoint: 'https://openrouter.ai/api/v1',
+    endpointUserConfigurable: false,
+    modelDiscovery: 'rest_list',
+    defaultModelId: 'openai/gpt-4o-mini',
+    deployment: 'cloud',
+    simpleModeSupported: true,
+    docsUrl: 'https://openrouter.ai/keys',
+  },
   ollama: {
     presetId: 'ollama',
     displayName: 'Ollama (Local)',
@@ -174,6 +192,7 @@ export const SIMPLE_PROVIDER_PRESET_IDS: readonly ProviderPresetId[] = [
   'openai',
   'anthropic',
   'deepseek',
+  'openrouter',
   'ollama',
 ];
 

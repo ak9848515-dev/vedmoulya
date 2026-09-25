@@ -52,6 +52,9 @@ npm-debug.log*
 *.out.txt
 *.err.txt
 *.pid.txt
+# The same captured stderr under its hyphenated name (`npm run build 2> build-err.txt`),
+# which the `*.err.txt` pattern above does not cover.
+/*-err.txt
 
 # Secrets
 *.pem

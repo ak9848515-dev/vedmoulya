@@ -3,43 +3,75 @@
 // Implements BLP-002/D02 Frontend Platform
 // BLD-016-A — Application Shell & Foundation
 // ─────────────────────────────────────────────────────────────────────────────
+import type { NextConfig } from 'next';
 
 /* eslint-disable security/detect-non-literal-fs-filename -- false positive:
-   every path is built from process.cwd() plus fixed literals, and nothing here
-   is derived from request input. */
-import type { NextConfig } from 'next';
-import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+   every path is built from this config file's own location (or process.cwd())
+   plus fixed literals, and nothing is derived from request input. Mirrors the
+   documented disable in src/lib/server-env.ts. */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Deterministic development environment (root-cause fix for the identity DB).
+// Deterministic development environment (PROD-02B — root-cause fix).
 //
 // Next.js only loads env files from its OWN project directory (apps/web), so a
-// `next dev` / `next start` launched directly (`npm run dev`) never sees the
+// `next dev` / `next start` launched directly (`npm run dev`) never saw the
 // repository's authoritative development values in the ROOT `.env.local`. The
 // identity service then resolved `config.database.url` through
 // `requireExternalUrl('IDENTITY_DATABASE_URL', 'postgres://localhost:5432/…')`,
 // silently fell back to localhost, and every Google-OAuth user lookup failed
 // with a PostgreSQL connection/auth error (28P01) instead of using the
-// configured database.
+// configured database. AI/Redis/SMTP/feature-flag reads had the SAME problem,
+// which is why Google OAuth and the AI providers could disagree about the
+// environment inside one process.
 //
-// Fix: load the SAME files in the SAME order as the repository's ONE
-// authoritative startup strategy (scripts/lib/probes.ts → loadEnvFilesSafe):
-//   • development / test → root `.env.local`, then `apps/web/.env.local`
+// Fix: apply the SAME files in the SAME order as the repository's ONE
+// authoritative startup strategy (scripts/lib/probes.ts → loadEnvironment):
+//   • development / test  → root `.env.local`, then `apps/web/.env.local`
 //   • production / staging → NO local file (platform environment only)
 // `process.loadEnvFile` never overwrites an already-set key, so precedence is
 // shell variables > apps/web/.env.local (loaded by Next first) > root
 // `.env.local`. No value is ever logged, and nothing is exposed to the client
 // through NEXT_PUBLIC_* — every key stays server-side.
-function findRepoRoot(start: string): string {
-  let dir = resolve(start);
+//
+// The same contract is implemented as a typed, unit-tested module at
+// `src/lib/server-env.ts`. Next evaluates THIS file with its own config loader,
+// which cannot import a TS source module, so the wiring is inlined here and
+// `src/lib/__tests__/server-env.test.ts` asserts the two never diverge.
+// ─────────────────────────────────────────────────────────────────────────────
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** True when `dir` holds BOTH the core package and the web application. */
+function hasRepoMarkers(dir: string): boolean {
+  return (
+    existsSync(join(dir, 'packages', 'core', 'package.json')) &&
+    existsSync(join(dir, 'apps', 'web', 'package.json'))
+  );
+}
+
+/**
+ * Resolve the monorepo root, preferring this config file's OWN location
+ * (`<repoRoot>/apps/web/next.config.ts`) so a cwd or ancestor directory that
+ * contains an unrelated checkout can never be mistaken for the root.
+ */
+function findRepoRoot(): string {
+  try {
+    // apps/web/next.config.ts → ../../ = repo root
+    const here = fileURLToPath(import.meta.url);
+    const candidate = resolve(dirname(here), '..', '..');
+    if (hasRepoMarkers(candidate)) return candidate;
+  } catch {
+    // Fall through to the bounded cwd walk below.
+  }
+  let dir = resolve(process.cwd());
   for (let depth = 0; depth < 6; depth += 1) {
-    if (existsSync(join(dir, 'packages', 'core', 'package.json'))) return dir;
+    if (hasRepoMarkers(dir)) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return resolve(start);
+  return resolve(process.cwd());
 }
 
 // `next-env.d.ts` narrows NODE_ENV to a non-nullable union, but next.config is
@@ -47,7 +79,7 @@ function findRepoRoot(start: string): string {
 // fallback explicit without tripping no-unnecessary-condition.
 const nodeEnv = (process.env.NODE_ENV as string | undefined) ?? 'development';
 if (nodeEnv !== 'production' && nodeEnv !== 'staging') {
-  const repoRoot = findRepoRoot(process.cwd());
+  const repoRoot = findRepoRoot();
   const envFiles = [join(repoRoot, '.env.local'), join(repoRoot, 'apps', 'web', '.env.local')];
   for (const file of envFiles) {
     try {

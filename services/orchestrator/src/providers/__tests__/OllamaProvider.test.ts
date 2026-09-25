@@ -101,6 +101,152 @@ describe('OllamaProvider (same provider contract as every other provider)', () =
     ).rejects.toThrow(/api error: 503/);
   });
 
+  // ── BLD-023 — model RESOLUTION against what is actually installed ───────
+  // The adapter used to be pinned to its configured preference, so a machine
+  // that never pulled that model failed every execution with `api error: 404`
+  // and the runtime fell through to the mock — even though installed models
+  // HAD been discovered and validated. These lock the resolution contract.
+
+  it('executes an INSTALLED model when the configured preference was never pulled', async () => {
+    const calls: Array<{ url: string; body?: string }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        calls.push({ url: href, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+        if (href.endsWith('/api/tags')) {
+          return new Response(
+            JSON.stringify({
+              models: [
+                { name: 'qwen2.5-coder:7b-instruct', capabilities: ['completion', 'tools'] },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            model: 'qwen2.5-coder:7b-instruct',
+            message: { role: 'assistant', content: 'installed model answer' },
+            prompt_eval_count: 5,
+            eval_count: 2,
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    // 'llama3.2' is the default preference and is NOT in the installed set.
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    const response = await provider.execute({
+      messages: [{ role: 'user', content: 'hello' }],
+      model: 'ollama',
+    });
+
+    const chat = calls.find((call) => call.url.endsWith('/api/chat'));
+    expect(chat).toBeDefined();
+    expect(JSON.parse(chat?.body ?? '{}').model).toBe('qwen2.5-coder:7b-instruct');
+    // The model that ACTUALLY ran is what the runtime records — never the
+    // stale preference.
+    expect(response.model).toBe('qwen2.5-coder:7b-instruct');
+    expect(response.metadata?.modelVersion).toBe('qwen2.5-coder:7b-instruct');
+    expect(response.content).toBe('installed model answer');
+  });
+
+  it('prefers the configured model when it IS installed', async () => {
+    const chatBodies: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        if (href.endsWith('/api/tags')) {
+          return new Response(
+            JSON.stringify({
+              models: [
+                { name: 'qwen2.5-coder:7b-instruct', capabilities: ['completion'] },
+                { name: 'llama3.2', capabilities: ['completion'] },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (typeof init?.body === 'string') chatBodies.push(init.body);
+        return chatResponse('configured model answer');
+      }),
+    );
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' });
+    const response = await provider.execute({
+      messages: [{ role: 'user', content: 'hello' }],
+      model: 'ollama',
+    });
+    expect(JSON.parse(chatBodies[0] ?? '{}').model).toBe('llama3.2');
+    expect(response.model).toBe('llama3.2');
+  });
+
+  it('never selects an embedding-only model when the runtime declares capabilities', async () => {
+    const chatBodies: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        if (href.endsWith('/api/tags')) {
+          return new Response(
+            JSON.stringify({
+              models: [
+                { name: 'nomic-embed-text', capabilities: ['embedding'] },
+                { name: 'qwen2.5-coder:3b', capabilities: ['completion', 'insert'] },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (typeof init?.body === 'string') chatBodies.push(init.body);
+        return chatResponse('chat model answer');
+      }),
+    );
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    await provider.execute({ messages: [{ role: 'user', content: 'hi' }], model: 'ollama' });
+    // The embedding model is listed first but must never be chosen for chat.
+    expect(JSON.parse(chatBodies[0] ?? '{}').model).toBe('qwen2.5-coder:3b');
+  });
+
+  it('publishes the INSTALLED model through configuredModel once health was probed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              models: [{ name: 'qwen2.5-coder:7b-instruct', capabilities: ['completion'] }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    // Before the probe the configured preference is what routing would see.
+    expect(provider.configuredModel).toBe('llama3.2');
+    await provider.getHealth();
+    // After the probe routing advertises a model the adapter can really run.
+    expect(provider.configuredModel).toBe('qwen2.5-coder:7b-instruct');
+  });
+
+  it('keeps the configured model when the runtime cannot be listed (never invents one)', async () => {
+    const chatBodies: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        if (href.endsWith('/api/tags')) throw new Error('ECONNREFUSED');
+        if (typeof init?.body === 'string') chatBodies.push(init.body);
+        return chatResponse('answer');
+      }),
+    );
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    await provider.execute({ messages: [{ role: 'user', content: 'hi' }], model: 'ollama' });
+    expect(JSON.parse(chatBodies[0] ?? '{}').model).toBe('llama3.2');
+    expect(provider.configuredModel).toBe('llama3.2');
+  });
+
   it('registers through registerPlatformProviders when configured — indistinguishable from any other provider', () => {
     const orchestrator = new AIOrchestrationService();
     registerPlatformProviders(orchestrator, {

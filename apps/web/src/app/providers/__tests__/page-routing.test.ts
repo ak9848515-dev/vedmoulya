@@ -28,13 +28,13 @@ describe('one-click connect gate (registry-only families)', () => {
   // gateway's connect contract accepts. A registry-only family keeps the
   // advanced configuration instead of being silently probed.
   it('offers the one-click flow for every built-in contract provider', () => {
-    for (const family of ['google', 'openai', 'anthropic', 'deepseek', 'ollama']) {
+    for (const family of ['google', 'openai', 'anthropic', 'deepseek', 'openrouter', 'ollama']) {
       expect(isContractProviderFamily(family)).toBe(true);
     }
   });
 
   it('gates the one-click flow off for registry-only providers', () => {
-    for (const family of ['openrouter', 'mock', 'acme-ai']) {
+    for (const family of ['mock', 'acme-ai']) {
       expect(isContractProviderFamily(family)).toBe(false);
       // ...and those still route somewhere: the advanced config screen (the
       // local auto-detect flow is reserved for the local contract family).

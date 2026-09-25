@@ -106,6 +106,62 @@ PostgreSQL `28P01`) distinctly from a network outage, so a rotated/incorrect
 password is caught at startup rather than at sign-in. Production startup NEVER
 uses these local fallbacks (see the model at the top of this section).
 
+### Next.js server environment boundary (PROD-02B)
+
+The web application runs the **API/gateway inside the Next.js server process**
+(`apps/web/src/app/api/trpc/[trpc]/route.ts` imports `@vedmoulya/api`), so the
+Next.js runtime — not a separate backend process — is what reads the AI,
+database, Redis and feature-flag configuration. Next.js loads env files **only
+from its own project directory** (`apps/web`), which is why the repository
+implements one explicit, deterministic boundary instead of relying on cwd.
+
+| Mode                    | Files loaded (in this order)                                   | Notes                                                          |
+| ----------------------- | -------------------------------------------------------------- | -------------------------------------------------------------- |
+| `development`, `test`   | `<repoRoot>/.env.local`, then `<repoRoot>/apps/web/.env.local` | Root supplies the backend surface; app-local overrides per key |
+| `production`, `staging` | **none**                                                       | Platform environment is the only source (fail-closed)          |
+
+- **Single implementation.** `apps/web/src/lib/server-env.ts` owns the
+  contract (repo-root resolution, file order, mode gate, key inventory). Both
+  `apps/web/next.config.ts` and the Next.js runtime apply it; the unit test
+  `src/lib/__tests__/server-env.test.ts` fails if the config wiring diverges.
+- **Precedence.** `process.loadEnvFile` never overwrites an already-set key, so
+  `shell / platform variables` > `apps/web/.env.local` > root `.env.local`.
+  Next.js loads `apps/web/.env.local` first, which is exactly why the app-local
+  file remains the documented override surface.
+- **Root resolution is anchored to the module's own path**
+  (`<repoRoot>/apps/web/…`), not `process.cwd()`, and requires **both**
+  `packages/core/package.json` and `apps/web/package.json` as markers. A cwd (or
+  ancestor) directory containing an unrelated checkout can therefore never be
+  mistaken for the root — the failure mode that made the server read the wrong
+  environment.
+- **Every key stays server-side.** No `NEXT_PUBLIC_*` name is ever read here, so
+  no secret can be inlined into the browser bundle.
+  `findLeakedPublicSecrets()` reports any offending NAME (never a value).
+- **Never break the boot.** A malformed/absent file is reported by FILE NAME and
+  skipped; `npm run preflight` / `npm run doctor` surface the actionable,
+  secret-free diagnosis.
+
+Verify the boundary without printing a value:
+
+```bash
+npm run preflight          # environment + provider runtime truth (names only)
+npm run doctor             # same registry, machine-oriented
+```
+
+Required server-side names (declared in `SERVER_ENV_KEYS`, asserted by tests):
+`AUTH_JWT_SECRET` · `IDENTITY_DATABASE_URL` · `REDIS_URL`, plus the AI
+execution surface (`AI_OPENAI_API_KEY`, `AI_GOOGLE_API_KEY`,
+`AI_DEEPSEEK_API_KEY`, `AI_OLLAMA_BASE_URL`, `AI_DEFAULT_PROVIDER`,
+`AI_ROUTING_STRATEGY`, …), the Google **OAuth** pair
+(`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` — see the note below) and the
+`FF_*` feature flags.
+
+> **Google has TWO distinct credentials.** `AI_GOOGLE_API_KEY` is the Google AI
+> Studio (Gemini) key used by the AI runtime; `GOOGLE_CLIENT_ID` /
+> `GOOGLE_CLIENT_SECRET` are the OAuth client used by social login. They are
+> configured and fail-fast validated independently — setting one never
+> satisfies the other, and OAuth working says nothing about Gemini.
+
 ### Database bootstrap
 
 Repositories apply their own **idempotent** DDL (`CREATE TABLE/INDEX IF NOT

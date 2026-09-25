@@ -141,5 +141,10 @@ export function setupFailureView(result: ProviderSetupResultDTO): SetupFailureVi
  * Connect action runs the OAuth authorization instead.
  */
 export function providerNeedsKeyUpFront(family: string): boolean {
-  return family === 'openai' || family === 'anthropic' || family === 'deepseek';
+  return (
+    family === 'openai' ||
+    family === 'anthropic' ||
+    family === 'deepseek' ||
+    family === 'openrouter'
+  );
 }

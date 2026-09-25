@@ -99,7 +99,7 @@ export function loadConfiguration(): Configuration {
 
   // EPIC-019 — the configuration layer must AGREE with the runtime provider
   // registry. AI_DEFAULT_PROVIDER may only name a family that actually has a
-  // runtime adapter; catalog-only families (anthropic/google/openrouter/ollama)
+  // runtime adapter; catalog-only families (anthropic/ollama)
   // fail fast in production instead of passing validation and then failing at
   // runtime with "no provider registered".
   const runtimeMode = toRuntimeMode(envName);

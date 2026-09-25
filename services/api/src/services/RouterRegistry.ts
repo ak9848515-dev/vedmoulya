@@ -533,7 +533,15 @@ const providerSetEnabledInput = z.object({
 // logged and never echoed back. Server-managed Gemini omits it.
 const providerConnectInput = z.object({
   userId: z.string().min(1),
-  family: z.enum(['google', 'openai', 'anthropic', 'deepseek', 'ollama', 'openai-compatible']),
+  family: z.enum([
+    'google',
+    'openai',
+    'anthropic',
+    'deepseek',
+    'openrouter',
+    'ollama',
+    'openai-compatible',
+  ]),
   endpointUrl: z.string().max(2000).optional(),
   apiKey: z.string().max(4096).optional(),
 });
@@ -541,7 +549,15 @@ const providerConnectInput = z.object({
 // PROVIDER-01 — forget a stored (encrypted) provider credential.
 const providerDisconnectInput = z.object({
   userId: z.string().min(1),
-  family: z.enum(['google', 'openai', 'anthropic', 'deepseek', 'ollama', 'openai-compatible']),
+  family: z.enum([
+    'google',
+    'openai',
+    'anthropic',
+    'deepseek',
+    'openrouter',
+    'ollama',
+    'openai-compatible',
+  ]),
 });
 
 // G9 — one-click provider setup. The key (when the provider needs one) is used
@@ -549,7 +565,15 @@ const providerDisconnectInput = z.object({
 // echoed back, and never persisted when the provider rejected it.
 const providerSetupInput = z.object({
   userId: z.string().min(1),
-  family: z.enum(['google', 'openai', 'anthropic', 'deepseek', 'ollama', 'openai-compatible']),
+  family: z.enum([
+    'google',
+    'openai',
+    'anthropic',
+    'deepseek',
+    'openrouter',
+    'ollama',
+    'openai-compatible',
+  ]),
   apiKey: z.string().max(4096).optional(),
   endpointUrl: z.string().max(2000).optional(),
   /**

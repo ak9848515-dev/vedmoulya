@@ -23,6 +23,8 @@ export interface OrchestratorConfig {
     anthropic?: { apiKey: string };
     google?: { apiKey: string };
     deepseek?: { apiKey: string };
+    /** OpenRouter — OpenAI-compatible endpoint (shared adapter, no special path). */
+    openrouter?: { apiKey: string; defaultModelId?: string };
     /** BLD-022 — Ollama local provider (same ProviderAdapter contract). */
     ollama?: { baseUrl: string; model?: string };
     /** SPRINT-049 — custom (user-defined) providers to register dynamically. */
@@ -126,6 +128,16 @@ export function resolveGoogleKey(): string | undefined {
 }
 
 /**
+ * Resolve the OpenRouter API key from the canonical production config variable
+ * (`AI_OPENROUTER_API_KEY`). OpenRouter is an OpenAI-compatible endpoint and
+ * therefore runs through the SAME shared adapter as every other compatible
+ * provider — its key is a separate credential from every other family.
+ */
+export function resolveOpenRouterKey(): string | undefined {
+  return process.env.AI_OPENROUTER_API_KEY?.trim() || undefined;
+}
+
+/**
  * BLD-022 — resolve the Ollama base URL from the canonical environment
  * variable (`AI_OLLAMA_BASE_URL`). Ollama participates through the SAME
  * ProviderAdapter contract as every cloud provider (health, capability
@@ -185,6 +197,20 @@ export function registerPlatformProviders(
     // (@ai-sdk/google — createGoogleGenerativeAI). The Google AI Studio API key
     // is a SEPARATE credential from Google OAuth credentials.
     orchestrator.registerProvider(new GoogleGeminiProvider(googleKey));
+  }
+  const openrouterKey = providers?.openrouter?.apiKey ?? resolveOpenRouterKey();
+  if (openrouterKey) {
+    // OpenRouter is an OpenAI-compatible endpoint, so it reuses the SAME shared
+    // OpenAICompatibleProvider adapter as user-configured custom endpoints —
+    // health, routing, retry/fallback and evidence work identically.
+    orchestrator.registerProvider(
+      new OpenAICompatibleProvider(openrouterKey, 'https://openrouter.ai/api/v1', 'openrouter', {
+        name: 'OpenRouter',
+        ...(providers?.openrouter?.defaultModelId !== undefined
+          ? { modelId: providers.openrouter.defaultModelId }
+          : {}),
+      }),
+    );
   }
   // BLD-022 — Ollama local provider: registered when a base URL is configured.
   // Routed, health-checked, retried and fallen back EXACTLY like every other

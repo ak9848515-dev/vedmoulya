@@ -139,6 +139,7 @@ export const PROVIDER_CONTRACT_FAMILIES = [
   'openai',
   'anthropic',
   'deepseek',
+  'openrouter',
   'ollama',
   'openai-compatible',
 ] as const satisfies readonly ConnectProviderFamily[];

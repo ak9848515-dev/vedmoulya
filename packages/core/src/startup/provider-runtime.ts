@@ -114,20 +114,26 @@ export const PROVIDER_RUNTIME_DESCRIPTORS: readonly ProviderRuntimeDescriptor[] 
   {
     family: 'openrouter',
     name: 'OpenRouter',
-    envKeys: [],
-    adapter: null,
-    canExecute: false,
+    envKeys: ['AI_OPENROUTER_API_KEY'],
+    // OpenRouter speaks the OpenAI chat-completions contract on its own base
+    // URL, so it runs through the SHARED OpenAI-compatible adapter — no
+    // provider-specific execution path.
+    adapter: 'OpenAICompatibleProvider (OpenAI chat-completions endpoint)',
+    canExecute: true,
     freeTier: false,
     defaultEligibleStrict: false,
   },
   {
     family: 'ollama',
     name: 'Ollama (Local)',
-    envKeys: [],
-    // Provider Intelligence UI has local-model DISCOVERY; there is no
-    // execution adapter (Ollama never receives a production model request).
-    adapter: null,
-    canExecute: false,
+    // BLD-022 — Ollama IS registered for execution by registerPlatformProviders
+    // when a base URL is configured, through the SAME ProviderAdapter contract
+    // (health, capability gates, routing, retry/fallback, evidence). This entry
+    // previously claimed otherwise, which made a successfully connected local
+    // provider render as permanently "cannot run it yet".
+    envKeys: ['AI_OLLAMA_BASE_URL'],
+    adapter: 'OllamaProvider (OpenAI-compatible local runtime)',
+    canExecute: true,
     freeTier: true,
     defaultEligibleStrict: false,
   },
@@ -236,7 +242,12 @@ function computeRealProviderState(
   }
 
   const value = env[presentKey] ?? '';
-  if (value.trim().length < 32) {
+  // The < 32-char heuristic exists to catch PLACEHOLDER API KEYS. A local
+  // runtime is provisioned by a BASE URL, which is not a credential and is
+  // legitimately shorter than a key (http://localhost:11434) — applying the
+  // key heuristic to it would report a working local provider as ERROR.
+  const credentialShaped = /_(?:API_)?KEY$|_TOKEN$/i.test(presentKey);
+  if (credentialShaped && value.trim().length < 32) {
     return {
       family: desc.family,
       name: desc.name,
@@ -329,10 +340,10 @@ export type DefaultProviderValidation =
 
 /**
  * Is the configured AI_DEFAULT_PROVIDER value truthful at runtime?
- * In production/staging a catalog-only family (anthropic/google/openrouter/
- * ollama) is REJECTED — the platform must never pretend it can execute a
- * provider that has no adapter. In development/test the check is advisory
- * (the mock still runs) but the state is reported honestly.
+ * In production/staging a catalog-only family (anthropic/ollama) is REJECTED —
+ * the platform must never pretend it can execute a provider that has no
+ * adapter. In development/test the check is advisory (the mock still runs) but
+ * the state is reported honestly.
  */
 export function validateDefaultProvider(
   env: Record<string, string | undefined>,

@@ -343,13 +343,39 @@ describe('ProviderSetupOrchestrator', () => {
     });
 
     it('refuses a family this build does not support, without probing it', async () => {
-      const result = await orchestrator.setup({ userId: 'user-1', family: 'openrouter' });
+      const result = await orchestrator.setup({ userId: 'user-1', family: 'acme-ai' });
 
       expect(result.outcome).toBe('UNAVAILABLE');
-      expect(result.providerId).toBe('openrouter');
+      expect(result.providerId).toBe('acme-ai');
       expect(result.message).toMatch(/not available in this VedMoulya/i);
       expect(probe).not.toHaveBeenCalled();
       expect(credentials.resolve).not.toHaveBeenCalled();
+    });
+
+    // REGRESSION (shared pipeline): OpenRouter was absent from the connect
+    // contract entirely, so its Connect action could only ever fail. It is now
+    // a first-class family on the SHARED OpenAI-compatible path.
+    it('accepts OpenRouter as a first-class family through the shared pipeline', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'USER', secret: 'sk-or-1' });
+      credentials.hasCredential.mockResolvedValue(true);
+      probe.mockResolvedValue({
+        connected: true,
+        credentialSource: 'USER',
+        models: [{ id: 'openai/gpt-4o-mini', name: 'openai/gpt-4o-mini' }],
+      });
+      generate.mockResolvedValue({ ok: true, latencyMs: 120 });
+      preferences.setProviderEnabled.mockResolvedValue({ success: true });
+      preferences.updatePreferences.mockResolvedValue({ success: true });
+
+      const result = await orchestrator.setup({
+        userId: 'user-1',
+        family: 'openrouter',
+        apiKey: 'sk-or-1',
+      });
+
+      expect(result.outcome).toBe('SUCCESS');
+      expect(result.providerId).toBe('openrouter');
+      expect(probe).toHaveBeenCalledWith(expect.objectContaining({ family: 'openrouter' }));
     });
   });
 
