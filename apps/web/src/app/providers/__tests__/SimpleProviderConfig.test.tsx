@@ -37,6 +37,33 @@ vi.mock('../../../lib/api-client.js', () => ({
   }),
 }));
 
+/**
+ * BUGFIX (Ollama honesty) — local detection now runs in the BROWSER (the only
+ * actor on the user's machine), so these tests must provide the Ollama HTTP API.
+ * The happy path answers `/api/version`, `/api/tags` and `/api/chat` like a real
+ * Ollama; every other URL falls through to the mocked gateway.
+ */
+function stubOllamaFetch(models: Array<{ id: string; name: string }>): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/version')) {
+        return new Response(JSON.stringify({ version: '0.6.0' }), { status: 200 });
+      }
+      if (url.endsWith('/api/tags')) {
+        return new Response(JSON.stringify({ models: models.map((m) => ({ name: m.id })) }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith('/api/chat')) {
+        return new Response(JSON.stringify({ message: { content: 'ok' } }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    }),
+  );
+}
+
 function connectedResult(
   overrides: Partial<ProviderConnectionResultDTO> = {},
 ): ProviderConnectionResultDTO {
@@ -67,6 +94,14 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
     // that don't exercise discovery see no late state updates; tests that do
     // override this with a resolved/rejected value.
     mocks.connectMutate.mockImplementation(() => new Promise(() => {}));
+    // Browser-side Ollama discovery is stubbed by default to "nothing answers",
+    // so a cloud-provider test never accidentally probes a real local server.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
   });
 
   // ── Field minimality per provider (Phase 3) ──────────────────────────────
@@ -94,6 +129,9 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
     );
 
     it('ollama: detects local models on open — no API key, no endpoint field first', async () => {
+      // The BROWSER discovers the real local models; the gateway call then
+      // persists through the existing pipeline.
+      stubOllamaFetch([{ id: 'llama3.2', name: 'llama3.2' }]);
       mocks.connectMutate.mockResolvedValue(
         connectedResult({
           message: 'Connected successfully — 1 model available on Ollama.',
@@ -119,8 +157,16 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
       );
     });
 
-    it('ollama: reveals the address field on demand, pre-filled with the preset default', () => {
+    it('ollama: reveals the address field on demand, pre-filled with the preset default', async () => {
       render(<SimpleProviderConfig userId="u1" presetId="ollama" />);
+
+      // The panel auto-scans on open. That scan is an async browser probe which
+      // every test stubs to fail, so wait for it to SETTLE before asserting:
+      // otherwise its state update lands mid-assertion and React reports it as
+      // an unwrapped update (a flaky, noisy test rather than a real defect).
+      await waitFor(() =>
+        expect(screen.getByTestId('simple-provider-local-discovery')).toBeDefined(),
+      );
 
       fireEvent.click(screen.getByTestId('simple-provider-server-toggle'));
       const input = screen.getByTestId('simple-provider-server-url') as HTMLInputElement;
@@ -345,6 +391,7 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
     ];
 
     it('auto-detects local models, then saves the chosen one through the gateway', async () => {
+      stubOllamaFetch(localModels);
       mocks.connectMutate.mockResolvedValue(
         connectedResult({
           message: 'Connected successfully — 2 models available on Ollama.',
@@ -375,6 +422,11 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
       expect(dropdown.options.length).toBe(2);
       expect(dropdown.value).toBe('llama3.2');
 
+      // 2b. The UI states the MEASURED local state rather than guessing.
+      expect(screen.getByTestId('simple-provider-local-found').textContent).toMatch(
+        /2 models found/,
+      );
+
       // 3. The user only has to pick a model…
       fireEvent.change(dropdown, { target: { value: 'qwen2.5:7b' } });
       expect(dropdown.value).toBe('qwen2.5:7b');
@@ -400,6 +452,7 @@ describe('SimpleProviderConfig (FINAL-02 — friendly Simple mode)', () => {
     });
 
     it('re-scans the edited address when the user changes the local server', async () => {
+      stubOllamaFetch([{ id: 'llama3.2', name: 'llama3.2' }]);
       mocks.connectMutate.mockResolvedValue(
         connectedResult({
           message: 'Connected successfully — 1 model available on Ollama.',

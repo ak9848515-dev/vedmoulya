@@ -46,6 +46,15 @@ import {
   type DiscoveredProviderModelDTO,
 } from '../../lib/api-client.js';
 
+// BUGFIX (Ollama honesty) — browser-side discovery for local runtimes.
+import {
+  OLLAMA_START_HINT,
+  OLLAMA_ENDPOINT_CANDIDATES,
+  discoverOllama,
+  testOllamaGeneration,
+  type OllamaDiscoveryResult,
+} from './ollama-discovery.js';
+
 export interface SimpleProviderConfigProps {
   userId: string;
   /** Provider family id (google/openai/anthropic/deepseek/ollama). */
@@ -97,6 +106,14 @@ export function SimpleProviderConfig({
   const [saveStage, setSaveStage] = useState<SaveStage>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // ── BUGFIX (Ollama honesty) — BROWSER-side local discovery state ────────
+  // The gateway probe cannot see the user's machine when VedMoulya is deployed
+  // remotely, so a failed server probe is NOT evidence about the user's Ollama.
+  // The browser (the only actor on the same machine) performs the real
+  // discovery, and its classified result drives every message below.
+  const [localDiscovery, setLocalDiscovery] = useState<OllamaDiscoveryResult | null>(null);
+  const [localTesting, setLocalTesting] = useState(false);
+
   const pad = variant === 'dialog' ? 'gap-3' : 'gap-4';
 
   const discovered: DiscoveredProviderModelDTO[] = useMemo(
@@ -136,14 +153,68 @@ export function SimpleProviderConfig({
     }
   }, [connect, userId, preset, apiKey, serverUrl, serverManagedAvailable, useOwnKey]);
 
+  /**
+   * BUGFIX (Ollama honesty) — the REAL local discovery, run in the browser.
+   *
+   * It replaces "any failed request ⇒ Ollama isn't installed" with measured
+   * states: not-reachable, no-models, models-found, browser-blocked. The gateway
+   * probe still runs afterwards when it makes sense, because persistence and the
+   * runtime credential store stay server-side.
+   */
+  const runLocalDiscovery = useCallback(async () => {
+    setLocalTesting(true);
+    setLocalDiscovery(null);
+    try {
+      const discovery = await discoverOllama({ endpoint: serverUrl });
+      setLocalDiscovery(discovery);
+
+      if (discovery.state === 'MODELS_FOUND') {
+        // Preselect a REAL id from the list Ollama just returned — never a
+        // hard-coded one. The preset default wins only when it really exists.
+        const ids = discovery.models.map((m) => m.id);
+        setSelectedModel(
+          ids.includes(preset.defaultModelId) ? preset.defaultModelId : (ids[0] ?? ''),
+        );
+
+        // A real generation test is required before anything is called
+        // connected: /api/tags only proves the CATALOG was readable.
+        const chosen = ids.includes(preset.defaultModelId) ? preset.defaultModelId : (ids[0] ?? '');
+        const generation = await testOllamaGeneration(discovery.endpoint, chosen);
+        if (generation.state === 'CONNECTED') {
+          // Only now is the provider declared usable, and only through the
+          // existing gateway pipeline (which persists owner-scoped config).
+          const outcome = await connect.mutateAsync({
+            userId,
+            family: preset.presetId as ConnectProviderFamily,
+            endpointUrl: discovery.endpoint,
+          });
+          setResult(outcome);
+        } else {
+          setLocalDiscovery({
+            ...discovery,
+            error: generation.error,
+            message: generation.message,
+          });
+        }
+      }
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : 'Local discovery failed');
+    } finally {
+      setLocalTesting(false);
+    }
+  }, [serverUrl, connect, userId, preset]);
+
   // Local providers: detect the available models as soon as the panel opens so
   // the user never has to press "Test Connection" first — they just choose from
   // the list. Cloud providers keep the explicit step (a key must be supplied).
+  //
+  // BUGFIX (Ollama honesty) — detection is the BROWSER-side discovery, because a
+  // failed server-side probe says nothing about the user's own machine.
   useEffect(() => {
     if (!isLocalProvider || autoDetected.current) return;
     autoDetected.current = true;
-    void handleTest();
-  }, [isLocalProvider, handleTest]);
+    void runLocalDiscovery();
+  }, [isLocalProvider, runLocalDiscovery]);
 
   // If the local server cannot be reached (or answers with an error), surface
   // the address field so the user can correct it and scan again.
@@ -303,6 +374,14 @@ export function SimpleProviderConfig({
               onChange={(e) => {
                 setServerUrl(e.target.value);
               }}
+              onKeyDown={(e) => {
+                // Changing the address must RE-RUN discovery, so an entered
+                // endpoint is validated by a real probe rather than assumed.
+                if (e.key === 'Enter' && isLocalProvider) {
+                  e.preventDefault();
+                  void runLocalDiscovery();
+                }
+              }}
               placeholder="http://localhost:11434"
               data-testid="simple-provider-server-url"
               className="w-full h-10 rounded-[12px] border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] px-3 text-[13px] text-[#111827] dark:text-[#F8FAFC] focus:outline-none focus:border-[#2B5FD9]"
@@ -384,6 +463,100 @@ export function SimpleProviderConfig({
         ) : null}
       </label>
 
+      {/* ── BUGFIX (Ollama honesty): the REAL local discovery state ─────────
+          Progressive and measured — never a blanket "Ollama isn't running". */}
+      {isLocalProvider && (localTesting || localDiscovery !== null) ? (
+        <div
+          role="status"
+          data-testid="simple-provider-local-discovery"
+          className={`rounded-lg border p-3 ${
+            localDiscovery?.state === 'MODELS_FOUND'
+              ? 'bg-[#F0FDF4] dark:bg-[#0F291D] border-emerald-200 dark:border-emerald-900'
+              : 'bg-[#FFFBEB] dark:bg-[#291704] border-amber-200 dark:border-amber-900'
+          }`}
+        >
+          {localTesting ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-[#2B5FD9]" aria-hidden="true" />
+              <p className="text-[12.5px] font-medium text-[#374151] dark:text-[#E2E8F0]">
+                Checking for Ollama…
+              </p>
+            </div>
+          ) : localDiscovery !== null ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-start gap-2">
+                {localDiscovery.state === 'MODELS_FOUND' ? (
+                  <CheckCircle2
+                    className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <AlertTriangle
+                    className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"
+                    aria-hidden="true"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12.5px] font-medium text-[#374151] dark:text-[#E2E8F0]">
+                    {localDiscovery.message}
+                  </p>
+                  {localDiscovery.state === 'MODELS_FOUND' ? (
+                    <p
+                      className="mt-0.5 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]"
+                      data-testid="simple-provider-local-found"
+                    >
+                      Running · {localDiscovery.models.length} model
+                      {localDiscovery.models.length === 1 ? '' : 's'} found
+                      {localDiscovery.endpoint === '' ? '' : ` on ${localDiscovery.endpoint}`}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* The honest next action per classified state. */}
+              {localDiscovery.error === 'OLLAMA_NOT_REACHABLE' ? (
+                <p className="text-[11.5px] text-amber-700/90 dark:text-amber-400/90">
+                  {OLLAMA_START_HINT} You can also check the address below — Ollama may be running
+                  on a different one.
+                </p>
+              ) : null}
+              {localDiscovery.error === 'OLLAMA_NO_MODELS' ? (
+                <p className="text-[11.5px] text-amber-700/90 dark:text-amber-400/90">
+                  Ollama is running. Install a model first — for example{' '}
+                  <code className="font-mono">ollama pull llama3.2</code> — then scan again.
+                </p>
+              ) : null}
+              {localDiscovery.error === 'OLLAMA_CORS_OR_BROWSER_BLOCKED' ? (
+                <p className="text-[11.5px] text-amber-700/90 dark:text-amber-400/90">
+                  Ollama is running, but this browser is not allowed to reach it. Add this app’s
+                  address to Ollama’s <code className="font-mono">OLLAMA_ORIGINS</code> setting,
+                  restart Ollama, then try again.
+                </p>
+              ) : null}
+              {localDiscovery.error === 'OLLAMA_INVALID_RESPONSE' ? (
+                <p className="text-[11.5px] text-amber-700/90 dark:text-amber-400/90">
+                  Something answered that address, but it was not an Ollama service. Check the
+                  address and try again.
+                </p>
+              ) : null}
+              {localDiscovery.error === 'OLLAMA_MODEL_UNAVAILABLE' ||
+              localDiscovery.error === 'OLLAMA_GENERATION_FAILED' ? (
+                <p className="text-[11.5px] text-amber-700/90 dark:text-amber-400/90">
+                  Choose a different model and press Scan again.
+                </p>
+              ) : null}
+
+              {/* Candidate addresses are shown as guidance, never applied silently. */}
+              {localDiscovery.error === 'OLLAMA_NOT_REACHABLE' ? (
+                <p className="text-[11px] text-[#94A3B8]">
+                  Tried: {OLLAMA_ENDPOINT_CANDIDATES.join(', ')}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Connection result — actionable, secret-free. */}
       {result ? (
         <div
@@ -447,13 +620,17 @@ export function SimpleProviderConfig({
         <button
           type="button"
           onClick={() => {
-            void handleTest();
+            void (isLocalProvider ? runLocalDiscovery() : handleTest());
           }}
-          disabled={testing}
+          disabled={testing || localTesting}
           data-testid="simple-provider-test"
           className="inline-flex h-10 items-center gap-2 rounded-[14px] border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-4 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0] hover:border-[#2B5FD9]/40 hover:text-[#2B5FD9] dark:hover:text-[#6B8FEF] transition-colors disabled:opacity-50"
         >
-          {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+          {testing || localTesting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Zap className="h-4 w-4" />
+          )}
           {isLocalProvider ? 'Scan again' : 'Test Connection'}
         </button>
         <button
@@ -473,7 +650,6 @@ export function SimpleProviderConfig({
           Save &amp; Enable
         </button>
       </div>
-
       {saveError ? (
         <p className="text-[12px] text-rose-600 dark:text-rose-400" role="alert">
           {saveError}

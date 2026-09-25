@@ -224,6 +224,10 @@ describe('ProviderConnectionTester (FINAL-02 — connection + model discovery)',
     it('reports latency on both success and failure', async () => {
       const ok = await run({ family: 'openai', apiKey: 'k', fetchFn: okFetch({ data: [] }) });
       expect(typeof ok.latencyMs).toBe('number');
+      // An empty cloud catalog is still an authenticated connection: the probe
+      // authenticated successfully and reports zero models honestly rather than
+      // inventing any (only a LOCAL runtime treats "no models" as its own state).
+      expect(ok.connected).toBe(true);
       expect(ok.message).toContain('0 models available');
 
       const fail = await run({
@@ -480,5 +484,114 @@ describe('ProviderConnectionTester (FINAL-02 — connection + model discovery)',
       const url = (fetchFn as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
       expect(url).toBe('http://ollama.internal:11434/api/tags');
     });
+  });
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// BUGFIX (Ollama honesty) — the tester must distinguish measured states
+//
+// The reported defect: a user WITH Ollama installed saw "Ollama isn't running on
+// this computer. Install it from ollama.com". The cause was that every
+// non-2xx/network outcome collapsed into `unreachable`, so a REACHABLE but empty
+// Ollama (and a reachable-but-model-less generation) were reported as absence.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ProviderConnectionTester — Ollama honesty (BUGFIX)', () => {
+  it('a REACHABLE Ollama with zero models is `no_models`, never `unreachable`', async () => {
+    // /api/tags answered 200 with an empty catalog → Ollama IS installed and up.
+    const result = await run({ family: 'ollama', fetchFn: okFetch({ models: [] }) });
+
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('no_models');
+    expect(result.modelCount).toBe(0);
+    expect(result.models ?? []).toEqual([]);
+    // The message must describe the real state and never assert absence.
+    expect(result.message).toMatch(/is running/);
+    expect(result.message).not.toMatch(/not installed/i);
+    expect(result.message).not.toMatch(/unreachable/i);
+  });
+
+  it('a reachable Ollama WITH models still connects and reports real ids', async () => {
+    const result = await run({
+      family: 'ollama',
+      fetchFn: okFetch({
+        models: [{ name: 'qwen2.5-coder:7b-instruct' }, { name: 'llama3.2:latest' }],
+      }),
+    });
+
+    expect(result.connected).toBe(true);
+    expect(result.models?.map((m) => m.id)).toEqual([
+      'qwen2.5-coder:7b-instruct',
+      'llama3.2:latest',
+    ]);
+  });
+
+  it('a genuine network failure stays `unreachable` (absence of evidence only)', async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const result = await run({ family: 'ollama', fetchFn: fetchFn as unknown as typeof fetch });
+
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('unreachable');
+    // The tester states the technical fact; the UI owns the honest wording.
+    expect(result.message).not.toMatch(/not installed/i);
+  });
+
+  it('a timeout is classified as unreachable, not as a missing install', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
+    const result = await run({ family: 'ollama', fetchFn: fetchFn as unknown as typeof fetch });
+
+    expect(result.errorKind).toBe('unreachable');
+    expect(result.message).not.toMatch(/not installed/i);
+  });
+
+  it('a browser-origin refusal on a loopback Ollama is `browser_origin_blocked`', async () => {
+    // Ollama answers 403 mentioning origins — it is UP; the browser is refused.
+    const fetchFn = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'origin not allowed' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    const result = await run({
+      family: 'ollama',
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('browser_origin_blocked');
+    // Never reported as a missing credential or a missing install.
+    expect(result.message).not.toMatch(/not installed/i);
+  });
+
+  it('an invalid endpoint (HTTP 404) is `not_found`, distinct from unreachable', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'not found' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    const result = await run({
+      family: 'ollama',
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    // A 404 on /api/tags means something answered at that address but is not
+    // serving the Ollama tags API — an ADDRESS problem, not a missing install
+    // and not an unreachable host. It must stay its own classified state.
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('not_found');
+  });
+
+  it('never reports a connection without a real model list (no fake ids)', async () => {
+    const result = await run({ family: 'ollama', fetchFn: okFetch({ models: 'garbage' }) });
+
+    // A malformed catalog is NOT a connection, and no model id may be invented
+    // from it. The probe reports the failure it actually measured (the catalog
+    // could not be read), and never echoes the unparsable payload.
+    expect(result.connected).toBe(false);
+    expect(result.models ?? []).toEqual([]);
   });
 });

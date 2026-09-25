@@ -48,6 +48,7 @@ import { ProviderMark } from './ProviderMark.js';
 import { useGoogleAccountConnection } from './google-account-connection.js';
 import {
   SetupStepView,
+  connectActionLabel,
   providerNeedsKeyUpFront,
   setupFailureView,
   setupStepViews,
@@ -91,11 +92,19 @@ export function ProviderConnectFlow({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const needsKey = providerNeedsKeyUpFront(family);
+  // BUGFIX (Gemini credential confusion) — the `google` family id is a MODEL
+  // VENDOR, not an authentication method. Connect uses the Gemini API KEY
+  // (keyed flow), while Google identity OAuth stays available only through the
+  // EXPLICIT "Connect Google account" affordance below. Mapping Connected to
+  // `family === 'google'` is what sent Gemini users into the identity consent
+  // screen instead of the Gemini key configuration.
   const isGoogle = family === 'google';
+  const supportsGoogleIdentity = isGoogle;
 
-  // Google: the consent round trip is the authentication step. Connect drives
-  // the existing sign-in flow, and the OAuth return (`oauthJustCompleted`) is
-  // what makes the pipeline run — a completed consent alone is never enough.
+  // Google identity is OPTIONAL enrichment — never the way a provider is
+  // switched on. A Gemini API key is the credential the Gemini API requires, so
+  // the keyed setup path above is the only pipeline. This hook exists for the
+  // explicit account-connection action and for honouring an OAuth round trip.
   const google = useGoogleAccountConnection(
     userId,
     '/providers?provider=google',
@@ -124,6 +133,13 @@ export function ProviderConnectFlow({
       } catch (error) {
         // A transport failure (offline, gateway error) is NOT a provider
         // verdict — say so instead of inventing a provider problem.
+        //
+        // BUGFIX (transport dead end) — the gateway ALWAYS attaches a recovery
+        // action to a provider verdict, but this locally-constructed result has
+        // no gateway verdict behind it, so it must supply its own. Omitting it
+        // left the user with "gateway unreachable" and NO next action at all
+        // (the recovery button only renders when actionLabel exists), i.e. no
+        // way forward except a manual page reload.
         setResult({
           outcome: 'UNAVAILABLE',
           connected: false,
@@ -138,6 +154,7 @@ export function ProviderConnectFlow({
             error instanceof Error && error.message
               ? error.message
               : 'VedMoulya could not reach its own gateway. Try again.',
+          recovery: { kind: 'retry', actionLabel: 'Try again' },
           credentialStored: false,
           preferencesApplied: false,
           completedAt: new Date().toISOString(),
@@ -151,14 +168,44 @@ export function ProviderConnectFlow({
   const runSetupRef = React.useRef(runSetup);
   runSetupRef.current = runSetup;
 
-  // The Google OAuth return: consent is done, so finish the pipeline (persist →
-  // validate → enable → connected). This is the fix for "consent → Not
-  // configured": the callback no longer merely sets a device flag.
+  // BUGFIX (family switch) — the flow can be re-used for a DIFFERENT provider on
+  // the same mounted instance (the provider page keeps one flow mounted while
+  // the selected family changes). `phase` and `result` belong to the PREVIOUS
+  // family: leaving `phase === 'failed'` in place hid the key field for the new
+  // family too (it is gated on `phase !== 'failed'`), so the card showed a stale
+  // failure from another provider and offered NO key input at all — a dead end.
+  // Every per-family verdict is discarded when the family changes.
+  const previousFamilyRef = React.useRef(family);
   useEffect(() => {
-    if (isGoogle && oauthJustCompleted && phase === 'idle') {
-      void runSetupRef.current({ oauthCompleted: true });
-    }
-  }, [isGoogle, oauthJustCompleted, phase, runSetupRef]);
+    if (previousFamilyRef.current === family) return;
+    previousFamilyRef.current = family;
+    setPhase('idle');
+    setResult(null);
+    setApiKey('');
+    setShowKey(false);
+  }, [family]);
+
+  // The Google OAuth return: consent finished, so the account marker is shown —
+  // but consent is NOT the Gemini credential, so the KEYED pipeline still runs
+  // and still decides whether Gemini is connected. This is why a returning user
+  // no longer sees "consent done → still needs a key".
+  //
+  // BUGFIX (Gemini recovery loop) — this runs AT MOST ONCE per mounted flow.
+  // Without the latch, the effect re-armed itself every time the phase returned
+  // to 'idle' and re-ran the keyless pipeline immediately: the recovery action
+  // on an AUTH_REQUIRED failure ("Add key") set the phase to 'idle', the effect
+  // fired again, the run failed again, and the user was trapped on the failure
+  // card with no way to ever reach the key field. The flag records that this
+  // mount has already honoured its OAuth return; returning to the key field is
+  // now a real, stable state.
+  const oauthSetupStartedRef = React.useRef(false);
+  useEffect(() => {
+    if (!isGoogle || !oauthJustCompleted) return;
+    if (oauthSetupStartedRef.current) return;
+    if (phase !== 'idle' || apiKey.trim() !== '') return;
+    oauthSetupStartedRef.current = true;
+    void runSetupRef.current({ oauthCompleted: true });
+  }, [isGoogle, oauthJustCompleted, phase, apiKey, runSetupRef]);
   const connectedFromStatus = status.data?.connectionState === 'CONNECTED';
   const success = useMemo(
     () => (result ? setupSuccessView(result, identity.name) : null),
@@ -346,11 +393,39 @@ export function ProviderConnectFlow({
             <button
               type="button"
               onClick={() => {
-                if (isGoogle && failure.needsCredential) {
-                  void google.connect();
+                // The recovery action is chosen by WHAT THE GATEWAY SAID went
+                // wrong (recovery.kind), never by which provider it is.
+                //
+                // BUGFIX (retry ignored for non-local providers) — this used to
+                // special-case `family === 'ollama'` for retrying and fall
+                // through to a bare `setPhase('idle')` for everyone else. A
+                // gateway `retry` recovery ("Try again" / "Scan again") on any
+                // CLOUD family therefore did nothing at all: the error card was
+                // dismissed and the user had to find and press Connect again,
+                // even though the button they pressed promised a retry. Keying
+                // on the kind makes the button do what its label says for every
+                // family, while a credential problem still returns to the KEY
+                // field instead of firing a request that cannot succeed yet.
+                if (failure.needsCredential) {
+                  // A missing/incorrect credential (Gemini included) → back to
+                  // the key field, never to a consent screen and never an
+                  // immediate re-run that is guaranteed to fail the same way.
+                  setPhase('idle');
                   return;
                 }
-                if (family === 'ollama') {
+                // BUGFIX (local-runtime recovery dead end) — `start_local_provider`
+                // is the gateway's recovery kind for a LOCAL runtime it could not
+                // use (not reachable / no models installed / browser blocked), and
+                // its label is always an invitation to try again ("Try again",
+                // "Scan again"). It was unhandled, so pressing it only dismissed
+                // the card and silently dropped back to an unchanged idle form:
+                // the action the user just pressed did nothing at all. It is now
+                // handled the same way as an explicit retry — because for a local
+                // runtime the setup call IS the scan.
+                if (
+                  failure.recoveryKind === 'retry' ||
+                  failure.recoveryKind === 'start_local_provider'
+                ) {
                   void runSetup();
                   return;
                 }
@@ -371,17 +446,12 @@ export function ProviderConnectFlow({
         <button
           type="button"
           onClick={() => {
-            if (isGoogle) {
-              if (oauthJustCompleted || google.connected) {
-                void runSetup({ oauthCompleted: true });
-                return;
-              }
-              void google.connect();
-              return;
-            }
+            // ONE primary action. Every provider — including Gemini — connects
+            // through the gateway setup pipeline; a Google account authorization
+            // is a SEPARATE, explicit action offered below.
             void runSetup();
           }}
-          disabled={setup.isPending || google.connecting || (needsKey && apiKey.trim() === '')}
+          disabled={setup.isPending || (needsKey && apiKey.trim() === '')}
           data-testid={`provider-connect-${family}`}
           className="inline-flex h-10 items-center gap-2 rounded-[14px] bg-[#2B5FD9] px-4 text-[13px] font-medium text-white hover:bg-[#1E4AA8] active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100"
         >
@@ -390,8 +460,27 @@ export function ProviderConnectFlow({
           ) : (
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
           )}
-          Connect
+          {connectActionLabel(family)}
         </button>
+        {/* Google IDENTITY — an explicit, separate action. It authorizes a
+            Google ACCOUNT and is deliberately NOT the way Gemini is connected,
+            because a Gemini API key is a different credential. */}
+        {supportsGoogleIdentity ? (
+          <button
+            type="button"
+            onClick={() => {
+              void google.connect();
+            }}
+            disabled={google.connecting}
+            data-testid="provider-connect-google-account"
+            className="inline-flex h-10 items-center gap-2 rounded-[14px] border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-4 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0] hover:border-[#2B5FD9]/40 transition-colors disabled:opacity-50"
+          >
+            {google.connecting ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : null}
+            {google.connected ? 'Google account connected' : 'Connect Google account'}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => {

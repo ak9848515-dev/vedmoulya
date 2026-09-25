@@ -114,6 +114,13 @@ export interface SetupFailureView {
   advancedUseful: boolean;
   /** True when the user should be asked for a key they have not supplied. */
   needsCredential: boolean;
+  /**
+   * The KIND of recovery the gateway asked for, when it supplied one. The
+   * screen dispatches on this rather than on the provider family, so the single
+   * action button always performs what its label promises (a `retry` really
+   * retries, for every family — not only for the local provider).
+   */
+  recoveryKind?: 'start_local_provider' | 'check_credential' | 'retry' | 'go_advanced';
 }
 
 /**
@@ -129,6 +136,7 @@ export function setupFailureView(result: ProviderSetupResultDTO): SetupFailureVi
     message: result.message,
     ...(recovery?.actionLabel !== undefined ? { actionLabel: recovery.actionLabel } : {}),
     ...(recovery?.detail !== undefined ? { detail: recovery.detail } : {}),
+    ...(recovery?.kind !== undefined ? { recoveryKind: recovery.kind } : {}),
     stage: result.stage,
     advancedUseful: recovery?.kind === 'go_advanced' || result.outcome === 'PERSISTENCE_FAILED',
     needsCredential,
@@ -136,15 +144,41 @@ export function setupFailureView(result: ProviderSetupResultDTO): SetupFailureVi
 }
 
 /**
- * True when this provider needs the user to paste a key BEFORE Connect can do
- * anything useful (the API-key families). Google is excluded because its
- * Connect action runs the OAuth authorization instead.
+ * True when this provider needs the user to paste an API key BEFORE Connect can
+ * do anything useful (the KEYED families).
+ *
+ * BUGFIX (Gemini credential confusion) — the Gemini family id is the internal
+ * string `google`, but that is a MODEL VENDOR id, not an authentication method.
+ * Two entirely different credentials share it:
+ *
+ *   • the VedMoulya GOOGLE IDENTITY OAuth (sign-in / "connect your Google
+ *     account") — an account authorization with no API key, and
+ *   • the GEMINI API KEY (Google AI Studio) that the Gemini API itself requires.
+ *
+ * Google identity OAuth is NOT a substitute for the Gemini API credential, so
+ * `google` MUST appear in this keyed set: its Connect action is the API-key
+ * configuration, exactly like the other cloud providers. Leaving it out is what
+ * made "Add key" on the Gemini card launch the identity consent screen and then
+ * still report "Gemini needs a key" — consent produced a session, never a key.
  */
 export function providerNeedsKeyUpFront(family: string): boolean {
   return (
     family === 'openai' ||
     family === 'anthropic' ||
     family === 'deepseek' ||
-    family === 'openrouter'
+    family === 'openrouter' ||
+    family === 'google'
   );
+}
+
+/**
+ * The label for the ONE primary action on a provider card.
+ *
+ * BUGFIX (Gemini credential confusion) — a keyed provider (including Gemini)
+ * must NOT offer "Connect", because its first real step is supplying a key. The
+ * label states what the user is about to do, so nothing on the card suggests a
+ * consent screen. A local provider keeps "Connect" (it discovers).
+ */
+export function connectActionLabel(family: string): string {
+  return providerNeedsKeyUpFront(family) ? 'Add key' : 'Connect';
 }

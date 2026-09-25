@@ -174,9 +174,18 @@ export function connectProviderFamily(family: string): ConnectProviderFamily {
 
 /**
  * OAuth availability. The ONLY provider OAuth in this codebase is the Google
- * identity authorization (services/identity — consumed through the existing
+ * IDENTITY authorization (services/identity — consumed through the existing
  * `beginGoogleSignIn` session manager). No other provider OAuth exists, so the
  * UI must never pretend one does.
+ *
+ * This answers ONE question — "can this family offer the Google ACCOUNT
+ * authorization?" — and deliberately says NOTHING about whether an API key is
+ * required. The internal `google` family id is a MODEL VENDOR (Gemini); its
+ * credential is a Google AI Studio API key, and the account authorization is a
+ * separate, optional capability. Callers that need "does this family require a
+ * pasted key?" must use `providerNeedsKeyUpFront` (provider-setup-copy.ts) —
+ * conflating the two is exactly what made Gemini's "Add key" open a consent
+ * screen and then still report that Gemini needed a key.
  */
 export function supportsOAuth(family: string): boolean {
   return family === 'google';

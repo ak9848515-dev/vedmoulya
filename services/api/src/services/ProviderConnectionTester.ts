@@ -75,7 +75,18 @@ export type ProviderConnectionErrorKind =
    * true ("VedMoulya can see Ollama, browser access is blocked") and given ONE
    * recovery instruction — never asked to configure networking.
    */
-  | 'browser_origin_blocked';
+  | 'browser_origin_blocked'
+  /**
+   * BUGFIX (Ollama honesty) — connected, but the local runtime reports NO
+   * installed models. This is emphatically NOT "not installed": the server
+   * answered, so it exists. The user needs to pull a model, not reinstall.
+   */
+  | 'no_models'
+  /**
+   * BUGFIX (Ollama honesty) — the model the setup selected is not among the
+   * models the runtime actually serves (removed/renamed since selection).
+   */
+  | 'model_unavailable';
 
 export interface DiscoveredProviderModel {
   /** The provider's real model id (e.g. "models/gemini-2.5-flash" → id). */
@@ -558,6 +569,19 @@ export async function validateProviderGeneration(
     });
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
+      // BUGFIX (Ollama honesty) — a local runtime that REFUSES the model with
+      // 404 has been reached and answered; the MODEL is missing, not the server.
+      // Reporting this as "unreachable" is what told users with a running Ollama
+      // that Ollama was not installed.
+      if (input.family === 'ollama' && response.status === 404) {
+        return {
+          ok: false,
+          modelId,
+          latencyMs,
+          message: `This Ollama server does not have the model "${modelId}" installed.`,
+          errorKind: 'model_unavailable',
+        };
+      }
       const { message, errorKind } = mapHttpFailure(response.status, response.statusText);
       return { ok: false, modelId, latencyMs, message: redactKey(message, apiKey), errorKind };
     }
@@ -805,6 +829,30 @@ export async function testProviderConnection(
     const body = await response.json();
     const models = parse(body);
     const label = PROVIDER_LABELS[input.family];
+
+    // BUGFIX (Ollama honesty) — the server ANSWERED, so it is installed and
+    // running. An empty model list is its own state ("reachable, no models"),
+    // never a connection failure: collapsing it into "unreachable" is what made
+    // a working Ollama install render as "Ollama isn't running on this
+    // computer". Only a local runtime with a genuinely empty catalog can be in
+    // this state, so the check is scoped to it.
+    const isLocalRuntime = input.family === 'ollama';
+    if (isLocalRuntime && models.length === 0) {
+      return {
+        connected: false,
+        status: 'failed',
+        message: `${label} is running, but no models are installed.`,
+        errorKind: 'no_models',
+        latencyMs,
+        modelCount: 0,
+        models,
+        testedAt,
+        credentialSource,
+        serverManagedKey,
+        ...runtime,
+      };
+    }
+
     const suffix = `${models.length} model${models.length === 1 ? '' : 's'} available`;
     return {
       connected: true,

@@ -224,41 +224,68 @@ describe('ProviderConnectFlow (G9 one-click setup)', () => {
     const failure = await waitFor(() => screen.getByTestId('provider-connect-failure'));
     expect(failure.textContent).toMatch(/could not reach its own gateway/);
     expect(screen.queryByTestId('provider-connect-success')).toBeNull();
-    // No provider verdict was reached, so no recovery action is invented.
-    expect(screen.queryByTestId('provider-connect-recovery')).toBeNull();
+    // BUGFIX (transport dead end): a transport failure may not be dressed up as
+    // a provider verdict — but it must still leave the user a way forward. The
+    // gateway attaches a recovery action to every verdict it returns, and this
+    // locally-built result has no gateway behind it, so it supplies its own
+    // retry. Without it the card was a dead end: the recovery button only
+    // renders when an action label exists.
+    const recovery = screen.getByTestId('provider-connect-recovery');
+    expect(recovery.textContent).toMatch(/Try again/);
+    expect(mocks.setupMutate).toHaveBeenCalledTimes(1);
+
+    // And that action really retries — it does not just dismiss the card.
+    fireEvent.click(recovery);
+    await waitFor(() => expect(mocks.setupMutate).toHaveBeenCalledTimes(2));
   });
 
-  // ── OAuth (Google) ───────────────────────────────────────────────────────
-  it('oauth: Connect starts the Google authorization instead of the setup call', async () => {
+  // ── OAuth (Google IDENTITY — a separate action from the Gemini key) ───────
+  //
+  // BUGFIX (Gemini credential confusion): the `google` family id is the Gemini
+  // MODEL VENDOR. Its Connect/"Add key" action takes a GEMINI API KEY, because a
+  // Google identity consent can never satisfy a Gemini API call. The account
+  // authorization stays reachable as its own explicit action.
+  it('oauth: the primary action is the Gemini API key, NOT the Google authorization', async () => {
     render(<ProviderConnectFlow userId="u1" family="google" />);
 
-    // Google authenticates through consent, so no key field is shown up front.
-    expect(screen.queryByTestId('provider-connect-key-google')).toBeNull();
+    // The keyed field is offered up front — this is the Gemini credential.
+    expect(screen.getByTestId('provider-connect-key-google')).toBeDefined();
+    expect(screen.getByTestId('provider-connect-google').textContent).toMatch(/Add key/);
 
+    // Clicking it can never launch consent when no key is supplied it stays disabled.
     fireEvent.click(screen.getByTestId('provider-connect-google'));
+    expect(mocks.googleConnect).not.toHaveBeenCalled();
+  });
+
+  it('oauth: the Google IDENTITY authorization has its own explicit action', async () => {
+    render(<ProviderConnectFlow userId="u1" family="google" />);
+
+    // Identity is still fully available — it is simply not the way Gemini is
+    // connected, so it is never conflated with the API-key path.
+    fireEvent.click(screen.getByTestId('provider-connect-google-account'));
 
     await waitFor(() => expect(mocks.googleConnect).toHaveBeenCalledTimes(1));
-    // Consent alone is not setup — the pipeline has not run yet.
+    // Authorization alone is not setup — the keyed pipeline has not run.
     expect(mocks.setupMutate).not.toHaveBeenCalled();
   });
 
-  it('oauth: a completed authorization lets Connect finish the pipeline', async () => {
-    mocks.google.connected = true;
+  it('oauth: a supplied Gemini key runs the setup pipeline, never the consent flow', async () => {
     mocks.setupMutate.mockResolvedValue(
-      setupResult({ providerId: 'google', message: 'Google connected' }),
+      setupResult({ providerId: 'google', message: 'Gemini connected' }),
     );
     render(<ProviderConnectFlow userId="u1" family="google" />);
 
+    typeKey('google', 'AIza-test-key');
     fireEvent.click(screen.getByTestId('provider-connect-google'));
 
     await waitFor(() =>
       expect(mocks.setupMutate).toHaveBeenCalledWith({
         userId: 'u1',
         family: 'google',
-        oauthCompleted: true,
+        apiKey: 'AIza-test-key',
       }),
     );
-    // The authorization is already done, so it is not started a second time.
+    // Consent is not part of connecting Gemini.
     expect(mocks.googleConnect).not.toHaveBeenCalled();
     expect(await waitFor(() => screen.getByTestId('provider-connect-success'))).toBeDefined();
   });
@@ -280,34 +307,36 @@ describe('ProviderConnectFlow (G9 one-click setup)', () => {
     expect(await waitFor(() => screen.getByTestId('provider-connect-success'))).toBeDefined();
   });
 
-  it('oauth: a Google failure offers the authorization itself as the ONE next action', async () => {
+  it('oauth: a Gemini failure offers the API KEY as the ONE next action', async () => {
     mocks.setupMutate.mockResolvedValue(
       setupResult({
-        outcome: 'AUTH_REQUIRED',
+        outcome: 'VALIDATION_FAILED',
         connected: false,
         providerId: 'google',
-        stage: 'authenticate',
+        stage: 'validate',
         credentialSource: 'NONE',
         selectedModel: null,
         modelSelectionSource: 'none',
-        message: 'Sign in with your Google account to continue.',
+        message: 'Gemini needs a key before VedMoulya can use it.',
         credentialStored: false,
         preferencesApplied: false,
-        recovery: { kind: 'check_credential', actionLabel: 'Sign in with Google' },
+        recovery: { kind: 'check_credential', actionLabel: 'Add key' },
       }),
     );
     render(<ProviderConnectFlow userId="u1" family="google" oauthJustCompleted />);
 
     const failure = await waitFor(() => screen.getByTestId('provider-connect-failure'));
-    expect(failure.textContent).toMatch(/Sign in with your Google account/);
+    expect(failure.textContent).toMatch(/needs a key/);
 
     const actions = screen.getAllByTestId('provider-connect-recovery');
     expect(actions).toHaveLength(1);
-    expect(actions[0]?.textContent).toMatch(/Sign in with Google/);
+    expect(actions[0]?.textContent).toMatch(/Add key/);
 
-    // The recovery action re-runs consent, not a setup call that cannot help.
+    // The recovery returns to the KEY field — it must never re-run consent,
+    // which could not produce a Gemini credential in the first place.
     fireEvent.click(actions[0] as HTMLElement);
-    await waitFor(() => expect(mocks.googleConnect).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('provider-connect-key-google')).toBeDefined());
+    expect(mocks.googleConnect).not.toHaveBeenCalled();
   });
 
   it('oauth: an authorization error is announced to the user', () => {
@@ -458,20 +487,20 @@ describe('ProviderConnectFlow (G9 one-click setup)', () => {
     expect(mocks.setupMutate).toHaveBeenCalledTimes(1);
   });
 
-  it('failure: an Ollama recovery re-runs the local setup instead of a generic retry', async () => {
+  it('failure: a local runtime "not reached" recovery re-runs the scan (never claims it is absent)', async () => {
     mocks.setupMutate.mockResolvedValue(
       setupResult({
-        outcome: 'VALIDATION_FAILED',
+        outcome: 'ACTION_REQUIRED',
         connected: false,
         providerId: 'ollama',
         stage: 'validate',
         credentialSource: 'NONE',
         selectedModel: null,
         modelSelectionSource: 'none',
-        message: 'Start your local server and try again.',
+        message: 'VedMoulya could not reach Ollama on this computer.',
         credentialStored: false,
         preferencesApplied: false,
-        recovery: { kind: 'start_local_provider', actionLabel: 'Start Ollama' },
+        recovery: { kind: 'start_local_provider', actionLabel: 'Try again' },
       }),
     );
     render(<ProviderConnectFlow userId="u1" family="ollama" />);
@@ -481,7 +510,49 @@ describe('ProviderConnectFlow (G9 one-click setup)', () => {
 
     // A local provider's single next action is the local setup itself — the
     // flow re-runs it rather than pointing at a form that cannot help.
+    //
+    // BUGFIX (local-runtime recovery dead end): the gateway's `retry` recovery
+    // was honoured for every family, but `start_local_provider` — the kind a
+    // local runtime actually produces — fell through to a bare `setPhase('idle')`.
+    // The button then dismissed the card and did nothing, so "Try again" never
+    // retried. Both kinds must re-run the scan.
+    expect(action.textContent).toMatch(/Try again/);
     fireEvent.click(action);
+    await waitFor(() => expect(mocks.setupMutate).toHaveBeenCalledTimes(2));
+  });
+
+  it('failure: a local-runtime recovery never claims Ollama is absent', async () => {
+    mocks.setupMutate.mockResolvedValue(
+      setupResult({
+        outcome: 'ACTION_REQUIRED',
+        connected: false,
+        providerId: 'ollama',
+        stage: 'validate',
+        credentialSource: 'NONE',
+        selectedModel: null,
+        modelSelectionSource: 'none',
+        message: 'VedMoulya could not reach Ollama on this computer.',
+        credentialStored: false,
+        preferencesApplied: false,
+        recovery: {
+          kind: 'start_local_provider',
+          actionLabel: 'Try again',
+          detail: 'Ollama may not be installed or running — or the address may be wrong.',
+        },
+      }),
+    );
+    render(<ProviderConnectFlow userId="u1" family="ollama" />);
+
+    fireEvent.click(screen.getByTestId('provider-connect-ollama'));
+    const failure = await waitFor(() => screen.getByTestId('provider-connect-failure'));
+
+    // Only what was MEASURED may be stated: an unanswered request can never
+    // prove the runtime is absent, so "isn't installed" is not allowed here.
+    expect(failure.textContent).toMatch(/could not reach Ollama/);
+    expect(failure.textContent).not.toMatch(/isn't installed/i);
+    expect(failure.textContent).not.toMatch(/isn't running/i);
+
+    fireEvent.click(screen.getByTestId('provider-connect-recovery'));
     await waitFor(() => expect(mocks.setupMutate).toHaveBeenCalledTimes(2));
   });
 

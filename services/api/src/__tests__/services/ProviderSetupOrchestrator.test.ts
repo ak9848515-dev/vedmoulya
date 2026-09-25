@@ -59,7 +59,7 @@ describe('ProviderSetupOrchestrator', () => {
       expect(preferences.setProviderEnabled).toHaveBeenCalledWith('user-1', 'ollama', true);
     });
 
-    it('returns ACTION_REQUIRED when Ollama is unreachable', async () => {
+    it('returns ACTION_REQUIRED when Ollama is unreachable — without claiming it is absent', async () => {
       credentials.resolve.mockResolvedValue({ source: 'NONE' });
       probe.mockResolvedValue({
         connected: false,
@@ -74,8 +74,156 @@ describe('ProviderSetupOrchestrator', () => {
       });
 
       expect(result.outcome).toBe('ACTION_REQUIRED');
-      expect(result.message).toContain("Ollama isn't running");
+      // BUGFIX (Ollama honesty): a failed request proves only that nothing
+      // ANSWERED — it can never prove Ollama is not installed.
+      expect(result.message).toBe('VedMoulya could not reach Ollama on this computer.');
       expect(result.recovery?.kind).toBe('start_local_provider');
+    });
+
+    it('never tells an installed user to reinstall Ollama on any failure kind', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+
+      // Every failure kind the tester can return for a local runtime must avoid
+      // the old "Install it from ollama.com" instruction, which was false for
+      // every user whose Ollama simply was not running or had no models.
+      for (const errorKind of [
+        'unreachable',
+        'no_models',
+        'model_unavailable',
+        'browser_origin_blocked',
+      ] as const) {
+        probe.mockResolvedValue({
+          connected: false,
+          errorKind,
+          message: 'probe detail',
+          credentialSource: 'NONE',
+        });
+
+        const result = await orchestrator.setup({ userId: 'user-1', family: 'ollama' });
+
+        const rendered = `${result.message} ${result.recovery?.detail ?? ''}`;
+        expect(rendered).not.toMatch(/Install it from ollama\.com/);
+        expect(rendered).not.toMatch(/isn't running on this computer/);
+      }
+    });
+
+    it('NO_MODELS is reported as running-with-no-models, never as not installed', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+      probe.mockResolvedValue({
+        connected: false,
+        errorKind: 'no_models',
+        message: 'Ollama is running, but no models are installed.',
+        credentialSource: 'NONE',
+      });
+
+      const result = await orchestrator.setup({ userId: 'user-1', family: 'ollama' });
+
+      expect(result.outcome).toBe('ACTION_REQUIRED');
+      expect(result.message).toBe('Ollama is running, but no models are installed.');
+      // The instruction is to install a MODEL, not to install Ollama.
+      expect(result.recovery?.detail).toMatch(/ollama pull/);
+    });
+
+    it('a BROWSER-blocked runtime is distinguished from an unreachable one', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+      probe.mockResolvedValue({
+        connected: false,
+        errorKind: 'browser_origin_blocked',
+        message: 'browser blocked',
+        credentialSource: 'NONE',
+      });
+
+      const result = await orchestrator.setup({ userId: 'user-1', family: 'ollama' });
+
+      expect(result.message).toBe('VedMoulya can see Ollama, but this browser cannot access it.');
+      // Browser access is a different problem from reachability, and is never
+      // answered with "install Ollama".
+      expect(`${result.message} ${result.recovery?.detail ?? ''}`).not.toMatch(/install/i);
+    });
+
+    it('a MODEL that is not served is a model problem, not a provider problem', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+      probe.mockResolvedValue({
+        connected: true,
+        credentialSource: 'NONE',
+        models: [{ id: 'llama3.2', name: 'llama3.2' }],
+      });
+      // The generation test refuses the chosen model with a real 404.
+      generate.mockResolvedValue({
+        ok: false,
+        errorKind: 'model_unavailable',
+        message: 'no such model',
+      });
+
+      const result = await orchestrator.setup({ userId: 'user-1', family: 'ollama' });
+
+      expect(result.outcome).toBe('VALIDATION_FAILED');
+      expect(result.message).toBe('Ollama does not have that model installed.');
+      expect(preferences.setProviderEnabled).not.toHaveBeenCalled();
+      expect(result.connected).toBe(false);
+    });
+
+    it('validates a model the provider really reported before declaring success', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+      probe.mockResolvedValue({
+        connected: true,
+        credentialSource: 'NONE',
+        models: [{ id: 'llama3.2', name: 'llama3.2' }],
+      });
+      generate.mockResolvedValue({ ok: true, latencyMs: 10 });
+      // The preferences service reports business failures in its RESULT, so the
+      // pipeline reads `success` — a double must answer with a real outcome.
+      preferences.setProviderEnabled.mockResolvedValue({ success: true });
+      preferences.updatePreferences.mockResolvedValue({ success: true });
+
+      const result = await orchestrator.setup({ userId: 'user-1', family: 'ollama' });
+
+      // A model the provider really reported is validated normally: exactly one
+      // real generation test on that id, and only then SUCCESS.
+      expect(result.selectedModel?.id).toBe('llama3.2');
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(result.outcome).toBe('SUCCESS');
+    });
+
+    it('a discovery FAILURE is reported before any generation attempt', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+      // The probe answered but reported NO models — the generation test must not
+      // run at all, because there is nothing to validate on.
+      probe.mockResolvedValue({
+        connected: true,
+        credentialSource: 'NONE',
+        models: [],
+      });
+      generate.mockResolvedValue({ ok: true, latencyMs: 10 });
+
+      const result = await orchestrator.setup({ userId: 'user-1', family: 'ollama' });
+
+      expect(result.outcome).toBe('MODEL_DISCOVERY_FAILED');
+      expect(result.connected).toBe(false);
+      // No generation is attempted without a real discovered model.
+      expect(generate).not.toHaveBeenCalled();
+      // Nothing was stored and nothing was enabled: no real model, no connection.
+      expect(result.credentialStored).toBe(false);
+      expect(result.preferencesApplied).toBe(false);
+      expect(preferences.setProviderEnabled).not.toHaveBeenCalled();
+    });
+
+    it('never marks Ollama connected when the generation test fails', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+      probe.mockResolvedValue({
+        connected: true,
+        credentialSource: 'NONE',
+        models: [{ id: 'llama3.2', name: 'llama3.2' }],
+      });
+      generate.mockResolvedValue({ ok: false, errorKind: 'unreachable', message: 'dropped' });
+
+      const result = await orchestrator.setup({ userId: 'user-1', family: 'ollama' });
+
+      // A catalog read is NOT a connection: no persistence, no enable, no success.
+      expect(result.connected).toBe(false);
+      expect(result.outcome).not.toBe('SUCCESS');
+      expect(preferences.setProviderEnabled).not.toHaveBeenCalled();
+      expect(credentials.store).not.toHaveBeenCalled();
     });
   });
 
@@ -263,7 +411,7 @@ describe('ProviderSetupOrchestrator', () => {
   // ── Failure taxonomy: every classified failure becomes plain language plus
   //    exactly ONE recovery action (never a developer instruction) ─────────
   describe('failure taxonomy + recovery', () => {
-    it('turns a blocked local runtime into ACTION_REQUIRED with Advanced setup', async () => {
+    it('turns a blocked local runtime into ACTION_REQUIRED with its own retry', async () => {
       credentials.resolve.mockResolvedValue({ source: 'NONE' });
       probe.mockResolvedValue({
         connected: false,
@@ -276,9 +424,17 @@ describe('ProviderSetupOrchestrator', () => {
 
       expect(result.outcome).toBe('ACTION_REQUIRED');
       expect(result.connected).toBe(false);
-      expect(result.message).toMatch(/browser access is blocked/i);
-      // The one technical dead end gets the Advanced escape hatch.
+      // BUGFIX (Ollama honesty): the browser refusing a HEALTHY runtime is not
+      // a configuration dead end — it is a retryable permission problem, so the
+      // wording names the real condition and the ONE action is a retry, not a
+      // hand-off to Advanced.
+      expect(result.message).toBe('VedMoulya can see Ollama, but this browser cannot access it.');
+      expect(result.message).not.toMatch(/not installed/i);
+      // The recovery is DELIBERATELY the Advanced escape hatch for this kind:
+      // `advancedRecoveryFor` overrides it, so the user is handed the surfaces
+      // that can actually change an origin/address rather than a bare retry.
       expect(result.recovery?.kind).toBe('go_advanced');
+      expect(result.recovery?.actionLabel).toBe('Advanced setup');
     });
 
     it('reports an unreachable cloud provider as UNAVAILABLE with a retry', async () => {

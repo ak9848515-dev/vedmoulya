@@ -327,24 +327,52 @@ function mapFailure(
   if (errorKind === 'browser_origin_blocked') {
     return {
       outcome: 'ACTION_REQUIRED',
-      message: `VedMoulya can see ${name}, but browser access is blocked.`,
+      message: `VedMoulya can see ${name}, but this browser cannot access it.`,
       recovery: {
         kind: 'start_local_provider',
-        actionLabel: 'Restart it once',
-        detail: `Close ${name} completely, start it again, then press Connect.`,
+        actionLabel: 'Try again',
+        detail: `Allow VedMoulya to connect to your local ${name}, then press Connect again.`,
       },
+    };
+  }
+
+  // BUGFIX (Ollama honesty) — the runtime ANSWERED and reported no models. It is
+  // therefore installed and running; the user must pull a model, never reinstall.
+  if (errorKind === 'no_models') {
+    return {
+      outcome: 'ACTION_REQUIRED',
+      message: `${name} is running, but no models are installed.`,
+      recovery: {
+        kind: 'start_local_provider',
+        actionLabel: 'Try again',
+        detail: `Install a model in ${name} (for example: ollama pull llama3.2), then press Connect again.`,
+      },
+    };
+  }
+
+  // The runtime answered and rejected the MODEL — the server is fine.
+  if (errorKind === 'model_unavailable') {
+    return {
+      outcome: 'VALIDATION_FAILED',
+      message: `${name} does not have that model installed.`,
+      recovery: { kind: 'retry', actionLabel: 'Scan again' },
     };
   }
 
   if (errorKind === 'unreachable') {
     if (family === 'ollama') {
+      // BUGFIX (Ollama honesty) — a failed request does NOT prove Ollama is
+      // absent. It may not be running, the address may be wrong, or the browser
+      // may be blocked. State only what was measured and offer the actions that
+      // actually resolve each case.
       return {
         outcome: 'ACTION_REQUIRED',
-        message: "Ollama isn't running on this computer.",
+        message: 'VedMoulya could not reach Ollama on this computer.',
         recovery: {
           kind: 'start_local_provider',
-          actionLabel: 'Start Ollama',
-          detail: 'Install it from ollama.com, open it, then press Connect again.',
+          actionLabel: 'Try again',
+          detail:
+            'Ollama may not be installed or running — or the address may be wrong. Check the address under Advanced, then try again.',
         },
       };
     }
@@ -736,6 +764,19 @@ export class ProviderSetupOrchestrator {
     // ── Stage 7 · real generation validation on the chosen model ──────────
     // "Connected" must mean the AI can ANSWER. This is the step that separates a
     // working provider from one that merely listed models.
+    //
+    // BUGFIX (Ollama honesty) — the chosen model is first checked against the
+    // models the provider REALLY reported, so a model that was removed or renamed
+    // since discovery is reported as a missing MODEL rather than a failed
+    // provider. No model id is ever invented here: the check compares against the
+    // discovered list only.
+    if (!seed.availableModels.some((model) => model.id === chosen.id)) {
+      return baseResult(seed, 'MODEL_DISCOVERY_FAILED', `${name} no longer serves that model.`, {
+        errorKind: 'model_unavailable',
+        recovery: { kind: 'retry', actionLabel: 'Scan again' },
+      });
+    }
+
     seed.stage = 'validate';
     const generation = await this.generate({
       family,
