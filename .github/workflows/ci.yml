@@ -6,10 +6,15 @@
 name: CI
 
 on:
+  # Feature branches are validated on push as well as on their PRs. Without
+  # `feature/**` a feature-branch commit receives NO gate at all — the PR is
+  # validated only when it merges into a listed base, so a regression can land
+  # on a feature branch unnoticed and be discovered after merge. `main` and
+  # `develop` behaviour is unchanged.
   push:
-    branches: [main, develop]
+    branches: [main, develop, 'feature/**']
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, 'feature/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

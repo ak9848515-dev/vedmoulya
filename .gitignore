@@ -47,6 +47,17 @@ npm-debug.log*
 # Generated audit/lint report artifacts at the repo root
 .eslint-detail.txt
 .eslint-report.json
+# Captured output of long-running local verification runs (lint/test/build).
+# These are produced by redirecting the canonical commands to a root-level
+# scratch file (`npm run lint > .lint-full.txt 2>&1`) for post-run inspection —
+# never build inputs, never committed. Pattern is explicit so real dot-files
+# such as `.env.example` stay tracked.
+/.lint-*.txt
+/.lint.txt
+/.test-full.txt
+/.test-*.txt
+/.webbuild.txt
+/.build-*.txt
 
 # Root-level command-output / pid scratch artifacts (SPRINT-024 hygiene)
 *.out.txt
