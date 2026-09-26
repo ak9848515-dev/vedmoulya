@@ -234,23 +234,29 @@ export function ProviderConfigScreen({
     return capabilityPhrases([...new Set(raw)]);
   }, [intelligence.data, provider.models]);
 
-  // The two primary authentication methods, side by side. OAuth is offered
-  // ONLY where the codebase really has it (Google) — the other option says so
-  // instead of pretending.
+  // GEMINI UX (credential separation) — a Google ACCOUNT identity and Gemini
+  // API access are different things. Gemini's required connection method is its
+  // own API key; the Google account authorization is a separate, optional
+  // identity connection that never activates Gemini. The labels below state
+  // that explicitly, so OAuth can never read as an alternative way to switch
+  // Gemini on.
+  const isGemini = provider.family === 'google';
   const authOptions = [
     {
       id: 'api_key' as const,
       icon: <KeyRound className="h-4 w-4" aria-hidden="true" />,
-      title: 'API KEY',
-      description: 'Connect with API key',
+      title: isGemini ? 'GEMINI API KEY' : 'API KEY',
+      description: isGemini ? 'Required to use Gemini AI' : 'Connect with API key',
       available: true,
       unavailableReason: '',
     },
     {
       id: 'oauth' as const,
       icon: <ShieldCheck className="h-4 w-4" aria-hidden="true" />,
-      title: 'OAUTH',
-      description: 'Connect your account',
+      title: 'GOOGLE ACCOUNT',
+      description: isGemini
+        ? 'Your Google account connection is separate from Gemini API access.'
+        : 'Connect your Google account',
       available: supportsOAuth(provider.family),
       unavailableReason: `OAuth isn't available for ${identity.name} yet — use an API key.`,
     },
@@ -423,7 +429,9 @@ export function ProviderConfigScreen({
         <Subtitle>
           {serverManagedAvailable
             ? 'This server already holds a working credential for this AI.'
-            : `Connect ${identity.name} to VedMoulya.`}
+            : isGemini
+              ? 'Gemini requires its own API key to use Gemini AI.'
+              : `Connect ${identity.name} to VedMoulya.`}
         </Subtitle>
 
         <fieldset className="mt-4">
@@ -640,16 +648,22 @@ export function ProviderConfigScreen({
           <div className="mt-5 space-y-3" data-testid="provider-oauth-panel">
             {googleAccount.connected ? (
               <>
-                <p className="inline-flex items-center gap-2 text-[13px] font-medium text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                  Connected
-                  <span className="text-[12px] font-normal text-[#64748B] dark:text-[#94A3B8]">
-                    Account connected
-                  </span>
+                {/* The Google ACCOUNT is authorised — this is deliberately NOT
+                    rendered as the AI being connected (no provider-green
+                    checkmark): identity is not the Gemini credential. */}
+                <p
+                  data-testid="provider-google-account-status"
+                  className="inline-flex items-center gap-2 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0]"
+                >
+                  <ShieldCheck
+                    className="h-4 w-4 text-[#2B5FD9] dark:text-[#6B8FEF]"
+                    aria-hidden="true"
+                  />
+                  Google account connected
                 </p>
                 <p className="text-[12px] text-[#64748B] dark:text-[#94A3B8]">
-                  Your Google account is authorised for VedMoulya. VedMoulya verifies the AI
-                  connection itself, above.
+                  Your Google account connection is separate from Gemini API access. It does not
+                  connect Gemini — Gemini requires its own API key, above.
                 </p>
                 <button
                   type="button"
@@ -662,8 +676,9 @@ export function ProviderConfigScreen({
               </>
             ) : (
               <>
-                <p className="text-[13px] text-[#374151] dark:text-[#E2E8F0]">
-                  Connect your account
+                <p className="text-[13px] text-[#374151] dark:text-[#E2E8F0]">Google account</p>
+                <p className="text-[12px] text-[#64748B] dark:text-[#94A3B8]">
+                  Your Google account connection is separate from Gemini API access.
                 </p>
                 <button
                   type="button"

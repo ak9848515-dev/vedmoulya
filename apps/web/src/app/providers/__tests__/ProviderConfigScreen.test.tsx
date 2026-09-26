@@ -246,14 +246,16 @@ describe('ProviderConfigScreen (simplified Configure AI)', () => {
   });
 
   // ── Structure ────────────────────────────────────────────────────────────
-  it('puts Connection first, with API KEY and OAUTH side by side', () => {
+  it('puts Connection first, with the API-key and Google-account options side by side', () => {
     renderScreen();
 
     expect(screen.getByTestId('config-section-connection')).toBeDefined();
     expect(screen.getByTestId('auth-option-api_key')).toBeDefined();
     expect(screen.getByTestId('auth-option-oauth')).toBeDefined();
     expect(screen.getByTestId('auth-option-api_key').textContent).toMatch(/API KEY/i);
-    expect(screen.getByTestId('auth-option-oauth').textContent).toMatch(/OAUTH/i);
+    // Gemini's identity option is named for what it is — a Google ACCOUNT — and
+    // is never labelled as a generic "OAUTH" that could read as an AI switch.
+    expect(screen.getByTestId('auth-option-oauth').textContent).toMatch(/GOOGLE ACCOUNT/i);
 
     // Connection is the first section on the screen.
     const html = document.body.innerHTML;
@@ -531,7 +533,13 @@ describe('ProviderConfigScreen (simplified Configure AI)', () => {
     fireEvent.click(screen.getByTestId('auth-option-oauth'));
 
     expect(screen.getByTestId('provider-oauth-disconnect')).toBeDefined();
-    expect(screen.getByTestId('provider-oauth-panel').textContent).toMatch(/Account connected/);
+    expect(screen.getByTestId('provider-oauth-panel').textContent).toMatch(
+      /Google account connected/,
+    );
+    // …and the panel states the separation instead of implying Gemini is ready.
+    expect(screen.getByTestId('provider-oauth-panel').textContent).toMatch(
+      /separate from Gemini API access/,
+    );
   });
 
   it('never offers OAuth for a provider that has none', () => {
@@ -950,5 +958,121 @@ describe('ProviderConfigScreen (advanced / OpenAI-compatible path)', () => {
     expect((screen.getByTestId('provider-discover-models') as HTMLButtonElement).disabled).toBe(
       true,
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GEMINI UX CLEANUP — Google ACCOUNT identity vs Gemini API access.
+//
+// The Gemini family id is the internal string `google`, so its configuration
+// screen displays BOTH a Google account authorization and a Gemini API-key
+// configuration. Those are different credentials. These tests pin the UX rule:
+// the Google account is an identity connection that NEVER activates Gemini,
+// and Gemini's status only changes on a real, verified API-key configuration.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ProviderConfigScreen (Gemini: Google account vs Gemini API key)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The OAuth round trip returns to ?provider=google&oauth=google.
+    window.history.replaceState({}, '', '/providers?provider=google&oauth=google');
+    window.localStorage.clear();
+    mocks.intelligence = intelligenceWithTwoModels();
+    mocks.setPrefsMutate.mockResolvedValue({});
+    mocks.refreshIntelligenceMutate.mockResolvedValue({});
+    mocks.connectMutate.mockResolvedValue(connectedResult());
+  });
+
+  // 1 — Google OAuth connected but Gemini API key missing → Gemini stays o.
+  it('keeps Gemini NOT CONNECTED when only the Google account is connected', () => {
+    const { onToggle } = renderScreen({ runtime: null });
+
+    // The provider status is derived from runtime truth, never from OAuth.
+    expect(screen.getByTestId('config-connection-status').textContent).toMatch(/Not connected/);
+    // The required Gemini credential is still asked for (the active method).
+    expect(screen.getByTestId('provider-api-key-input')).toBeDefined();
+
+    fireEvent.click(screen.getByTestId('auth-option-oauth'));
+    expect(screen.getByTestId('provider-google-account-status').textContent).toMatch(
+      /Google account connected/,
+    );
+    // Connecting the identity fires no provider probe and enables no provider.
+    expect(mocks.connectMutate).not.toHaveBeenCalled();
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  // 2 — a valid Gemini API key can become CONNECTED after real verification.
+  it('connects Gemini only after a real API-key verification succeeds', async () => {
+    mocks.connectMutate.mockResolvedValue(
+      connectedResult({
+        latencyMs: 42,
+        models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
+      }),
+    );
+    const { onToggle, onChanged } = renderScreen({ runtime: null, enabled: false });
+
+    // Before verification the provider is genuinely not connected.
+    expect(screen.getByTestId('config-connection-status').textContent).toMatch(/Not connected/);
+
+    fireEvent.change(screen.getByTestId('provider-api-key-input'), {
+      target: { value: 'AIza-valid-gemini-key' },
+    });
+    fireEvent.click(screen.getByTestId('provider-test-connection'));
+
+    // The probe really ran with the pasted key…
+    await waitFor(() =>
+      expect(mocks.connectMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'u1',
+          family: 'google',
+          apiKey: 'AIza-valid-gemini-key',
+        }),
+      ),
+    );
+    // …and only a verified result turns Gemini on.
+    const success = await waitFor(() => screen.getByTestId('provider-connection-success'));
+    expect(success.textContent).toMatch(/Connected/);
+    expect(onToggle).toHaveBeenCalledWith('google', true);
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('shows Gemini CONNECTED once a verified credential is present', () => {
+    // CONFIGURED runtime truth + enabled preference ⇒ the one READY state.
+    renderScreen({ runtime: CONFIGURED_RUNTIME });
+    expect(screen.getByTestId('config-connection-status').textContent).toMatch(/Connected/);
+  });
+
+  // 3 — Google OAuth is never treated as the Gemini credential.
+  it('presents the Google account as identity, separate from Gemini API access', () => {
+    renderScreen({ runtime: null });
+
+    const oauthOption = screen.getByTestId('auth-option-oauth');
+    expect(oauthOption.textContent).toMatch(/GOOGLE ACCOUNT/);
+    expect(oauthOption.textContent).not.toMatch(/OAUTH/);
+
+    // The primary/required method is named for Gemini's own key.
+    expect(screen.getByTestId('auth-option-api_key').textContent).toMatch(/GEMINI API KEY/);
+    expect(screen.getByTestId('config-section-connection').textContent).toMatch(
+      /Gemini requires its own API key/,
+    );
+
+    fireEvent.click(oauthOption);
+    expect(screen.getByTestId('provider-oauth-panel').textContent).toMatch(
+      /separate from Gemini API access/,
+    );
+  });
+
+  // 4 — the OAuth return must not overwrite the Gemini provider status.
+  it('does not let the OAuth return overwrite the Gemini provider status', () => {
+    // The URL marks a completed Google consent round trip.
+    expect(window.location.search).toMatch(/oauth=google/);
+    const { onToggle } = renderScreen({ runtime: null });
+
+    expect(screen.getByTestId('config-connection-status').textContent).toMatch(/Not connected/);
+    expect(mocks.connectMutate).not.toHaveBeenCalled();
+    expect(onToggle).not.toHaveBeenCalled();
+    // The identity round trip was recognised — as an ACCOUNT, not a connection.
+    fireEvent.click(screen.getByTestId('auth-option-oauth'));
+    expect(screen.getByTestId('provider-google-account-status')).toBeDefined();
   });
 });
