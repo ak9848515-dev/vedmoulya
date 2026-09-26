@@ -38,13 +38,15 @@ Two boundaries matter:
 | ------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `packages/local-ai/src/types.ts`                              | `LocalRuntime` interface, model/generation types, error vocabulary |
 | `packages/local-ai/src/states.ts`                             | The 10-state connection model and its derivation                   |
-| `packages/local-ai/src/registry.ts`                           | Runtime adapter registration/selection                             |     | `packages/local-ai/src/adapters/ollama-runtime.ts`  | The Ollama adapter (all Ollama-specific detail) |
+| `packages/local-ai/src/registry.ts`                           | Runtime adapter registration/selection                             |
+| `packages/local-ai/src/adapters/ollama-runtime.ts`            | The Ollama adapter (all Ollama-specific detail)                    |
 | `packages/local-ai/src/adapters/openai-compatible-runtime.ts` | OpenAI-compatible adapter (LM Studio, llama.cpp server, vLLM, Jan) |
 | `packages/local-ai/src/adapters/http.ts`                      | Shared failure classification for every adapter                    |
 | `packages/local-ai/src/agent/agent.ts`                        | The Local Agent service (status derivation, strict `verify`)       |
 | `packages/local-ai/src/agent/server.ts`                       | Loopback HTTP API + CORS allow-list                                |
 | `packages/local-ai/src/agent/cli.ts`                          | `npm run local-agent` entrypoint                                   |
-| `apps/web/src/app/providers/local-ai-agent.ts`                | Browser client for the agent                                       |     | `apps/web/src/app/providers/use-local-ai-status.ts` | The ONE live Local AI state hook (shared)       |
+| `apps/web/src/app/providers/local-ai-agent.ts`                | Browser client for the agent                                       |
+| `apps/web/src/app/providers/use-local-ai-status.ts`           | The ONE live Local AI state hook (shared)                          |
 | `apps/web/src/app/providers/LocalAiPanel.tsx`                 | The Local AI panel + the compact overview card                     |
 
 ## Local Runtime interface
