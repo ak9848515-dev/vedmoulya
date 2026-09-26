@@ -60,6 +60,7 @@ import {
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
 import { ProvidersOverview } from './ProvidersOverview.js';
+import { LocalAiPanel } from './LocalAiPanel.js';
 import { ProviderConnectFlow } from './ProviderConnectFlow.js';
 import { ProviderConfigureExperience } from './ProviderConfigureExperience.js';
 import { SimpleProviderConfig } from './SimpleProviderConfig.js';
@@ -700,6 +701,9 @@ function ProviderExperienceView({
           <p className="text-[13px] text-[#92400E] dark:text-[#FCD34D]">{toggleError}</p>
         </div>
       ) : null}
+
+      {/* ── Local AI (minimal): the Local Agent bridge on this computer ── */}
+      <LocalAiPanel />
 
       {/* ── Screen 1: VedMoulya's AI + Other AI ───────────────────────── */}
       <ProvidersOverview

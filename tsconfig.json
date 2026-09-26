@@ -23,6 +23,7 @@
     { "path": "packages/execution-orchestrator" },
     { "path": "packages/execution-strategy" },
     { "path": "packages/providers" },
+    { "path": "packages/local-ai" },
     { "path": "packages/rag" },
     { "path": "packages/loop-engine" },
     { "path": "packages/app-factory" },

@@ -296,6 +296,14 @@ export default tseslint.config(
       // verification/lifecycle unions returned by the gateway (never raw user
       // input) — same proven pattern as the providers page above.
       'apps/web/src/app/providers/ProviderDetailView.tsx',
+      // Local AI foundation (Phase 1): LOCAL_AI_STATE_META[state] and
+      // TONE_CLASS[tone] index typed records over CLOSED unions (LocalAiState,
+      // the state tone) — keys come from the agent's own resolved state or a
+      // fixed constant map, never raw user input; strict +
+      // noUncheckedIndexedAccess keeps reads null-safe. Same proven pattern as
+      // the providers page above.
+      'packages/local-ai/src/agent/agent.ts',
+      'apps/web/src/app/providers/LocalAiPanel.tsx',
       // Capability Marketplace (EPIC-013): CAPABILITY_TO_AI_FEATURES[cap] /
       // CAPABILITY_DISCOVERY_KEYWORDS[cap] index typed records over the closed
       // CapabilityId union — keys come from the planner's own graph, never raw

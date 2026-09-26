@@ -16,6 +16,7 @@
     "clean": "npm run clean --workspaces --if-present",
     "clean:build": "rm -rf apps/web/.next && echo 'Build cache cleared'",
     "dev": "npm run dev -w apps/web",
+    "local-agent": "tsx packages/local-ai/src/agent/cli.ts",
     "preflight": "npx tsx scripts/preflight.ts",
     "preflight:prod": "npx tsx scripts/preflight.ts --mode production",
     "doctor": "npx tsx scripts/doctor.ts",

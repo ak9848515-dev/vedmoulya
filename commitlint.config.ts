@@ -39,6 +39,7 @@ const Configuration: UserConfig = {
         'config', // @vedmoulya/config
         'information', // @vedmoulya/information
         'intelligence', // @vedmoulya/intelligence
+        'local-ai', // @vedmoulya/local-ai (Local Agent / local runtimes)
         'web', // @vedmoulya/web (Next.js app)
         'api', // API gateway service
         'identity', // Identity service
