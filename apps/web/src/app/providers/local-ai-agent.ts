@@ -98,6 +98,35 @@ export interface LocalAgentClientOptions {
   fetchFn?: typeof fetch;
 }
 
+/** A chat message as the agent expects it. */
+export interface LocalChatMessageDTO {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+/** One streamed chunk forwarded by the agent (NDJSON). */
+export interface LocalStreamChunkDTO {
+  content: string;
+  done: boolean;
+}
+
+export interface LocalStreamOptions {
+  runtimeId?: string;
+  modelId?: string;
+  timeoutMs?: number;
+  fetchFn?: typeof fetch;
+  /** Called for every chunk as it arrives, so the UI can render incrementally. */
+  onChunk?: (chunk: LocalStreamChunkDTO) => void;
+}
+
+/** The outcome of a streamed generation (never thrown — always returned). */
+export interface LocalStreamResult {
+  ok: boolean;
+  /** The full reply, reassembled from the streamed chunks. */
+  text: string;
+  message: string;
+}
+
 function timeoutSignal(timeoutMs: number): AbortSignal {
   return AbortSignal.timeout(timeoutMs);
 }
@@ -214,4 +243,101 @@ export async function verifyLocalRuntime(
   } catch {
     return null;
   }
+}
+
+/** Parse one NDJSON line from the agent's stream endpoint. */
+function parseStreamLine(line: string): LocalStreamChunkDTO | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line) as unknown;
+  } catch {
+    return null;
+  }
+  const record = asRecord(parsed);
+  if (record === null) return null;
+  const content = record['content'];
+  return { content: typeof content === 'string' ? content : '', done: record['done'] === true };
+}
+
+/**
+ * Stream a real generation through the agent (agent → runtime → model) and
+ * forward each chunk as it arrives. Like every call here it NEVER throws: an
+ * offline agent or a stopped stream is a typed failure result.
+ *
+ * The path is `POST /runtimes/:id/stream` (NDJSON), so the model is executed
+ * through the SAME Local Runtime interface as the non-streaming path.
+ */
+export async function streamLocalGeneration(
+  agentUrl: string,
+  messages: LocalChatMessageDTO[],
+  options: LocalStreamOptions = {},
+): Promise<LocalStreamResult> {
+  const runtimeId = options.runtimeId ?? DEFAULT_LOCAL_RUNTIME_ID;
+  const fetchFn = options.fetchFn ?? globalThis.fetch;
+  const hasModel = options.modelId !== undefined && options.modelId !== '';
+
+  let response: Response;
+  try {
+    response = await fetchFn(`${agentUrl}/runtimes/${runtimeId}/stream`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Accept: 'application/x-ndjson' },
+      body: JSON.stringify({
+        messages,
+        ...(hasModel ? { modelId: options.modelId } : {}),
+      }),
+      signal: timeoutSignal(options.timeoutMs ?? 120_000),
+    });
+  } catch {
+    return { ok: false, text: '', message: 'The Local Agent could not be reached.' };
+  }
+
+  if (!response.ok || response.body === null) {
+    return {
+      ok: false,
+      text: '',
+      message: `The Local Agent refused the stream (HTTP ${response.status}).`,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+
+  const consume = (line: string): void => {
+    const trimmed = line.trim();
+    if (trimmed === '') return;
+    const chunk = parseStreamLine(trimmed);
+    if (chunk === null) return;
+    text += chunk.content;
+    options.onChunk?.(chunk);
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex !== -1) {
+        consume(buffer.slice(0, newlineIndex));
+        buffer = buffer.slice(newlineIndex + 1);
+        newlineIndex = buffer.indexOf('\n');
+      }
+    }
+    consume(buffer);
+  } catch {
+    return {
+      ok: false,
+      text,
+      message: 'The local generation stream stopped unexpectedly.',
+    };
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (text.trim() === '') {
+    return { ok: false, text, message: 'The local model produced no reply.' };
+  }
+  return { ok: true, text, message: 'Local generation finished.' };
 }

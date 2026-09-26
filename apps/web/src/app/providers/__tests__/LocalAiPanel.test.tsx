@@ -10,7 +10,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { LocalAiPanel } from '../LocalAiPanel.js';
-import { checkLocalAgent, fetchLocalRuntimeStatus, verifyLocalRuntime } from '../local-ai-agent.js';
+import {
+  checkLocalAgent,
+  fetchLocalRuntimeStatus,
+  streamLocalGeneration,
+  verifyLocalRuntime,
+} from '../local-ai-agent.js';
 
 vi.mock('../local-ai-agent.js', () => ({
   DEFAULT_LOCAL_AGENT_URL: 'http://127.0.0.1:43117',
@@ -20,11 +25,13 @@ vi.mock('../local-ai-agent.js', () => ({
   checkLocalAgent: vi.fn(),
   fetchLocalRuntimeStatus: vi.fn(),
   verifyLocalRuntime: vi.fn(),
+  streamLocalGeneration: vi.fn(),
 }));
 
 const mockedCheck = vi.mocked(checkLocalAgent);
 const mockedStatus = vi.mocked(fetchLocalRuntimeStatus);
 const mockedVerify = vi.mocked(verifyLocalRuntime);
+const mockedStream = vi.mocked(streamLocalGeneration);
 
 const STATUS_REPORT = {
   runtime: 'ollama',
@@ -51,6 +58,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockedStatus.mockResolvedValue(null);
   mockedVerify.mockResolvedValue(null);
+  mockedStream.mockResolvedValue({ ok: true, text: '', message: 'Local generation finished.' });
 });
 
 describe('LocalAiPanel', () => {
@@ -143,6 +151,46 @@ describe('LocalAiPanel', () => {
     );
     expect(screen.getByTestId('local-ai-checks').textContent).toContain(
       'Real generation succeeded',
+    );
+  });
+
+  it('streams a generation through the agent and renders the reply incrementally', async () => {
+    mockedCheck.mockResolvedValue({
+      reachable: true,
+      url: 'http://127.0.0.1:43117',
+      health: {
+        status: 'RUNNING',
+        version: '1.0.0',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        runtimes: ['ollama'],
+      },
+      message: 'Local Agent connected.',
+    });
+    mockedStatus.mockResolvedValue(STATUS_REPORT);
+    mockedStream.mockImplementation((_url, _messages, options) => {
+      options?.onChunk?.({ content: 'Hel', done: false });
+      options?.onChunk?.({ content: 'lo', done: true });
+      return Promise.resolve({ ok: true, text: 'Hello', message: 'Local generation finished.' });
+    });
+
+    render(<LocalAiPanel />);
+    await waitFor(() => {
+      expect(screen.getByTestId('local-ai-prompt')).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByTestId('local-ai-prompt'), {
+      target: { value: 'Reply with the single word: ok' },
+    });
+    fireEvent.click(screen.getByTestId('local-ai-generate'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('local-ai-output').textContent).toBe('Hello');
+    });
+    expect(mockedStream).toHaveBeenCalledTimes(1);
+    expect(mockedStream.mock.calls[0]?.[0]).toBe('http://127.0.0.1:43117');
+    expect(mockedStream.mock.calls[0]?.[2]?.modelId).toBe('qwen2.5-coder:7b-instruct');
+    expect(screen.getByTestId('local-ai-stream-status').textContent).toBe(
+      'Local generation finished.',
     );
   });
 });

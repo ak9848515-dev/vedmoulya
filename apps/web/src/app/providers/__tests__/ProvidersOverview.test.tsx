@@ -16,6 +16,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { ProvidersOverview, effectiveRuntimeStatus } from '../ProvidersOverview.js';
 import type { ProviderExperienceRowDTO, ProviderRuntimeStateDTO } from '../../../lib/api-client.js';
+import type { LocalAiStatus, LocalAiSnapshot } from '../use-local-ai-status.js';
 
 // PROVIDER-UX — a user-supplied (USER) credential makes a family usable even
 // though the deployment runtime registry reports NOT_CONFIGURED for it.
@@ -121,6 +122,7 @@ function renderOverview(
     addAIOpen?: boolean;
     providers?: ProviderExperienceRowDTO[];
     preferredProviderId?: string;
+    localAi?: LocalAiStatus;
   } = {},
 ) {
   const onConfigure = vi.fn();
@@ -148,6 +150,7 @@ function renderOverview(
       onRefresh={onRefresh}
       addAIOpen={overrides.addAIOpen ?? false}
       onAddAIOpenChange={onAddAIOpenChange}
+      {...(overrides.localAi !== undefined ? { localAi: overrides.localAi } : {})}
     />,
   );
   return {
@@ -389,5 +392,47 @@ describe('ProvidersOverview (simplified AI Providers screen)', () => {
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Escape' });
     expect(screen.queryAllByRole('menuitem')).toHaveLength(0);
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+// ── Local AI on the overview cards ─────────────────────────────────────────
+describe('ProvidersOverview — Local AI card', () => {
+  function stubLocalAi(snapshot: Partial<LocalAiSnapshot>): LocalAiStatus {
+    const merged: LocalAiSnapshot = {
+      agentReachable: true,
+      checking: false,
+      connecting: false,
+      state: 'OLLAMA_CONNECTED',
+      label: 'Connected',
+      tone: 'ok',
+      message: 'Ollama answered on qwen2.5-coder:3b.',
+      runtimeName: 'Ollama',
+      modelId: 'qwen2.5-coder:3b',
+      ...snapshot,
+    };
+    return {
+      check: null,
+      report: null,
+      selectedModelId: merged.modelId ?? '',
+      setSelectedModelId: vi.fn(),
+      checking: merged.checking,
+      connecting: merged.connecting,
+      agentReachable: merged.agentReachable,
+      snapshot: merged,
+      refresh: vi.fn(() => Promise.resolve()),
+      connect: vi.fn(() => Promise.resolve()),
+    };
+  }
+
+  it('renders the shared Local AI live state among the provider cards', () => {
+    renderOverview({ localAi: stubLocalAi({}) });
+    expect(screen.getByTestId('local-ai-overview-card')).toBeTruthy();
+    expect(screen.getByTestId('local-ai-overview-connection').textContent).toBe('Connected');
+    expect(screen.getByTestId('local-ai-overview-model').textContent).toBe('qwen2.5-coder:3b');
+  });
+
+  it('renders nothing extra when no Local AI controller is supplied', () => {
+    renderOverview();
+    expect(screen.queryByTestId('local-ai-overview-card')).toBeNull();
   });
 });

@@ -32,6 +32,7 @@ export {
   deriveLocalAiState,
   isLocalAiConnected,
   LOCAL_AI_STATE_META,
+  localAiStateLabel,
   stateForRuntimeError,
 } from './states.js';
 
@@ -49,6 +50,14 @@ export {
   parseOllamaStreamLine,
   parseOllamaVersion,
 } from './adapters/ollama-runtime.js';
+export type { OpenAICompatibleRuntimeOptions } from './adapters/openai-compatible-runtime.js';
+export {
+  DEFAULT_LM_STUDIO_ENDPOINT,
+  OpenAICompatibleRuntimeAdapter,
+  parseOpenAiChatContent,
+  parseOpenAiModelIds,
+  parseOpenAiStreamLine,
+} from './adapters/openai-compatible-runtime.js';
 
 // ── Local Agent ───────────────────────────────────────────────────────────
 export type {
@@ -66,7 +75,11 @@ export {
   UnknownLocalRuntimeError,
 } from './agent/agent.js';
 export type { DefaultLocalAgentOptions } from './agent/default-agent.js';
-export { createDefaultLocalAgent, resolveOllamaEndpoint } from './agent/default-agent.js';
+export {
+  createDefaultLocalAgent,
+  resolveLmStudioEndpoint,
+  resolveOllamaEndpoint,
+} from './agent/default-agent.js';
 
 // ── HTTP server ───────────────────────────────────────────────────────────
 export type { LocalAgentServerOptions, StartedLocalAgent } from './agent/server.js';

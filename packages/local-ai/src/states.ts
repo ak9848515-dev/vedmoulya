@@ -163,6 +163,39 @@ export function deriveLocalAiState(evidence: LocalAiEvidence): LocalAiState {
   return 'OLLAMA_MODELS_FOUND';
 }
 
+/**
+ * The label for a state, named after the runtime ACTUALLY being talked to.
+ *
+ * The state ids keep their original names for wire compatibility, but a label
+ * must never say "Ollama" on an LM Studio card — Ollama is one runtime, not
+ * "Local AI". For the Ollama runtime this returns exactly the meta labels, so
+ * existing behaviour is unchanged.
+ */
+export function localAiStateLabel(state: LocalAiState, runtimeDisplayName: string): string {
+  switch (state) {
+    case 'LOCAL_AGENT_NOT_RUNNING':
+      return 'Local Agent not connected';
+    case 'LOCAL_AGENT_RUNNING':
+      return 'Local Agent connected';
+    case 'OLLAMA_NOT_RUNNING':
+      return `${runtimeDisplayName} not running`;
+    case 'OLLAMA_UNREACHABLE':
+      return `${runtimeDisplayName} unreachable`;
+    case 'OLLAMA_INVALID_RESPONSE':
+      return 'Unexpected response';
+    case 'OLLAMA_NO_MODELS':
+      return 'No models installed';
+    case 'OLLAMA_MODELS_FOUND':
+      return 'Models found';
+    case 'OLLAMA_MODEL_UNAVAILABLE':
+      return 'Model unavailable';
+    case 'OLLAMA_GENERATION_FAILED':
+      return 'Generation failed';
+    case 'OLLAMA_CONNECTED':
+      return 'Connected';
+  }
+}
+
 /** CONNECTED is the only state that means "usable local AI right now". */
 export function isLocalAiConnected(state: LocalAiState): boolean {
   return state === 'OLLAMA_CONNECTED';

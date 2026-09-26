@@ -39,6 +39,9 @@ import type {
   RuntimeHealth,
 } from '../types.js';
 import { OLLAMA_RUNTIME_ID } from '../types.js';
+import { asRecord, classifyNetworkError } from './http.js';
+
+export { classifyNetworkError };
 
 /** Ollama's documented default host/port. */
 export const DEFAULT_OLLAMA_ENDPOINT = 'http://127.0.0.1:11434';
@@ -59,36 +62,8 @@ function normalizeEndpoint(endpoint: string): string {
   return endpoint.trim().replace(/\/+$/, '');
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-}
-
 /** The capabilities we infer only when the runtime does not declare any. */
 const INFERRED_CAPABILITIES: readonly string[] = ['reasoning', 'coding', 'chat', 'generation'];
-
-/** Read a Node/undici error code out of a thrown value (directly or via cause). */
-function readErrorCode(error: unknown): string | undefined {
-  const record = asRecord(error);
-  if (record === null) return undefined;
-  const direct = record['code'];
-  if (typeof direct === 'string') return direct;
-  const cause = asRecord(record['cause']);
-  const causeCode = cause?.['code'];
-  return typeof causeCode === 'string' ? causeCode : undefined;
-}
-
-/**
- * Classify a thrown fetch failure.
- *
- * ECONNREFUSED/ECONNRESET mean nothing accepted the connection — the runtime is
- * almost certainly not started (NOT_RUNNING). A timeout or any other failure
- * proves only that no answer arrived (UNREACHABLE), never absence.
- */
-export function classifyNetworkError(error: unknown): LocalRuntimeErrorKind {
-  const code = readErrorCode(error);
-  if (code === 'ECONNREFUSED' || code === 'ECONNRESET') return 'NOT_RUNNING';
-  return 'UNREACHABLE';
-}
 
 /** Read the version string from a /api/version payload. */
 export function parseOllamaVersion(body: unknown): string | undefined {

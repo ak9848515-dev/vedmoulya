@@ -20,7 +20,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { LocalRuntimeRegistry } from '../registry.js';
-import { deriveLocalAiState, LOCAL_AI_STATE_META, type LocalAiState } from '../states.js';
+import {
+  deriveLocalAiState,
+  LOCAL_AI_STATE_META,
+  localAiStateLabel,
+  type LocalAiState,
+} from '../states.js';
 import type {
   LocalGenerateChunk,
   LocalGenerateRequest,
@@ -271,11 +276,11 @@ export class LocalAgent {
       };
     }
     checks.push({ key: 'runtime', label: 'Runtime reachable', ok: true });
-    checks.push({
-      key: 'health',
-      label: 'Runtime version answered',
-      ok: discovery.version !== undefined,
-    });
+    // Health is the RUNTIME's own check (Ollama answers /api/version, an
+    // OpenAI-compatible server answers /v1/models) — never a version, which not
+    // every runtime exposes.
+    const health = await runtime.health();
+    checks.push({ key: 'health', label: 'Runtime health check passed', ok: health.healthy });
 
     const listing = await runtime.listModels();
     const models = listing.models;
@@ -345,7 +350,7 @@ export class LocalAgent {
     return {
       ...base,
       state,
-      label: LOCAL_AI_STATE_META[state].label,
+      label: localAiStateLabel(state, runtime.displayName),
       message: generation.message,
       connected: state === 'OLLAMA_CONNECTED',
       checks,
@@ -379,7 +384,7 @@ export class LocalAgent {
       displayName,
       endpoint,
       state,
-      label: meta.label,
+      label: localAiStateLabel(state, displayName),
       tone: meta.tone,
       message: message.trim() === '' ? meta.description : message,
       modelCount: extra.modelCount ?? extra.models.length,

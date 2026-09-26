@@ -34,17 +34,18 @@ Two boundaries matter:
 
 ## Packages and files
 
-| Path                                               | Responsibility                                                     |
-| -------------------------------------------------- | ------------------------------------------------------------------ |
-| `packages/local-ai/src/types.ts`                   | `LocalRuntime` interface, model/generation types, error vocabulary |
-| `packages/local-ai/src/states.ts`                  | The 10-state connection model and its derivation                   |
-| `packages/local-ai/src/registry.ts`                | Runtime adapter registration/selection                             |
-| `packages/local-ai/src/adapters/ollama-runtime.ts` | The Ollama adapter (all Ollama-specific detail)                    |
-| `packages/local-ai/src/agent/agent.ts`             | The Local Agent service (status derivation, strict `verify`)       |
-| `packages/local-ai/src/agent/server.ts`            | Loopback HTTP API + CORS allow-list                                |
-| `packages/local-ai/src/agent/cli.ts`               | `npm run local-agent` entrypoint                                   |
-| `apps/web/src/app/providers/local-ai-agent.ts`     | Browser client for the agent                                       |
-| `apps/web/src/app/providers/LocalAiPanel.tsx`      | Minimal Local AI UI on `/providers`                                |
+| Path                                                          | Responsibility                                                     |
+| ------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `packages/local-ai/src/types.ts`                              | `LocalRuntime` interface, model/generation types, error vocabulary |
+| `packages/local-ai/src/states.ts`                             | The 10-state connection model and its derivation                   |
+| `packages/local-ai/src/registry.ts`                           | Runtime adapter registration/selection                             |     | `packages/local-ai/src/adapters/ollama-runtime.ts`  | The Ollama adapter (all Ollama-specific detail) |
+| `packages/local-ai/src/adapters/openai-compatible-runtime.ts` | OpenAI-compatible adapter (LM Studio, llama.cpp server, vLLM, Jan) |
+| `packages/local-ai/src/adapters/http.ts`                      | Shared failure classification for every adapter                    |
+| `packages/local-ai/src/agent/agent.ts`                        | The Local Agent service (status derivation, strict `verify`)       |
+| `packages/local-ai/src/agent/server.ts`                       | Loopback HTTP API + CORS allow-list                                |
+| `packages/local-ai/src/agent/cli.ts`                          | `npm run local-agent` entrypoint                                   |
+| `apps/web/src/app/providers/local-ai-agent.ts`                | Browser client for the agent                                       |     | `apps/web/src/app/providers/use-local-ai-status.ts` | The ONE live Local AI state hook (shared)       |
+| `apps/web/src/app/providers/LocalAiPanel.tsx`                 | The Local AI panel + the compact overview card                     |
 
 ## Local Runtime interface
 
@@ -68,15 +69,36 @@ Every method is **total**: failures are typed results, never thrown surprises.
 
 Checked against a running Ollama (0.34.4):
 
-| Call        | Endpoint                                 | Used for                     |
-| ----------- | ---------------------------------------- | ---------------------------- |
-| version     | `GET /api/version`                       | `discover()`, `health()`     |
-| models      | `GET /api/tags`                          | `listModels()`, `getModel()` |
-| chat        | `POST /api/chat` (`stream:false`)        | `generate()`                 |
-| chat stream | `POST /api/chat` (`stream:true`, NDJSON) | `stream()`                   |
+| Call    | Endpoint                          | Used for                     |
+| ------- | --------------------------------- | ---------------------------- |
+| version | `GET /api/version`                | `discover()`, `health()`     |
+| models  | `GET /api/tags`                   | `listModels()`, `getModel()` |
+| chat    | `POST /api/chat` (`stream:false`) | `generate()`                 |     | chat stream | `POST /api/chat` (`stream:true`, NDJSON) | `stream()` |
+
+The agent exposes the streaming path at
+`POST /runtimes/:id/stream` (NDJSON chunks), and the web panel's **Generate**
+action renders the reply incrementally through it — the same Local Runtime
+interface as the non-streaming path.
 
 Model capabilities are `MEASURED` when Ollama reports them (its `/api/tags`
 entries carry `capabilities`) and `INFERRED` otherwise.
+
+### OpenAI-compatible adapter (LM Studio and friends)
+
+The second runtime proves the interface is not Ollama-shaped. It implements the
+same `LocalRuntime` contract against the OpenAI-compatible HTTP API:
+
+| Call        | Endpoint                                         | Used for                                               |
+| ----------- | ------------------------------------------------ | ------------------------------------------------------ |
+| models      | `GET /v1/models`                                 | `discover()`, `health()`, `listModels()`, `getModel()` |
+| chat        | `POST /v1/chat/completions` (`stream:false`)     | `generate()`                                           |
+| chat stream | `POST /v1/chat/completions` (`stream:true`, SSE) | `stream()`                                             |
+
+Default endpoint `http://127.0.0.1:1234` (LM Studio), id `lm-studio`. This API
+exposes **no version** and **no declared capabilities**, so no version is
+claimed and model capabilities are `INFERRED`. Both runtimes are registered by
+the default agent; a runtime that is not running is reported as such, never as
+an error.
 
 ## Connection states
 
@@ -130,6 +152,7 @@ tools.
    Environment overrides:
    - `VEDMOULYA_LOCAL_AGENT_PORT` (default `43117`)
    - `VEDMOULYA_OLLAMA_URL` / `OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
+   - `VEDMOULYA_LM_STUDIO_URL` / `LM_STUDIO_BASE_URL` (default `http://127.0.0.1:1234`)
    - `VEDMOULYA_LOCAL_AGENT_ALLOWED_ORIGINS` (comma-separated, default local dev
      origins + the deployed app)
 3. Open VedMoulya at `/providers` and use the **Local AI** panel: it shows the
@@ -145,12 +168,24 @@ curl -X POST http://127.0.0.1:43117/runtimes/ollama/verify
 curl -X POST http://127.0.0.1:43117/runtimes/ollama/generate \
   -H 'content-type: application/json' \
   -d '{"messages":[{"role":"user","content":"Reply with the single word: ok"}]}'
+
+# streamed generation (NDJSON chunks)
+curl -N -X POST http://127.0.0.1:43117/runtimes/ollama/stream \
+  -H 'content-type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Count to three."}]}'
 ```
 
 ## How the web app talks to the agent
 
 `apps/web/src/app/providers/local-ai-agent.ts` probes
 `http://127.0.0.1:43117` (then `http://localhost:43117`) and calls
-`/health`, `/runtimes/ollama/status` and `/runtimes/ollama/verify`. Every call
-**never throws**: an absent agent is a normal "not connected" result, so cloud
-AI keeps working and the app never crashes.
+`/health`, `/runtimes/ollama/status`, `/runtimes/ollama/verify` and
+`/runtimes/ollama/stream`. Every call **never throws**: an absent agent is a
+normal "not connected" result, so cloud AI keeps working and the app never
+crashes.
+
+One hook (`use-local-ai-status.ts`) owns the live connection state. The
+`/providers` page calls it ONCE and passes the controller to both the full
+Local AI panel and the compact **Local AI card on the AI Providers overview**,
+so both surfaces always show the SAME measured state (no second probe, no
+re-derived status).

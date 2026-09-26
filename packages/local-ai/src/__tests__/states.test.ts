@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   deriveLocalAiState,
   isLocalAiConnected,
+  localAiStateLabel,
   stateForRuntimeError,
   LOCAL_AI_STATE_META,
   type LocalAiState,
@@ -88,5 +89,21 @@ describe('deriveLocalAiState', () => {
     for (const state of Object.keys(LOCAL_AI_STATE_META)) {
       expect(LOCAL_AI_STATE_META[state as LocalAiState].label.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('localAiStateLabel', () => {
+  it('matches the Ollama meta labels exactly (no behaviour change for Ollama)', () => {
+    expect(localAiStateLabel('OLLAMA_NOT_RUNNING', 'Ollama')).toBe('Ollama not running');
+    expect(localAiStateLabel('OLLAMA_UNREACHABLE', 'Ollama')).toBe('Ollama unreachable');
+    expect(localAiStateLabel('OLLAMA_CONNECTED', 'Ollama')).toBe('Connected');
+    expect(localAiStateLabel('LOCAL_AGENT_NOT_RUNNING', 'Ollama')).toBe(
+      'Local Agent not connected',
+    );
+  });
+
+  it('names the ACTUAL runtime instead of Ollama', () => {
+    expect(localAiStateLabel('OLLAMA_NOT_RUNNING', 'LM Studio')).toBe('LM Studio not running');
+    expect(localAiStateLabel('OLLAMA_UNREACHABLE', 'llama.cpp')).toBe('llama.cpp unreachable');
   });
 });

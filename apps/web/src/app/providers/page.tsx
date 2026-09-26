@@ -60,7 +60,8 @@ import {
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
 import { ProvidersOverview } from './ProvidersOverview.js';
-import { LocalAiPanel } from './LocalAiPanel.js';
+import { LocalAiPanelView } from './LocalAiPanel.js';
+import { useLocalAiStatus } from './use-local-ai-status.js';
 import { ProviderConnectFlow } from './ProviderConnectFlow.js';
 import { ProviderConfigureExperience } from './ProviderConfigureExperience.js';
 import { SimpleProviderConfig } from './SimpleProviderConfig.js';
@@ -584,6 +585,9 @@ function ProviderExperienceView({
   // "Updated X min ago".
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const [refreshingUsage, setRefreshingUsage] = useState(false);
+  // ONE Local AI controller shared by the panel and the overview card, so both
+  // surfaces show the SAME live connection state (never two probes/derivations).
+  const localAi = useLocalAiStatus();
 
   useEffect(() => {
     if (data && !isLoading && !isError) {
@@ -703,7 +707,7 @@ function ProviderExperienceView({
       ) : null}
 
       {/* ── Local AI (minimal): the Local Agent bridge on this computer ── */}
-      <LocalAiPanel />
+      <LocalAiPanelView localAi={localAi} />
 
       {/* ── Screen 1: VedMoulya's AI + Other AI ───────────────────────── */}
       <ProvidersOverview
@@ -725,6 +729,7 @@ function ProviderExperienceView({
         }}
         addAIOpen={addAIOpen}
         onAddAIOpenChange={onAddAIOpenChange}
+        localAi={localAi}
       />
 
       {/* ── Advanced: usage & availability + provider registry ─────────── */}

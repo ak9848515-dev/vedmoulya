@@ -36,6 +36,8 @@ import {
   providerStatusDisplay,
   type ProviderStatusDisplay,
 } from './provider-ux.js';
+import { LocalAiOverviewCard } from './LocalAiPanel.js';
+import type { LocalAiStatus } from './use-local-ai-status.js';
 
 /**
  * The Primary Brain every VedMoulya account starts with. Mirrors the domain
@@ -69,6 +71,14 @@ export interface ProvidersOverviewProps {
   onRefresh: () => void;
   addAIOpen: boolean;
   onAddAIOpenChange: (open: boolean) => void;
+  /**
+   * The LIVE Local AI controller (optional). When provided, a compact Local AI
+   * card shows the SAME connection state as the Local AI panel — one shared
+   * source, never a second probe or a re-derived state. Omitted by callers
+   * that do not surface Local AI (e.g. isolated tests), so nothing changes for
+   * them.
+   */
+  localAi?: LocalAiStatus;
 }
 
 // ── The ⋮ actions menu (keyboard + screen-reader accessible) ────────────────
@@ -383,6 +393,7 @@ export function ProvidersOverview({
   onRefresh,
   addAIOpen,
   onAddAIOpenChange,
+  localAi,
 }: ProvidersOverviewProps): React.JSX.Element {
   // The provider VedMoulya is currently using: the user's choice, or the
   // domain default (Gemini) when they never chose — resolved against the REAL
@@ -545,6 +556,18 @@ export function ProvidersOverview({
               );
             })}
           </div>
+        </section>
+      ) : null}
+
+      {localAi !== undefined ? (
+        <section aria-labelledby="local-ai-heading" className="space-y-3">
+          <h2
+            id="local-ai-heading"
+            className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748B] dark:text-[#94A3B8]"
+          >
+            Local AI
+          </h2>
+          <LocalAiOverviewCard localAi={localAi} />
         </section>
       ) : null}
 

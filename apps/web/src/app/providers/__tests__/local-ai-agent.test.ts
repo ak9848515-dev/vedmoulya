@@ -10,6 +10,7 @@ import {
   checkLocalAgent,
   DEFAULT_LOCAL_AGENT_URL,
   fetchLocalRuntimeStatus,
+  streamLocalGeneration,
   verifyLocalRuntime,
   LOCAL_AGENT_URL_CANDIDATES,
 } from '../local-ai-agent.js';
@@ -129,5 +130,73 @@ describe('verifyLocalRuntime', () => {
     expect(
       await verifyLocalRuntime(DEFAULT_LOCAL_AGENT_URL, 'ollama', undefined, { fetchFn }),
     ).toBeNull();
+  });
+});
+
+/** Build a Response whose body is a real NDJSON stream. */
+function ndjsonResponse(lines: string[], status = 200): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const line of lines) controller.enqueue(encoder.encode(`${line}\n`));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status });
+}
+
+describe('streamLocalGeneration', () => {
+  it('streams chunks incrementally and reassembles the reply', async () => {
+    const fetchFn = vi.fn(() =>
+      Promise.resolve(
+        ndjsonResponse([
+          '{"content":"he","done":false}',
+          '{"content":"llo","done":false}',
+          '{"content":"","done":true}',
+        ]),
+      ),
+    ) as unknown as typeof fetch;
+
+    const chunks: string[] = [];
+    const result = await streamLocalGeneration(
+      DEFAULT_LOCAL_AGENT_URL,
+      [{ role: 'user', content: 'hi' }],
+      {
+        modelId: 'qwen2.5-coder:3b',
+        fetchFn,
+        onChunk: (chunk) => {
+          chunks.push(chunk.content);
+        },
+      },
+    );
+
+    expect(chunks).toEqual(['he', 'llo', '']);
+    expect(result.ok).toBe(true);
+    expect(result.text).toBe('hello');
+    expect(String(fetchFn.mock.calls[0]?.[0])).toContain('/runtimes/ollama/stream');
+  });
+
+  it('reports a streamed failure without throwing', async () => {
+    const fetchFn = vi.fn(() =>
+      Promise.resolve(ndjsonResponse([], 500)),
+    ) as unknown as typeof fetch;
+    const result = await streamLocalGeneration(
+      DEFAULT_LOCAL_AGENT_URL,
+      [{ role: 'user', content: 'hi' }],
+      { fetchFn },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('500');
+  });
+
+  it('reports an unreachable agent without throwing', async () => {
+    const fetchFn = vi.fn(() => Promise.reject(new Error('down'))) as unknown as typeof fetch;
+    const result = await streamLocalGeneration(
+      DEFAULT_LOCAL_AGENT_URL,
+      [{ role: 'user', content: 'hi' }],
+      { fetchFn },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/could not be reached/i);
   });
 });
