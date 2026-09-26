@@ -35,6 +35,10 @@ export interface AuthSession {
    *  (SPRINT-041B). The client treats this as authoritative; a NEW user is
    *  incomplete until they save age/gender/purpose/primaryGoal. */
   profileComplete: boolean;
+  /** True when this VedMoulya IDENTITY is linked to a Google account. This is
+   *  identity truth, NOT an AI-provider credential: it never implies Gemini is
+   *  connected (see the provider flow — Gemini requires its own API key). */
+  googleLinked: boolean;
   tokens: TokenPair;
 }
 
@@ -51,6 +55,8 @@ export interface ProfileView {
   primaryGoal?: string;
   /** First-login profile completion — derived from the stored profile. */
   profileComplete: boolean;
+  /** True when this VedMoulya IDENTITY is linked to a Google account. */
+  googleLinked: boolean;
 }
 
 /** Accepted self-service profile updates (PATCH /me/profile). */
@@ -295,6 +301,7 @@ export class AuthService extends BaseService {
       email: { toString(): string };
       role: { role: string };
       profile: { displayName: string; isComplete(): boolean };
+      hasGoogleIdentity(): boolean;
     },
     tokens: TokenPair,
   ): AuthSession {
@@ -304,6 +311,7 @@ export class AuthService extends BaseService {
       role: user.role.role,
       displayName: user.profile.displayName,
       profileComplete: user.profile.isComplete(),
+      googleLinked: user.hasGoogleIdentity(),
       tokens,
     };
   }
@@ -379,6 +387,7 @@ export class AuthService extends BaseService {
       purpose: user.profile.purpose,
       primaryGoal: user.profile.primaryGoal,
       profileComplete: user.profile.isComplete(),
+      googleLinked: user.hasGoogleIdentity(),
     };
   }
 
@@ -407,6 +416,7 @@ export class AuthService extends BaseService {
       purpose: updatedProfile.purpose,
       primaryGoal: updatedProfile.primaryGoal,
       profileComplete: updatedProfile.isComplete(),
+      googleLinked: user.hasGoogleIdentity(),
     };
   }
 

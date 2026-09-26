@@ -18,11 +18,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { ProviderConfigScreen } from '../ProviderConfigScreen.js';
+import { useAuthStore } from '../../../stores/auth-store.js';
 import type {
   ProviderConnectionResultDTO,
   ProviderExperienceRowDTO,
   ProviderRuntimeStateDTO,
 } from '../../../lib/api-client.js';
+
+/** Pick whether the signed-in VedMoulya identity is linked to Google. */
+function setSessionGoogleLinked(linked: boolean): void {
+  useAuthStore.setState({
+    user: {
+      userId: 'u1',
+      email: 'u1@example.com',
+      role: 'user',
+      googleLinked: linked,
+    },
+  });
+}
 
 const mocks = vi.hoisted(() => ({
   connectMutate: vi.fn(),
@@ -246,16 +259,15 @@ describe('ProviderConfigScreen (simplified Configure AI)', () => {
   });
 
   // ── Structure ────────────────────────────────────────────────────────────
-  it('puts Connection first, with the API-key and Google-account options side by side', () => {
-    renderScreen();
+  it('puts Connection first, with the API key as the only connection method', () => {
+    renderScreen({ runtime: null });
 
     expect(screen.getByTestId('config-section-connection')).toBeDefined();
-    expect(screen.getByTestId('auth-option-api_key')).toBeDefined();
-    expect(screen.getByTestId('auth-option-oauth')).toBeDefined();
-    expect(screen.getByTestId('auth-option-api_key').textContent).toMatch(/API KEY/i);
-    // Gemini's identity option is named for what it is — a Google ACCOUNT — and
-    // is never labelled as a generic "OAUTH" that could read as an AI switch.
-    expect(screen.getByTestId('auth-option-oauth').textContent).toMatch(/GOOGLE ACCOUNT/i);
+    // The API key is the connection method; a Google account is IDENTITY shown
+    // separately, never an authentication option.
+    expect(screen.getByTestId('provider-api-key-input')).toBeDefined();
+    expect(screen.queryByTestId('auth-option-oauth')).toBeNull();
+    expect(screen.queryByTestId('auth-option-api_key')).toBeNull();
 
     // Connection is the first section on the screen.
     const html = document.body.innerHTML;
@@ -511,45 +523,36 @@ describe('ProviderConfigScreen (simplified Configure AI)', () => {
     expect(success.innerHTML).not.toContain('sk-test-key');
   });
 
-  // ── Connection: OAuth ────────────────────────────────────────────────────
-  it('runs the EXISTING Google authorization flow from the OAuth option', async () => {
+  // ── Google account: IDENTITY, never a connection method ──────────────────
+  it('does not offer Google OAuth as an AI connection method on the Gemini screen', () => {
     renderScreen();
-    fireEvent.click(screen.getByTestId('auth-option-oauth'));
 
-    const connect = screen.getByTestId('provider-oauth-connect');
-    expect(connect.textContent).toMatch(/Continue with Google/);
-    fireEvent.click(connect);
-
-    await waitFor(() => {
-      expect(mocks.beginGoogleSignIn).toHaveBeenCalledWith(
-        '/providers?provider=google&oauth=google',
-      );
-    });
+    // No OAuth radio option, no connect button — a Google account can never be
+    // mistaken for activating Gemini.
+    expect(screen.queryByTestId('auth-option-oauth')).toBeNull();
+    expect(screen.queryByTestId('auth-option-api_key')).toBeNull();
+    expect(screen.queryByTestId('provider-oauth-connect')).toBeNull();
+    expect(mocks.beginGoogleSignIn).not.toHaveBeenCalled();
   });
 
-  it('shows the connected account with a Disconnect action after the round trip', () => {
+  it('shows the Google account as identity after the OAuth round trip', () => {
     window.history.replaceState({}, '', '/providers?provider=google&oauth=google');
     renderScreen();
-    fireEvent.click(screen.getByTestId('auth-option-oauth'));
 
-    expect(screen.getByTestId('provider-oauth-disconnect')).toBeDefined();
-    expect(screen.getByTestId('provider-oauth-panel').textContent).toMatch(
-      /Google account connected/,
+    const account = screen.getByTestId('provider-google-account-status');
+    expect(account.textContent).toMatch(/Signed in with Google/);
+    // Identity is rendered as its own section and states the separation — it is
+    // never given the provider's connected affordance.
+    expect(screen.getByTestId('config-section-google-account').textContent).toMatch(
+      /Google login is separate from Gemini API access/,
     );
-    // …and the panel states the separation instead of implying Gemini is ready.
-    expect(screen.getByTestId('provider-oauth-panel').textContent).toMatch(
-      /separate from Gemini API access/,
-    );
+    expect(screen.queryByTestId('provider-oauth-disconnect')).toBeNull();
   });
 
-  it('never offers OAuth for a provider that has none', () => {
+  it('shows no Google Account section for a provider without Google identity', () => {
     renderScreen({ provider: OPENAI_PROVIDER, runtime: null });
-    const oauthOption = screen.getByTestId('auth-option-oauth');
-    const radio = oauthOption.querySelector('input') as HTMLInputElement;
-    expect(radio.disabled).toBe(true);
-    expect(screen.getByTestId('auth-option-oauth-unavailable').textContent).toMatch(
-      /OAuth isn't available/i,
-    );
+    expect(screen.queryByTestId('config-section-google-account')).toBeNull();
+    expect(screen.queryByTestId('auth-option-oauth')).toBeNull();
     // The API-key flow stays the active one.
     expect(screen.getByTestId('provider-api-key-input')).toBeDefined();
   });
@@ -816,15 +819,10 @@ describe('ProviderConfigScreen (advanced / OpenAI-compatible path)', () => {
     expect(error.textContent).not.toMatch(/ECONNREFUSED/);
   });
 
-  it('announces an OAuth failure instead of leaving the user guessing', async () => {
-    mocks.beginGoogleSignIn.mockResolvedValue({ ok: false, error: 'offline' });
+  it('never starts Google OAuth from the AI connection screen', () => {
     renderScreen();
-
-    fireEvent.click(screen.getByTestId('auth-option-oauth'));
-    fireEvent.click(screen.getByTestId('provider-oauth-connect'));
-
-    const alert = await waitFor(() => screen.getByRole('alert'));
-    expect(alert.textContent).toMatch(/You appear to be offline/);
+    expect(screen.queryByTestId('provider-oauth-connect')).toBeNull();
+    expect(mocks.beginGoogleSignIn).not.toHaveBeenCalled();
   });
 
   // ── Advanced: custom AI registration + detail hand-off ───────────────────
@@ -981,20 +979,23 @@ describe('ProviderConfigScreen (Gemini: Google account vs Gemini API key)', () =
     mocks.setPrefsMutate.mockResolvedValue({});
     mocks.refreshIntelligenceMutate.mockResolvedValue({});
     mocks.connectMutate.mockResolvedValue(connectedResult());
+    // Identity state is server-derived on the session; reset between tests.
+    useAuthStore.setState({ user: null });
   });
 
-  // 1 — Google OAuth connected but Gemini API key missing → Gemini stays o.
+  // 1 — Google OAuth connected but Gemini API key missing → Gemini stays ○.
   it('keeps Gemini NOT CONNECTED when only the Google account is connected', () => {
+    // The canonical Google LOGIN already linked the identity (server truth).
+    setSessionGoogleLinked(true);
     const { onToggle } = renderScreen({ runtime: null });
 
-    // The provider status is derived from runtime truth, never from OAuth.
+    // The provider status is derived from runtime truth, never from identity.
     expect(screen.getByTestId('config-connection-status').textContent).toMatch(/Not connected/);
-    // The required Gemini credential is still asked for (the active method).
+    // The required Gemini credential is still asked for.
     expect(screen.getByTestId('provider-api-key-input')).toBeDefined();
-
-    fireEvent.click(screen.getByTestId('auth-option-oauth'));
+    // The Google account is shown as identity, separately from the AI status.
     expect(screen.getByTestId('provider-google-account-status').textContent).toMatch(
-      /Google account connected/,
+      /Signed in with Google/,
     );
     // Connecting the identity fires no provider probe and enables no provider.
     expect(mocks.connectMutate).not.toHaveBeenCalled();
@@ -1042,24 +1043,33 @@ describe('ProviderConfigScreen (Gemini: Google account vs Gemini API key)', () =
     expect(screen.getByTestId('config-connection-status').textContent).toMatch(/Connected/);
   });
 
-  // 3 — Google OAuth is never treated as the Gemini credential.
+  // 3 — Google identity is never treated as the Gemini credential.
   it('presents the Google account as identity, separate from Gemini API access', () => {
+    setSessionGoogleLinked(true);
     renderScreen({ runtime: null });
 
-    const oauthOption = screen.getByTestId('auth-option-oauth');
-    expect(oauthOption.textContent).toMatch(/GOOGLE ACCOUNT/);
-    expect(oauthOption.textContent).not.toMatch(/OAUTH/);
-
-    // The primary/required method is named for Gemini's own key.
-    expect(screen.getByTestId('auth-option-api_key').textContent).toMatch(/GEMINI API KEY/);
+    // No OAuth connection option exists; the API key is the connection method.
+    expect(screen.queryByTestId('auth-option-oauth')).toBeNull();
     expect(screen.getByTestId('config-section-connection').textContent).toMatch(
       /Gemini requires its own API key/,
     );
+    // The Google account is a separate, informational identity section.
+    const account = screen.getByTestId('config-section-google-account');
+    expect(account.textContent).toMatch(/Google Account/);
+    expect(account.textContent).toMatch(/already connected to your VedMoulya identity/);
+    expect(account.textContent).toMatch(/Google login is separate from Gemini API access/);
+  });
 
-    fireEvent.click(oauthOption);
-    expect(screen.getByTestId('provider-oauth-panel').textContent).toMatch(
-      /separate from Gemini API access/,
-    );
+  it('shows an unlinked Google account without offering OAuth as a connection', () => {
+    // No OAuth round-trip marker and no linked identity.
+    window.history.replaceState({}, '', '/providers?provider=google');
+    setSessionGoogleLinked(false);
+    renderScreen({ runtime: null });
+
+    const account = screen.getByTestId('config-section-google-account');
+    expect(account.textContent).toMatch(/Not linked/);
+    expect(account.textContent).toMatch(/Gemini does not require a Google account/);
+    expect(screen.queryByTestId('provider-oauth-connect')).toBeNull();
   });
 
   // 4 — the OAuth return must not overwrite the Gemini provider status.
@@ -1071,8 +1081,9 @@ describe('ProviderConfigScreen (Gemini: Google account vs Gemini API key)', () =
     expect(screen.getByTestId('config-connection-status').textContent).toMatch(/Not connected/);
     expect(mocks.connectMutate).not.toHaveBeenCalled();
     expect(onToggle).not.toHaveBeenCalled();
-    // The identity round trip was recognised — as an ACCOUNT, not a connection.
-    fireEvent.click(screen.getByTestId('auth-option-oauth'));
-    expect(screen.getByTestId('provider-google-account-status')).toBeDefined();
+    // The round trip is recognised as IDENTITY, not as a connection.
+    expect(screen.getByTestId('provider-google-account-status').textContent).toMatch(
+      /Signed in with Google/,
+    );
   });
 });

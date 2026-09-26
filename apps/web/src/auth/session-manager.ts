@@ -61,6 +61,7 @@ function toAuthUser(session: {
   role: string;
   displayName?: string;
   profileComplete?: boolean;
+  googleLinked?: boolean;
 }): AuthUser {
   return {
     userId: session.userId,
@@ -68,6 +69,7 @@ function toAuthUser(session: {
     role: session.role,
     displayName: session.displayName,
     profileComplete: session.profileComplete,
+    googleLinked: session.googleLinked,
   };
 }
 
@@ -77,6 +79,7 @@ function applySession(session: {
   role: string;
   displayName?: string;
   profileComplete?: boolean;
+  googleLinked?: boolean;
   tokens: AuthTokenPair;
 }): void {
   const store = useAuthStore.getState();
@@ -108,6 +111,7 @@ export async function refreshProfile(): Promise<void> {
     useAuthStore.getState().setProfile({
       displayName: profile.displayName,
       profileComplete: profile.profileComplete,
+      googleLinked: profile.googleLinked,
     });
   } catch {
     // Offline or transient — keep the cached profile. Never clears the session.
@@ -127,6 +131,7 @@ export async function completeProfile(data: ProfileUpdateInput): Promise<SignInO
     useAuthStore.getState().setProfile({
       displayName: profile.displayName,
       profileComplete: profile.profileComplete,
+      googleLinked: profile.googleLinked,
     });
     return { ok: true };
   } catch (error) {

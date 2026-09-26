@@ -30,6 +30,10 @@ export interface AuthUser {
    *  undefined = unknown (e.g. legacy persisted sessions); the onboarding gate
    *  only fires on an explicit false, never on unknown. */
   profileComplete?: boolean;
+  /** True when this VedMoulya IDENTITY is linked to a Google account —
+   *  SERVER-derived (session + GET /me). Identity truth only: it never implies
+   *  Gemini (an AI provider) is connected. undefined = unknown (legacy store). */
+  googleLinked?: boolean;
 }
 
 export interface AuthSession {
@@ -60,7 +64,11 @@ interface AuthState {
   setOffline: (offline: boolean) => void;
   setSessionReady: (ready: boolean) => void;
   /** Apply server-authoritative profile data (displayName + completion). */
-  setProfile: (profile: { displayName?: string; profileComplete?: boolean }) => void;
+  setProfile: (profile: {
+    displayName?: string;
+    profileComplete?: boolean;
+    googleLinked?: boolean;
+  }) => void;
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────
@@ -98,13 +106,18 @@ export const useAuthStore = create<AuthState>()(
       setSessionReady: (ready: boolean): void => {
         set({ sessionReady: ready });
       },
-      setProfile: (profile: { displayName?: string; profileComplete?: boolean }): void => {
+      setProfile: (profile: {
+        displayName?: string;
+        profileComplete?: boolean;
+        googleLinked?: boolean;
+      }): void => {
         set((state) => ({
           user: state.user
             ? {
                 ...state.user,
                 displayName: profile.displayName ?? state.user.displayName,
                 profileComplete: profile.profileComplete ?? state.user.profileComplete,
+                googleLinked: profile.googleLinked ?? state.user.googleLinked,
               }
             : state.user,
         }));

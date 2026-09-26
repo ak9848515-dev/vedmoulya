@@ -59,6 +59,11 @@ export class GoogleProvider {
       client_id: this.clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
+      // IDENTITY-ONLY scopes. VedMoulya sign-in must NEVER request Google
+      // Drive, Calendar or Gmail scopes: those are separate CAPABILITIES,
+      // connected later through their own explicit, incremental authorization
+      // (the minimum read/write scope that capability needs) — never bundled
+      // into login, and never conflated with Gemini AI access.
       scope: 'openid email profile',
       state,
       access_type: 'offline',

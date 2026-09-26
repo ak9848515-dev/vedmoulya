@@ -13,16 +13,23 @@
 //   3. keeps a device-local marker so the state survives a navigation,
 //   4. lets the user disconnect that marker again.
 //
-// HONESTY: connecting a Google account authorises the GOOGLE identity. It is
-// not the same thing as Gemini API access, which is why the Configure screen
-// still verifies the provider itself through the existing server-side
-// connection probe and says so in plain language.
+// HONESTY: a Google account authorises the GOOGLE identity. It is not the same
+// thing as Gemini API access, which is why the Configure screen still verifies
+// the provider itself through the existing server-side connection probe and
+// says so in plain language.
+//
+// SOURCE OF TRUTH: the account link is IDENTITY truth, exposed by the identity
+// service as `googleLinked` on the session/profile (derived from the stored
+// Google subject). The session value is authoritative on every device; the
+// device-local marker only bridges the moment an OAuth round trip returns,
+// before the refreshed profile has loaded.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { beginGoogleSignIn } from '../../auth/session-manager.js';
+import { useAuthStore } from '../../stores/auth-store.js';
 
 /** Marks the OAuth round trip in the URL (`?oauth=google`). */
 export const GOOGLE_OAUTH_RETURN_VALUE = 'google';
@@ -72,9 +79,13 @@ export function useGoogleAccountConnection(
   /** The URL marker that proves the round trip completed on this load. */
   returnedFromOAuth = false,
 ): GoogleAccountConnection {
-  const [connected, setConnected] = useState<boolean>(
+  // IDENTITY truth: the session says whether this VedMoulya identity is linked
+  // to a Google account. It survives reload/navigation and is device-independent.
+  const sessionGoogleLinked = useAuthStore((state) => state.user?.googleLinked === true);
+  const [markerConnected, setMarkerConnected] = useState<boolean>(
     () => returnedFromOAuth || readMarker(userId),
   );
+  const connected = sessionGoogleLinked || markerConnected;
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,7 +94,7 @@ export function useGoogleAccountConnection(
   useEffect(() => {
     if (!returnedFromOAuth) return;
     writeMarker(userId, true);
-    setConnected(true);
+    setMarkerConnected(true);
   }, [returnedFromOAuth, userId]);
 
   const connect = useCallback(async (): Promise<void> => {
@@ -105,8 +116,11 @@ export function useGoogleAccountConnection(
   }, [returnPath]);
 
   const disconnect = useCallback((): void => {
+    // Clears the device-local marker only. The server-side Google IDENTITY
+    // link (googleLinked) is untouched — account linking is not sign-out and
+    // is not unlinked from a provider screen.
     writeMarker(userId, false);
-    setConnected(false);
+    setMarkerConnected(false);
     setError(null);
     // Drop the OAuth return marker from the URL so a later visit is not read
     // as "just authorised again".

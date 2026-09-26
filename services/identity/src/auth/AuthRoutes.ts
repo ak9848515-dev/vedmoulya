@@ -273,7 +273,8 @@ export function createAuthRouter(authService: AuthService): Hono {
           `s.state={accessToken:t.accessToken,refreshToken:t.refreshToken,` +
           `expiresAt:t.expiresAt,user:{userId:d.data.userId,email:d.data.email,` +
           `role:d.data.role,displayName:d.data.displayName,` +
-          `profileComplete:d.data.profileComplete}};` +
+          `profileComplete:d.data.profileComplete,` +
+          `googleLinked:d.data.googleLinked}};` +
           `localStorage.setItem('vedmoulya-auth',JSON.stringify(s))}catch(e){}` +
           `window.location.replace('/')` +
           `}else{window.location.replace('/login?error=google_failed')}` +

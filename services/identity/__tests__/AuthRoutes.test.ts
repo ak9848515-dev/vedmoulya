@@ -60,14 +60,20 @@ describe('createAuthRouter', () => {
         email: 'a@b.com',
         displayName: 'A',
         profileComplete: false,
+        googleLinked: true,
       });
       const res = await app(service).request('/me', {
         headers: { authorization: 'Bearer token' },
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { success: boolean; data: { userId: string } };
+      const body = (await res.json()) as {
+        success: boolean;
+        data: { userId: string; googleLinked: boolean };
+      };
       expect(body.success).toBe(true);
       expect(body.data.userId).toBe('usr_1');
+      // The identity link reaches the app through the EXISTING /me contract.
+      expect(body.data.googleLinked).toBe(true);
       // userId came from the token (payload.sub), never from client input.
       expect(service.getProfile).toHaveBeenCalledWith('usr_1');
     });

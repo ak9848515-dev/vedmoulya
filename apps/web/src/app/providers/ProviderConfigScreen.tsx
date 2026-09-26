@@ -60,7 +60,6 @@ import {
   providerIdentity,
   providerStatusDisplay,
   supportsAutomaticModel,
-  supportsOAuth,
 } from './provider-ux.js';
 import { useGoogleAccountConnection } from './google-account-connection.js';
 
@@ -79,8 +78,6 @@ export interface ProviderConfigScreenProps {
   /** Refresh the experience view model after a preference change. */
   onChanged: () => void;
 }
-
-type AuthMethod = 'api_key' | 'oauth';
 
 interface ModelChoice {
   id: string;
@@ -154,7 +151,6 @@ export function ProviderConfigScreen({
   const refreshIntelligence = useRefreshProviderIntelligence();
   const intelligence = useProviderIntelligenceStatus(userId, provider.providerId);
 
-  const [method, setMethod] = useState<AuthMethod>('api_key');
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [useOwnKey, setUseOwnKey] = useState(false);
@@ -235,32 +231,10 @@ export function ProviderConfigScreen({
   }, [intelligence.data, provider.models]);
 
   // GEMINI UX (credential separation) — a Google ACCOUNT identity and Gemini
-  // API access are different things. Gemini's required connection method is its
-  // own API key; the Google account authorization is a separate, optional
-  // identity connection that never activates Gemini. The labels below state
-  // that explicitly, so OAuth can never read as an alternative way to switch
-  // Gemini on.
+  // API access are different things. Gemini's ONLY connection method is its own
+  // API key; the Google account is IDENTITY, shown separately below and never
+  // presented as a way to switch the AI on.
   const isGemini = provider.family === 'google';
-  const authOptions = [
-    {
-      id: 'api_key' as const,
-      icon: <KeyRound className="h-4 w-4" aria-hidden="true" />,
-      title: isGemini ? 'GEMINI API KEY' : 'API KEY',
-      description: isGemini ? 'Required to use Gemini AI' : 'Connect with API key',
-      available: true,
-      unavailableReason: '',
-    },
-    {
-      id: 'oauth' as const,
-      icon: <ShieldCheck className="h-4 w-4" aria-hidden="true" />,
-      title: 'GOOGLE ACCOUNT',
-      description: isGemini
-        ? 'Your Google account connection is separate from Gemini API access.'
-        : 'Connect your Google account',
-      available: supportsOAuth(provider.family),
-      unavailableReason: `OAuth isn't available for ${identity.name} yet — use an API key.`,
-    },
-  ];
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -434,279 +408,205 @@ export function ProviderConfigScreen({
               : `Connect ${identity.name} to VedMoulya.`}
         </Subtitle>
 
-        <fieldset className="mt-4">
-          <legend className="sr-only">Authentication method</legend>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {authOptions.map((option) => {
-              const selected = method === option.id;
-              return (
-                <label
-                  key={option.id}
-                  className={`relative flex items-center gap-3 rounded-xl border px-4 py-3.5 cursor-pointer transition-colors ${
-                    selected
-                      ? 'border-[#2B5FD9] bg-[#EFF4FE] dark:bg-[#1E3A8A]/30'
-                      : 'border-[#E2E8F0] dark:border-[#334155] hover:border-[#2B5FD9]/40'
-                  } ${option.available ? '' : 'opacity-60 cursor-not-allowed'}`}
-                  data-testid={`auth-option-${option.id}`}
-                >
-                  <input
-                    type="radio"
-                    name="auth-method"
-                    value={option.id}
-                    checked={selected}
-                    disabled={!option.available}
-                    onChange={() => {
-                      setMethod(option.id);
-                    }}
-                    className="sr-only peer"
-                  />
-                  <span className="text-[#2B5FD9] dark:text-[#6B8FEF] peer-focus-visible:outline-none">
-                    {option.icon}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[12px] font-semibold tracking-wide text-[#111827] dark:text-[#F8FAFC]">
-                      {option.title}
-                    </span>
-                    <span className="block text-[12.5px] text-[#64748B] dark:text-[#94A3B8]">
-                      {option.description}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          {/* An unavailable method explains itself — VedMoulya never offers a
-              connection it cannot make. */}
-          {authOptions
-            .filter((option) => !option.available)
-            .map((option) => (
-              <p
-                key={`${option.id}-reason`}
-                data-testid={`auth-option-${option.id}-unavailable`}
-                className="mt-2 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]"
-              >
-                {option.unavailableReason}
-              </p>
-            ))}
-        </fieldset>
-
-        {/* API key panel — a real form, so pressing Enter in the key field
+        {/* Gemini's ONLY connection method is its own API key. A Google
+            account is IDENTITY, not a way to activate the AI, so it is never
+            offered here as an alternative authentication method. The Google
+            account is shown separately, below. Pressing Enter in the key field
             runs the connection test (no hidden save action). */}
-        {method === 'api_key' ? (
-          <form
-            className="mt-5 space-y-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleTest();
-            }}
-          >
-            {serverManagedAvailable ? (
-              <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-[#F0FDF4] dark:bg-[#0F291D] p-3.5">
-                <p className="text-[13px] font-medium text-emerald-700 dark:text-emerald-400">
-                  Using this server&apos;s configured credential
-                </p>
-                <p className="mt-0.5 text-[12px] text-emerald-700/80 dark:text-emerald-500/80">
-                  No key needed from you — VedMoulya verifies and connects directly.
-                </p>
-              </div>
-            ) : (
-              <div>
-                <label
-                  htmlFor="provider-api-key"
-                  className="block text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0]"
-                >
-                  API Key
-                </label>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <span className="relative flex-1">
-                    <input
-                      id="provider-api-key"
-                      type={showKey ? 'text' : 'password'}
-                      value={apiKey}
-                      autoComplete="off"
-                      onChange={(event) => {
-                        setApiKey(event.target.value);
-                      }}
-                      placeholder={`Paste your ${identity.name} key`}
-                      data-testid="provider-api-key-input"
-                      {...(preset.credentialHelp
-                        ? { 'aria-describedby': 'provider-api-key-help' }
-                        : {})}
-                      className="w-full h-11 rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] pl-3 pr-11 text-[13px] text-[#111827] dark:text-[#F8FAFC] placeholder:text-[#94A3B8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus:border-[#2B5FD9]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowKey((prev) => !prev);
-                      }}
-                      aria-label={showKey ? 'Hide API key' : 'Show API key'}
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#64748B] dark:text-[#94A3B8] hover:text-[#374151] dark:hover:text-[#E2E8F0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9]"
-                    >
-                      {showKey ? (
-                        <EyeOff className="h-4 w-4" aria-hidden="true" />
-                      ) : (
-                        <Eye className="h-4 w-4" aria-hidden="true" />
-                      )}
-                    </button>
-                  </span>
-                </div>
-                {preset.credentialHelp ? (
-                  <p
-                    id="provider-api-key-help"
-                    className="mt-1.5 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]"
-                  >
-                    {preset.credentialHelp}{' '}
-                    {preset.docsUrl ? (
-                      <a
-                        href={preset.docsUrl}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
-                      >
-                        Get a key
-                      </a>
-                    ) : null}
-                  </p>
-                ) : null}
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center gap-2.5">
-              <button
-                type="submit"
-                disabled={testing || (!serverManagedAvailable && apiKey.trim() === '')}
-                data-testid="provider-test-connection"
-                className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#2B5FD9] px-4 text-[13px] font-medium text-white hover:bg-[#1E4AA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        <form
+          className="mt-5 space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleTest();
+          }}
+        >
+          {serverManagedAvailable ? (
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-[#F0FDF4] dark:bg-[#0F291D] p-3.5">
+              <p className="text-[13px] font-medium text-emerald-700 dark:text-emerald-400">
+                Using this server&apos;s configured credential
+              </p>
+              <p className="mt-0.5 text-[12px] text-emerald-700/80 dark:text-emerald-500/80">
+                No key needed from you — VedMoulya verifies and connects directly.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label
+                htmlFor="provider-api-key"
+                className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0]"
               >
-                {testing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Zap className="h-4 w-4" aria-hidden="true" />
-                )}
-                Test Connection
-              </button>
-              {provider.family === 'google' && runtime?.status === 'CONFIGURED' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUseOwnKey((prev) => !prev);
-                  }}
-                  data-testid="provider-use-own-key"
-                  className="text-[12px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
+                <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+                {isGemini ? 'Gemini API key' : 'API Key'}
+              </label>
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="relative flex-1">
+                  <input
+                    id="provider-api-key"
+                    type={showKey ? 'text' : 'password'}
+                    value={apiKey}
+                    autoComplete="off"
+                    onChange={(event) => {
+                      setApiKey(event.target.value);
+                    }}
+                    placeholder={`Paste your ${identity.name} key`}
+                    data-testid="provider-api-key-input"
+                    {...(preset.credentialHelp
+                      ? { 'aria-describedby': 'provider-api-key-help' }
+                      : {})}
+                    className="w-full h-11 rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] pl-3 pr-11 text-[13px] text-[#111827] dark:text-[#F8FAFC] placeholder:text-[#94A3B8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus:border-[#2B5FD9]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowKey((prev) => !prev);
+                    }}
+                    aria-label={showKey ? 'Hide API key' : 'Show API key'}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#64748B] dark:text-[#94A3B8] hover:text-[#374151] dark:hover:text-[#E2E8F0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9]"
+                  >
+                    {showKey ? (
+                      <EyeOff className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </button>
+                </span>
+              </div>
+              {preset.credentialHelp ? (
+                <p
+                  id="provider-api-key-help"
+                  className="mt-1.5 text-[11.5px] text-[#64748B] dark:text-[#94A3B8]"
                 >
-                  {useOwnKey ? 'Use the configured credential' : 'Use my own key instead'}
-                </button>
+                  {preset.credentialHelp}{' '}
+                  {preset.docsUrl ? (
+                    <a
+                      href={preset.docsUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
+                    >
+                      Get a key
+                    </a>
+                  ) : null}
+                </p>
               ) : null}
             </div>
+          )}
 
-            {result?.connected ? (
-              <p
-                role="status"
-                data-testid="provider-connection-success"
-                className="inline-flex items-center gap-2 text-[13px] font-medium text-emerald-600 dark:text-emerald-400"
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="submit"
+              disabled={testing || (!serverManagedAvailable && apiKey.trim() === '')}
+              data-testid="provider-test-connection"
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#2B5FD9] px-4 text-[13px] font-medium text-white hover:bg-[#1E4AA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5FD9] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {testing ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Zap className="h-4 w-4" aria-hidden="true" />
+              )}
+              Test Connection
+            </button>
+            {provider.family === 'google' && runtime?.status === 'CONFIGURED' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setUseOwnKey((prev) => !prev);
+                }}
+                data-testid="provider-use-own-key"
+                className="text-[12px] font-medium text-[#2B5FD9] dark:text-[#6B8FEF] hover:underline"
               >
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                Connected
-                {typeof result.latencyMs === 'number' ? (
-                  <span className="text-[12px] font-normal text-[#64748B] dark:text-[#94A3B8]">
-                    · {result.latencyMs} ms
-                    {discovered.length > 0
-                      ? ` · ${String(discovered.length)} model${discovered.length === 1 ? '' : 's'} available`
-                      : ''}
-                  </span>
-                ) : null}
-              </p>
-            ) : null}
-
-            {failure ? (
-              <div
-                ref={failureRef}
-                role="alert"
-                tabIndex={-1}
-                data-testid="provider-connection-error"
-                className="rounded-xl border border-rose-200 dark:border-rose-900 bg-[#FEF2F2] dark:bg-[#2A1215] p-3.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-              >
-                <p className="text-[13px] font-medium text-rose-700 dark:text-rose-400">
-                  {failure.title}
-                </p>
-                {failure.hint ? (
-                  <p className="mt-0.5 text-[12px] text-rose-600 dark:text-rose-400/80">
-                    {failure.hint}
-                  </p>
-                ) : null}
-                <button
-                  type="submit"
-                  className="mt-2.5 inline-flex h-9 items-center rounded-xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-transparent px-3.5 text-[12.5px] font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
-                >
-                  Try Again
-                </button>
-              </div>
-            ) : null}
-          </form>
-        ) : (
-          /* OAuth panel — uses the EXISTING Google authorization flow */
-          <div className="mt-5 space-y-3" data-testid="provider-oauth-panel">
-            {googleAccount.connected ? (
-              <>
-                {/* The Google ACCOUNT is authorised — this is deliberately NOT
-                    rendered as the AI being connected (no provider-green
-                    checkmark): identity is not the Gemini credential. */}
-                <p
-                  data-testid="provider-google-account-status"
-                  className="inline-flex items-center gap-2 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0]"
-                >
-                  <ShieldCheck
-                    className="h-4 w-4 text-[#2B5FD9] dark:text-[#6B8FEF]"
-                    aria-hidden="true"
-                  />
-                  Google account connected
-                </p>
-                <p className="text-[12px] text-[#64748B] dark:text-[#94A3B8]">
-                  Your Google account connection is separate from Gemini API access. It does not
-                  connect Gemini — Gemini requires its own API key, above.
-                </p>
-                <button
-                  type="button"
-                  onClick={googleAccount.disconnect}
-                  data-testid="provider-oauth-disconnect"
-                  className="inline-flex h-10 items-center rounded-xl border border-[#E2E8F0] dark:border-[#334155] px-4 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0] hover:border-[#2B5FD9]/40 transition-colors"
-                >
-                  Disconnect
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="text-[13px] text-[#374151] dark:text-[#E2E8F0]">Google account</p>
-                <p className="text-[12px] text-[#64748B] dark:text-[#94A3B8]">
-                  Your Google account connection is separate from Gemini API access.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void googleAccount.connect();
-                  }}
-                  disabled={googleAccount.connecting}
-                  data-testid="provider-oauth-connect"
-                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-4 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0] hover:border-[#2B5FD9]/40 hover:text-[#2B5FD9] disabled:opacity-60 transition-colors"
-                >
-                  {googleAccount.connecting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  ) : null}
-                  Continue with Google
-                </button>
-                <p className="text-[11.5px] text-[#64748B] dark:text-[#94A3B8]">
-                  Uses VedMoulya&apos;s existing Google sign-in — no new account is created.
-                </p>
-              </>
-            )}
-            {googleAccount.error ? (
-              <p role="alert" className="text-[12.5px] text-rose-600 dark:text-rose-400">
-                {googleAccount.error}
-              </p>
+                {useOwnKey ? 'Use the configured credential' : 'Use my own key instead'}
+              </button>
             ) : null}
           </div>
-        )}
+
+          {result?.connected ? (
+            <p
+              role="status"
+              data-testid="provider-connection-success"
+              className="inline-flex items-center gap-2 text-[13px] font-medium text-emerald-600 dark:text-emerald-400"
+            >
+              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              Connected
+              {typeof result.latencyMs === 'number' ? (
+                <span className="text-[12px] font-normal text-[#64748B] dark:text-[#94A3B8]">
+                  · {result.latencyMs} ms
+                  {discovered.length > 0
+                    ? ` · ${String(discovered.length)} model${discovered.length === 1 ? '' : 's'} available`
+                    : ''}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
+
+          {failure ? (
+            <div
+              ref={failureRef}
+              role="alert"
+              tabIndex={-1}
+              data-testid="provider-connection-error"
+              className="rounded-xl border border-rose-200 dark:border-rose-900 bg-[#FEF2F2] dark:bg-[#2A1215] p-3.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+            >
+              <p className="text-[13px] font-medium text-rose-700 dark:text-rose-400">
+                {failure.title}
+              </p>
+              {failure.hint ? (
+                <p className="mt-0.5 text-[12px] text-rose-600 dark:text-rose-400/80">
+                  {failure.hint}
+                </p>
+              ) : null}
+              <button
+                type="submit"
+                className="mt-2.5 inline-flex h-9 items-center rounded-xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-transparent px-3.5 text-[12.5px] font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : null}
+        </form>
       </SectionCard>
+
+      {/* ── Google Account (IDENTITY — never an AI connection) ─────────────── */}
+      {isGemini ? (
+        <SectionCard testId="config-section-google-account" labelledBy="google-account-heading">
+          <SectionTitle id="google-account-heading">Google Account</SectionTitle>
+          {googleAccount.connected ? (
+            <div className="mt-3 space-y-1.5">
+              <p
+                data-testid="provider-google-account-status"
+                className="inline-flex items-center gap-2 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0]"
+              >
+                <ShieldCheck
+                  className="h-4 w-4 text-[#2B5FD9] dark:text-[#6B8FEF]"
+                  aria-hidden="true"
+                />
+                Signed in with Google
+              </p>
+              <p className="text-[12.5px] text-[#64748B] dark:text-[#94A3B8]">
+                Your Google account is already connected to your VedMoulya identity.
+              </p>
+              <p className="text-[12px] text-[#64748B] dark:text-[#94A3B8]">
+                Google login is separate from Gemini API access.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-1.5">
+              <p
+                data-testid="provider-google-account-status"
+                className="text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0]"
+              >
+                Not linked
+              </p>
+              <p className="text-[12.5px] text-[#64748B] dark:text-[#94A3B8]">
+                Your VedMoulya sign-in is not linked to a Google account.
+              </p>
+              <p className="text-[12px] text-[#64748B] dark:text-[#94A3B8]">
+                Gemini does not require a Google account.
+              </p>
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
 
       {/* ── 2. Model ────────────────────────────────────────────────────── */}
       <SectionCard testId="config-section-model" labelledBy="model-heading">

@@ -595,3 +595,43 @@ describe('first-login profile (SPRINT-041B)', () => {
     expect(outcome.ok).toBe(false);
   });
 });
+
+// ── Identity separation (googleLinked) ──────────────────────────────────────
+// googleLinked is IDENTITY truth from the server: it says the VedMoulya
+// identity is linked to a Google account. It is never an AI credential, so it
+// travels on the session/profile only and never touches provider state.
+
+describe('identity separation (googleLinked)', () => {
+  it('stores the server googleLinked flag from the sign-in session', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ success: true, data: { ...SESSION_BODY, googleLinked: true } }),
+    );
+    await signInWithEmailAndPassword('user@vedmoulya.com', 'secret');
+    expect(useAuthStore.getState().user?.googleLinked).toBe(true);
+  });
+
+  it('leaves googleLinked unknown when the server omits it (legacy session)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, data: SESSION_BODY }));
+    await signInWithEmailAndPassword('user@vedmoulya.com', 'secret');
+    expect(useAuthStore.getState().user?.googleLinked).toBeUndefined();
+  });
+
+  it('refreshProfile applies the server googleLinked flag', async () => {
+    seedSession(SESSION_BODY);
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        data: {
+          userId: 'user-1',
+          email: 'user@vedmoulya.com',
+          displayName: 'Ada',
+          profileComplete: true,
+          googleLinked: true,
+        },
+      }),
+    );
+
+    await refreshProfile();
+    expect(useAuthStore.getState().user?.googleLinked).toBe(true);
+  });
+});

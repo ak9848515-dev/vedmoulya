@@ -39,6 +39,9 @@ export interface AuthSession {
   displayName: string;
   /** First-login profile completion — server-derived, authoritative. */
   profileComplete: boolean;
+  /** True when this VedMoulya IDENTITY is linked to a Google account. Identity
+   *  truth only — it never implies Gemini is connected. */
+  googleLinked: boolean;
   tokens: AuthTokenPair;
 }
 
@@ -54,6 +57,8 @@ export interface ProfileView {
   purpose?: string;
   primaryGoal?: string;
   profileComplete: boolean;
+  /** True when this VedMoulya IDENTITY is linked to a Google account. */
+  googleLinked: boolean;
 }
 
 export interface ProfileUpdateInput {

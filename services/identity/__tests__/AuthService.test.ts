@@ -562,6 +562,42 @@ describe('AuthService', () => {
       expect(profile.profileComplete).toBe(false);
     });
   });
+
+  // ── Identity separation — googleLinked is IDENTITY truth ───────────────
+  // The session/profile expose whether the VedMoulya identity is linked to a
+  // Google account. This is NOT an AI credential: the UI shows it separately
+  // from Gemini and never treats a Google login as a Gemini connection.
+
+  describe('identity separation (googleLinked)', () => {
+    it('email sign-in session reports googleLinked=false', async () => {
+      const repo = makeRepository();
+      repo.findByEmail.mockResolvedValue(makeUser());
+      const service = createService(repo);
+
+      const result = await service.signInWithEmail('test@example.com', 'password');
+      expect(result.success).toBe(true);
+      expect(result.session?.googleLinked).toBe(false);
+    });
+
+    it('reports googleLinked=true once a Google identity is linked', async () => {
+      const repo = makeRepository();
+      repo.findByEmail.mockResolvedValue(makeUser({ googleId: 'google-sub-1' }));
+      const service = createService(repo);
+
+      const result = await service.signInWithEmail('test@example.com', 'password');
+      expect(result.session?.googleLinked).toBe(true);
+    });
+
+    it('getProfile exposes googleLinked from the stored identity', async () => {
+      const repo = makeRepository();
+      const user = makeUser({ googleId: 'google-sub-1' });
+      repo.findById.mockResolvedValue(user);
+      const service = createService(repo);
+
+      const profile = await service.getProfile(user.id);
+      expect(profile.googleLinked).toBe(true);
+    });
+  });
 });
 
 // Keep the Email import referenced for tree-shaking safety in coverage runs.
