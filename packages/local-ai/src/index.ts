@@ -81,6 +81,27 @@ export {
   resolveOllamaEndpoint,
 } from './agent/default-agent.js';
 
+// ── Local Workspace capability (independent of runtimes) ──────────────────
+export type { DefaultLocalWorkspaceOptions } from './agent/default-workspaces.js';
+export {
+  createDefaultLocalWorkspaceService,
+  resolveWorkspaceAllowedRoots,
+} from './agent/default-workspaces.js';
+export type {
+  WorkspaceCapabilities,
+  WorkspaceContext,
+  WorkspaceContextFile,
+  WorkspaceEntry,
+  WorkspaceError,
+  WorkspaceErrorKind,
+  WorkspaceFileContent,
+  WorkspaceLimits,
+  WorkspaceListing,
+  WorkspaceResult,
+  WorkspaceSummary,
+} from '@vedmoulya/local-workspace';
+export { LocalWorkspaceService } from '@vedmoulya/local-workspace';
+
 // ── HTTP server ───────────────────────────────────────────────────────────
 export type { LocalAgentServerOptions, StartedLocalAgent } from './agent/server.js';
 export {

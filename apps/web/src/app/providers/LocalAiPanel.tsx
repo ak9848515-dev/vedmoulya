@@ -31,6 +31,7 @@ import {
   type LocalRuntimeVerifyDTO,
 } from './local-ai-agent.js';
 import { useLocalAiStatus, type LocalAiStatus, type LocalAiTone } from './use-local-ai-status.js';
+import { LocalWorkspaceSection } from './LocalWorkspaceSection.js';
 
 const TONE_CLASS: Record<string, string> = {
   ok: 'text-emerald-700 dark:text-emerald-300',
@@ -297,6 +298,8 @@ export function LocalAiPanelView({ localAi }: { localAi: LocalAiStatus }): React
           Start it on this computer with <code>npm run local-agent</code>.
         </p>
       ) : null}
+
+      {agentReachable && check !== null ? <LocalWorkspaceSection agentUrl={check.url} /> : null}
     </section>
   );
 }

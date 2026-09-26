@@ -18,6 +18,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { LocalAgent, UnknownLocalRuntimeError } from './agent.js';
 import type { LocalChatMessage, LocalGenerateRequest } from '../types.js';
+import type {
+  LocalWorkspaceService,
+  WorkspaceError,
+  WorkspaceErrorKind,
+} from '@vedmoulya/local-workspace';
 
 export const DEFAULT_LOCAL_AGENT_PORT = 43_117;
 export const DEFAULT_LOCAL_AGENT_HOST = '127.0.0.1';
@@ -32,6 +37,12 @@ export const DEFAULT_ALLOWED_ORIGINS: readonly string[] = [
 export interface LocalAgentServerOptions {
   agent: LocalAgent;
   allowedOrigins?: readonly string[];
+  /**
+   * The optional workspace capability. Runtime and workspace are INDEPENDENT: a
+   * server without a workspace still serves every runtime route, and a workspace
+   * failure can never affect runtime discovery or generation.
+   */
+  workspace?: LocalWorkspaceService;
 }
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -108,13 +119,83 @@ function parseGenerateRequest(body: unknown): LocalGenerateRequest | null {
   };
 }
 
+/** Map a typed workspace failure to an honest HTTP status (no OS detail). */
+function workspaceStatus(kind: WorkspaceErrorKind): number {
+  switch (kind) {
+    case 'INVALID_REQUEST':
+    case 'PATH_IS_NOT_DIRECTORY':
+      return 400;
+    case 'PATH_NOT_ALLOWED':
+      return 403;
+    case 'WORKSPACE_NOT_AUTHORIZED':
+    case 'WORKSPACE_REVOKED':
+    case 'WORKSPACE_ROOT_UNAVAILABLE':
+    case 'PATH_NOT_FOUND':
+      return 404;
+    case 'FILE_TOO_LARGE':
+      return 413;
+    case 'BINARY_FILE':
+      return 415;
+    case 'LIMIT_EXCEEDED':
+      return 429;
+    case 'IO_ERROR':
+      return 500;
+    default:
+      return 400;
+  }
+}
+
+/** Serialize a typed workspace failure without leaking absolute paths. */
+function workspaceErrorBody(error: WorkspaceError): { error: WorkspaceError } {
+  const safe: WorkspaceError = { kind: error.kind, message: error.message };
+  if (error.path !== undefined) safe.path = error.path;
+  return { error: safe };
+}
+
+/** Parse an optional JSON body into a record (never trusts the wire). */
+function optionalRecord(body: unknown): Record<string, unknown> | null {
+  if (body === undefined) return {};
+  return asRecord(body);
+}
+
+/** Parse a positive integer from a query string value or a JSON body value. */
+function parsePositiveInt(raw: unknown): number | undefined {
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return raw;
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+  return undefined;
+}
+
+/** Parse an optional array of strings (workspace focus paths). */
+function parseStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const values = raw.filter((entry): entry is string => typeof entry === 'string');
+  return values.length > 0 ? values : undefined;
+}
+
+/** Parse the bounded listing query (`path`, `depth`, `max`). */
+function parseListQuery(url: URL): { path?: string; depth?: number; max?: number } {
+  const path = url.searchParams.get('path');
+  const depth = parsePositiveInt(url.searchParams.get('depth'));
+  const max = parsePositiveInt(url.searchParams.get('max'));
+  return {
+    ...(path !== null ? { path } : {}),
+    ...(depth !== undefined ? { depth } : {}),
+    ...(max !== undefined ? { max } : {}),
+  };
+}
+
 /**
  * Build the Local Agent HTTP server. The server itself is transport only: all
- * decisions live in `LocalAgent`, so every surface sees the same truth.
+ * decisions live in `LocalAgent` (runtime) and `LocalWorkspaceService`
+ * (workspace), so every surface sees the same truth.
  */
 export function createLocalAgentServer(options: LocalAgentServerOptions): Server {
-  const { agent } = options;
+  const { agent, workspace } = options;
   const allowed = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
+  const capabilities: string[] = ['runtime', ...(workspace !== undefined ? ['workspace'] : [])];
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const origin = resolveOrigin(req, allowed);
@@ -130,11 +211,11 @@ export function createLocalAgentServer(options: LocalAgentServerOptions): Server
 
     try {
       if (segments.length === 0) {
-        json(res, 200, { name: 'VedMoulya Local Agent', ...agent.health() }, origin);
+        json(res, 200, { name: 'VedMoulya Local Agent', ...agent.health(), capabilities }, origin);
         return;
       }
       if (segments.length === 1 && segments[0] === 'health' && method === 'GET') {
-        json(res, 200, agent.health(), origin);
+        json(res, 200, { ...agent.health(), capabilities }, origin);
         return;
       }
       if (segments.length === 1 && segments[0] === 'runtimes' && method === 'GET') {
@@ -202,6 +283,135 @@ export function createLocalAgentServer(options: LocalAgentServerOptions): Server
           res.end();
           return;
         }
+      }
+
+      // ── Workspace capability (independent of runtimes) ──────────────────
+      if (segments[0] === 'workspaces') {
+        const sendWorkspaceError = (error: WorkspaceError): void => {
+          json(res, workspaceStatus(error.kind), workspaceErrorBody(error), origin);
+        };
+
+        if (workspace === undefined) {
+          if (segments.length === 2 && segments[1] === 'capabilities' && method === 'GET') {
+            json(
+              res,
+              200,
+              {
+                available: false,
+                capabilities: { list: false, read: false, write: false, exec: false },
+              },
+              origin,
+            );
+            return;
+          }
+          json(res, 503, { error: 'The workspace capability is not available.' }, origin);
+          return;
+        }
+
+        if (segments.length === 2 && segments[1] === 'capabilities' && method === 'GET') {
+          json(
+            res,
+            200,
+            {
+              available: true,
+              capabilities: workspace.capabilities(),
+              limits: workspace.limitsSnapshot(),
+            },
+            origin,
+          );
+          return;
+        }
+
+        if (segments.length === 1 && method === 'GET') {
+          json(res, 200, { workspaces: workspace.list() }, origin);
+          return;
+        }
+
+        if (segments.length === 1 && method === 'POST') {
+          const body = asRecord(await readJsonBody(req));
+          if (body === null) {
+            json(
+              res,
+              400,
+              workspaceErrorBody({
+                kind: 'INVALID_REQUEST',
+                message: 'An explicit folder is required.',
+              }),
+              origin,
+            );
+            return;
+          }
+          const result = await workspace.authorize(body['root']);
+          if (!result.ok) sendWorkspaceError(result.error);
+          else json(res, 200, { workspace: result.value }, origin);
+          return;
+        }
+
+        if (segments.length === 2) {
+          const id = decodeURIComponent(segments[1] ?? '');
+          if (method === 'GET') {
+            const result = workspace.get(id);
+            if (!result.ok) sendWorkspaceError(result.error);
+            else json(res, 200, { workspace: result.value }, origin);
+            return;
+          }
+          if (method === 'DELETE') {
+            const result = workspace.revoke(id);
+            if (!result.ok) sendWorkspaceError(result.error);
+            else json(res, 200, { revoked: result.value.id }, origin);
+            return;
+          }
+        }
+
+        if (segments.length >= 3) {
+          const id = decodeURIComponent(segments[1] ?? '');
+          const action = segments[2] ?? '';
+          if (action === 'entries' && method === 'GET') {
+            const result = await workspace.entries(id, parseListQuery(url));
+            if (!result.ok) sendWorkspaceError(result.error);
+            else json(res, 200, result.value, origin);
+            return;
+          }
+          if (action === 'tree' && method === 'GET') {
+            const depth = parsePositiveInt(url.searchParams.get('depth'));
+            const result = await workspace.entries(id, {
+              depth: depth ?? 2,
+            });
+            if (!result.ok) sendWorkspaceError(result.error);
+            else json(res, 200, result.value, origin);
+            return;
+          }
+          if (action === 'file' && method === 'GET') {
+            const path = url.searchParams.get('path');
+            const maxBytes = parsePositiveInt(url.searchParams.get('maxBytes'));
+            const result = await workspace.readFile(id, {
+              path: path ?? '',
+              ...(maxBytes !== undefined ? { maxBytes } : {}),
+            });
+            if (!result.ok) sendWorkspaceError(result.error);
+            else json(res, 200, result.value, origin);
+            return;
+          }
+          if (action === 'context' && method === 'POST') {
+            const body = optionalRecord(await readJsonBody(req));
+            if (body === null) {
+              sendWorkspaceError({ kind: 'INVALID_REQUEST', message: 'Invalid context request.' });
+              return;
+            }
+            const focus = parseStringArray(body['focus']);
+            const maxFiles = parsePositiveInt(body['maxFiles']);
+            const result = await workspace.context(id, {
+              ...(focus !== undefined ? { focus } : {}),
+              ...(maxFiles !== undefined ? { maxFiles } : {}),
+            });
+            if (!result.ok) sendWorkspaceError(result.error);
+            else json(res, 200, result.value, origin);
+            return;
+          }
+        }
+
+        json(res, 404, { error: 'Not found' }, origin);
+        return;
       }
 
       json(res, 404, { error: 'Not found' }, origin);

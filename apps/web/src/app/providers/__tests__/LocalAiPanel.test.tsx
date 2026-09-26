@@ -28,6 +28,26 @@ vi.mock('../local-ai-agent.js', () => ({
   streamLocalGeneration: vi.fn(),
 }));
 
+// The Local AI panel now embeds the Local Workspace section; keep these tests
+// hermetic by answering the workspace capability probe locally.
+vi.mock('../local-workspace-client.js', () => ({
+  fetchWorkspaceCapabilities: vi.fn(() =>
+    Promise.resolve({
+      ok: true,
+      value: {
+        available: false,
+        capabilities: { list: false, read: false, write: false, exec: false },
+      },
+    }),
+  ),
+  fetchWorkspaces: vi.fn(() => Promise.resolve({ ok: true, value: [] })),
+  authorizeWorkspace: vi.fn(),
+  revokeWorkspace: vi.fn(),
+  fetchWorkspaceEntries: vi.fn(),
+  readWorkspaceFile: vi.fn(),
+  assembleWorkspaceContext: vi.fn(),
+}));
+
 const mockedCheck = vi.mocked(checkLocalAgent);
 const mockedStatus = vi.mocked(fetchLocalRuntimeStatus);
 const mockedVerify = vi.mocked(verifyLocalRuntime);

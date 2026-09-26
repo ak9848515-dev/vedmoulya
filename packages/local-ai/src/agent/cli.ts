@@ -10,6 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createDefaultLocalAgent } from './default-agent.js';
+import { createDefaultLocalWorkspaceService } from './default-workspaces.js';
 import {
   DEFAULT_ALLOWED_ORIGINS,
   DEFAULT_LOCAL_AGENT_HOST,
@@ -36,8 +37,10 @@ function readAllowedOrigins(env: Record<string, string | undefined>): readonly s
 async function main(): Promise<void> {
   const env = process.env;
   const agent = createDefaultLocalAgent();
+  const workspace = createDefaultLocalWorkspaceService({ env });
   const started = await startLocalAgentServer({
     agent,
+    workspace,
     port: readPort(env),
     host: DEFAULT_LOCAL_AGENT_HOST,
     allowedOrigins: readAllowedOrigins(env),
@@ -61,7 +64,12 @@ async function main(): Promise<void> {
     `[local-agent] VedMoulya Local Agent ${agent.health().version} listening on ${started.url}`,
   );
   console.error(`[local-agent] runtimes: ${agent.health().runtimes.join(', ')}`);
-  console.error('[local-agent] this bridge exposes ONLY runtime discovery, models and generation.');
+  console.error(
+    '[local-agent] capabilities: runtime (discovery, models, generation) and workspace (explicitly authorized, read-only).',
+  );
+  console.error(
+    '[local-agent] the workspace capability lists and reads ONLY directories you explicitly authorize; it never writes, executes or follows symlinks.',
+  );
 }
 
 void main().catch((error: unknown) => {

@@ -24,6 +24,7 @@
     { "path": "packages/execution-strategy" },
     { "path": "packages/providers" },
     { "path": "packages/local-ai" },
+    { "path": "packages/local-workspace" },
     { "path": "packages/rag" },
     { "path": "packages/loop-engine" },
     { "path": "packages/app-factory" },
