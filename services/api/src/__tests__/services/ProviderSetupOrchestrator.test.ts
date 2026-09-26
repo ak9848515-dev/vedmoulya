@@ -631,7 +631,37 @@ describe('ProviderSetupOrchestrator', () => {
 
       expect(result.outcome).toBe('AUTH_REQUIRED');
       expect(result.connected).toBe(false);
-      expect(result.message).toMatch(/no key it can use/i);
+      // The provider is NOT connected here, so it must never be called
+      // "verified" — only the missing API key is named.
+      expect(result.message).toMatch(/Gemini requires an API key/i);
+      expect(result.message).not.toMatch(/verified/i);
+      expect(result.recovery?.kind).toBe('check_credential');
+    });
+
+    it('names the connected Google account separately when OAuth returned but no key is usable', async () => {
+      const keyless = new ProviderSetupOrchestrator({ preferences, probe, generate });
+      probe.mockResolvedValue({
+        connected: true,
+        credentialSource: 'NONE',
+        models: [{ id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' }],
+      });
+      generate.mockResolvedValue({ ok: true, latencyMs: 20 });
+      preferences.setProviderEnabled.mockResolvedValue({ success: true });
+      preferences.updatePreferences.mockResolvedValue({ success: true });
+
+      const result = await keyless.setup({
+        userId: 'user-1',
+        family: 'google',
+        oauthCompleted: true,
+      });
+
+      expect(result.outcome).toBe('AUTH_REQUIRED');
+      expect(result.connected).toBe(false);
+      // The Google account is the verified IDENTITY; Gemini AI is NOT connected
+      // and still requires its own separate API key.
+      expect(result.message).toMatch(/verified your Google account/i);
+      expect(result.message).toMatch(/Gemini AI requires its own Gemini API key/i);
+      expect(result.message).not.toMatch(/Gemini is verified/i);
       expect(result.recovery?.kind).toBe('check_credential');
     });
 

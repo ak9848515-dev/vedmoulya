@@ -824,12 +824,19 @@ export class ProviderSetupOrchestrator {
       credentialRequired,
     );
     if (!resolvable) {
-      return baseResult(
-        seed,
-        'AUTH_REQUIRED',
-        `${name} is verified, but VedMoulya still has no key it can use — add one to finish.`,
-        { recovery: { kind: 'check_credential', actionLabel: 'Add key' } },
-      );
+      // HONESTY FIX (Gemini status wording) — the provider is NOT connected
+      // here: only a credential probe succeeded, and the runtime still has no
+      // key it can resolve. Calling the provider itself "verified" reads as
+      // "Gemini AI is connected", which is exactly the confusion this state
+      // must not create. Say what is actually missing instead:
+      //   • the provider needs its own API key (the Gemini API key), and
+      //   • a connected Google account is a separate identity, not the key.
+      const message = oauthAuthenticated
+        ? 'VedMoulya has verified your Google account, but Gemini AI requires its own Gemini API key — add one to finish.'
+        : `${name} requires an API key — add one to finish.`;
+      return baseResult(seed, 'AUTH_REQUIRED', message, {
+        recovery: { kind: 'check_credential', actionLabel: 'Add key' },
+      });
     }
 
     return baseResult(seed, 'SUCCESS', `${name} connected.`, {
