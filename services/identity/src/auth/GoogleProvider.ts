@@ -3,7 +3,24 @@
 // Handles Google sign-in, token exchange, and profile fetching
 // ──────────────────────────────────────────────────────────────────
 
-import { logger } from '@vedmoulya/core';
+import { AppError, logger } from '@vedmoulya/core';
+
+/**
+ * Raised when Google sign-in cannot be started because this deployment has no
+ * Google OAuth client configured (GOOGLE_CLIENT_ID absent in
+ * production/staging).
+ *
+ * This is an OPERATOR configuration gap, not a user error and not an
+ * unexpected crash, so it carries a stable machine-readable code and a 503
+ * status instead of the indistinguishable generic 500 a bare `Error` produced.
+ * The message stays client-safe (no variable names, no infrastructure detail);
+ * the actionable "which variable is missing" hint is logged server-side.
+ */
+export class GoogleOAuthNotConfiguredError extends AppError {
+  constructor() {
+    super('Google sign-in is not configured on this server.', 'GOOGLE_OAUTH_NOT_CONFIGURED', 503);
+  }
+}
 
 export interface GoogleUserProfile {
   id: string;
@@ -44,11 +61,17 @@ export class GoogleProvider {
     // without real OAuth credentials.
     const env: string = process.env.NODE_ENV ?? 'development';
     if (!this.clientId && (env === 'production' || env === 'staging')) {
-      throw new Error(
-        'Google OAuth is not configured: GOOGLE_CLIENT_ID is missing. ' +
-          'Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI ' +
-          'in your Vercel environment variables.',
-      );
+      // PHASE-11 — log the actionable detail (the exact missing variable) so an
+      // operator can fix it from the server logs, while the thrown error stays
+      // client-safe and machine-readable.
+      logger.error('Google OAuth is not configured — GOOGLE_CLIENT_ID is missing', {
+        env,
+        missing: 'GOOGLE_CLIENT_ID',
+        hint:
+          'Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI in the ' +
+          'platform (e.g. Vercel) environment; production/staging read no local env file.',
+      });
+      throw new GoogleOAuthNotConfiguredError();
     }
     const redirectUri =
       this.redirectUri ||
