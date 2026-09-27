@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GoogleProvider } from '../src/auth/GoogleProvider.js';
+import { GoogleProvider, GoogleOAuthNotConfiguredError } from '../src/auth/GoogleProvider.js';
 
 describe('GoogleProvider', () => {
   let provider: GoogleProvider;
@@ -29,6 +29,32 @@ describe('GoogleProvider', () => {
       expect(url).toContain('prompt=consent');
       expect(url).toContain('redirect_uri=');
       expect(url).toContain('client_id=');
+    });
+
+    // PHASE-11 — an unconfigured deployment must fail with a coded 503, not a
+    // bare Error that the error mapper turns into an indistinguishable 500.
+    it('throws a coded GoogleOAuthNotConfiguredError in production when the client id is absent', () => {
+      const prevNodeEnv = process.env.NODE_ENV;
+      const prevClientId = process.env.GOOGLE_CLIENT_ID;
+      process.env.NODE_ENV = 'production';
+      delete process.env.GOOGLE_CLIENT_ID;
+      try {
+        const unconfigured = new GoogleProvider();
+        expect(() => unconfigured.getAuthorizationUrl('state-1')).toThrow(
+          GoogleOAuthNotConfiguredError,
+        );
+        try {
+          unconfigured.getAuthorizationUrl('state-1');
+        } catch (error) {
+          expect((error as GoogleOAuthNotConfiguredError).code).toBe('GOOGLE_OAUTH_NOT_CONFIGURED');
+          expect((error as GoogleOAuthNotConfiguredError).statusCode).toBe(503);
+          // Client-safe: no variable names or infrastructure detail leak out.
+          expect((error as Error).message).not.toContain('GOOGLE_CLIENT_ID');
+        }
+      } finally {
+        process.env.NODE_ENV = prevNodeEnv;
+        if (prevClientId !== undefined) process.env.GOOGLE_CLIENT_ID = prevClientId;
+      }
     });
   });
 

@@ -457,6 +457,39 @@ describe('google sign-in', () => {
     expect(useAuthStore.getState().accessToken).toBe('access-1');
   });
 
+  // PHASE-11 — the friendly UI message is a fallback; the real cause (code +
+  // status) must survive for developers instead of being swallowed.
+  it('preserves the structured server error as a diagnostic while keeping a friendly message', async () => {
+    stubBrowser();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          success: false,
+          error: {
+            code: 'GOOGLE_OAUTH_NOT_CONFIGURED',
+            message: 'Google sign-in is not configured on this server.',
+          },
+        },
+        503,
+      ),
+    );
+
+    const outcome = await beginGoogleSignIn('/career');
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: 'Could not start Google sign-in. Please try again.',
+    });
+    const diagnostic = errorSpy.mock.calls.find((call) => call[0] === '[auth] flow failed');
+    expect(diagnostic?.[1]).toMatchObject({
+      operation: 'google.begin',
+      code: 'GOOGLE_OAUTH_NOT_CONFIGURED',
+      status: 503,
+    });
+    errorSpy.mockRestore();
+  });
+
   it('rejects a mismatched CSRF state', async () => {
     stubBrowser();
     vi.stubGlobal(
