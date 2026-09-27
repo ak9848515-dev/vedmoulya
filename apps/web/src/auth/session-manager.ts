@@ -325,6 +325,24 @@ export async function signUpWithEmailAndPassword(params: SignUpParams): Promise<
 }
 
 /**
+ * PHASE-11 — Structured auth diagnostics.
+ *
+ * The UI keeps a friendly, non-technical message, but a developer must be able
+ * to see WHY a flow failed. This records a structured `{ operation, code,
+ * status, message }` to the console without ever including secrets — no
+ * tokens, authorization codes, or credentials. Backend error messages are
+ * already client-safe (the server never returns infrastructure detail).
+ */
+function reportAuthDiagnostic(operation: string, error: unknown): void {
+  const code =
+    error instanceof AuthApiError ? error.code : error instanceof Error ? error.name : 'UNKNOWN';
+  const status = error instanceof AuthApiError ? error.status : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  // Deliberate developer-facing diagnostic — not user-facing copy.
+  console.error('[auth] flow failed', { operation, code, status, message });
+}
+
+/**
  * Start the Google OAuth redirect flow:
  * 1. Fetch the authorization URL + CSRF state from /auth/google/url.
  * 2. Persist the pending { state, next } for the callback to verify.
@@ -344,6 +362,10 @@ export async function beginGoogleSignIn(next: string): Promise<SignInOutcome> {
     return { ok: true };
   } catch (error) {
     if (isNetworkError(error)) return { ok: false, error: 'offline' };
+    // The friendly message is a fallback, not a replacement for the truth:
+    // preserve the real code/status/message for developers (e.g. a 503
+    // GOOGLE_OAUTH_NOT_CONFIGURED from a server without Google OAuth set up).
+    reportAuthDiagnostic('google.begin', error);
     return { ok: false, error: 'Could not start Google sign-in. Please try again.' };
   }
 }
@@ -380,6 +402,7 @@ export async function completeGoogleSignIn(
     return { ok: true, next: pending.next };
   } catch (error) {
     if (isNetworkError(error)) return { ok: false, error: 'offline' };
+    reportAuthDiagnostic('google.complete', error);
     return { ok: false, error: 'Google sign-in failed. Please try again.' };
   }
 }
