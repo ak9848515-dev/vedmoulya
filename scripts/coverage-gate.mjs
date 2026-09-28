@@ -125,6 +125,23 @@ function runWorkspaceCoverage(ws) {
   }
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
   const thresholdErrors = (output.match(/ERROR: Coverage[^\n]*/g) ?? []).map((l) => l.trim());
+  // Vitest colourises its summary (CI forces colour on), so strip ANSI before
+  // parsing the run result.
+  // eslint-disable-next-line no-control-regex -- Intentional ANSI escape stripping of Vitest output.
+  const plainOutput = output.replace(/\u001b\[[0-9;]*m/g, '');
+  // Distinguish "no tests were discovered" from "tests ran but the run failed".
+  // Both leave no coverage artifact, but reporting the former for the latter
+  // points the reader at a discovery / path-mapping bug that does not exist —
+  // e.g. a failing test under Vitest 5's unawaited-assertion check still runs
+  // tests and writes no coverage report.
+  const testsSummary =
+    plainOutput
+      .match(/^[ \t]*(?:Test Files|Tests)[ \t]+[^\n]*$/gm)
+      ?.join(' / ')
+      .trim() ?? null;
+  // No tests were discovered when vitest says so outright, or when it never
+  // reported a run summary at all (e.g. `passWithNoTests` with zero files).
+  const noTests = /No test files found/i.test(plainOutput) || testsSummary === null;
   // A workspace with no test files (passWithNoTests) produces no coverage data
   // and exits 0 — treat it as FAIL so no-test workspaces can't silently bypass
   // the 80% gate (user decision: "80% everywhere now").
@@ -176,6 +193,8 @@ function runWorkspaceCoverage(ws) {
     status: result.status,
     thresholdErrors,
     noData,
+    noTests,
+    testsSummary,
   };
 }
 
@@ -228,7 +247,18 @@ for (const r of results) {
   if (r.failed) {
     failures += 1;
     console.log(`  ❌ ${r.ws} (exit ${String(r.status ?? 'n/a')})`);
-    if (r.noData) console.log('       No coverage data — workspace has no test files (0% < 80%)');
+    if (r.noData) {
+      if (r.noTests) {
+        console.log('       No coverage data — workspace has no test files (0% < 80%)');
+      } else {
+        console.log(
+          '       No coverage artifact produced — tests ran but the Vitest run failed before ' +
+            'coverage was written' +
+            (r.testsSummary === null ? '' : ` [${r.testsSummary}]`) +
+            '. See the Vitest output above.',
+        );
+      }
+    }
     for (const err of r.thresholdErrors.slice(0, 6)) console.log(`       ${err}`);
   } else {
     console.log(`  ✅ ${r.ws}`);
