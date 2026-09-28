@@ -88,5 +88,7 @@ export {
   DEFAULT_ALLOWED_ORIGINS,
   DEFAULT_LOCAL_AGENT_HOST,
   DEFAULT_LOCAL_AGENT_PORT,
+  LOCAL_AGENT_ALLOWED_ORIGINS_ENV,
+  parseAllowedOrigins,
   startLocalAgentServer,
 } from './agent/server.js';

@@ -452,7 +452,7 @@ describe('ProviderConnectFlow (G9 one-click setup)', () => {
     expect(onAdvanced).toHaveBeenCalledTimes(1);
   });
 
-  it('failure: a recovery action with no provider-specific step returns to the Connect form', async () => {
+  it('failure: a go_advanced recovery opens the Advanced panel instead of returning to the form', async () => {
     mocks.setupMutate.mockResolvedValue(
       setupResult({
         outcome: 'VALIDATION_FAILED',
@@ -475,15 +475,65 @@ describe('ProviderConnectFlow (G9 one-click setup)', () => {
 
     const failure = await waitFor(() => screen.getByTestId('provider-connect-failure'));
     expect(failure.textContent).toMatch(/did not accept the key/);
-    // While the failure is on screen the key field is hidden.
+    // While the failure is on screen the key field is hidden, and the Advanced
+    // panel is still closed.
     expect(screen.queryByTestId('provider-connect-key-openai')).toBeNull();
+    expect(screen.queryByTestId('provider-connect-advanced')).toBeNull();
 
-    // A recovery with no provider-specific step (not Google consent, not a
-    // local server) returns the user to the form so a corrected key can be
-    // supplied — it does not silently re-run the same probe.
+    // The recovery promises technical detail ("Open advanced settings"), so it
+    // must reveal the Advanced panel — not silently re-run the probe and not
+    // just drop the user back on the same form.
     fireEvent.click(screen.getByTestId('provider-connect-recovery'));
 
-    await waitFor(() => expect(screen.getByTestId('provider-connect-key-openai')).toBeDefined());
+    await waitFor(() => expect(screen.getByTestId('provider-connect-advanced')).toBeDefined());
+    // The form is NOT restored, and the probe is not re-run.
+    expect(screen.queryByTestId('provider-connect-key-openai')).toBeNull();
+    expect(mocks.setupMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it('failure: a Gemini PERSISTENCE_FAILED result renders one honest message and the Advanced action (never a key prompt)', async () => {
+    // PRODUCTION REPRO — the deployment has no credential store, so the gateway
+    // cannot persist the key the user pasted. The UI must render the gateway's
+    // honest message and its single action, and must NOT present this as a
+    // missing credential: the user already supplied one, and AUTH_REQUIRED
+    // wording here is exactly the bug this guards against.
+    mocks.setupMutate.mockResolvedValue(
+      setupResult({
+        outcome: 'PERSISTENCE_FAILED',
+        connected: false,
+        providerId: 'google',
+        stage: 'persist_credential',
+        credentialSource: 'USER',
+        selectedModel: { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+        modelSelectionSource: 'provider_default',
+        message:
+          'VedMoulya cannot save your Gemini key securely on this deployment, so it was not connected.',
+        credentialStored: false,
+        preferencesApplied: false,
+        recovery: { kind: 'go_advanced', actionLabel: 'Advanced setup' },
+      }),
+    );
+    render(<ProviderConnectFlow userId="u1" family="google" />);
+
+    typeKey('google', 'AIza-real-looking-key');
+    fireEvent.click(screen.getByTestId('provider-connect-google'));
+
+    const failure = await waitFor(() => screen.getByTestId('provider-connect-failure'));
+    // The gateway's exact, honest message is rendered — not a key prompt.
+    expect(failure.textContent).toMatch(/cannot save your Gemini key securely/);
+    expect(failure.textContent).not.toMatch(/add one/i);
+    expect(failure.textContent).not.toMatch(/requires an API key/i);
+    // Exactly one next action, labelled as the gateway named it.
+    expect(screen.getByTestId('provider-connect-recovery').textContent).toMatch(/Advanced setup/);
+    // The key itself is never echoed into the DOM.
+    expect(document.body.innerHTML).not.toMatch(/AIza-real-looking-key/);
+
+    // Its single action opens the Advanced panel: the deployment problem is
+    // operator-side, so the user needs the technical detail — never a key
+    // prompt and never a pointless re-run.
+    fireEvent.click(screen.getByTestId('provider-connect-recovery'));
+    await waitFor(() => expect(screen.getByTestId('provider-connect-advanced')).toBeDefined());
+    expect(screen.queryByTestId('provider-connect-key-google')).toBeNull();
     expect(mocks.setupMutate).toHaveBeenCalledTimes(1);
   });
 

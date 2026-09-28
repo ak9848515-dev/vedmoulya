@@ -259,4 +259,60 @@ describe('OllamaProvider (same provider contract as every other provider)', () =
     expect(ollama?.capabilities).toContain('coding');
     expect(ollama?.capabilities).toContain('reasoning');
   });
+
+  it('never chooses the development mock while a REAL adapter can serve (PRODUCT-001)', async () => {
+    // PRODUCT-001 — mock is a last-resort provider, not a peer. When a real
+    // adapter is registered for the same capability the runtime must execute
+    // it, never the deterministic mock — otherwise a mission can "succeed"
+    // while running fake intelligence.
+    const SAVED = {
+      openai: process.env.OPENAI_API_KEY,
+      aiOpenai: process.env.AI_OPENAI_API_KEY,
+      deepseek: process.env.AI_DEEPSEEK_API_KEY,
+      google: process.env.AI_GOOGLE_API_KEY,
+    };
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OPENAI_API_KEY;
+    delete process.env.AI_DEEPSEEK_API_KEY;
+    delete process.env.AI_GOOGLE_API_KEY;
+    try {
+      const calls: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string | URL | Request) => {
+          const href = String(url);
+          calls.push(href);
+          return href.endsWith('/api/tags')
+            ? healthyTagsResponse()
+            : chatResponse('real local answer');
+        }),
+      );
+
+      const orchestrator = new AIOrchestrationService();
+      registerPlatformProviders(orchestrator, {
+        providers: { ollama: { baseUrl: 'http://127.0.0.1:11434' }, enableMock: true },
+      });
+      // The mock is STILL registered (development fallback + EPIC-019 agreement).
+      expect(orchestrator.getProvider('mock')).toBeDefined();
+
+      const result = await orchestrator.orchestrate({
+        capability: 'reasoning',
+        userInput: 'hello',
+        qualityTier: 'standard',
+      });
+
+      // The REAL adapter executed — the local HTTP chat endpoint was called.
+      expect(result.provider).toBe('ollama');
+      expect(calls.some((call) => call.endsWith('/api/chat'))).toBe(true);
+    } finally {
+      if (SAVED.openai === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = SAVED.openai;
+      if (SAVED.aiOpenai === undefined) delete process.env.AI_OPENAI_API_KEY;
+      else process.env.AI_OPENAI_API_KEY = SAVED.aiOpenai;
+      if (SAVED.deepseek === undefined) delete process.env.AI_DEEPSEEK_API_KEY;
+      else process.env.AI_DEEPSEEK_API_KEY = SAVED.deepseek;
+      if (SAVED.google === undefined) delete process.env.AI_GOOGLE_API_KEY;
+      else process.env.AI_GOOGLE_API_KEY = SAVED.google;
+    }
+  });
 });

@@ -429,6 +429,19 @@ export function ProviderConnectFlow({
                   void runSetup();
                   return;
                 }
+                // BUGFIX (advanced recovery dead end) — `go_advanced` is the
+                // gateway's recovery for a genuinely technical dead end, and
+                // its label promises exactly that ("Advanced setup" / "Open
+                // advanced settings"). It used to fall through to
+                // setPhase('idle'), which only dismissed the card and dropped
+                // the user back on the SAME Connect form — the action did
+                // nothing its label promised. Open the Advanced panel instead;
+                // the failure stays visible beside the detail rather than
+                // being replaced by the form.
+                if (failure.recoveryKind === 'go_advanced') {
+                  setShowAdvanced(true);
+                  return;
+                }
                 setPhase('idle');
               }}
               data-testid="provider-connect-recovery"
