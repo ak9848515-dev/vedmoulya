@@ -18,6 +18,7 @@
 //     never credential material.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { logger } from '@vedmoulya/core';
 import { resolvePlatformCredential, type ProviderCredentialSource } from '@vedmoulya/providers';
 
 // Google Gemini generativelanguage API (same host @ai-sdk/google uses).
@@ -141,6 +142,77 @@ export interface ProviderConnectionTestResult {
   runtimeNote?: string;
 }
 
+/**
+ * PROD-DIAG — WHERE the generation validation failed, with enough resolution to
+ * tell the four production conditions apart. This exists because the friendly
+ * taxonomy collapses several distinct provider conditions into one UI-facing
+ * `errorKind` ('unavailable' covers BOTH an HTTP 5xx AND an HTTP 200 whose body
+ * carried no usable answer), which made a live Gemini setup failure
+ * indistinguishable in production logs.
+ *
+ * It is a DIAGNOSTIC-ONLY dimension: it is reported through the structured
+ * logger and never through the user-facing message, so no screen changes
+ * behaviour and no provider appears connected that was not really validated.
+ */
+export type GenerationDiagnosticClassification =
+  /** The provider answered with a usable completion — the ONLY success path. */
+  | 'generation_success'
+  /** A non-2xx HTTP status from the provider (401/403/429/5xx/other). */
+  | 'generation_http_error'
+  /** HTTP 2xx, but the body carried no usable candidate — the provider's `ok`
+   *  status is NOT the same thing as the provider answering. */
+  | 'generation_empty_response'
+  /** The request never completed (timeout / DNS / TLS / connection refused). */
+  | 'generation_network_error'
+  /** No model to validate, so no request was issued at all. */
+  | 'generation_not_attempted';
+
+/**
+ * PROD-DIAG — the safe, credential-free metadata captured for ONE generation
+ * validation attempt.
+ *
+ * SECURITY CONTRACT (this is why the shape is read-only and narrow):
+ *   • NEVER carries an API key, Authorization header, cookie or token.
+ *   • NEVER carries the request body, the prompt, or the provider's response
+ *     body — only the BOOLEANS about whether a candidate/content part existed
+ *     and the character COUNT of the answer text.
+ *   • `providerStatusReason` is populated only from an allow-listed set of
+ *     provider status tokens (see `safeProviderStatusReason`), never from free
+ *     text that could echo an echoed credential.
+ *   • It is never returned to the browser; it goes to server-side logs only.
+ */
+export interface GenerationValidationDiagnostic {
+  /** Provider family the validation ran against (e.g. 'google'). */
+  providerFamily: TestableProviderFamily;
+  /** Pipeline stage — always the validation stage. */
+  stage: 'validate';
+  /** The model id the validation was attempted on (never invented). */
+  modelId: string;
+  classification: GenerationDiagnosticClassification;
+  /** HTTP status when a response was received at all. */
+  httpStatus?: number;
+  /** The EXISTING user-facing classification, so both views line up. */
+  errorKind?: ProviderConnectionErrorKind;
+  /** Measured round-trip of the attempt. */
+  latencyMs: number;
+  /** True when no credential could be resolved for the request. */
+  noCredential?: boolean;
+  /** True when the provider's body contained a candidates/choices/content array. */
+  candidatePresent?: boolean;
+  /** True when a usable text part was present inside that candidate. */
+  contentPartPresent?: boolean;
+  /** Character count of the answer text — never the text itself. */
+  answerLength?: number;
+  /** Allow-listed provider status token (e.g. 'UNAVAILABLE'), never raw text. */
+  providerStatusReason?: string;
+  /**
+   * The platform error NAME for a network/timeout failure ('AbortError',
+   * 'TimeoutError', 'TypeError'). A fixed platform identifier — never provider
+   * text and never the error message.
+   */
+  networkErrorName?: string;
+}
+
 export interface TestProviderConnectionInput {
   family: TestableProviderFamily;
   /** User-supplied key — used for THIS probe only, never stored or logged. */
@@ -159,6 +231,49 @@ export interface TestProviderConnectionInput {
   timeoutMs?: number;
   /** Env source (tests inject; production = process.env). */
   env?: Record<string, string | undefined>;
+  /**
+   * PROD-DIAG — optional diagnostic reporter for the generation validation.
+   * Omitted in production ⇒ the structured logger. A caller that needs the
+   * classification elsewhere (or a test) can inject its own sink; the sink only
+   * ever receives the credential-free record described above.
+   */
+  onDiagnostic?: GenerationDiagnosticSink;
+}
+
+/**
+ * PROD-DIAG — where a generation-validation diagnostic is reported.
+ *
+ * Defaults to the repository's structured logger (a JSON line in Vercel logs).
+ * Tests inject a capture function to assert the exact payload — including the
+ * proof that no credential material is present — without spying on the logger.
+ */
+export type GenerationDiagnosticSink = (diagnostic: GenerationValidationDiagnostic) => void;
+
+/**
+ * PROD-DIAG — emit ONE structured diagnostic record through the caller's sink.
+ *
+ * The sink defaults to the repository's structured logger, so production
+ * (Vercel) gets a JSON line without any new logging dependency, while tests
+ * inject a capture function and assert the exact payload. The record contains
+ * only allow-listed scalar metadata — there is no code path here that can
+ * receive a key, a header, the request body or the response body.
+ */
+function emitGenerationDiagnostic(
+  sink: GenerationDiagnosticSink | undefined,
+  diagnostic: GenerationValidationDiagnostic,
+): void {
+  if (sink) {
+    sink(diagnostic);
+    return;
+  }
+  const { classification, ...context } = diagnostic;
+  // Failures are warn (they are the interesting production signal); a success is
+  // info so it stays visible without looking like an incident.
+  if (classification === 'generation_success') {
+    logger.info('[provider-setup] generation validation succeeded', { classification, ...context });
+    return;
+  }
+  logger.warn('[provider-setup] generation validation failed', { classification, ...context });
 }
 
 // __TESTER_TAIL__
@@ -172,6 +287,150 @@ export interface TestProviderConnectionInput {
 function redactKey(message: string, key: string | undefined): string {
   if (!key || key.length < 8) return message;
   return message.split(key).join('[redacted]');
+}
+
+/**
+ * PROD-DIAG — allow-listed provider status/reason tokens that are safe to log.
+ *
+ * The provider's error `status` string is a short, machine-readable enum
+ * (Google's `google.rpc.Status` codes, or an OpenAI/Anthropic `error.type`).
+ * Only tokens on this list are ever emitted; anything else is dropped rather
+ * than logged, so an unexpected value can never smuggle credential material or
+ * free-form provider text into production logs.
+ */
+const SAFE_PROVIDER_STATUS_REASONS: readonly string[] = [
+  'INVALID_ARGUMENT',
+  'FAILED_PRECONDITION',
+  'PERMISSION_DENIED',
+  'NOT_FOUND',
+  'UNAUTHENTICATED',
+  'RESOURCE_EXHAUSTED',
+  'INTERNAL',
+  'UNAVAILABLE',
+  'DEADLINE_EXCEEDED',
+  'ABORTED',
+  'OUT_OF_RANGE',
+  'CANCELLED',
+  'UNKNOWN',
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'not_found_error',
+  'rate_limit_error',
+  'api_error',
+  'overloaded_error',
+  'timeout_error',
+];
+
+/**
+ * PROD-DIAG — extract a provider status token if (and only if) it is on the
+ * allow-list. The value is read from the parsed error envelope ONLY; the raw
+ * response text is never touched, and a non-allow-listed value returns
+ * `undefined` instead of being logged.
+ */
+export function safeProviderStatusReason(body: unknown): string | undefined {
+  if (body === null || typeof body !== 'object') return undefined;
+  const error = (body as { error?: unknown }).error;
+  if (error === null || typeof error !== 'object') return undefined;
+  const record = error as { status?: unknown; type?: unknown; code?: unknown };
+  // Google spells it `status`; OpenAI/Anthropic spell it `type`. `code` is a
+  // number in both APIs, so it only matches when it is a literal token.
+  const candidates = [record.status, record.type, record.code];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (SAFE_PROVIDER_STATUS_REASONS.includes(trimmed)) return trimmed;
+  }
+  return undefined;
+}
+
+/**
+ * PROD-DIAG — character count of the model's answer text (0 when absent).
+ * Only the LENGTH is ever reported; the text itself stays in memory.
+ *
+ * It reads the SAME fields the family's parse function reads (via the shared
+ * `firstMessagePart` reader, which accepts both Anthropic's flat `content`
+ * array and Gemini's nested `candidate.content.parts`), so the count can never
+ * describe a payload the parser did not look at.
+ */
+export function generationAnswerLength(body: unknown, family: TestableProviderFamily): number {
+  if (family === 'ollama') {
+    const message = (body as { message?: { content?: unknown } }).message;
+    return typeof message?.content === 'string' ? message.content.trim().length : 0;
+  }
+  if (
+    family === 'openai' ||
+    family === 'deepseek' ||
+    family === 'openrouter' ||
+    family === 'openai-compatible'
+  ) {
+    const choices = (body as { choices?: Array<Record<string, unknown>> }).choices;
+    const first = choices?.[0];
+    const message = first ? (first as { message?: { content?: unknown } }).message : undefined;
+    return typeof message?.content === 'string' ? message.content.trim().length : 0;
+  }
+  if (family === 'anthropic') {
+    // Anthropic answers with the parts array directly on the body.
+    return firstMessagePart(body).trim().length;
+  }
+  // Google: the parts live on the FIRST candidate, so that candidate is the
+  // value the shared reader expects (passing the whole body would always read
+  // as empty and misreport every Gemini answer as zero-length).
+  const candidates = (body as { candidates?: unknown[] }).candidates;
+  const first = Array.isArray(candidates) ? candidates[0] : undefined;
+  return first === undefined ? 0 : firstMessagePart(first).trim().length;
+}
+
+/**
+ * PROD-DIAG — whether the parsed body contained ANY candidate/choice container
+ * at all, WITHOUT reading its content. This separates two very different
+ * HTTP 200 conditions that the UI cannot tell apart:
+ *   • `candidatePresent: false` → the provider returned no candidate array
+ *     (e.g. Gemini answered with a `promptFeedback` block and no candidates,
+ *     or a safety/blocked response);
+ *   • `candidatePresent: true, contentPartPresent: false` → a candidate came
+ *     back but carried no usable text part.
+ */
+export function hasGenerationCandidate(body: unknown, family: TestableProviderFamily): boolean {
+  if (family === 'ollama') {
+    const message = (body as { message?: unknown }).message;
+    return message !== null && typeof message === 'object';
+  }
+  if (
+    family === 'openai' ||
+    family === 'deepseek' ||
+    family === 'openrouter' ||
+    family === 'openai-compatible'
+  ) {
+    const choices = (body as { choices?: unknown }).choices;
+    return Array.isArray(choices) && choices.length > 0;
+  }
+  // google + anthropic both report an array of content containers.
+  const containers =
+    family === 'anthropic'
+      ? (body as { content?: unknown }).content
+      : (body as { candidates?: unknown }).candidates;
+  return Array.isArray(containers) && containers.length > 0;
+}
+
+/**
+ * PROD-DIAG — read the provider's error status token from a NON-OK response.
+ *
+ * The response is consumed through `clone().text()` so the ORIGINAL response
+ * stays unread (the caller may still need it) and the raw text is parsed into an
+ * object and immediately discarded. Failure to read/parse yields `undefined`:
+ * a diagnostic must never throw and must never turn a provider error into a
+ * different error. The text is never logged and never returned.
+ */
+async function readSafeProviderStatusReason(response: Response): Promise<string | undefined> {
+  try {
+    const text = await response.clone().text();
+    if (text.trim() === '') return undefined;
+    return safeProviderStatusReason(JSON.parse(text));
+  } catch {
+    // Unreadable/oversized/non-JSON error body — nothing safe to report.
+    return undefined;
+  }
 }
 
 function mapHttpFailure(
@@ -543,6 +802,16 @@ export async function validateProviderGeneration(
   const timeoutMs = input.timeoutMs ?? envTimeoutMs(env) ?? DEFAULT_GENERATION_TIMEOUT_MS;
   const modelId = input.modelId.trim();
   if (modelId === '') {
+    // PROD-DIAG — no request was issued at all, so this is reported as
+    // "not attempted" and must never be confused with a provider failure.
+    emitGenerationDiagnostic(input.onDiagnostic, {
+      providerFamily: input.family,
+      stage: 'validate',
+      modelId,
+      classification: 'generation_not_attempted',
+      errorKind: 'no_credential',
+      latencyMs: 0,
+    });
     return {
       ok: false,
       modelId,
@@ -569,11 +838,27 @@ export async function validateProviderGeneration(
     });
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
+      // PROD-DIAG — a provider error answers with a small JSON envelope whose
+      // `error.status`/`error.type` is a machine-readable enum token. Only the
+      // parsed envelope is read, only allow-listed tokens are kept, and the raw
+      // body is discarded — the response text is never logged.
+      const providerStatusReason = await readSafeProviderStatusReason(response);
       // BUGFIX (Ollama honesty) — a local runtime that REFUSES the model with
       // 404 has been reached and answered; the MODEL is missing, not the server.
       // Reporting this as "unreachable" is what told users with a running Ollama
       // that Ollama was not installed.
       if (input.family === 'ollama' && response.status === 404) {
+        emitGenerationDiagnostic(input.onDiagnostic, {
+          providerFamily: input.family,
+          stage: 'validate',
+          modelId,
+          classification: 'generation_http_error',
+          httpStatus: response.status,
+          errorKind: 'model_unavailable',
+          latencyMs,
+          noCredential: apiKey === undefined,
+          ...(providerStatusReason !== undefined ? { providerStatusReason } : {}),
+        });
         return {
           ok: false,
           modelId,
@@ -583,10 +868,40 @@ export async function validateProviderGeneration(
         };
       }
       const { message, errorKind } = mapHttpFailure(response.status, response.statusText);
+      emitGenerationDiagnostic(input.onDiagnostic, {
+        providerFamily: input.family,
+        stage: 'validate',
+        modelId,
+        classification: 'generation_http_error',
+        httpStatus: response.status,
+        errorKind,
+        latencyMs,
+        noCredential: apiKey === undefined,
+        ...(providerStatusReason !== undefined ? { providerStatusReason } : {}),
+      });
       return { ok: false, modelId, latencyMs, message: redactKey(message, apiKey), errorKind };
     }
     const body = await response.json();
     if (!plan.parse(body)) {
+      // PROD-DIAG — THE distinction this whole task exists for: the transport
+      // succeeded (HTTP 200) but the body carried no usable answer. This is NOT
+      // the same condition as an HTTP failure, yet the existing taxonomy reported
+      // both as `unavailable`, which is why the live Gemini failure could not be
+      // identified from logs. Only booleans + a character COUNT are reported;
+      // the answer text and the response body are never logged.
+      emitGenerationDiagnostic(input.onDiagnostic, {
+        providerFamily: input.family,
+        stage: 'validate',
+        modelId,
+        classification: 'generation_empty_response',
+        httpStatus: response.status,
+        errorKind: 'unavailable',
+        latencyMs,
+        noCredential: apiKey === undefined,
+        candidatePresent: hasGenerationCandidate(body, input.family),
+        contentPartPresent: generationAnswerLength(body, input.family) > 0,
+        answerLength: generationAnswerLength(body, input.family),
+      });
       return {
         ok: false,
         modelId,
@@ -595,13 +910,42 @@ export async function validateProviderGeneration(
         errorKind: 'unavailable',
       };
     }
+    // PROD-DIAG — the ONE success path. Logged so a production run always shows
+    // which of the two `ok` conditions actually happened.
+    emitGenerationDiagnostic(input.onDiagnostic, {
+      providerFamily: input.family,
+      stage: 'validate',
+      modelId,
+      classification: 'generation_success',
+      httpStatus: response.status,
+      latencyMs,
+      noCredential: apiKey === undefined,
+      candidatePresent: true,
+      contentPartPresent: true,
+      answerLength: generationAnswerLength(body, input.family),
+    });
     return { ok: true, modelId, latencyMs };
   } catch (error) {
     const { message, errorKind } = mapNetworkError(error, timeoutMs);
+    const latencyMs = Date.now() - startedAt;
+    // PROD-DIAG — the request never completed. `errorName` is a fixed platform
+    // identifier ('AbortError'/'TimeoutError'/…), never provider text, so it is
+    // safe; the error MESSAGE is deliberately not logged because an error can
+    // echo request material and is redacted only for the user-facing copy.
+    emitGenerationDiagnostic(input.onDiagnostic, {
+      providerFamily: input.family,
+      stage: 'validate',
+      modelId,
+      classification: 'generation_network_error',
+      errorKind,
+      latencyMs,
+      noCredential: apiKey === undefined,
+      networkErrorName: error instanceof Error ? error.name : undefined,
+    });
     return {
       ok: false,
       modelId,
-      latencyMs: Date.now() - startedAt,
+      latencyMs,
       message: redactKey(message, apiKey),
       errorKind,
     };
