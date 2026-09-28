@@ -22,12 +22,39 @@ import type { LocalChatMessage, LocalGenerateRequest } from '../types.js';
 export const DEFAULT_LOCAL_AGENT_PORT = 43_117;
 export const DEFAULT_LOCAL_AGENT_HOST = '127.0.0.1';
 
-/** Web origins allowed to call the agent. Local dev + the deployed app. */
+/**
+ * Web origins allowed to call the agent out of the box: local dev and the ONE
+ * production user-facing origin (deploy guide: `app.vedmoulya.com` → Vercel).
+ * Deployments with a different origin override this with
+ * `VEDMOULYA_LOCAL_AGENT_ALLOWED_ORIGINS` (comma-separated).
+ */
 export const DEFAULT_ALLOWED_ORIGINS: readonly string[] = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  'https://app.vedmoulya.com',
+  // Preview/deployment URL of the hosted app — kept for existing environments.
   'https://vedmoulya-web.vercel.app',
 ];
+
+/** Environment variable that overrides the CORS allow-list (comma-separated). */
+export const LOCAL_AGENT_ALLOWED_ORIGINS_ENV = 'VEDMOULYA_LOCAL_AGENT_ALLOWED_ORIGINS';
+
+/**
+ * Resolve the browser origins allowed to call the agent.
+ *
+ * An explicit comma-separated list wins; blank/absent falls back to the safe
+ * defaults (never an empty, deny-all list). Pure, so the CLI and any embedder
+ * resolve the list the SAME way and it stays testable.
+ */
+export function parseAllowedOrigins(raw: string | undefined): readonly string[] {
+  const trimmed = raw?.trim() ?? '';
+  if (trimmed === '') return DEFAULT_ALLOWED_ORIGINS;
+  const origins = trimmed
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin !== '');
+  return origins.length > 0 ? origins : DEFAULT_ALLOWED_ORIGINS;
+}
 
 export interface LocalAgentServerOptions {
   agent: LocalAgent;
@@ -56,6 +83,23 @@ function corsHeaders(origin: string | null): Record<string, string> {
     'access-control-max-age': '600',
     vary: 'Origin',
   };
+}
+
+/**
+ * Private Network Access (Chrome). A PUBLIC HTTPS page calling this loopback
+ * agent is blocked unless the preflight answer carries
+ * `Access-Control-Allow-Private-Network: true` — even when the origin itself is
+ * allow-listed. Echoed only when the browser actually asked, and only for an
+ * allow-listed origin (an unknown origin still gets nothing).
+ */
+function privateNetworkHeaders(
+  req: IncomingMessage,
+  origin: string | null,
+): Record<string, string> {
+  if (origin === null) return {};
+  return req.headers['access-control-request-private-network'] === 'true'
+    ? { 'access-control-allow-private-network': 'true' }
+    : {};
 }
 
 function resolveOrigin(req: IncomingMessage, allowed: readonly string[]): string | null {
@@ -114,13 +158,16 @@ function parseGenerateRequest(body: unknown): LocalGenerateRequest | null {
  */
 export function createLocalAgentServer(options: LocalAgentServerOptions): Server {
   const { agent } = options;
-  const allowed = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
+  // Explicit list wins; otherwise the host environment may configure it. This
+  // keeps ANY entrypoint (not only the CLI) configurable via the env var.
+  const allowed =
+    options.allowedOrigins ?? parseAllowedOrigins(process.env[LOCAL_AGENT_ALLOWED_ORIGINS_ENV]);
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const origin = resolveOrigin(req, allowed);
     const method = req.method ?? 'GET';
     if (method === 'OPTIONS') {
-      res.writeHead(204, { ...corsHeaders(origin) });
+      res.writeHead(204, { ...corsHeaders(origin), ...privateNetworkHeaders(req, origin) });
       res.end();
       return;
     }

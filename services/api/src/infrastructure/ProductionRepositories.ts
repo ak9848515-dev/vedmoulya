@@ -126,6 +126,16 @@ function isTestEnv(): boolean {
   return process.env.NODE_ENV === 'test';
 }
 
+/**
+ * True in a real deployment (production/staging). Strict environments must be
+ * told — loudly, but without failing startup — when a feature silently degrades
+ * because a secret is absent (e.g. no user-credential encryption key).
+ */
+function isStrictEnv(): boolean {
+  const env: string = process.env.NODE_ENV ?? 'development';
+  return env === 'production' || env === 'staging';
+}
+
 /** Singleton slot for the RAG repository (AI-RUNTIME-002). */
 const ragRegistrySlot: RepositorySlot<RagRepository> = {};
 
@@ -587,7 +597,21 @@ export function createProductionProviderPreferencesStore(): ProviderPreferencesS
 
 export function createProductionProviderCredentialService(): ProviderCredentialService | undefined {
   const keyMaterial = process.env.AI_CREDENTIAL_ENCRYPTION_KEY?.trim();
-  if (keyMaterial === undefined || keyMaterial === '') return undefined;
+  if (keyMaterial === undefined || keyMaterial === '') {
+    // A deployment without this key cannot store USER-owned provider credentials
+    // (there is no plaintext fallback — the platform credential still works).
+    // That is a valid degraded state, but it must never be SILENT: otherwise a
+    // user-supplied Gemini key is accepted, validated, then discarded, and the
+    // setup surfaces "requires an API key" as if none was ever supplied.
+    // Warn in strict environments so a missing key is diagnosable. No value is
+    // read or logged here (there is none).
+    if (isStrictEnv()) {
+      logger.warn(
+        'User-owned provider credential storage disabled: AI_CREDENTIAL_ENCRYPTION_KEY is not set',
+      );
+    }
+    return undefined;
+  }
   try {
     return new ProviderCredentialService(
       createProductionProviderCredentialStore(),

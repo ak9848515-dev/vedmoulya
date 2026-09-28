@@ -269,7 +269,26 @@ export class AIOrchestrationService extends BaseService {
       throw new NotFoundError('Provider', capability);
     }
 
-    return candidates;
+    return this.orderRealProvidersBeforeMock(candidates);
+  }
+
+  /**
+   * Mock is a LAST-RESORT provider, never a peer candidate.
+   *
+   * The deterministic mock stays REGISTERED in development/test (EPIC-019
+   * registry agreement, `listProviders`, doctor) and remains the honest
+   * fallback when no real adapter can serve the capability. But when a real
+   * adapter is registered for the same capability, the mock must not be
+   * chosen ahead of it — otherwise the autonomous loop appears to work while
+   * executing fake intelligence. This rule only SINKS the mock; the relative
+   * order of real providers is untouched (no local>cloud / free>paid policy).
+   */
+  private orderRealProvidersBeforeMock(candidates: ProviderAdapter[]): ProviderAdapter[] {
+    const mock = candidates.filter((provider) => provider.family === 'mock');
+    if (mock.length === 0) return candidates;
+    const real = candidates.filter((provider) => provider.family !== 'mock');
+    // No real adapter can serve → the mock remains the only (last-resort) path.
+    return real.length === 0 ? candidates : [...real, ...mock];
   }
 
   // ── Request Cache ────────────────────────────────────────────────────────
@@ -680,6 +699,10 @@ export class AIOrchestrationService extends BaseService {
         });
       }
     }
+    // Mock must never outrank a real adapter, even when the advisor's score
+    // model would otherwise place it first (mock is cheap/fast, not real).
+    // Re-sink it AFTER advisor ordering — see orderRealProvidersBeforeMock.
+    candidates = this.orderRealProvidersBeforeMock(candidates);
     selectionSpan.setAttribute('candidates', candidates.length);
     selectionSpan.end();
 

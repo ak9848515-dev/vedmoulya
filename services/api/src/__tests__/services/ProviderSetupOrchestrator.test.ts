@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ProviderSetupOrchestrator } from '../../services/ProviderSetupOrchestrator.js';
 import type { ProviderCredentialService, ProviderPreferencesService } from '@vedmoulya/providers';
+import {
+  InMemoryProviderCredentialStore,
+  ProviderCredentialService as RealProviderCredentialService,
+  createProviderCredentialCipher,
+} from '@vedmoulya/providers';
 
 describe('ProviderSetupOrchestrator', () => {
   let credentials: vi.Mocked<ProviderCredentialService>;
@@ -638,6 +643,45 @@ describe('ProviderSetupOrchestrator', () => {
       expect(result.recovery?.kind).toBe('check_credential');
     });
 
+    // PRODUCTION REPRO (Gemini key received but not persisted): the deployment
+    // has no credential encryption key, so the orchestrator is composed with a
+    // preferences service but WITHOUT a credential service. The user's key is
+    // genuinely accepted by the provider probe, yet it cannot be persisted.
+    // The pipeline must fail at the persist stage and must NOT enable/prefer a
+    // provider whose key was never stored. Reporting AUTH_REQUIRED here would
+    // tell a user who just pasted a working key to "add one" — the exact bug.
+    it('reports PERSISTENCE_FAILED when a key is supplied but no credential store is configured', async () => {
+      const keyless = new ProviderSetupOrchestrator({ preferences, probe, generate });
+      probe.mockResolvedValue({
+        connected: true,
+        credentialSource: 'USER',
+        models: [{ id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' }],
+      });
+      generate.mockResolvedValue({ ok: true, latencyMs: 20 });
+      preferences.setProviderEnabled.mockResolvedValue({ success: true });
+      preferences.updatePreferences.mockResolvedValue({ success: true });
+
+      const result = await keyless.setup({
+        userId: 'user-1',
+        family: 'google',
+        apiKey: 'AIza-real-looking-key',
+      });
+
+      expect(result.outcome).toBe('PERSISTENCE_FAILED');
+      expect(result.connected).toBe(false);
+      expect(result.stage).toBe('persist_credential');
+      expect(result.credentialStored).toBe(false);
+      expect(result.preferencesApplied).toBe(false);
+      // A provider whose credential was NOT stored must never be enabled or
+      // made the default — that is the half-configured state this guards.
+      expect(preferences.setProviderEnabled).not.toHaveBeenCalled();
+      expect(preferences.updatePreferences).not.toHaveBeenCalled();
+      // The message names the real problem; it must never tell the user to add
+      // the key they just supplied.
+      expect(result.message).not.toMatch(/add one/i);
+      expect(result.recovery?.kind).toBe('go_advanced');
+    });
+
     it('names the connected Google account separately when OAuth returned but no key is usable', async () => {
       const keyless = new ProviderSetupOrchestrator({ preferences, probe, generate });
       probe.mockResolvedValue({
@@ -710,6 +754,80 @@ describe('ProviderSetupOrchestrator', () => {
       expect(result.stage).toBe('validate');
       expect(result.message).toMatch(/did not answer/i);
       expect(preferences.setProviderEnabled).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── The configured-deployment path (the fix for "key received but not persisted") ──
+  // PRODUCTION REPRO: `credentialStored:false` with a supplied key can ONLY come
+  // from an orchestrator with no credential service. These tests pin the other
+  // half: when a credential service IS configured (AI_CREDENTIAL_ENCRYPTION_KEY
+  // present in production), the pasted key is really stored, readable back and
+  // the setup reaches SUCCESS.
+  describe('credential persistence with a configured credential service', () => {
+    const KEY = 'test-deployment-encryption-key-0001';
+
+    it('stores the pasted key, is readable through a fresh service, and reaches SUCCESS', async () => {
+      const store = new InMemoryProviderCredentialStore();
+      const realCredentials = new RealProviderCredentialService(
+        store,
+        createProviderCredentialCipher(KEY),
+      );
+      probe.mockResolvedValue({
+        connected: true,
+        credentialSource: 'USER',
+        models: [{ id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' }],
+      });
+      generate.mockResolvedValue({ ok: true, latencyMs: 20 });
+      preferences.setProviderEnabled.mockResolvedValue({ success: true });
+      preferences.updatePreferences.mockResolvedValue({ success: true });
+
+      const configured = new ProviderSetupOrchestrator({
+        credentials: realCredentials,
+        preferences,
+        probe,
+        generate,
+      });
+
+      const result = await configured.setup({
+        userId: 'user-1',
+        family: 'google',
+        apiKey: 'AIza-real-looking-key',
+      });
+
+      expect(result.outcome).toBe('SUCCESS');
+      expect(result.connected).toBe(true);
+      expect(result.credentialStored).toBe(true);
+      expect(preferences.setProviderEnabled).toHaveBeenCalledWith('user-1', 'google', true);
+
+      // The very read-back `refresh_state` depends on: a FRESH service over the
+      // SAME store resolves the owner's stored credential.
+      const reopened = new RealProviderCredentialService(
+        store,
+        createProviderCredentialCipher(KEY),
+      );
+      expect(await reopened.hasCredential('user-1', 'google')).toBe(true);
+      const resolved = await reopened.resolve('user-1', 'google');
+      expect(resolved.source).toBe('USER');
+      expect(resolved.secret).toBe('AIza-real-looking-key');
+
+      // The secret is never returned in the setup result.
+      expect(JSON.stringify(result)).not.toContain('AIza-real-looking-key');
+    });
+
+    it('keys credentials per owner and family — one user never resolves another\u2019s key', async () => {
+      const store = new InMemoryProviderCredentialStore();
+      const credentialsA = new RealProviderCredentialService(
+        store,
+        createProviderCredentialCipher(KEY),
+      );
+      await credentialsA.store('user-1', 'google', 'AIza-user-1');
+
+      const credentialsB = new RealProviderCredentialService(
+        store,
+        createProviderCredentialCipher(KEY),
+      );
+      expect(await credentialsB.hasCredential('user-2', 'google')).toBe(false);
+      expect((await credentialsB.resolve('user-2', 'google')).source).toBe('NONE');
     });
   });
 

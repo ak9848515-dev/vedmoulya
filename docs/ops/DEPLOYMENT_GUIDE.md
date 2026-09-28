@@ -261,9 +261,15 @@ Required when the corresponding feature is enabled:
 `GOOGLE_CLIENT_SECRET` · `GOOGLE_REDIRECT_URI` (when
 `FF_SOCIAL_LOGIN_ENABLED=true` — all non-loopback).
 
+Required for user-owned provider credentials: `AI_CREDENTIAL_ENCRYPTION_KEY` —
+a strong, non-blank secret of at least 16 characters. When it is absent, a
+user's own provider key (including the Gemini API key) cannot be stored: it is
+validated and then discarded, and setup reports the provider as needing a key.
+Unset disables user-owned credential storage (the platform key still works) and
+logs a warning — never a plaintext fallback.
+
 Recommended / optional (each has a documented degraded state — never a silent
-one): `AI_CREDENTIAL_ENCRYPTION_KEY` (unset disables user-owned provider
-credentials, the platform key still works) · `AI_MAX_INPUT_TOKENS` ·
+one): `AI_MAX_INPUT_TOKENS` ·
 `AI_MAX_OUTPUT_TOKENS` · `AI_PROVIDER_TIMEOUT_MS` · `AI_TOOL_ALLOWLIST` ·
 `AI_PROMPT_CACHE_ENABLED` · `AI_ENABLE_MOCK` · `AI_RUNTIME_LEGACY_RAW_FETCH` ·
 `AI_OLLAMA_BASE_URL` / `AI_OLLAMA_MODEL` · `AI_EXECUTION_MAX_ITERATIONS` ·

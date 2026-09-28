@@ -65,7 +65,12 @@ describe('installBackButtonHandler', () => {
   it('registers exactly one backButton listener (idempotent)', () => {
     installBackButtonHandler({ onBack, onExit, isRoot: () => isRoot });
     installBackButtonHandler({ onBack, onExit, isRoot: () => isRoot });
-    expect(appMock.addListener).toHaveBeenCalledTimes(1);
+    // Vitest 5 clears mock call history before every test (`clearMocks`
+    // defaults to true), which also discards the listener registered in
+    // `beforeAll`. Assert on the durable listener list instead: exactly one
+    // backButton listener exists for the whole suite despite the repeated
+    // installs above.
+    expect(listeners).toHaveLength(1);
   });
 
   it('pops history when not on the root tab', () => {

@@ -34,9 +34,9 @@ function createMockItem(overrides: Partial<ContextItem> = {}): ContextItem {
 }
 
 describe('InMemoryContextRepository', () => {
-  it('stores seed catalog items', () => {
+  it('stores seed catalog items', async () => {
     const repo = new InMemoryContextRepository(createCatalogContext());
-    expect(repo.count()).resolves.toBe(SEED_CONTEXT_SIZE);
+    await expect(repo.count()).resolves.toBe(SEED_CONTEXT_SIZE);
   });
 
   it('finds item by id', async () => {

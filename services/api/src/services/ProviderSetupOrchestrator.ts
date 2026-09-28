@@ -750,6 +750,24 @@ export class ProviderSetupOrchestrator {
     // is never stored. Without a deployment encryption key nothing is stored at
     // all, and the pipeline says so instead of pretending otherwise.
     seed.stage = 'persist_credential';
+    // BUGFIX (key accepted but not persisted) — the provider accepted the key
+    // the user pasted, but this deployment has NO encrypted credential store
+    // (AI_CREDENTIAL_ENCRYPTION_KEY unset or unusable). Previously the key was
+    // dropped SILENTLY: the pipeline still enabled the provider and applied the
+    // preference, then reported AUTH_REQUIRED at refresh_state ("requires an API
+    // key — add one to finish") as if the user had never supplied one. That left
+    // a half-configured provider that could never be used. Fail at the stage
+    // that actually failed — BEFORE any preference is written — and say what is
+    // missing, so a deployment misconfiguration is never mistaken for a missing
+    // user credential.
+    if (pastedKey !== undefined && this.credentials === undefined) {
+      return baseResult(
+        seed,
+        'PERSISTENCE_FAILED',
+        `VedMoulya cannot save your ${name} key securely on this deployment, so it was not connected.`,
+        { recovery: { kind: 'go_advanced', actionLabel: 'Advanced setup' } },
+      );
+    }
     try {
       seed.credentialStored = await this.persistCredential(request, pastedKey);
     } catch {

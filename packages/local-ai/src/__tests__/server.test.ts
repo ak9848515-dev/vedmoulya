@@ -1,7 +1,13 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { LocalAgent } from '../agent/agent.js';
 import { LocalRuntimeRegistry } from '../registry.js';
-import { startLocalAgentServer, type StartedLocalAgent } from '../agent/server.js';
+import {
+  DEFAULT_ALLOWED_ORIGINS,
+  LOCAL_AGENT_ALLOWED_ORIGINS_ENV,
+  parseAllowedOrigins,
+  startLocalAgentServer,
+  type StartedLocalAgent,
+} from '../agent/server.js';
 import { OllamaRuntimeAdapter } from '../adapters/ollama-runtime.js';
 
 const TAGS = {
@@ -142,5 +148,106 @@ describe('Local Agent HTTP server', () => {
       headers: { Origin: 'https://evil.example' },
     });
     expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});
+
+// ── Production-origin CORS + Private Network Access (Local AI connectivity) ──
+// The web app fetches the loopback agent directly. A public HTTPS page calling
+// a localhost address is blocked unless (a) its origin is allow-listed AND
+// (b) the Private Network Access preflight is answered. These tests pin both.
+describe('Local Agent CORS policy — production origins + private network access', () => {
+  it('includes the canonical production origin in the defaults', () => {
+    expect(DEFAULT_ALLOWED_ORIGINS).toContain('https://app.vedmoulya.com');
+    // Local development stays allowed.
+    expect(DEFAULT_ALLOWED_ORIGINS).toContain('http://localhost:3000');
+    expect(DEFAULT_ALLOWED_ORIGINS).toContain('http://127.0.0.1:3000');
+  });
+
+  it('allows the localhost and 127.0.0.1 origins, and rejects an unknown one', async () => {
+    // Exercise the DEFAULT policy (not the single-origin test helper).
+    const server = await startLocalAgentServer({
+      agent: agent(),
+      port: 0,
+      allowedOrigins: DEFAULT_ALLOWED_ORIGINS,
+    });
+    started = server;
+    for (const origin of ['http://localhost:3000', 'http://127.0.0.1:3000']) {
+      const response = await fetch(`${server.url}/health`, { headers: { Origin: origin } });
+      expect(response.headers.get('access-control-allow-origin')).toBe(origin);
+    }
+    const denied = await fetch(`${server.url}/health`, {
+      headers: { Origin: 'https://evil.example' },
+    });
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('answers the private-network preflight for an allowed origin', async () => {
+    const server = await start(agent());
+    const response = await fetch(`${server.url}/runtimes/ollama/verify`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://localhost:3000',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type',
+        'Access-Control-Request-Private-Network': 'true',
+      },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:3000');
+    expect(response.headers.get('access-control-allow-private-network')).toBe('true');
+  });
+
+  it('never grants the private-network header to a rejected origin', async () => {
+    const server = await start(agent());
+    const response = await fetch(`${server.url}/runtimes/ollama/verify`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://evil.example',
+        'Access-Control-Request-Private-Network': 'true',
+      },
+    });
+    expect(response.headers.get('access-control-allow-private-network')).toBeNull();
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('omits the private-network header when the browser did not ask for it', async () => {
+    const server = await start(agent());
+    const response = await fetch(`${server.url}/health`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'http://localhost:3000' },
+    });
+    expect(response.headers.get('access-control-allow-private-network')).toBeNull();
+  });
+
+  it('parses an explicit allow-list and falls back to the safe defaults', () => {
+    expect(parseAllowedOrigins('https://a.example, https://b.example')).toEqual([
+      'https://a.example',
+      'https://b.example',
+    ]);
+    // Blank/absent/empty entries must never produce a deny-all list.
+    expect(parseAllowedOrigins(undefined)).toBe(DEFAULT_ALLOWED_ORIGINS);
+    expect(parseAllowedOrigins('   ')).toBe(DEFAULT_ALLOWED_ORIGINS);
+    expect(parseAllowedOrigins(' , ')).toBe(DEFAULT_ALLOWED_ORIGINS);
+  });
+
+  it('lets the environment override the allow-list for a server with no explicit origins', async () => {
+    process.env[LOCAL_AGENT_ALLOWED_ORIGINS_ENV] = 'https://custom.example';
+    try {
+      const server = await startLocalAgentServer({ agent: agent(), port: 0 });
+      started = server;
+
+      const allowed = await fetch(`${server.url}/health`, {
+        headers: { Origin: 'https://custom.example' },
+      });
+      expect(allowed.headers.get('access-control-allow-origin')).toBe('https://custom.example');
+
+      // A default origin is NOT allowed once the environment overrides the list.
+      const denied = await fetch(`${server.url}/health`, {
+        headers: { Origin: 'http://localhost:3000' },
+      });
+      expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+    } finally {
+      delete process.env[LOCAL_AGENT_ALLOWED_ORIGINS_ENV];
+    }
   });
 });

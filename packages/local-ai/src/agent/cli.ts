@@ -11,9 +11,10 @@
 
 import { createDefaultLocalAgent } from './default-agent.js';
 import {
-  DEFAULT_ALLOWED_ORIGINS,
   DEFAULT_LOCAL_AGENT_HOST,
   DEFAULT_LOCAL_AGENT_PORT,
+  LOCAL_AGENT_ALLOWED_ORIGINS_ENV,
+  parseAllowedOrigins,
   startLocalAgentServer,
 } from './server.js';
 
@@ -24,13 +25,7 @@ function readPort(env: Record<string, string | undefined>): number {
 }
 
 function readAllowedOrigins(env: Record<string, string | undefined>): readonly string[] {
-  const raw = env['VEDMOULYA_LOCAL_AGENT_ALLOWED_ORIGINS'];
-  if (raw === undefined || raw.trim() === '') return DEFAULT_ALLOWED_ORIGINS;
-  const origins = raw
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter((origin) => origin !== '');
-  return origins.length > 0 ? origins : DEFAULT_ALLOWED_ORIGINS;
+  return parseAllowedOrigins(env[LOCAL_AGENT_ALLOWED_ORIGINS_ENV]);
 }
 
 async function main(): Promise<void> {
