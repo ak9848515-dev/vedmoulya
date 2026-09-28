@@ -18,7 +18,7 @@ const mockContainer = vi.hoisted(() => {
 });
 
 const mockModuleRegistry = vi.hoisted(() => ({
-  register: vi.fn(),
+  register: vi.fn<(module: { name: string }) => void>(),
 }));
 
 const mockInMemoryEventBus = vi.hoisted(() => vi.fn());
@@ -49,6 +49,12 @@ vi.mock('../../persistence/DatabaseConnection.js', () => ({
 }));
 
 const { registerKnowledgeServices, knowledgeModule } = await import('../KnowledgeModule.js');
+
+// The module self-registers once, while it is evaluated above. Vitest 5 enables
+// `clearMocks` by default, which discards recorded calls before every test, so
+// snapshot the registration here rather than reading the cleared mock inside
+// the test.
+const selfRegisteredModules = mockModuleRegistry.register.mock.calls.map(([module]) => module);
 
 describe('KnowledgeModule', () => {
   beforeEach(() => {
@@ -112,8 +118,6 @@ describe('KnowledgeModule', () => {
   });
 
   it('self-registers with the module registry', () => {
-    expect(mockModuleRegistry.register).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'knowledge' }),
-    );
+    expect(selfRegisteredModules).toContainEqual(expect.objectContaining({ name: 'knowledge' }));
   });
 });

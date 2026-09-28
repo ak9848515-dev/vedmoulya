@@ -19,7 +19,7 @@ const mockContainer = vi.hoisted(() => {
 });
 
 const mockModuleRegistry = vi.hoisted(() => ({
-  register: vi.fn(),
+  register: vi.fn<(module: { name: string }) => void>(),
 }));
 
 const mockInMemoryEventBus = vi.hoisted(() => vi.fn());
@@ -54,12 +54,19 @@ vi.mock('../../persistence/DatabaseConnection.js', () => ({
 // Import AFTER mocks are registered
 const { registerExecutionServices, executionModule } = await import('../ExecutionModule.js');
 
+// The module self-registers once, while it is evaluated above. Vitest 5 enables
+// `clearMocks` by default, which discards recorded calls before every test, so
+// snapshot the registration here rather than reading the cleared mock inside
+// the test.
+const selfRegisteredModules = mockModuleRegistry.register.mock.calls.map(([module]) => module);
+
 describe('ExecutionModule', () => {
   beforeEach(() => {
     mockContainer.registry.clear();
     mockContainer.register.mockClear();
-    // Note: mockModuleRegistry.register is NOT cleared here — it fires once at
-    // module import time (top-level moduleRegistry.register(executionModule)).
+    // Note: mockModuleRegistry.register is not cleared here — its import-time
+    // registration (top-level moduleRegistry.register(executionModule)) is
+    // captured in `selfRegisteredModules` above.
   });
 
   it('registers db, repository, cache, event publisher, and observability services', () => {
@@ -119,8 +126,6 @@ describe('ExecutionModule', () => {
   });
 
   it('self-registers with the module registry', () => {
-    expect(mockModuleRegistry.register).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'execution' }),
-    );
+    expect(selfRegisteredModules).toContainEqual(expect.objectContaining({ name: 'execution' }));
   });
 });
