@@ -372,7 +372,13 @@ export class MissionControllerService {
     }
 
     const requiredCaps = mission.constraints.requiredCapabilities ?? [];
-    const providerStatus = await this.options.providerAvailability.getProviderStatus(requiredCaps);
+    // PROVIDER-01 → Mission: availability is scoped to the mission OWNER so a
+    // user's own stored provider credential can satisfy their mission without
+    // becoming visible to any other user.
+    const providerStatus = await this.options.providerAvailability.getProviderStatus(
+      requiredCaps,
+      mission.userId,
+    );
     if (!providerStatus.available) {
       const pendingObjective = mission.objectives.find(
         (o) => o.state === 'PENDING' || o.state === 'READY',
@@ -1208,8 +1214,10 @@ export class MissionControllerService {
     // Provider-wait recovery (§18): re-check availability exactly once.
     if (mission.state === 'WAITING_FOR_PROVIDER') {
       const requiredCapabilities = mission.constraints.requiredCapabilities ?? [];
-      const providerStatus =
-        await this.options.providerAvailability.getProviderStatus(requiredCapabilities);
+      const providerStatus = await this.options.providerAvailability.getProviderStatus(
+        requiredCapabilities,
+        mission.userId,
+      );
       if (providerStatus.available) {
         this.recordActivity(
           mission,
@@ -1330,8 +1338,10 @@ export class MissionControllerService {
       let available = false;
       let capableProviderIds: string[] = [];
       try {
-        const status =
-          await this.options.providerAvailability.getProviderStatus(requiredCapabilities);
+        const status = await this.options.providerAvailability.getProviderStatus(
+          requiredCapabilities,
+          candidate.userId,
+        );
         available = status.available;
         capableProviderIds = status.capableProviders.map((provider) => provider.providerId);
       } catch (error) {

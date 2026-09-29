@@ -34,7 +34,12 @@ export class SimpleProviderAvailability implements ProviderAvailabilityPort {
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
-  async getProviderStatus(requiredCapabilities: string[]): Promise<ProviderStatus> {
+  async getProviderStatus(
+    requiredCapabilities: string[],
+    // PROVIDER-01 → Mission: this in-memory double has no per-user
+    // credentials, so `userId` is accepted for port compatibility only.
+    _userId?: string,
+  ): Promise<ProviderStatus> {
     const capableProviders = this.providers.filter((p) => {
       if (!p.healthy) return false;
       return requiredCapabilities.every((cap) => p.capabilities.includes(cap));

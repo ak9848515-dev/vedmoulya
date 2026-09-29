@@ -73,7 +73,16 @@ export interface ObjectiveSelectionPort {
 
 // -- Provider Availability Port ------------------------------------
 export interface ProviderAvailabilityPort {
-  getProviderStatus(requiredCapabilities: string[]): Promise<ProviderStatus>;
+  /**
+   * Whether at least one provider can serve the required capabilities.
+   *
+   * PROVIDER-01 → Mission: `userId` (when supplied) scopes availability to
+   * the OWNING user, so a provider the user connected with their OWN stored
+   * credential becomes eligible for THAT user's missions without becoming a
+   * deployment-wide provider. When omitted, only the platform providers are
+   * considered — exactly the pre-existing behavior.
+   */
+  getProviderStatus(requiredCapabilities: string[], userId?: string): Promise<ProviderStatus>;
 }
 
 // -- Goal Understanding Port (delegates to planning) --------------

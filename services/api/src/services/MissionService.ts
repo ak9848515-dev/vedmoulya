@@ -28,7 +28,9 @@ import {
   ensureMissionPersistence,
 } from '@vedmoulya/mission-runtime';
 import { registerPlatformProviders } from '@vedmoulya/orchestrator';
+import type { ProviderCredentialService } from '@vedmoulya/providers';
 import type { MissionRuntime, MissionRuntimeOptions } from '@vedmoulya/mission-runtime';
+import { createMissionUserProviderRegistrar } from './MissionUserProviders.js';
 import {
   ExecutionMemoryService,
   MemoryIntelligenceStoreAdapter,
@@ -180,6 +182,14 @@ export interface MissionServiceOptions {
   requireDurablePersistence?: boolean;
   /** Bounded activity log length per mission (browser memory safety). */
   maxActivityPerMission?: number;
+  /**
+   * PROVIDER-01 → Mission — the deployment's encrypted per-user provider
+   * credential service. When present, a provider a user connected with their
+   * OWN credential becomes eligible for THAT user's missions (owner-scoped;
+   * never deployment-wide). Absent → platform environment credentials only,
+   * i.e. the exact previous behavior.
+   */
+  credentials?: ProviderCredentialService;
 }
 
 /**
@@ -288,6 +298,9 @@ export class MissionService {
     const memory = this.options.sql
       ? await this.createDurableExecutionMemory(this.options.sql)
       : undefined;
+    // The user-provider registrar is undefined unless this deployment can
+    // really decrypt/store user credentials — never fabricated.
+    const registerUserProviders = createMissionUserProviderRegistrar(this.options.credentials);
     const runtime = createMissionRuntime({
       workspaceRoot: this.options.workspaceRoot ?? resolveDefaultMissionWorkspace(),
       stores,
@@ -301,6 +314,11 @@ export class MissionService {
           // normal path; no separate mission execution architecture).
           registerPlatformProviders(orchestrator);
         }),
+      // PROVIDER-01 → Mission: when the deployment can store user credentials,
+      // register the mission OWNER's own credential-backed adapters into a
+      // per-user orchestrator, so a provider the user connected is genuinely
+      // used by their mission (owner-scoped; platform providers preserved).
+      ...(registerUserProviders ? { registerUserProviders } : {}),
       ...this.options.runtimeOptions,
     });
     logger.info('MissionService: MissionRuntime composed (BLD-024)', {

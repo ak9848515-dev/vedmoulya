@@ -18,6 +18,7 @@ export type {
 
 // Adapters — provider availability over the frozen AIOrchestrationService
 export { OrchestratorProviderAvailability } from './adapters/OrchestratorProviderAvailability.js';
+export type { UserOrchestratorResolver } from './adapters/OrchestratorProviderAvailability.js';
 
 // Adapters — routing intelligence ports over the real registered adapters
 export {
@@ -92,6 +93,7 @@ export {
   RunVerificationAdapter,
   planToolNames,
 } from './adapters/PlanningExecutionPorts.js';
+export type { UserAgentResolver } from './adapters/PlanningExecutionPorts.js';
 
 // Adapters — learning estate (advisory only)
 export {

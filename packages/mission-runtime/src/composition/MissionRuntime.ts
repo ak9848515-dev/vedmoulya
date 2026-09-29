@@ -79,6 +79,7 @@ import {
   RunRegistry,
   RunVerificationAdapter,
 } from '../adapters/PlanningExecutionPorts.js';
+import type { UserAgentResolver } from '../adapters/PlanningExecutionPorts.js';
 import {
   MissionExecutionMemoryAdapter,
   MissionExperienceOptimizationAdapter,
@@ -128,6 +129,23 @@ export interface MissionRuntimeOptions {
    * configured — never silently mocked in production).
    */
   registerProviders?: (orchestrator: AIOrchestrationService) => void;
+  /**
+   * PROVIDER-01 → Mission — user-scoped provider registration.
+   *
+   * When wired, every provider-facing decision for a mission is served by a
+   * PER-USER orchestrator: the platform providers registered above PLUS the
+   * OWNER's own credential-backed adapters. A provider the user connected
+   * through the Providers screen therefore becomes genuinely usable by THAT
+   * user's missions — without the credential ever becoming a deployment-wide
+   * provider for anyone else. Absent → the shared orchestrator only
+   * (unchanged behavior).
+   *
+   * The callback receives the freshly-created orchestrator and the mission
+   * owner's id; it must resolve the credential through the EXISTING credential
+   * service and register the EXISTING adapter. It must never log, persist or
+   * return secret material.
+   */
+  registerUserProviders?: (orchestrator: AIOrchestrationService, userId: string) => Promise<void>;
   /** Additional deterministic templates for the frozen planner. */
   extraPlannerTemplates?: readonly PlanTemplate[];
   /** Persistence override (defaults to in-memory; use ensureMissionPersistence for durable). */
@@ -231,6 +249,38 @@ export function buildMissionRuntimeComponents(
     orchestrator.configureIntelligence(createOrchestratorRoutingPorts(orchestrator));
   }
 
+  // ── PROVIDER-01 → Mission: per-user orchestrators ──────────────────────
+  //    A user who connected a provider with their OWN credential must be
+  //    able to run missions with it WITHOUT that credential becoming a
+  //    deployment-wide provider. When a user registrar is wired, each
+  //    mission owner gets their own orchestrator (platform providers + their
+  //    own adapters only), created once and reused. Every other runtime
+  //    keeps the shared orchestrator — and every user keeps every platform
+  //    provider, so environment-configured providers are unaffected.
+  const userOrchestrators = new Map<string, Promise<AIOrchestrationService>>();
+  const resolveUserOrchestrator =
+    options.registerUserProviders === undefined
+      ? undefined
+      : (userId: string): Promise<AIOrchestrationService> => {
+          const existing = userOrchestrators.get(userId);
+          if (existing) return existing;
+          const created = (async (): Promise<AIOrchestrationService> => {
+            const userOrchestrator = new AIOrchestrationService(options.orchestratorOptions);
+            // Platform providers first — a user credential OVERLAYS the
+            // deployment's providers, it never removes them.
+            options.registerProviders?.(userOrchestrator);
+            // Then the owner's own credential-backed adapters, resolved
+            // through the existing credential service by the host wiring.
+            await options.registerUserProviders?.(userOrchestrator, userId);
+            userOrchestrator.configureIntelligence(
+              createOrchestratorRoutingPorts(userOrchestrator),
+            );
+            return userOrchestrator;
+          })();
+          userOrchestrators.set(userId, created);
+          return created;
+        };
+
   // ── Governed ToolRuntime: safe tools + bounded, path-jailed workspace ──
   const workspace = new WorkspaceRootBinding();
   if (options.workspaceRoot) workspace.setRoot(options.workspaceRoot);
@@ -283,6 +333,32 @@ export function buildMissionRuntimeComponents(
     clock: new SystemClock(),
   });
   const planning = new PlanningApplicationService({ planner, executor: agent });
+
+  // ── PROVIDER-01 → Mission: per-user execution agents ──────────────────
+  //    The agent's AI boundary must answer from the OWNER's orchestrator,
+  //    otherwise the run would route to the shared deployment providers and
+  //    silently ignore the credential the user connected. The tools are the
+  //    SAME shared, governed registry — only the AI boundary is user-scoped.
+  const userAgents = new Map<string, Promise<AgentExecutionService>>();
+  const resolveUserAgent = ((): UserAgentResolver | undefined => {
+    const resolveOrchestrator = resolveUserOrchestrator;
+    if (resolveOrchestrator === undefined) return undefined;
+    return (userId: string): Promise<AgentExecutionService> => {
+      const existing = userAgents.get(userId);
+      if (existing) return existing;
+      const created = (async (): Promise<AgentExecutionService> => {
+        const userOrchestrator = await resolveOrchestrator(userId);
+        return new AgentExecutionService({
+          ai: new AIOrchestrationAgentPort(userOrchestrator),
+          tools: toolPort,
+          toolRegistry: toolPort,
+          clock: new SystemClock(),
+        });
+      })();
+      userAgents.set(userId, created);
+      return created;
+    };
+  })();
 
   // ── Learning estate (frozen services + their infrastructure) ──
   const memory = options.memory ?? new ExecutionMemoryService();
@@ -348,12 +424,15 @@ export function buildMissionRuntimeComponents(
     runs,
     ports: {
       objectiveSelector: new DevelopmentObjectiveSelector(inspector),
-      providerAvailability: new OrchestratorProviderAvailability(orchestrator),
+      providerAvailability: new OrchestratorProviderAvailability(
+        orchestrator,
+        resolveUserOrchestrator,
+      ),
       goalUnderstanding: new SimpleGoalUnderstanding(),
       planner: new MissionPlanningAdapter(planning, {
         grantedPermissionClasses: missionPermissionClasses,
       }),
-      executor: new AgentExecutionAdapter(agent, runs),
+      executor: new AgentExecutionAdapter(agent, runs, resolveUserAgent),
       verifier: new RunVerificationAdapter(runs),
       executionMemory: new MissionExecutionMemoryAdapter(memory, runs),
       experienceOptimization: new MissionExperienceOptimizationAdapter(optimization),

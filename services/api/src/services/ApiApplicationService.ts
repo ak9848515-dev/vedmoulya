@@ -2376,6 +2376,11 @@ export class ApiApplicationService {
         workspaceRoot: process.env.MISSION_WORKSPACE_ROOT?.trim() || undefined,
         sql: this.hasDatabase() ? createEISql('vedmoulya-missions') : undefined,
         requireDurablePersistence: this.isProductionEnvironment(),
+        // PROVIDER-01 → Mission: the SAME encrypted, owner-scoped credential
+        // service the Providers screen writes through, so a provider the user
+        // connected is genuinely usable by their missions. Undefined when this
+        // deployment cannot store user credentials (platform keys only).
+        credentials: this.providerCredentialService,
       });
 
     // BLD-025 §1 — Discover-and-recover: on process boot, inspect persisted

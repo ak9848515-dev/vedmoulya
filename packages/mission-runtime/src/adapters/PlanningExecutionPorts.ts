@@ -15,6 +15,7 @@
 
 import type {
   AgentExecutionRun,
+  AgentExecutionService,
   AgentPlan,
   AgentRunBudgetConfig,
   ToolPermissionClass,
@@ -223,10 +224,19 @@ export function planToolNames(plan: AgentPlan): string[] {
  * tool the mission does not allow fails with PERMISSION_DENIED and never
  * runs). Run usage flows back to the controller's budget accounting.
  */
+/**
+ * PROVIDER-01 → Mission: resolves the OWNER's agent (bound to a per-user
+ * orchestrator carrying that user's own credential-backed adapter) so an
+ * objective executes on the provider the user actually connected. Absent →
+ * the shared deployment agent (unchanged behavior).
+ */
+export type UserAgentResolver = (userId: string) => Promise<AgentExecutionService>;
+
 export class AgentExecutionAdapter implements ExecutionPort {
   constructor(
-    private readonly agent: import('@vedmoulya/agent-execution').AgentExecutionService,
+    private readonly agent: AgentExecutionService,
     private readonly runs: RunRegistry,
+    private readonly resolveUserAgent?: UserAgentResolver,
   ) {}
 
   async executePlan(
@@ -259,7 +269,12 @@ export class AgentExecutionAdapter implements ExecutionPort {
         };
       }
     }
-    const run = await this.agent.start({
+    // PROVIDER-01 → Mission: when a user-scoped agent is wired, the run
+    // executes on THAT user's orchestrator, so the generation is performed by
+    // the adapter built from the same credential the user connected — never
+    // another user's, never a deployment-wide key the user did not supply.
+    const agent = this.resolveUserAgent ? await this.resolveUserAgent(userId) : this.agent;
+    const run = await agent.start({
       userId,
       goal: plan.objective,
       plan,
