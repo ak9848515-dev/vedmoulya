@@ -245,6 +245,32 @@ export class AIOrchestrationService extends BaseService {
     return this.providers.get(name);
   }
 
+  /**
+   * Can this runtime ACTUALLY serve a request for `capability` right now?
+   *
+   * A pure registry query over the very same candidate selection
+   * `orchestrate`/`stream` perform — registered adapters only, no provider
+   * call, no cache lookup, no telemetry. It exists so the "AI Ready" signal
+   * reports the exact predicate that decides whether a real request can be
+   * routed, instead of a provider descriptor's theoretical capability.
+   */
+  canServe(
+    capability: CapabilityType,
+    tier: QualityTier = 'standard',
+  ): { ok: boolean; providers: string[]; reason?: string } {
+    try {
+      const candidates = this.selectCandidates(capability, tier);
+      return { ok: true, providers: candidates.map((provider) => provider.name) };
+    } catch (error) {
+      // An empty/invalid candidate set is reported honestly — never as ready.
+      return {
+        ok: false,
+        providers: [],
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   // ── Capability Routing ───────────────────────────────────────────────────
 
   private selectCandidates(capability: CapabilityType, tier: QualityTier): ProviderAdapter[] {
@@ -966,6 +992,11 @@ export class AIOrchestrationService extends BaseService {
       );
       emit({ type: 'status', stage: 'streaming' });
       let text = '';
+      // REAL usage the provider adapter reports on its terminal `done` chunk
+      // (the same SDK usage its non-streaming `execute` path uses). Absent →
+      // the pre-existing deterministic output estimate is kept; nothing is
+      // invented.
+      let streamUsage: { input: number; output: number; cost?: number } | undefined;
       try {
         for await (const chunk of streamFn({
           messages,
@@ -978,18 +1009,49 @@ export class AIOrchestrationService extends BaseService {
             data?: {
               text?: string;
               latencyMs?: number;
-              tokenUsage?: { input: number; output: number };
+              tokenUsage?: { input?: number; output?: number; total?: number };
+              cost?: number;
             };
           };
           if (c.type === 'content' && c.data?.text) {
             text += c.data.text;
             emit({ type: 'content', stage: 'streaming', content: c.data.text });
           } else if (c.type === 'done' && c.data) {
+            // Only take the adapter's REAL numbers; a partially reported usage
+            // keeps the estimate for the part the provider did not supply.
+            const usage = c.data.tokenUsage;
+            if (usage !== undefined) {
+              streamUsage = {
+                input: typeof usage.input === 'number' ? usage.input : 0,
+                output:
+                  typeof usage.output === 'number'
+                    ? usage.output
+                    : TokenEstimationService.estimateTokens(text),
+              };
+            }
+            if (typeof c.data.cost === 'number') {
+              streamUsage = {
+                input: streamUsage?.input ?? 0,
+                output: streamUsage?.output ?? TokenEstimationService.estimateTokens(text),
+                cost: c.data.cost,
+              };
+            }
             emit({ type: 'done', data: c.data });
           }
         }
         streamSpan.setAttribute('status', 'success');
-        streamSpan.setAttribute('output_tokens', TokenEstimationService.estimateTokens(text));
+        streamSpan.setAttribute(
+          'output_tokens',
+          streamUsage?.output ?? TokenEstimationService.estimateTokens(text),
+        );
+        if (streamUsage !== undefined) {
+          streamSpan.setAttribute('input_tokens', streamUsage.input);
+        }
+        // The provider's OWN pricing produced this cost; when the adapter cannot
+        // price the call the attribute is simply absent (never a made-up value).
+        if (streamUsage?.cost !== undefined) {
+          streamSpan.setAttribute('cost', streamUsage.cost);
+        }
         streamSpan.end();
         this.recordExecutionHealth({
           providerId: streamingProvider.name,
@@ -1008,7 +1070,7 @@ export class AIOrchestrationService extends BaseService {
         emit({ type: 'error', data: { message: 'streaming failed' } });
         throw error;
       }
-      final = this.buildStreamedResponse(streamingProvider, text, request, aiRequest);
+      final = this.buildStreamedResponse(streamingProvider, text, request, aiRequest, streamUsage);
     } else {
       // Non-streaming provider: the full response is delivered as a single
       // content chunk, but the run still advertises the streaming stage so
@@ -1516,8 +1578,14 @@ export class AIOrchestrationService extends BaseService {
     text: string,
     _request: OrchestrateRequestDTO,
     _aiRequest: AIRequest,
+    usage?: { input: number; output: number; cost?: number },
   ): AIResponse {
-    const tokens = TokenEstimationService.estimateTokens(text);
+    // The adapter's REAL usage when it supplied one; otherwise the deterministic
+    // estimate the streamed path has always used. Cost is USD from the
+    // provider's own pricing, and stays 0 when the adapter could not price the
+    // call (never fabricated).
+    const outputTokens = usage?.output ?? TokenEstimationService.estimateTokens(text);
+    const inputTokens = usage?.input ?? 0;
     return {
       content: text,
       provider: provider.name,
@@ -1525,8 +1593,8 @@ export class AIOrchestrationService extends BaseService {
       confidence: 0.9,
       qualityScore: 8.0,
       latency: 0,
-      cost: 0,
-      tokenUsage: { input: 0, output: tokens, total: tokens },
+      cost: usage?.cost ?? 0,
+      tokenUsage: { input: inputTokens, output: outputTokens, total: inputTokens + outputTokens },
       validation: {
         passed: true,
         checks: [{ name: 'format', passed: true, score: 10 }],

@@ -26,6 +26,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { AIOrchestrationService } from '@vedmoulya/services';
+import type { AIOrchestrationOptions } from '@vedmoulya/services';
 import type { ToolRegistry, ToolRegistryOptions } from '@vedmoulya/services/ai/runtime/ToolRuntime';
 import { AgentExecutionService, AIOrchestrationAgentPort } from '@vedmoulya/agent-execution';
 import type { ToolPermissionClass } from '@vedmoulya/agent-execution';
@@ -120,8 +121,14 @@ export interface MissionRuntimeOptions {
   missionPermissionClasses?: ToolPermissionClass[];
   /** Inject an existing orchestrator; otherwise a fresh one is created. */
   orchestrator?: AIOrchestrationService;
-  /** Narrow orchestrator tuning (retry backoff for tests, etc.). */
-  orchestratorOptions?: { retryBaseDelayMs?: number };
+  /**
+   * Orchestrator tuning for the runtime's OWN orchestrators (shared + each
+   * per-user one): retry backoff, and — for hosts that supply it — the SAME
+   * `observability` (AIObservability) pipeline the direct AI path uses, so
+   * Mission AI execution emits the same trace/usage telemetry instead of a
+   * second telemetry system. Absent → unchanged NOOP behavior.
+   */
+  orchestratorOptions?: AIOrchestrationOptions;
   /**
    * Provider registration hook — production wiring passes the platform
    * registrar (registerPlatformProviders from @vedmoulya/orchestrator).

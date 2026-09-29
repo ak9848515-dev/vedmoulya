@@ -6,11 +6,13 @@
 // the existing AI Companion (AI-RUNTIME-002 stream) with the typed question —
 // no API keys, no provider configuration, no model selection required.
 //
-// Honesty: the readiness chip reflects the REAL runtime provider registry
-// (providers.getRuntimeStatus → canExecute). "AI Ready" is only claimed when a
-// provider that can actually execute exists (dev mock counts, real keys count,
-// catalog-only providers never do). This is composition over the existing
-// provider runtime + AI Companion + UI store — no new engine.
+// Honesty: the readiness chip reflects the user's ACTUAL runtime — the same
+// user-scoped runtime the Ask request executes on (registered adapters +
+// capability), never a provider descriptor's theoretical `canExecute`.
+// "AI Ready" is only claimed when a provider can really serve the request
+// (a user-connected key counts, a configured platform key counts, an
+// unconfigured/catalog-only provider never does). This is composition over the
+// existing provider runtime + AI Companion + UI store — no new engine.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
@@ -19,7 +21,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowUp, Sparkles, Settings2 } from 'lucide-react';
 import { useUIStore } from '../../stores/ui-store.js';
-import { useProviderRuntimeStatus } from '../../lib/api-client.js';
+import { useAIReadiness } from '../../lib/api-client.js';
 
 export interface AskAIInputProps {
   userId: string;
@@ -35,12 +37,12 @@ export function AskAIInput({ userId }: AskAIInputProps): React.JSX.Element {
   const setAiPanelOpen = useUIStore((s) => s.setAiPanelOpen);
   const setPendingQuestion = useUIStore((s) => s.setPendingQuestion);
   const [value, setValue] = useState('');
-  const runtime = useProviderRuntimeStatus(userId);
+  const readiness = useAIReadiness(userId);
 
-  // Honest readiness: at least one registered provider that can actually
-  // execute a request (EPIC-019 vocabulary). Unknown while the query loads.
-  const readinessKnown = !runtime.isLoading && !runtime.isError;
-  const ready = readinessKnown && (runtime.data?.providers ?? []).some((p) => p.canExecute);
+  // Honest readiness: a registered provider that can actually serve the Ask
+  // request on THIS user's runtime. Unknown while the query loads.
+  const readinessKnown = !readiness.isLoading && !readiness.isError;
+  const ready = readinessKnown && readiness.data?.ready === true;
 
   const ask = (question: string): void => {
     const trimmed = question.trim();

@@ -20,7 +20,11 @@ const mocks = vi.hoisted(() => ({
   setAiPanelOpen: vi.fn(),
   setPendingQuestion: vi.fn(),
   push: vi.fn(),
-  runtimeProviders: [{ canExecute: true }] as Array<{ canExecute: boolean }>,
+  readiness: { ready: true, capability: 'reasoning', providers: ['mock'] } as {
+    ready: boolean;
+    capability: string;
+    providers: string[];
+  },
   runtimeLoading: false,
 }));
 
@@ -37,8 +41,8 @@ vi.mock('../../../stores/ui-store.js', () => ({
 }));
 
 vi.mock('../../../lib/api-client.js', () => ({
-  useProviderRuntimeStatus: () => ({
-    data: { providers: mocks.runtimeProviders },
+  useAIReadiness: () => ({
+    data: mocks.readiness,
     isLoading: mocks.runtimeLoading,
     isError: false,
   }),
@@ -49,7 +53,7 @@ describe('AskAIInput (SPRINT-048 immediate AI readiness)', () => {
     mocks.setAiPanelOpen.mockReset();
     mocks.setPendingQuestion.mockReset();
     mocks.push.mockReset();
-    mocks.runtimeProviders = [{ canExecute: true }];
+    mocks.readiness = { ready: true, capability: 'reasoning', providers: ['mock'] };
     mocks.runtimeLoading = false;
   });
 
@@ -77,14 +81,14 @@ describe('AskAIInput (SPRINT-048 immediate AI readiness)', () => {
   });
 
   it('shows AI setup needed when no provider can execute (honesty)', () => {
-    mocks.runtimeProviders = [{ canExecute: false }];
+    mocks.readiness = { ready: false, capability: 'reasoning', providers: [] };
     render(<AskAIInput userId="u1" />);
     expect(screen.getByText('AI setup needed')).toBeTruthy();
     expect(screen.queryByText('AI Ready')).toBeNull();
   });
 
   it('links to AI Providers from the setup-needed state', () => {
-    mocks.runtimeProviders = [{ canExecute: false }];
+    mocks.readiness = { ready: false, capability: 'reasoning', providers: [] };
     render(<AskAIInput userId="u1" />);
     fireEvent.click(screen.getByRole('button', { name: /AI setup needed/i }));
     expect(mocks.push).toHaveBeenCalledWith('/providers');

@@ -34,10 +34,17 @@ export class TraceProviderOtelBridge implements OtelBridge {
     end(status?: 'ok' | 'error'): void;
     setAttribute(key: string, value: string | number | boolean): void;
   } {
+    // OWNER-SCOPED TRACES: the AI runtime emits `ai.user_id` (the authenticated
+    // session user) when user correlation is enabled. Promote it onto the trace
+    // record as its `userId` so the owner-scoped CostLedger/TraceStore queries
+    // can see real AI usage. This is the userId ONLY — never a credential,
+    // token or secret (those are never placed in span attributes at all).
+    const userId = ownerUserId(attributes);
     const handle: TelemetrySpanHandle = this.provider.startSpan({
       name,
       kind: 'ai',
       attributes: redactAttributes(attributes),
+      ...(userId !== undefined ? { userId } : {}),
     });
     return {
       end: (status: 'ok' | 'error' = 'ok'): void => {
@@ -48,6 +55,16 @@ export class TraceProviderOtelBridge implements OtelBridge {
       },
     };
   }
+}
+
+/**
+ * The owning user id carried by an AI span, or undefined when absent. Only a
+ * non-empty string is accepted, so a malformed value degrades to "no owner"
+ * (the trace stays unattributed) rather than recording something untrue.
+ */
+function ownerUserId(attributes?: Record<string, string | number | boolean>): string | undefined {
+  const value = attributes?.['ai.user_id'];
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
 /** Redact string attributes (defense-in-depth; structured numbers pass). */

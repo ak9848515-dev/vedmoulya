@@ -8,6 +8,7 @@
 // Composition
 export {
   buildMissionRuntimeComponents,
+  cacheUserInitialization,
   createMissionRuntime,
 } from './composition/MissionRuntime.js';
 export type {

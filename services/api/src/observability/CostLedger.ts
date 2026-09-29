@@ -145,8 +145,17 @@ export class CostLedger {
         durationMs: trace.endedAt !== undefined ? trace.endedAt - trace.startedAt : undefined,
       };
 
+      // A trace that ALREADY carries an engine-level usage rollup (loop.run /
+      // factory.build record tokens_total + cost_usd, and loop.step events are
+      // summed below) must not ALSO count the AI runtime's per-execution
+      // attributes, or the same generation would be counted twice. Traces
+      // without such a rollup (direct Ask VedMoulya calls, Mission AI steps)
+      // rely solely on the AI runtime attributes — normalized in
+      // `accumulateSpan` — so they become measurable without changing any
+      // existing engine trace result.
+      const engineAccountsUsage = traceCarriesEngineUsage(trace);
       for (const span of trace.spans) {
-        this.accumulateSpan(span, totals, row, byProvider);
+        this.accumulateSpan(span, totals, row, byProvider, engineAccountsUsage);
       }
       // loop.step events carry authoritative per-provider tokens/cost.
       for (const span of trace.spans) {
@@ -290,16 +299,54 @@ export class CostLedger {
     totals: EconomicsTotals,
     row: LedgerExecutionRow,
     byProvider: Map<string, ProviderEconomics>,
+    engineAccountsUsage: boolean,
   ): void {
     if (span.kind === 'ai') {
-      const provider = stringAttr(span.attributes.provider) ?? 'unknown';
-      const entry = ensureProvider(byProvider, provider);
-      entry.calls += 1;
-      entry.latencyMs += span.durationMs ?? 0;
-      totals.aiCalls += 1;
-      totals.latencyMs += span.durationMs ?? 0;
-      row.aiCalls += 1;
-      if (span.name === 'ai.retry') totals.retries += 1;
+      // A trace with an engine rollup keeps its pre-existing counting (every
+      // ai span). A trace WITHOUT one (direct Ask VedMoulya, Mission AI steps)
+      // counts ACTUAL provider executions — so a request that never reached a
+      // provider (e.g. failed selection, or a pure optimization/validation
+      // span) is never reported as an AI call.
+      const isProviderExecution = span.name === 'ai.provider_execution';
+      if (engineAccountsUsage || isProviderExecution) {
+        const provider = stringAttr(span.attributes.provider) ?? 'unknown';
+        const entry = ensureProvider(byProvider, provider);
+        entry.calls += 1;
+        entry.latencyMs += span.durationMs ?? 0;
+        totals.aiCalls += 1;
+        totals.latencyMs += span.durationMs ?? 0;
+        row.aiCalls += 1;
+        if (span.name === 'ai.retry') totals.retries += 1;
+      }
+    }
+
+    // AI runtime usage (AI-RUNTIME-002 attributes): only counted when the
+    // trace has no engine rollup, so a generation is measured exactly once.
+    if (!engineAccountsUsage) {
+      const usage = aiRuntimeUsage(span);
+      if (usage !== undefined) {
+        totals.tokensInput += usage.tokensInput;
+        totals.tokensOutput += usage.tokensOutput;
+        totals.tokensTotal += usage.tokensTotal;
+        totals.costUsd += usage.costUsd;
+        row.tokensTotal += usage.tokensTotal;
+        row.costUsd += usage.costUsd;
+        const provider = stringAttr(span.attributes.provider);
+        if (provider !== undefined) {
+          const entry = ensureProvider(byProvider, provider);
+          entry.tokensInput += usage.tokensInput;
+          entry.tokensOutput += usage.tokensOutput;
+          entry.tokensTotal += usage.tokensTotal;
+          entry.costUsd += usage.costUsd;
+        }
+      }
+      // Prompt-cache hits: the AI runtime reports the cache outcome on the run
+      // span (`ai.run`), and a hit means NO provider execution occurred — so
+      // it is counted here and never contributes tokens/cost.
+      if (aiRuntimeCacheHit(span)) {
+        totals.cacheHits += 1;
+        row.cacheHits += 1;
+      }
     }
     // Engine spans carry authoritative economics attributes.
     const tokensTotal = numAttr(span.attributes.tokens_total);
@@ -345,6 +392,70 @@ export class CostLedger {
     }
     return found ? cost : undefined;
   }
+}
+
+/**
+ * Does this trace already account for usage at the engine level?
+ *
+ * `loop.run` / `factory.build` spans record `tokens_total` + `cost_usd`, and
+ * the loop engine additionally emits `loop.step` events carrying the same
+ * figures per step. When either is present the trace is engine-authoritative
+ * for economics and the AI runtime's own span attributes must NOT be added on
+ * top (that would double-count one generation).
+ */
+function traceCarriesEngineUsage(trace: ExecutionTrace): boolean {
+  for (const span of trace.spans) {
+    if (span.kind === 'ai') continue;
+    if (numAttr(span.attributes.tokens_total) > 0 || numAttr(span.attributes.cost_usd) > 0) {
+      return true;
+    }
+    for (const event of span.events) {
+      if (event.name !== 'loop.step') continue;
+      if (numAttr(event.attributes?.tokens_total) > 0 || numAttr(event.attributes?.cost_usd) > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Canonical AI usage normalized from the AI runtime's own span attributes. */
+interface AiRuntimeUsage {
+  tokensInput: number;
+  tokensOutput: number;
+  tokensTotal: number;
+  costUsd: number;
+}
+
+/**
+ * Normalize ONE `ai.provider_execution` span into the ledger's semantics.
+ *
+ * The AI runtime records `input_tokens` / `output_tokens` / `cost` (USD — see
+ * VercelAIProvider/GoogleGeminiProvider "cost per 1K tokens (USD)" and
+ * RoutingEvidenceService's `cost → costUsd` mapping) and marks the span
+ * `status: 'success'` only when a provider generation actually completed.
+ *
+ * A FAILED call (any other status) contributes nothing: a failed provider
+ * selection or execution must never be recorded as a successful generation.
+ * Absent attributes contribute zero — values are never invented.
+ */
+function aiRuntimeUsage(span: TraceSpan): AiRuntimeUsage | undefined {
+  if (span.kind !== 'ai' || span.name !== 'ai.provider_execution') return undefined;
+  // Only an explicitly successful provider execution is a real generation.
+  if (stringAttr(span.attributes.status) !== 'success') return undefined;
+  const tokensInput = numAttr(span.attributes.input_tokens);
+  const tokensOutput = numAttr(span.attributes.output_tokens);
+  const costUsd = numAttr(span.attributes.cost);
+  const tokensTotal = tokensInput + tokensOutput;
+  if (tokensTotal === 0 && costUsd === 0) return undefined;
+  return { tokensInput, tokensOutput, tokensTotal, costUsd };
+}
+
+/** A prompt-cache HIT explicitly reported by the AI runtime on its run span. */
+function aiRuntimeCacheHit(span: TraceSpan): boolean {
+  if (span.kind !== 'ai') return false;
+  if (span.name !== 'ai.run' && span.name !== 'ai.stream_run') return false;
+  return stringAttr(span.attributes.cache) === 'hit';
 }
 
 function ensureProvider(map: Map<string, ProviderEconomics>, provider: string): ProviderEconomics {
