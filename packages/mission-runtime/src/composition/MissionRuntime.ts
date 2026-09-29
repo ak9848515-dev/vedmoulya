@@ -233,6 +233,33 @@ export interface MissionRuntimeComponents {
   stores: { missions: MissionStore; checkpoints: CheckpointStore };
 }
 
+/**
+ * PROVIDER-01 → Mission — cache a lazy per-user runtime initialization.
+ *
+ * Concurrent callers for the SAME user share ONE initialization promise, so
+ * registration never runs twice. A FAILED initialization is NOT retained: the
+ * entry is evicted (identity-checked, so a concurrently replaced entry is
+ * never removed) and the ORIGINAL error is re-thrown to every awaiting caller.
+ * A later request can therefore retry cleanly — no retry is attempted here and
+ * nothing is swallowed. Different users are cached under different keys and
+ * remain isolated.
+ */
+export function cacheUserInitialization<V>(
+  cache: Map<string, Promise<V>>,
+  userId: string,
+  initialize: () => Promise<V>,
+): Promise<V> {
+  const existing = cache.get(userId);
+  if (existing) return existing;
+  const attempt: Promise<V> = initialize().catch((error: unknown) => {
+    // Evict only THIS attempt; a concurrent retry may already have replaced it.
+    if (cache.get(userId) === attempt) cache.delete(userId);
+    throw error;
+  });
+  cache.set(userId, attempt);
+  return attempt;
+}
+
 export function buildMissionRuntimeComponents(
   options: MissionRuntimeOptions = {},
 ): MissionRuntimeComponents {
@@ -261,10 +288,10 @@ export function buildMissionRuntimeComponents(
   const resolveUserOrchestrator =
     options.registerUserProviders === undefined
       ? undefined
-      : (userId: string): Promise<AIOrchestrationService> => {
-          const existing = userOrchestrators.get(userId);
-          if (existing) return existing;
-          const created = (async (): Promise<AIOrchestrationService> => {
+      : (userId: string): Promise<AIOrchestrationService> =>
+          // A failed initialization is evicted (never cached) so a transient
+          // credential-service failure cannot permanently disable this user.
+          cacheUserInitialization(userOrchestrators, userId, async () => {
             const userOrchestrator = new AIOrchestrationService(options.orchestratorOptions);
             // Platform providers first — a user credential OVERLAYS the
             // deployment's providers, it never removes them.
@@ -276,10 +303,7 @@ export function buildMissionRuntimeComponents(
               createOrchestratorRoutingPorts(userOrchestrator),
             );
             return userOrchestrator;
-          })();
-          userOrchestrators.set(userId, created);
-          return created;
-        };
+          });
 
   // ── Governed ToolRuntime: safe tools + bounded, path-jailed workspace ──
   const workspace = new WorkspaceRootBinding();
@@ -343,10 +367,10 @@ export function buildMissionRuntimeComponents(
   const resolveUserAgent = ((): UserAgentResolver | undefined => {
     const resolveOrchestrator = resolveUserOrchestrator;
     if (resolveOrchestrator === undefined) return undefined;
-    return (userId: string): Promise<AgentExecutionService> => {
-      const existing = userAgents.get(userId);
-      if (existing) return existing;
-      const created = (async (): Promise<AgentExecutionService> => {
+    return (userId: string): Promise<AgentExecutionService> =>
+      // Same rule as the orchestrator cache: a failed initialization is
+      // evicted so it can be retried, and the original error still propagates.
+      cacheUserInitialization(userAgents, userId, async () => {
         const userOrchestrator = await resolveOrchestrator(userId);
         return new AgentExecutionService({
           ai: new AIOrchestrationAgentPort(userOrchestrator),
@@ -354,10 +378,7 @@ export function buildMissionRuntimeComponents(
           toolRegistry: toolPort,
           clock: new SystemClock(),
         });
-      })();
-      userAgents.set(userId, created);
-      return created;
-    };
+      });
   })();
 
   // ── Learning estate (frozen services + their infrastructure) ──
