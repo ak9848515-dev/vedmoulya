@@ -35,7 +35,11 @@ const mocks = vi.hoisted(() => ({
       aiContext: { currentFocus: 'MVP launch' },
     },
   } as { success: boolean; data?: Record<string, unknown> },
-  runtimeProviders: [{ canExecute: true }] as Array<{ canExecute: boolean }>,
+  readiness: { ready: true, capability: 'reasoning', providers: ['mock'] } as {
+    ready: boolean;
+    capability: string;
+    providers: string[];
+  },
   runtimeLoading: false,
   runtimeError: false,
   pendingQuestion: null as string | null,
@@ -76,8 +80,8 @@ vi.mock('../../lib/trpc.js', () => ({
 
 vi.mock('../../lib/api-client.js', () => ({
   useLifeOSSnapshot: () => ({ data: mocks.snapshot, isLoading: false, isError: false }),
-  useProviderRuntimeStatus: () => ({
-    data: { providers: mocks.runtimeProviders },
+  useAIReadiness: () => ({
+    data: mocks.readiness,
     isLoading: mocks.runtimeLoading,
     isError: mocks.runtimeError,
   }),
@@ -115,7 +119,7 @@ function streamResult(content = 'Hello world') {
 describe('UX-08 Ask VedMoulya — canonical experience', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.runtimeProviders = [{ canExecute: true }];
+    mocks.readiness = { ready: true, capability: 'reasoning', providers: ['mock'] };
     mocks.runtimeLoading = false;
     mocks.runtimeError = false;
     mocks.pendingQuestion = null;
@@ -315,7 +319,7 @@ describe('UX-08 Ask VedMoulya — canonical experience', () => {
   });
 
   it('shows the honest provider-unavailable state (never a fake "Connected")', () => {
-    mocks.runtimeProviders = [{ canExecute: false }];
+    mocks.readiness = { ready: false, capability: 'reasoning', providers: [] };
     render(<AICompanion />);
     expect(screen.getByText('AI not available')).toBeDefined();
     expect(

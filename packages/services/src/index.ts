@@ -17,6 +17,7 @@ export type {
 
 // ── AI Orchestrator Application Layer ──────────────────────────────────────
 export { AIOrchestrationService, AIMapper, AIMetrics } from './ai/index.js';
+export type { AIOrchestrationOptions } from './ai/index.js';
 export type {
   ProviderAdapter,
   OrchestrateRequestDTO,

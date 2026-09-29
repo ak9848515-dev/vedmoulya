@@ -297,15 +297,20 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       }
 
       const usage = await result.usage;
+      const inputTokens = usage.inputTokens ?? 0;
+      const outputTokens = usage.outputTokens ?? 0;
       yield {
         type: 'done',
         data: {
           latencyMs: Date.now() - startedAt,
           tokenUsage: {
-            input: usage.inputTokens ?? 0,
-            output: usage.outputTokens ?? 0,
+            input: inputTokens,
+            output: outputTokens,
             total: usage.totalTokens ?? 0,
           },
+          // The provider's OWN per-1K pricing — the SAME calculation `execute`
+          // uses, so streaming and non-streaming cost stay consistent.
+          cost: (inputTokens / 1000) * this.inputPer1K + (outputTokens / 1000) * this.outputPer1K,
         },
         timestamp: new Date().toISOString(),
       };

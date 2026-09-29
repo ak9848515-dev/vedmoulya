@@ -592,6 +592,28 @@ export function useProviderRuntimeStatus(userId: string) {
   return { ...q, data: unwrap<ProviderRuntimeStatusDTO>(q.data) };
 }
 
+/**
+ * Honest AI readiness for the CURRENT user: whether a provider is actually
+ * registered and executable on the same user-scoped runtime the Ask request
+ * runs on. This is a cheap state determination (one cached registry query) —
+ * it never performs a provider call, never reads usage/cost, and is not
+ * satisfied by a provider descriptor's theoretical `canExecute`.
+ */
+export interface AIReadinessDTO {
+  ready: boolean;
+  capability: string;
+  providers: string[];
+  reason?: string;
+}
+
+export function useAIReadiness(userId: string, capability?: CapabilityType) {
+  const q = api.ai.readiness.useQuery(
+    { userId, ...(capability !== undefined ? { capability } : {}) },
+    { enabled: Boolean(userId) },
+  );
+  return { ...q, data: unwrap<AIReadinessDTO>(q.data) };
+}
+
 // ── EPIC-012A — Provider Experience Hooks ───────────────────────────────────
 
 export function useProviderExperience(userId: string) {

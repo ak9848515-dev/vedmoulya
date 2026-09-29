@@ -52,8 +52,10 @@ vi.mock('next/navigation', () => ({
 // actions through the REAL mission infrastructure.
 vi.mock('../../lib/api-client.js', () => ({
   useLifeOSSnapshot: () => ({ data: undefined, isLoading: false, isError: false }),
-  useProviderRuntimeStatus: () => ({
-    data: { providers: [{ canExecute: true }] },
+  // Phase C — honest readiness comes from the user's ACTUAL runtime
+  // (registered adapter + capability), never a descriptor's canExecute.
+  useAIReadiness: () => ({
+    data: { ready: true, capability: 'reasoning', providers: ['mock'] },
     isLoading: false,
     isError: false,
   }),

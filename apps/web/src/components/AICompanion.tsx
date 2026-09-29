@@ -19,11 +19,7 @@ import {
 import { useUIStore } from '../stores/ui-store.js';
 import { useAuthStore } from '../stores/auth-store.js';
 import { api } from '../lib/trpc.js';
-import {
-  useLifeOSSnapshot,
-  useProviderRuntimeStatus,
-  useMissionCreateAndRun,
-} from '../lib/api-client.js';
+import { useLifeOSSnapshot, useAIReadiness, useMissionCreateAndRun } from '../lib/api-client.js';
 import { missionDetailRoute } from '../lib/navigation-model.js';
 import {
   classifyAskIntent,
@@ -120,11 +116,13 @@ export function AICompanion(): React.JSX.Element {
   const userId = useAuthStore((s) => s.user?.userId ?? '');
   const streamMutation = api.ai.stream.useMutation();
   const createMission = useMissionCreateAndRun();
-  // Honest AI readiness: "AI Ready" only when a registered provider can
-  // actually execute a request (EPIC-019 runtime vocabulary, never fabricated).
-  const runtimeStatus = useProviderRuntimeStatus(userId);
-  const aiReadinessKnown = !runtimeStatus.isLoading && !runtimeStatus.isError;
-  const aiCanExecute = (runtimeStatus.data?.providers ?? []).some((p) => p.canExecute);
+  // Honest AI readiness: "AI Ready" only when the SAME user-scoped runtime the
+  // Ask request executes on can actually serve it right now (a REGISTERED
+  // adapter with the required capability) — never a descriptor's theoretical
+  // canExecute, and never a live provider call.
+  const readiness = useAIReadiness(userId);
+  const aiReadinessKnown = !readiness.isLoading && !readiness.isError;
+  const aiCanExecute = readiness.data?.ready === true;
   // REAL context source: the same certified Life OS snapshot the Home, Progress
   // and Life hubs read. Absent data contributes nothing (never fabricated).
   const snapshot = useLifeOSSnapshot(userId);

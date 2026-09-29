@@ -39,6 +39,7 @@ import { PostgresMemoryRepository } from '@vedmoulya/memory-intelligence';
 import { MISSION_TERMINAL_STATES } from '@vedmoulya/mission-controller';
 import type { Mission, MissionObjective } from '@vedmoulya/mission-controller';
 import { redactSecrets } from '@vedmoulya/services';
+import type { AIObservability } from '@vedmoulya/services';
 import { logger } from '@vedmoulya/core';
 import * as path from 'node:path';
 import type { Sql } from 'postgres';
@@ -190,6 +191,15 @@ export interface MissionServiceOptions {
    * i.e. the exact previous behavior.
    */
   credentials?: ProviderCredentialService;
+  /**
+   * EPIC-012 → Mission — the deployment's AI observability pipeline (the
+   * frozen AIObservability seam bridged onto the trace spine). When present it
+   * is given to EVERY Mission-created orchestrator (the shared one and each
+   * per-user one), so a real Mission AI generation emits the SAME telemetry the
+   * direct AI path does and reaches the owner's CostLedger. Absent → the
+   * runtime keeps its previous NOOP observability (no behavior change).
+   */
+  aiObservability?: AIObservability;
 }
 
 /**
@@ -305,7 +315,12 @@ export class MissionService {
       workspaceRoot: this.options.workspaceRoot ?? resolveDefaultMissionWorkspace(),
       stores,
       ...(memory ? { memory } : {}),
-      orchestratorOptions: { retryBaseDelayMs: 250 },
+      orchestratorOptions: {
+        retryBaseDelayMs: 250,
+        ...(this.options.aiObservability !== undefined
+          ? { observability: this.options.aiObservability }
+          : {}),
+      },
       registerProviders:
         this.options.runtimeOptions?.registerProviders ??
         ((orchestrator: import('@vedmoulya/orchestrator').AIOrchestrationService): void => {

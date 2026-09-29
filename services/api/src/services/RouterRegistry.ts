@@ -1943,6 +1943,13 @@ const aiProviderHealthInput = z.object({
   providerId: z.string().min(1),
 });
 
+// Honest readiness: an OPTIONAL capability so the caller can ask about the
+// exact surface it is about to use (Ask VedMoulya = 'reasoning' by default).
+const aiReadinessInput = z.object({
+  userId: z.string().min(1),
+  capability: capabilityAIFeatureEnum.optional(),
+});
+
 // ── AI Runtime schemas (AI-RUNTIME-002: streaming + selection explanation) ──
 
 const aiStreamInput = aiOrchestrateInput;
@@ -5385,7 +5392,13 @@ export function createAppRouter(services: ApiApplicationService) {
     ai: router({
       orchestrate: heavyProcedure
         .input(aiOrchestrateInput)
-        .mutation(({ input, ctx }) => createAIRouter(services.ai).orchestrate(input, ctx)),
+        .mutation(({ input, ctx }) =>
+          createAIRouter(
+            services.ai,
+            services.resolveAiOrchestrator,
+            services.withOwnerTrace,
+          ).orchestrate(input, ctx),
+        ),
       listProviders: standardProcedure
         .input(userId)
         .query(({ input, ctx }) => createAIRouter(services.ai).listProviders(input, ctx)),
@@ -5398,11 +5411,27 @@ export function createAppRouter(services: ApiApplicationService) {
       getAllProviderHealth: standardProcedure
         .input(userId)
         .query(({ input, ctx }) => createAIRouter(services.ai).getAllProviderHealth(input, ctx)),
+      // HONEST READINESS — derived from the owner's ACTUAL registered runtime
+      // (the same one stream/orchestrate execute on). No provider call is made.
+      readiness: standardProcedure
+        .input(aiReadinessInput)
+        .query(({ input, ctx }) =>
+          createAIRouter(services.ai, services.resolveAiOrchestrator).readiness(input, ctx),
+        ),
       // AI-RUNTIME-002: streamed run (server-side SDK streaming, collected
       // as typed events) — heavy tier, every call may hit a live provider.
+      // Routed through the OWNER's runtime (platform providers + the user's
+      // own credential-backed adapters) so Ask VedMoulya can use a provider the
+      // user connected, without changing provider routing or authentication.
       stream: heavyProcedure
         .input(aiStreamInput)
-        .mutation(({ input, ctx }) => createAIRouter(services.ai).stream(input, ctx)),
+        .mutation(({ input, ctx }) =>
+          createAIRouter(
+            services.ai,
+            services.resolveAiOrchestrator,
+            services.withOwnerTrace,
+          ).stream(input, ctx),
+        ),
       // AI-RUNTIME-002: pure decision query — WHY would the runtime pick a
       // provider/model for this capability (EI-002/EI-004, no execution).
       explainSelection: standardProcedure

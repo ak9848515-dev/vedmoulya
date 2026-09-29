@@ -223,6 +223,10 @@ import type { SpeechToTextPort, TextToSpeechPort } from '@vedmoulya/voice';
 import { createVoiceBrainPort, createVoiceAnswerPort } from '../infrastructure/VoiceBridgePorts.js';
 import { ProactiveIntelligenceService } from '@vedmoulya/proactive';
 import { MissionService } from './MissionService.js';
+import {
+  createMissionUserProviderRegistrar,
+  createUserAiOrchestratorResolver,
+} from './MissionUserProviders.js';
 import { ActiveIntelligenceControlPlane } from '@vedmoulya/control-plane';
 import { WorldModelService } from '@vedmoulya/world-model';
 import {
@@ -707,6 +711,28 @@ export class ApiApplicationService {
   // ── EPIC-012 — Production Observability & Control Plane ───────────────────
   /** The correlated execution-trace spine (also the engine TelemetryPort). */
   readonly traceProvider: ExecutionTraceProvider;
+  /**
+   * ASK VEDMOULYA — the AI runtime for ONE authenticated user. Resolves the
+   * deployment orchestrator when no user credential can be stored, otherwise a
+   * cached per-user orchestrator (platform providers + the owner's own
+   * credential-backed adapters) through the SAME composition Mission uses.
+   * Never the deployment instance with a user secret added.
+   */
+  readonly resolveAiOrchestrator: (userId: string) => Promise<AIOrchestrationService>;
+  /**
+   * ASK VEDMOULYA — run ONE AI request inside an owner-scoped trace. The
+   * authenticated session user owns the trace, so every `ai.*` span of the
+   * request (provider execution, tokens, cost) is attributed to them and the
+   * per-user CostLedger can see real usage. No credentials ever enter a trace.
+   */
+  readonly withOwnerTrace: <T>(userId: string, fn: () => Promise<T>) => Promise<T>;
+  /**
+   * The EI-002/EI-004/RAG/health wiring applied to the deployment orchestrator,
+   * reused verbatim for each per-user orchestrator so routing/advisor behavior
+   * is identical for every user (never re-derived, never duplicated).
+   */
+  private readonly aiIntelligence:
+    Parameters<AIOrchestrationService['configureIntelligence']>[0] | undefined;
   /** The operational control surface (ops.* namespace). */
   readonly ops: OpsApplicationService;
 
@@ -846,6 +872,14 @@ export class ApiApplicationService {
     // data (e.g. the factory goal attribute) can never leak secrets.
     this.traceProvider = new ExecutionTraceProvider({ redact: redactSecrets });
     const telemetry: TelemetryPort = this.traceProvider;
+    // Owner-scoped boundary trace for direct AI requests (Ask VedMoulya). This
+    // is the SAME trace spine every engine uses — one trace per AI request,
+    // owned by the authenticated user; the AI runtime's spans parent under it.
+    this.withOwnerTrace = <T>(userId: string, fn: () => Promise<T>): Promise<T> =>
+      this.traceProvider.withSpan(
+        { name: 'ai.request', kind: 'engine', userId, attributes: {} },
+        async () => await fn(),
+      );
     // SPRINT-034 — ONE CostLedger instance is shared between the ops surface
     // and the world-model cost port (the world model only READS measured cost;
     // CostLedger stays the single accounting authority).
@@ -861,9 +895,7 @@ export class ApiApplicationService {
     this.ai = new AIOrchestrationService({
       contextOptimizer: new ContextOptimizer(),
       promptCache: new PromptCacheManager(),
-      observability: new AIObservability({
-        exporter: new OtelAIObservabilityExporter(new TraceProviderOtelBridge(this.traceProvider)),
-      }),
+      observability: this.createTraceBackedAiObservability(),
     });
     // AI-RUNTIME-001 (EPIC-005): the gateway AI orchestrator was previously
     // constructed with no provider adapters registered — every real AI call
@@ -1085,7 +1117,7 @@ export class ApiApplicationService {
     //    intelligence + EI-004 execution strategy and retrieves enterprise
     //    knowledge through the RAG port — consuming the real application
     //    services, never duplicating them.
-    this.ai.configureIntelligence({
+    this.aiIntelligence = {
       providerIntelligence: createProviderIntelligencePort(
         this.providers,
         intelligenceStore,
@@ -1095,6 +1127,36 @@ export class ApiApplicationService {
       executionStrategy: createExecutionStrategyPort(this.executionStrategy),
       rag: createRagRetrievalPort(this.rag),
       healthFeedback: executionHealth,
+    };
+    this.ai.configureIntelligence(this.aiIntelligence);
+
+    // ── ASK VEDMOULYA — per-user AI runtime (PROVIDER-01 → AI runtime) ──────
+    //    ai.stream/ai.orchestrate previously ran on the DEPLOYMENT orchestrator
+    //    (platform env providers only), so a provider the user connected with
+    //    their OWN credential was invisible to Ask even though Mission could
+    //    already use it. This resolver composes the SAME per-user runtime the
+    //    Mission seam uses — a fresh orchestrator with the platform providers,
+    //    the SAME advisor/intelligence/RAG/observability wiring, then the
+    //    owner's credential-backed adapters — cached per user through the
+    //    EXISTING owner-scoped cache. No second registry, store or router.
+    this.resolveAiOrchestrator = createUserAiOrchestratorResolver({
+      platform: this.ai,
+      createUserOrchestrator: (): AIOrchestrationService => {
+        const orchestrator = new AIOrchestrationService({
+          contextOptimizer: new ContextOptimizer(),
+          // A fresh prompt cache per user — one user's cached responses can
+          // never be served to another user.
+          promptCache: new PromptCacheManager(),
+          observability: this.createTraceBackedAiObservability(),
+        });
+        // Platform providers first; the owner's credential OVERLAYS them.
+        registerPlatformProviders(orchestrator);
+        if (this.aiIntelligence !== undefined) {
+          orchestrator.configureIntelligence(this.aiIntelligence);
+        }
+        return orchestrator;
+      },
+      registerUserProviders: createMissionUserProviderRegistrar(this.providerCredentialService),
     });
 
     // ── Create the Enterprise Execution Orchestrator (EPIC-004 / EI-005) ────
@@ -2381,6 +2443,10 @@ export class ApiApplicationService {
         // connected is genuinely usable by their missions. Undefined when this
         // deployment cannot store user credentials (platform keys only).
         credentials: this.providerCredentialService,
+        // Mission AI execution runs on the SAME observability pipeline the rest
+        // of the estate uses, so an autonomous generation produces an
+        // owner-scoped trace and reaches the per-user CostLedger.
+        aiObservability: this.createTraceBackedAiObservability(),
       });
 
     // BLD-025 §1 — Discover-and-recover: on process boot, inspect persisted
@@ -2398,6 +2464,24 @@ export class ApiApplicationService {
         });
       });
     }
+  }
+
+  /**
+   * The ONE AI observability pipeline the whole estate uses: the frozen
+   * AIObservability seam exported onto the EPIC-012 trace spine.
+   *
+   * `emitUserTenantCorrelation` is enabled so the authenticated user reaches the
+   * trace as `ai.user_id`; TraceProviderOtelBridge promotes it onto the trace
+   * record's owner. Only the user id is added — never a credential, token or
+   * secret (those never appear in AI span attributes to begin with). This keeps
+   * direct AI (Ask VedMoulya), per-user orchestrators and Mission on the SAME
+   * telemetry infrastructure rather than a second one.
+   */
+  private createTraceBackedAiObservability(): AIObservability {
+    return new AIObservability({
+      exporter: new OtelAIObservabilityExporter(new TraceProviderOtelBridge(this.traceProvider)),
+      emitUserTenantCorrelation: true,
+    });
   }
 
   /**
