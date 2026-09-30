@@ -324,6 +324,7 @@ class StreamingRecordingAdapter implements ProviderAdapter {
     yield { type: 'content', data: { text: 'Hello ' } };
     yield { type: 'content', data: { text: 'world' } };
     const data: Record<string, unknown> = {
+      modelId: 'gemini-3.5-flash',
       latencyMs: 3,
       tokenUsage: { input: STREAM_IN, output: STREAM_OUT, total: STREAM_IN + STREAM_OUT },
     };
@@ -367,6 +368,9 @@ describe('streaming execution — real provider usage is preserved', () => {
     expect(spans[0]?.attributes.input_tokens).toBe(STREAM_IN);
     expect(spans[0]?.attributes.output_tokens).toBe(STREAM_OUT);
     expect(spans[0]?.attributes.cost).toBe(STREAM_COST);
+    expect(spans[0]?.attributes.model).toBe('gemini-3.5-flash');
+    expect(spans[0]?.attributes.provider_family).toBe('google');
+    expect(store.list({ userId: 'user-a' })[0]?.userId).toBe('user-a');
 
     // The streamed response carries the REAL usage too (no estimate, no zero).
     expect(result.data?.final.tokenUsage.input).toBe(STREAM_IN);
@@ -380,6 +384,7 @@ describe('streaming execution — real provider usage is preserved', () => {
     expect(totals.tokensOutput).toBe(STREAM_OUT);
     expect(totals.tokensTotal).toBe(STREAM_IN + STREAM_OUT);
     expect(totals.costUsd).toBeCloseTo(STREAM_COST, 8);
+    expect(totals.aiCalls).toBe(1);
   });
 
   it('leaves cost unavailable when the provider cannot price the call', async () => {

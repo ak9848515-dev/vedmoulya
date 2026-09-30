@@ -12,6 +12,25 @@
 
 import React, { useState, useCallback } from 'react';
 import { isSimpleProviderPreset, providerPreset } from '@vedmoulya/shared';
+import { convertUsdToInr, formatInr, type ExchangeRateProvider } from '@vedmoulya/shared';
+
+// ── Injected USD→INR presentation (A2/A4/A5) ──────────────────────────────────
+// Registry prices are canonical USD. Display converts through an injected
+// exchange-rate provider; missing FX renders explicitly unavailable.
+
+function usdPerMillionLabel(
+  usdAmount: number | null | undefined,
+  fx?: ExchangeRateProvider,
+): string {
+  if (usdAmount === undefined || usdAmount === null) return '—';
+  const rate = fx?.usdToInrRate();
+  const converted = convertUsdToInr({
+    usdAmount,
+    ...(rate === undefined ? {} : { rate, source: fx?.source() }),
+  });
+  if (!converted.available) return 'FX unavailable';
+  return `${formatInr(converted.costInr)}/1M`;
+}
 import { Loading, Switch, EmptyState } from '@vedmoulya/ui';
 import {
   Cpu,
@@ -189,10 +208,12 @@ export function ProviderDetailView({
   providerId,
   userId,
   onBack,
+  fx,
 }: {
   providerId: string;
   userId: string;
   onBack: () => void;
+  fx?: ExchangeRateProvider;
 }): React.JSX.Element {
   const {
     data: provider,
@@ -535,11 +556,11 @@ export function ProviderDetailView({
                     <div className="flex items-center gap-4 text-[11px] text-[#64748B] dark:text-[#94A3B8] md:shrink-0">
                       <span title="Context window">Context {fmtTokens(m.contextWindow.value)}</span>
                       <span title="Max output">Out {fmtTokens(m.maxOutputTokens.value)}</span>
-                      <span title="Input price per 1M tokens">
-                        ${m.priceInputPer1M.value?.toFixed(2) ?? '—'}/1M in
+                      <span title="Input price per 1M tokens (canonical USD → INR)">
+                        {usdPerMillionLabel(m.priceInputPer1M.value, fx)} in
                       </span>
-                      <span title="Output price per 1M tokens">
-                        ${m.priceOutputPer1M.value?.toFixed(2) ?? '—'}/1M out
+                      <span title="Output price per 1M tokens (canonical USD → INR)">
+                        {usdPerMillionLabel(m.priceOutputPer1M.value, fx)} out
                       </span>
                     </div>
                   </div>
@@ -595,15 +616,15 @@ export function ProviderDetailView({
           >
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
               <div>
-                <span className="text-[#94A3B8]">Input / 1M tokens</span>
+                <span className="text-[#94A3B8]">Input / 1M tokens (INR)</span>
                 <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-                  ${provider.inputPerMillionTokens.toFixed(2)}
+                  {usdPerMillionLabel(provider.inputPerMillionTokens, fx)}
                 </p>
               </div>
               <div>
-                <span className="text-[#94A3B8]">Output / 1M tokens</span>
+                <span className="text-[#94A3B8]">Output / 1M tokens (INR)</span>
                 <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-                  ${provider.outputPerMillionTokens.toFixed(2)}
+                  {usdPerMillionLabel(provider.outputPerMillionTokens, fx)}
                 </p>
               </div>
               <div>

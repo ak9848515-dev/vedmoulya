@@ -75,6 +75,11 @@ export interface AIHandlers {
     input: { userId: string } & Record<string, unknown>,
     _ctx: TRPCContext,
   ) => Promise<ApiResponse<StreamRunDTO>>;
+  /** LOCAL AI — record one Local Agent execution into owner-scoped telemetry. */
+  recordLocalUsage: (
+    input: { userId: string } & LocalUsageRecord,
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse<{ recorded: boolean }>>;
   /** Pure decision query: WHY the runtime would pick a provider/model. */
   explainSelection: (
     input: {
@@ -102,10 +107,31 @@ export type AIUserOrchestratorResolver = (userId: string) => Promise<AIOrchestra
  */
 export type AIOwnerTraceRunner = <T>(userId: string, fn: () => Promise<T>) => Promise<T>;
 
+/**
+ * One REAL Local Agent execution (browser → agent → local runtime) to attribute
+ * to its owner. Only the runtime's own REAL token counts are carried; there is
+ * no monetary cost for local inference, and the caller can never supply one.
+ */
+export interface LocalUsageRecord {
+  /** The local runtime/provider id (e.g. `ollama`). */
+  provider: string;
+  /** The model that ACTUALLY ran. */
+  model: string;
+  input: number;
+  output: number;
+  total?: number;
+  mode?: string;
+  capability?: string;
+}
+
+/** Record one Local Agent execution into the SAME owner-scoped telemetry spine. */
+export type AILocalUsageRecorder = (userId: string, usage: LocalUsageRecord) => Promise<void>;
+
 export function createAIRouter(
   ai: AIOrchestrationService,
   resolveUserOrchestrator?: AIUserOrchestratorResolver,
   withOwnerTrace?: AIOwnerTraceRunner,
+  recordLocalUsage?: AILocalUsageRecorder,
 ): AIHandlers {
   const svc = ai;
   // Execution routes through the OWNER's runtime when one is resolvable, so a
@@ -162,5 +188,28 @@ export function createAIRouter(
           requestedOutputTokens: input.requestedOutputTokens,
         }),
       ),
+    // LOCAL AI — the browser talks to its local agent directly, so the server
+    // never sees the execution. The browser reports the runtime's REAL usage
+    // back through THIS authenticated procedure, which records it on the SAME
+    // owner-scoped trace → CostLedger spine (no second telemetry system).
+    recordLocalUsage: async (input, _ctx): Promise<ApiResponse<{ recorded: boolean }>> => {
+      if (recordLocalUsage === undefined || !input.userId) {
+        return successResponse({ recorded: false });
+      }
+      const usage: LocalUsageRecord = {
+        provider: input.provider,
+        model: input.model,
+        input: input.input,
+        output: input.output,
+        ...(input.total !== undefined ? { total: input.total } : {}),
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
+        ...(input.capability !== undefined ? { capability: input.capability } : {}),
+      };
+      // The recorder itself opens the owner-scoped boundary trace (it is the
+      // component that owns the trace spine), so ownership is enforced in one
+      // place regardless of which surface invokes it.
+      await recordLocalUsage(input.userId, usage);
+      return successResponse({ recorded: true });
+    },
   };
 }

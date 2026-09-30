@@ -79,7 +79,8 @@ describe('AIOrchestrationService runtime (AI-RUNTIME-002)', () => {
     const generateStructured = vi.fn(async () =>
       mockResponse(JSON.stringify({ summary: 'ok', score: 8 }), { provider: 'mock' }),
     );
-    const svc = new AIOrchestrationService();
+    const exporter = new TestAIObservabilityExporter();
+    const svc = new AIOrchestrationService({ observability: new AIObservability({ exporter }) });
     svc.registerProvider(mockAdapter('mock', { generateStructured }));
 
     const result = await svc.orchestrate({
@@ -642,12 +643,21 @@ describe('AIOrchestrationService runtime (AI-RUNTIME-002)', () => {
   });
 
   it('streams through a native async-iterable provider stream', async () => {
-    const svc = new AIOrchestrationService();
+    const exporter = new TestAIObservabilityExporter();
+    const svc = new AIOrchestrationService({ observability: new AIObservability({ exporter }) });
     const streamingAdapter = mockAdapter('streamer', {
       stream: async function* () {
         yield { type: 'content', data: { text: 'Hello' } };
         yield { type: 'content', data: { text: ' world' } };
-        yield { type: 'done', data: { latencyMs: 2, tokenUsage: { input: 5, output: 4 } } };
+        yield {
+          type: 'done',
+          data: {
+            modelId: 'streamer-resolved-model',
+            latencyMs: 2,
+            tokenUsage: { input: 5, output: 4 },
+            cost: 0.003,
+          },
+        };
       },
     } as ProviderAdapter);
     svc.registerProvider(streamingAdapter);
@@ -665,6 +675,80 @@ describe('AIOrchestrationService runtime (AI-RUNTIME-002)', () => {
     expect(run.events.some((e) => e.type === 'done')).toBe(true);
     expect(run.final.content).toBe('Hello world');
     expect(run.final.provider).toBe('streamer');
+    expect(run.final.model).toBe('streamer-resolved-model');
+    const execution = exporter.spans.find((span) => span.name === 'ai.provider_execution');
+    expect(execution?.attributes.model).toBe('streamer-resolved-model');
+    expect(execution?.attributes.input_tokens).toBe(5);
+    expect(execution?.attributes.output_tokens).toBe(4);
+    expect(execution?.attributes.cost).toBe(0.003);
+  });
+
+  it('uses the same advisor-selected provider/model for streaming and telemetry', async () => {
+    const exporter = new TestAIObservabilityExporter();
+    const intelligence: ProviderIntelligencePort = {
+      getCandidates: async () => [
+        candidate({
+          providerId: 'preferred-streamer',
+          benchmarkScore: 95,
+          models: [
+            {
+              id: 'preferred-model',
+              contextWindow: 128000,
+              maxOutputTokens: 4096,
+              streaming: true,
+            },
+          ],
+        }),
+        candidate({
+          providerId: 'first-registered',
+          benchmarkScore: 70,
+          models: [
+            { id: 'other-model', contextWindow: 128000, maxOutputTokens: 4096, streaming: true },
+          ],
+        }),
+      ],
+    };
+    const strategy: ExecutionStrategyPort = {
+      getRoutingContext: async () => ({
+        strategy: 'balanced' as const,
+        preferredProviders: ['preferred-streamer'],
+      }),
+    };
+    const selectedStream = vi.fn(async function* (request: { modelId?: string }) {
+      yield {
+        type: 'done',
+        data: { modelId: request.modelId, tokenUsage: { input: 7, output: 3 }, cost: 0.004 },
+      };
+    });
+    const unselectedStream = vi.fn(async function* () {
+      yield { type: 'done', data: { modelId: 'wrong-model' } };
+    });
+    const svc = new AIOrchestrationService({
+      providerIntelligence: intelligence,
+      executionStrategy: strategy,
+      observability: new AIObservability({ exporter, emitUserTenantCorrelation: true }),
+    });
+    svc.registerProvider(mockAdapter('first-registered', { stream: unselectedStream }));
+    svc.registerProvider(mockAdapter('preferred-streamer', { stream: selectedStream }));
+
+    const run = await svc.stream({
+      capability: 'reasoning',
+      userInput: 'Run the selected stream model',
+      qualityTier: 'standard',
+      userId: 'user-a',
+    });
+
+    expect(run.final.provider).toBe('preferred-streamer');
+    expect(run.final.model).toBe('preferred-model');
+    expect(selectedStream).toHaveBeenCalledWith(
+      expect.objectContaining({ modelId: 'preferred-model' }),
+    );
+    expect(unselectedStream).not.toHaveBeenCalled();
+    const execution = exporter.spans.find((span) => span.name === 'ai.provider_execution');
+    expect(execution?.attributes.provider).toBe('preferred-streamer');
+    expect(execution?.attributes.provider_family).toBe('mock');
+    expect(execution?.attributes.model).toBe('preferred-model');
+    expect(execution?.userId).toBe('user-a');
   });
 
   // ── Phase B: advisor-selected model reaches ACTUAL execution ────────────
@@ -695,7 +779,7 @@ describe('AIOrchestrationService runtime (AI-RUNTIME-002)', () => {
     const svc = new AIOrchestrationService({
       providerIntelligence: intelligence,
       executionStrategy: strategy,
-      observability: new AIObservability({ exporter }),
+      observability: new AIObservability({ exporter, emitUserTenantCorrelation: true }),
     });
     svc.registerProvider(mockAdapter('mock', { execute } as Partial<ProviderAdapter>));
 
@@ -703,6 +787,7 @@ describe('AIOrchestrationService runtime (AI-RUNTIME-002)', () => {
       capability: 'reasoning',
       userInput: 'Run with the selected model',
       qualityTier: 'standard',
+      userId: 'user-a',
     });
 
     // The advisor-selected model reached the adapter, not the adapter's own
@@ -718,6 +803,12 @@ describe('AIOrchestrationService runtime (AI-RUNTIME-002)', () => {
     expect(execSpan?.attributes.requested_model).toBe('advisor-picked-model');
     expect(execSpan?.attributes.model).toBe('advisor-picked-model');
     expect(execSpan?.attributes.capability).toBe('reasoning');
+    expect(execSpan?.attributes.provider_family).toBe('mock');
+    expect(execSpan?.userId).toBe('user-a');
+    expect(execSpan?.attributes.input_tokens).toBe(10);
+    expect(execSpan?.attributes.output_tokens).toBe(20);
+    expect(execSpan?.attributes.total_tokens).toBe(30);
+    expect(execSpan?.attributes.cost).toBe(0);
   });
 
   it('records the ACTUAL executed model even when it differs from the intent', async () => {

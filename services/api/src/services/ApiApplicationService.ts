@@ -208,6 +208,11 @@ import { ProviderSetupOrchestrator } from './ProviderSetupOrchestrator.js';
 import { RoutingEvidenceService } from './RoutingEvidenceService.js';
 import { ExecutionHealthService } from './ExecutionHealthService.js';
 import { ModelSelectionIntelligence } from '@vedmoulya/services';
+import {
+  createCachedExchangeRateProvider,
+  type CachedExchangeRateProvider,
+} from '@vedmoulya/shared';
+import type { LocalUsageRecord } from '../routers/AIRouter.js';
 import { validateProductionAIConfig } from '../infrastructure/ProductionAIConfig.js';
 import { resolvePersistenceBundle } from '../infrastructure/PersistenceStores.js';
 import { setAuditStore } from '../middleware/audit.js';
@@ -694,6 +699,13 @@ export class ApiApplicationService {
   // ── EPIC-012A — Provider Experience & Preferences ────────────────────────
   readonly preferencesService: ProviderPreferencesService;
   readonly modelSelection: ModelSelectionIntelligence;
+  /**
+   * A2/A4 — the server-side USD→INR reference-rate seam used for user-facing
+   * economics (presentation only; canonical persisted economics stay USD).
+   * Refreshed best-effort at startup; stays explicitly unavailable until a
+   * real rate is observed — never a hard-coded or invented rate.
+   */
+  readonly exchangeRate: CachedExchangeRateProvider;
   readonly providerExperience: ProviderExperienceService;
   /**
    * PROVIDER-01 — encrypted per-user provider credentials. `undefined` means
@@ -726,6 +738,13 @@ export class ApiApplicationService {
    * per-user CostLedger can see real usage. No credentials ever enter a trace.
    */
   readonly withOwnerTrace: <T>(userId: string, fn: () => Promise<T>) => Promise<T>;
+  /**
+   * LOCAL AI — attribute one Local Agent execution (browser → agent → local
+   * runtime) to its owner on the SAME trace spine + CostLedger. Only REAL
+   * runtime token counts are recorded; local cost is zero and is never
+   * accepted from the caller.
+   */
+  readonly recordLocalAiUsage: (userId: string, usage: LocalUsageRecord) => Promise<void>;
   /**
    * The EI-002/EI-004/RAG/health wiring applied to the deployment orchestrator,
    * reused verbatim for each per-user orchestrator so routing/advisor behavior
@@ -880,6 +899,46 @@ export class ApiApplicationService {
         { name: 'ai.request', kind: 'engine', userId, attributes: {} },
         async () => await fn(),
       );
+    // LOCAL AI — one REAL Local Agent execution, recorded on the SAME spine.
+    // The browser (not the server) reaches the local agent, so it reports the
+    // runtime's real usage here; only real token counts are accepted and cost
+    // is fixed at zero (local inference has no price — never invented).
+    this.recordLocalAiUsage = async (userId, usage): Promise<void> => {
+      if (!userId) return;
+      const inputTokens =
+        Number.isFinite(usage.input) && usage.input > 0 ? Math.floor(usage.input) : 0;
+      const outputTokens =
+        Number.isFinite(usage.output) && usage.output > 0 ? Math.floor(usage.output) : 0;
+      const totalTokens =
+        usage.total !== undefined && Number.isFinite(usage.total) && usage.total > 0
+          ? Math.floor(usage.total)
+          : inputTokens + outputTokens;
+      await this.traceProvider.withSpan(
+        { name: 'ai.request', kind: 'engine', userId, attributes: {} },
+        (): Promise<void> => {
+          const span = this.createTraceBackedAiObservability().startSpan(
+            'ai.provider_execution',
+            `local-agent-${String(Date.now())}`,
+            {
+              provider: usage.provider,
+              provider_family: usage.provider,
+              mode: usage.mode ?? 'local-agent',
+              capability: usage.capability ?? 'general_conversation',
+              status: 'success',
+              model: usage.model,
+              input_tokens: inputTokens,
+              output_tokens: outputTokens,
+              total_tokens: totalTokens,
+              // Local inference has no monetary cost — never fabricated.
+              cost: 0,
+            },
+            { userId },
+          );
+          span.end('ok');
+          return Promise.resolve();
+        },
+      );
+    };
     // SPRINT-034 — ONE CostLedger instance is shared between the ops surface
     // and the world-model cost port (the world model only READS measured cost;
     // CostLedger stays the single accounting authority).
@@ -1102,6 +1161,7 @@ export class ApiApplicationService {
     //    A thin layer over the frozen ProviderRoutingAdvisor (Phase 12–16).
     //    Constructed with the same provider + execution strategy ports the
     //    AI runtime uses — never duplicates routing.
+    this.exchangeRate = createCachedExchangeRateProvider();
     this.modelSelection = new ModelSelectionIntelligence(
       createProviderIntelligencePort(
         this.providers,
@@ -1110,7 +1170,14 @@ export class ApiApplicationService {
         executionHealth,
       ),
       createExecutionStrategyPort(this.executionStrategy),
+      this.exchangeRate,
     );
+    // Prime the reference rate without blocking construction. Skipped under
+    // test so unit suites never perform network I/O; until the lookup succeeds
+    // the paid-model rationale keeps its explicit "FX unavailable" state.
+    if (process.env.VITEST === undefined && process.env.NODE_ENV !== 'test') {
+      void this.exchangeRate.refresh();
+    }
 
     // ── Wire the AI runtime intelligence (AI-RUNTIME-002) ─────────────────
     //    The orchestrator now genuinely routes on EI-002 provider

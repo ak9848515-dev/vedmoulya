@@ -197,6 +197,7 @@ interface ProviderUsageDetailDTO {
     modelId: string;
     calls: number;
     latencyMs: number;
+    tokensTotal: number;
     costUsd: number;
   }>;
   executions: Array<{
@@ -612,6 +613,15 @@ export function useAIReadiness(userId: string, capability?: CapabilityType) {
     { enabled: Boolean(userId) },
   );
   return { ...q, data: unwrap<AIReadinessDTO>(q.data) };
+}
+
+/**
+ * LOCAL AI — report one REAL Local Agent execution (browser → agent → local
+ * runtime) so it lands in the SAME owner-scoped usage/economics ledger the
+ * direct AI path uses. Only real token counts are sent; there is no cost.
+ */
+export function useRecordLocalAiUsage() {
+  return api.ai.recordLocalUsage.useMutation();
 }
 
 // ── EPIC-012A — Provider Experience Hooks ───────────────────────────────────

@@ -299,9 +299,16 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       const usage = await result.usage;
       const inputTokens = usage.inputTokens ?? 0;
       const outputTokens = usage.outputTokens ?? 0;
+      const requestedModel = request.modelId ?? this.modelId;
+      const response = (await result.finalStep).response;
+      const responseModel =
+        typeof response.modelId === 'string' && response.modelId.trim().length > 0
+          ? response.modelId
+          : undefined;
       yield {
         type: 'done',
         data: {
+          modelId: responseModel ?? requestedModel,
           latencyMs: Date.now() - startedAt,
           tokenUsage: {
             input: inputTokens,

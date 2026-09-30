@@ -48,9 +48,12 @@ export const LOCAL_AI_STATE_META: Record<LocalAiState, LocalAiStateMeta> = {
     description: 'The VedMoulya Local Agent is not running on this computer.',
   },
   LOCAL_AGENT_RUNNING: {
-    label: 'Local Agent connected',
-    tone: 'ok',
-    description: 'The Local Agent is running and ready to probe local runtimes.',
+    // NOT "connected": only a real runtime + a real generation can claim that.
+    // "Connected" here would be fake readiness from a /health 200 alone.
+    label: 'Local Agent running',
+    tone: 'neutral',
+    description:
+      'The Local Agent is running. No local runtime has been measured yet — check again to probe it.',
   },
   OLLAMA_NOT_RUNNING: {
     label: 'Ollama not running',
@@ -176,7 +179,7 @@ export function localAiStateLabel(state: LocalAiState, runtimeDisplayName: strin
     case 'LOCAL_AGENT_NOT_RUNNING':
       return 'Local Agent not connected';
     case 'LOCAL_AGENT_RUNNING':
-      return 'Local Agent connected';
+      return 'Local Agent running';
     case 'OLLAMA_NOT_RUNNING':
       return `${runtimeDisplayName} not running`;
     case 'OLLAMA_UNREACHABLE':
