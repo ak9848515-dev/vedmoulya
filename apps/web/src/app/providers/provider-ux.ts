@@ -242,6 +242,15 @@ export interface ProviderStatusOptions {
    * "Verifying" rather than a stale "Not connected".
    */
   activity?: 'configuring' | 'verifying';
+  /**
+   * Which credential can authenticate this family FOR THIS USER
+   * (`'USER' | 'PLATFORM' | 'NONE'` from the provider experience view model).
+   * Lets the projection honour a credential the user supplied themselves, which
+   * the deployment-only runtime registry cannot know about.
+   */
+  credentialSource?: 'USER' | 'PLATFORM' | 'NONE' | undefined;
+  /** The provider family id, so the credential override stays family-scoped. */
+  family?: string | undefined;
 }
 
 export function providerStatusDisplay(
@@ -261,6 +270,8 @@ export function providerStatusDisplay(
     enabled,
     lastVerification: options.lastVerification,
     activity: options.activity,
+    credentialSource: options.credentialSource,
+    family: options.family,
   });
   const configured = state.runtimeConfigured;
   // The REASON always comes from the canonical lifecycle, so the connection

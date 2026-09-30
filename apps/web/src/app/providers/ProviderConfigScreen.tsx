@@ -170,6 +170,11 @@ export function ProviderConfigScreen({
   // lifecycle already defines, so the chip never contradicts the spinner.
   const status = providerStatusDisplay(runtime?.status, identity.name, provider.enabled, {
     ...(testing ? { activity: 'verifying' } : {}),
+    // The owner's own credential makes this provider runnable even when the
+    // deployment carries no env key for the family — the same rule the
+    // overview card and the readiness indicator use.
+    credentialSource: provider.credentialSource,
+    family: provider.family,
   });
 
   // The deployment may already hold a working credential for this provider

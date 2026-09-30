@@ -916,6 +916,67 @@ describe('ProviderSetupOrchestrator', () => {
       expect(status.credentialSource).toBe('NONE');
       expect(status.actionableError).toBeUndefined();
     });
+
+    // ── PROVIDER-01 → runtime single source of truth ──────────────────────
+    // A provider the USER connected with their OWN key must read CONNECTED
+    // even though the deployment-wide runtime registry (env keys only) reports
+    // NOT_CONFIGURED for the family. Previously the env-only status was
+    // required, so a fully working user-connected OpenRouter/OpenAI/Gemini was
+    // flattened to DISCONNECTED while the AI Brain could genuinely execute it.
+    it.each(['openrouter', 'openai', 'google'])(
+      'is CONNECTED for a user-connected %s with no deployment env key',
+      async (family) => {
+        credentials.resolve.mockResolvedValue({ source: 'USER', secret: 'user-own-key' });
+
+        const status = await orchestrator.getStatus('user-1', family, {
+          runtimeStatus: 'NOT_CONFIGURED',
+          enabled: true,
+        });
+
+        expect(status.connectionState).toBe('CONNECTED');
+        expect(status.runtimeConfigured).toBe(true);
+        expect(status.credentialSource).toBe('USER');
+      },
+    );
+
+    it('still reports NOT_CONFIGURED honestly when neither the user nor the deployment has a key', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+
+      const status = await orchestrator.getStatus('user-1', 'openrouter', {
+        runtimeStatus: 'NOT_CONFIGURED',
+        enabled: true,
+      });
+
+      expect(status.connectionState).toBe('DISCONNECTED');
+      expect(status.runtimeConfigured).toBe(false);
+    });
+
+    it('never upgrades a family this deployment cannot execute from a user credential', async () => {
+      // Anthropic has no adapter in this build — a stored key must NOT be
+      // presented as connected, and no ERROR is fabricated here either: the
+      // status stays honestly DISCONNECTED (the UNSUPPORTED_RUNTIME wording is
+      // only produced when the runtime registry reports that state).
+      credentials.resolve.mockResolvedValue({ source: 'USER', secret: 'user-own-key' });
+
+      const status = await orchestrator.getStatus('user-1', 'anthropic', {
+        runtimeStatus: 'NOT_CONFIGURED',
+        enabled: true,
+      });
+
+      expect(status.connectionState).toBe('DISCONNECTED');
+      expect(status.runtimeConfigured).toBe(false);
+    });
+
+    it('keeps a disabled user-connected provider off CONNECTED', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'USER', secret: 'user-own-key' });
+
+      const status = await orchestrator.getStatus('user-1', 'openrouter', {
+        runtimeStatus: 'NOT_CONFIGURED',
+        enabled: false,
+      });
+
+      expect(status.connectionState).toBe('DISCONNECTED');
+    });
   });
 
   describe('API-Key Providers', () => {

@@ -740,9 +740,18 @@ function ProviderExperienceView({
   const { providers, preferences } = data;
 
   // Readiness (single red/orange/green per provider) from REAL runtime state
-  // + user preference — never fabricated. Used by the advanced usage widgets.
+  // + the owner's credential source + user preference — never fabricated.
+  // A provider the user connected with their own key IS usable even though the
+  // deployment-only runtime registry cannot see it, so the credential source is
+  // part of the state (the same rule the provider card uses).
   const readinessOf = (p: (typeof providers)[number]): ProviderReadiness =>
-    providerReadiness(runtimeByFamily.get(p.family)?.status, p.enabled);
+    providerReadiness(
+      runtimeByFamily.get(p.family)?.status,
+      p.enabled,
+      undefined,
+      p.credentialSource,
+      p.family,
+    );
   const summary = {
     ready: providers.filter((p) => readinessOf(p).key === 'green').length,
     attention: providers.filter((p) => readinessOf(p).key === 'orange').length,

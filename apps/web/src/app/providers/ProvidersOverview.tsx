@@ -366,6 +366,11 @@ function ProviderCard({
  * execute it, so we present that as CONFIGURED — the same status a deployment
  * key would produce. Every other status is passed through untouched, and a
  * provider with no credential is never upgraded (no fake READY).
+ *
+ * @deprecated Use `providerStatusDisplay(..., { credentialSource, family })` /
+ * `deriveProviderState` directly — the credential-aware rule now lives in the
+ * single provider state machine (`provider-state.ts`), so this presentation
+ * helper is kept only for callers that still hold a raw runtime status.
  */
 export function effectiveRuntimeStatus(
   provider: Pick<ProviderExperienceRowDTO, 'credentialSource'>,
@@ -406,15 +411,15 @@ export function ProvidersOverview({
     providerStatusDisplay(
       // PROVIDER-01 — the deployment runtime registry only knows about
       // DEPLOYMENT credentials (env keys); a key the USER supplied is invisible
-      // to it. A family the user has really connected (a stored, verified
-      // credential) is therefore as usable as a runtime-configured one, so the
-      // connection display derives from BOTH — never from the runtime registry
-      // alone, which would leave a working Gemini reading "Not connected".
-      effectiveRuntimeStatus(provider, runtimeByFamily.get(provider.family)?.status),
+      // to it. `credentialSource` + `family` let the ONE provider state machine
+      // decide, so a family the user really connected reads Connected while a
+      // provider with no usable credential is never upgraded (no fake READY).
+      runtimeByFamily.get(provider.family)?.status,
       providerIdentity(provider.family, provider.name).name,
       // PROVIDER-01 — the user's enable preference is part of the state:
       // a configured-but-disabled provider must never read "Connected".
       provider.enabled,
+      { credentialSource: provider.credentialSource, family: provider.family },
     );
 
   const menuItemsFor = (provider: ProviderExperienceRowDTO): MenuItem[] => {

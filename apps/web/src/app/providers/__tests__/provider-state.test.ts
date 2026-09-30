@@ -264,4 +264,69 @@ describe('connection display — a projection of the one lifecycle', () => {
     expect(failed.connection.key).toBe('issue');
     expect(failed.connection.hint).not.toMatch(/AI_[A-Z_]*API_KEY/);
   });
+
+  // PROVIDER-01 → runtime single source of truth.
+  // The deployment runtime registry is derived from env keys only, so a
+  // provider the USER connected with their OWN key reports NOT_CONFIGURED
+  // there. The state machine must still treat it as runnable (the ownership
+  // runtime genuinely registers the adapter), never as "Not connected" — that
+  // contradiction ("connected in the UI, unusable in the Brain") is exactly
+  // what this rule removes.
+  describe('a credential the OWNER supplied makes the provider runnable', () => {
+    it('reads Connected for a user-connected provider with no deployment key', () => {
+      for (const family of ['openrouter', 'openai', 'google']) {
+        const display = providerStatusDisplay('NOT_CONFIGURED', 'AI', true, {
+          credentialSource: 'USER',
+          family,
+        });
+        expect(display.connection.key).toBe('connected');
+        expect(display.configured).toBe(true);
+      }
+    });
+
+    it('never upgrades a family this deployment cannot execute', () => {
+      const display = providerStatusDisplay('NOT_CONFIGURED', 'Claude', true, {
+        credentialSource: 'USER',
+        family: 'anthropic',
+      });
+      expect(display.connection.key).toBe('not_connected');
+      expect(display.configured).toBe(false);
+    });
+
+    it('never upgrades a provider the user has no credential for', () => {
+      const display = providerStatusDisplay('NOT_CONFIGURED', 'OpenRouter', true, {
+        credentialSource: 'NONE',
+        family: 'openrouter',
+      });
+      expect(display.connection.key).toBe('not_connected');
+      expect(display.configured).toBe(false);
+    });
+
+    it('keeps a disabled user-connected provider off Connected', () => {
+      const display = providerStatusDisplay('NOT_CONFIGURED', 'OpenRouter', false, {
+        credentialSource: 'USER',
+        family: 'openrouter',
+      });
+      expect(display.connection.key).toBe('not_connected');
+    });
+
+    it('reads Green readiness for a user-connected provider', () => {
+      const readiness = providerReadiness('NOT_CONFIGURED', true, undefined, 'USER', 'gemini');
+      // The family id above is intentionally not in the credential set, so the
+      // honest answer stays red; the canonical family id is 'google'.
+      expect(readiness.key).toBe('red');
+
+      const google = providerReadiness('NOT_CONFIGURED', true, undefined, 'USER', 'google');
+      expect(google.key).toBe('green');
+    });
+
+    it('preserves the env-only behaviour when no credential source is supplied', () => {
+      const display = providerStatusDisplay('NOT_CONFIGURED', 'Gemini', true);
+      expect(display.connection.key).toBe('not_connected');
+
+      const readiness = providerReadiness('NOT_CONFIGURED', true);
+      expect(readiness.key).toBe('red');
+      expect(readiness.label).toBe('Not configured');
+    });
+  });
 });

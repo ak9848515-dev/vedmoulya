@@ -241,6 +241,55 @@ const KEYED_FAMILIES: ReadonlySet<string> = new Set([
   'openai-compatible',
 ]);
 
+/**
+ * Families the OWNER-SCOPED runtime can execute from a stored USER credential.
+ *
+ * This mirrors `createMissionUserProviderRegistrar` (services/api/
+ * MissionUserProviders.ts) — the registrar that turns an owner's encrypted
+ * credential into a real adapter for the family. It is deliberately a small
+ * closed set: the families that authenticate with a user-supplied SECRET and
+ * have an EXISTING adapter. A base-URL-provisioned runtime (Ollama / generic
+ * openai-compatible) is NOT here, because it is configured by endpoint, not by
+ * a per-user credential.
+ *
+ * WHY IT EXISTS — the honesty rule the old status resolver got wrong:
+ * `readProviderRuntimeState` is derived from DEPLOYMENT env keys only, so a
+ * provider a user connected with their OWN key was reported as
+ * `NOT_CONFIGURED` there. Requiring that env-derived status before reporting
+ * CONNECTED flattened a fully working user-connected provider to
+ * DISCONNECTED — the exact "connected but not usable / usable but not
+ * connected" contradiction this module exists to prevent.
+ */
+const USER_CREDENTIAL_FAMILIES: ReadonlySet<string> = new Set([
+  'openai',
+  'deepseek',
+  'google',
+  'openrouter',
+]);
+
+/**
+ * Can the runtime THIS USER executes on actually run `family`?
+ *
+ * TRUE when either source holds a usable credential for the family:
+ *   • the DEPLOYMENT registered it from its own env key
+ *     (`runtimeStatus === 'CONFIGURED' | 'MOCK'`), or
+ *   • the OWNER holds a stored credential whose family the owner-scoped
+ *     registrar can turn into a real adapter
+ *     (`credentialSource === 'USER'` on a `USER_CREDENTIAL_FAMILIES` family).
+ *
+ * FALSE for every other combination, so no card is ever upgraded without a
+ * credential the runtime can really resolve. This is the single predicate the
+ * server status and the browser display both use.
+ */
+export function resolveRuntimeConfigured(options: {
+  runtimeStatus?: string | undefined;
+  credentialSource: ProviderCredentialSource;
+  family: string;
+}): boolean {
+  if (options.runtimeStatus === 'CONFIGURED' || options.runtimeStatus === 'MOCK') return true;
+  return options.credentialSource === 'USER' && USER_CREDENTIAL_FAMILIES.has(options.family);
+}
+
 // ── Result builders (one place, so no surface can invent its own outcome) ───
 
 interface ResultSeed {
@@ -596,7 +645,15 @@ export class ProviderSetupOrchestrator {
       selectedModel: options.selectedModel ?? null,
       availableModels: options.availableModels ?? [],
       capabilities: options.capabilities ?? [],
-      runtimeConfigured: options.runtimeStatus === 'CONFIGURED' || options.runtimeStatus === 'MOCK',
+      // The SAME predicate every surface uses. It accounts for BOTH credential
+      // sources (deployment env key OR the owner's stored credential), so a
+      // user-connected provider is never flattened to DISCONNECTED by an
+      // env-only runtime registry.
+      runtimeConfigured: resolveRuntimeConfigured({
+        runtimeStatus: options.runtimeStatus,
+        credentialSource,
+        family,
+      }),
       ...(options.lastVerification?.at !== undefined
         ? { lastValidatedAt: options.lastVerification.at }
         : {}),

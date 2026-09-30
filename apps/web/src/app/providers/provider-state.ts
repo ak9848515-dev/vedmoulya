@@ -80,6 +80,30 @@ export interface ProviderStateInput {
    * provider runtime (never re-derived from UI state).
    */
   runtimeStatus?: string | undefined;
+  /**
+   * Which credential can authenticate this family FOR THIS USER, straight from
+   * the provider experience view model (`'USER' | 'PLATFORM' | 'NONE'`).
+   *
+   * WHY IT IS PART OF THIS INPUT: the platform runtime registry is derived from
+   * DEPLOYMENT env keys only, so it reports `NOT_CONFIGURED` for a provider the
+   * user connected with their OWN key — even though the owner-scoped runtime
+   * (`createUserAiOrchestratorResolver` + `createMissionUserProviderRegistrar`)
+   * genuinely registers that adapter for them. Treating the env-only status as
+   * the last word flattened a working user-connected provider to
+   * "Not connected" while the AI Brain could execute it. Passing the real
+   * credential source lets `runtimeConfigured` mean the truthful thing:
+   * "the runtime THIS USER executes on can run this provider".
+   *
+   * Omitted/undefined preserves the previous env-only behaviour exactly.
+   */
+  credentialSource?: 'USER' | 'PLATFORM' | 'NONE' | undefined;
+  /**
+   * The provider family id (`'google'`, `'openrouter'`, …). Needed so the
+   * credential override above applies ONLY to families the owner-scoped
+   * registrar can really turn into an adapter. Omitted → the credential
+   * override applies to any family.
+   */
+  family?: string | undefined;
   /** The user's persisted enable preference for this provider. */
   enabled: boolean;
   /**
@@ -93,6 +117,43 @@ export interface ProviderStateInput {
    * NOT the same as "verified broken".
    */
   lastVerification?: { ok: boolean; failureKind?: string } | undefined;
+}
+
+/**
+ * Families the OWNER-SCOPED runtime can execute from a stored USER credential.
+ *
+ * Mirrors `createMissionUserProviderRegistrar` (the registrar that turns an
+ * owner's encrypted credential into the EXISTING adapter for the family). A
+ * base-URL-provisioned runtime (Ollama / generic openai-compatible) is absent on
+ * purpose: it is configured by endpoint, not by a per-user secret.
+ */
+const USER_CREDENTIAL_FAMILIES: ReadonlySet<string> = new Set([
+  'openai',
+  'deepseek',
+  'google',
+  'openrouter',
+]);
+
+/**
+ * Can the runtime THIS USER executes on actually run this provider?
+ *
+ * TRUE when the deployment registered the family from its own env key
+ * (`CONFIGURED` / `MOCK`) OR the owner holds a stored credential for a family
+ * the owner-scoped registrar can turn into a real adapter. Every other
+ * combination stays false, so nothing is ever upgraded without a credential the
+ * runtime can genuinely resolve.
+ */
+export function isRuntimeConfigured(input: {
+  runtimeStatus?: string | undefined;
+  credentialSource?: 'USER' | 'PLATFORM' | 'NONE' | undefined;
+  family?: string | undefined;
+}): boolean {
+  if (input.runtimeStatus === 'CONFIGURED' || input.runtimeStatus === 'MOCK') return true;
+  if (input.credentialSource !== 'USER') return false;
+  // A family this deployment cannot execute from a user credential must not be
+  // upgraded even when a record exists (e.g. Anthropic has no adapter).
+  if (input.family === undefined) return true;
+  return USER_CREDENTIAL_FAMILIES.has(input.family);
 }
 
 export interface ProviderState {
@@ -155,7 +216,14 @@ function state(
  */
 export function deriveProviderState(input: ProviderStateInput): ProviderState {
   const runtimeStatus = input.runtimeStatus;
-  const runtimeConfigured = runtimeStatus === 'CONFIGURED' || runtimeStatus === 'MOCK';
+  // Uses the SAME predicate the server status resolver uses, so the card, the
+  // readiness indicator and the connection chip can never disagree about
+  // whether this user's runtime can actually execute the provider.
+  const runtimeConfigured = isRuntimeConfigured({
+    runtimeStatus,
+    credentialSource: input.credentialSource,
+    family: input.family,
+  });
   const enabled = input.enabled;
 
   // 1. In-flight flow stages — the user is watching this happen right now.

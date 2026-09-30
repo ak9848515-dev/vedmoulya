@@ -67,9 +67,27 @@ export function providerReadiness(
   runtimeStatus: string | undefined,
   enabled: boolean,
   lastVerification?: { ok: boolean; failureKind?: string },
+  /**
+   * Which credential can authenticate this family FOR THIS USER
+   * (`'USER' | 'PLATFORM' | 'NONE'`). A provider the user connected with their
+   * OWN key IS usable — the deployment-only runtime registry simply cannot see
+   * it — so the indicator must not read "Configure to use" for it.
+   */
+  credentialSource?: 'USER' | 'PLATFORM' | 'NONE',
+  /** The provider family id, so the credential override stays family-scoped. */
+  family?: string,
 ): ProviderReadiness {
-  const state = deriveProviderState({ runtimeStatus, enabled, lastVerification });
+  const state = deriveProviderState({
+    runtimeStatus,
+    enabled,
+    lastVerification,
+    credentialSource,
+    family,
+  });
   const isMock = runtimeStatus === 'MOCK';
+  // The ownership picture the RED wording depends on: a provider the USER
+  // connected is not "not configured" — it is configured by their own key.
+  const userCredential = credentialSource === 'USER';
 
   if (state.ready) {
     return {
@@ -104,8 +122,10 @@ export function providerReadiness(
     case 'DISABLED':
       return {
         key: 'red',
-        label: 'Not registered',
-        hint: 'This provider is not registered for execution in this environment.',
+        label: userCredential ? 'Needs attention' : 'Not registered',
+        hint: userCredential
+          ? 'Your saved key cannot be used for this provider in this build — reconnect it or choose another AI.'
+          : 'This provider is not registered for execution in this environment.',
       };
     case 'CONFIGURED':
     case 'MOCK':
@@ -115,8 +135,13 @@ export function providerReadiness(
     case 'NOT_CONFIGURED':
       return {
         key: 'red',
-        label: 'Not configured',
-        hint: 'No runtime key is set — configure the provider to use it.',
+        // A credential the USER holds is real configuration; calling it
+        // "Not configured" would contradict the provider card that reads
+        // Connected. The canonical state hint carries the exact reason.
+        label: userCredential ? state.label : 'Not configured',
+        hint: userCredential
+          ? state.hint
+          : 'No runtime key is set — configure the provider to use it.',
       };
     default:
       // Custom/user-registered entries, unknown families, or a missing runtime
