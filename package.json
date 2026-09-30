@@ -130,7 +130,10 @@
     "uuid": "^11.1.1",
     "sharp": "^0.35.4",
     "fast-uri": "^3.1.5",
-    "vite": "6.4.3"
+    "vite": "6.4.3",
+    "@ai-sdk/provider-utils": {
+      "undici": "^7.30.0"
+    }
   },
   "dependencies": {
     "@openrouter/sdk": "^1.2.107"
