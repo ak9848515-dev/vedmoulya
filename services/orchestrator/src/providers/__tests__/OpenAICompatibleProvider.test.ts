@@ -145,6 +145,7 @@ describe('OpenAICompatibleProvider', () => {
     streamTextMock.mockReturnValue({
       textStream: textStream(),
       usage: Promise.resolve({ inputTokens: 5, outputTokens: 2, totalTokens: 7 }),
+      finalStep: Promise.resolve({ response: { modelId: 'gpt-4o-mini' } }),
     });
 
     const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom');

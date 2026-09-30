@@ -132,11 +132,38 @@ export interface LocalGenerateResult {
   latencyMs: number;
   error?: LocalRuntimeErrorKind;
   message: string;
+  /**
+   * REAL usage the local runtime reported (Ollama `prompt_eval_count` /
+   * `eval_count`, OpenAI-compatible `prompt_tokens` / `completion_tokens`).
+   * Absent when the runtime reported none — usage is never fabricated.
+   */
+  usage?: LocalTokenUsage;
 }
 
+/** Local inference token usage. Local cost is genuinely zero — there is no price. */
+export interface LocalTokenUsage {
+  input: number;
+  output: number;
+  total: number;
+}
+
+/**
+ * One streamed chunk. A stream that could not START (runtime down, model not
+ * installed, transport refused) is reported as a TERMINAL chunk carrying `error`
+ * instead of silently ending with zero content — otherwise a broken runtime and a
+ * slow model are indistinguishable to the caller.
+ */
 export interface LocalGenerateChunk {
   content: string;
   done: boolean;
+  /** Present on a terminal failure chunk: why the stream could not run. */
+  error?: LocalRuntimeErrorKind;
+  /** Human-readable explanation accompanying `error`. */
+  message?: string;
+  /** The model the stream was asked for (echoed on failure for diagnosis). */
+  modelId?: string;
+  /** REAL usage the runtime reported on the terminal chunk (never fabricated). */
+  usage?: LocalTokenUsage;
 }
 
 /**

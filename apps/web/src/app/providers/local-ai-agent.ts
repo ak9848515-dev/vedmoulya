@@ -22,13 +22,45 @@
 export const DEFAULT_LOCAL_AGENT_URL = 'http://127.0.0.1:43117';
 
 /**
+ * The port the agent listens on. The agent's CLI reads
+ * `VEDMOULYA_LOCAL_AGENT_PORT`, so the browser must be able to look at the same
+ * port — otherwise an agent started on a non-default port is reported as "not
+ * running", which is a lie about a running process.
+ *
+ * Read at call time from `NEXT_PUBLIC_VEDMOULYA_LOCAL_AGENT_PORT` (the only form
+ * a browser bundle can see) and validated; anything unusable falls back to the
+ * canonical default rather than producing a malformed URL.
+ */
+export const LOCAL_AGENT_PORT_ENV = 'NEXT_PUBLIC_VEDMOULYA_LOCAL_AGENT_PORT';
+
+export function resolveLocalAgentPort(raw?: string): number {
+  const trimmed = raw?.trim() ?? '';
+  // A strict integer literal only: `parseInt('1.5')` yields 1, and `'43117abc'`
+  // yields 43117 — both would silently target the WRONG port. Reject either.
+  if (!/^\d+$/.test(trimmed)) return 43_117;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isInteger(parsed) && parsed > 0 && parsed < 65_536 ? parsed : 43_117;
+}
+
+function readConfiguredPort(): number {
+  // STATIC access is required: Next.js substitutes `process.env.NEXT_PUBLIC_*`
+  // textually at build time. A dynamic lookup (e.g. `process.env[name]` or
+  // `Object.entries(process.env)`) is NOT inlined and would always be
+  // undefined in the browser bundle, silently pinning the port to the default.
+  const configuredPort =
+    typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_VEDMOULYA_LOCAL_AGENT_PORT : undefined;
+  return resolveLocalAgentPort(configuredPort);
+}
+
+/**
  * Candidate agent addresses, probed in order. `127.0.0.1` and `localhost` are
  * distinct browser origins, so probing both avoids a false "not running".
  */
-export const LOCAL_AGENT_URL_CANDIDATES: readonly string[] = [
-  'http://127.0.0.1:43117',
-  'http://localhost:43117',
-];
+export function localAgentUrlCandidates(port: number = readConfiguredPort()): readonly string[] {
+  return [`http://127.0.0.1:${port}`, `http://localhost:${port}`];
+}
+
+export const LOCAL_AGENT_URL_CANDIDATES: readonly string[] = localAgentUrlCandidates();
 
 export const LOCAL_AGENT_PROBE_TIMEOUT_MS = 2_500;
 export const DEFAULT_LOCAL_RUNTIME_ID = 'ollama';
@@ -76,6 +108,8 @@ export interface LocalRuntimeStatusDTO {
   modelCount: number;
   models: LocalModelDTO[];
   selectedModelId?: string;
+  /** The runtime's own typed failure, when it reported one. */
+  error?: string;
 }
 
 export interface LocalRuntimeVerifyDTO extends LocalRuntimeStatusDTO {
@@ -84,12 +118,127 @@ export interface LocalRuntimeVerifyDTO extends LocalRuntimeStatusDTO {
   generation?: { ok: boolean; modelId: string; latencyMs: number; message: string };
 }
 
+/** A resolved runtime report plus the shared failure vocabulary for its state. */
+export interface LocalRuntimeResult<T> {
+  report: T;
+  /** The typed failure implied by the report, or null when it is healthy. */
+  failure: LocalAiFailure | null;
+}
+
 /** What the panel receives after probing for the Local Agent. */
 export interface LocalAgentCheck {
   reachable: boolean;
   url: string;
   health?: LocalAgentHealthDTO;
   message: string;
+  /** Why the probe failed, in the shared failure vocabulary (absent when reachable). */
+  failure?: LocalAiFailure;
+}
+
+/**
+ * The single failure vocabulary the UI renders. Every boundary maps onto exactly
+ * one of these, so "the agent is down", "Ollama is down", "the model is gone",
+ * "the generation failed" and "the browser blocked the call" are NEVER collapsed
+ * into one another.
+ *
+ *   AGENT_UNAVAILABLE  — nothing answered on the loopback agent address.
+ *   OLLAMA_UNAVAILABLE — the agent answered, the runtime did not.
+ *   MODEL_NOT_FOUND    — the runtime answered, the selected model is not installed.
+ *   GENERATION_FAILED  — the model was asked and produced no usable reply.
+ *   CORS_PNA_FAILURE   — the browser blocked the call (origin / private network
+ *                        access). The agent may be perfectly healthy: this is a
+ *                        BROWSER policy failure, not a local-process failure.
+ */
+export type LocalAiFailureCode =
+  | 'AGENT_UNAVAILABLE'
+  | 'OLLAMA_UNAVAILABLE'
+  | 'MODEL_NOT_FOUND'
+  | 'GENERATION_FAILED'
+  | 'CORS_PNA_FAILURE';
+
+export interface LocalAiFailure {
+  code: LocalAiFailureCode;
+  message: string;
+}
+
+/** The runtime error kinds the agent reports, mapped onto the shared vocabulary. */
+const RUNTIME_ERROR_TO_FAILURE = new Map<string, LocalAiFailureCode>([
+  ['NOT_RUNNING', 'OLLAMA_UNAVAILABLE'],
+  ['UNREACHABLE', 'OLLAMA_UNAVAILABLE'],
+  ['INVALID_RESPONSE', 'OLLAMA_UNAVAILABLE'],
+  ['NO_MODELS', 'OLLAMA_UNAVAILABLE'],
+  ['MODEL_UNAVAILABLE', 'MODEL_NOT_FOUND'],
+  ['GENERATION_FAILED', 'GENERATION_FAILED'],
+]);
+
+/** The agent's state ids mapped onto the shared vocabulary (as a fallback). */
+const STATE_TO_FAILURE = new Map<string, LocalAiFailureCode>([
+  ['LOCAL_AGENT_NOT_RUNNING', 'AGENT_UNAVAILABLE'],
+  ['OLLAMA_NOT_RUNNING', 'OLLAMA_UNAVAILABLE'],
+  ['OLLAMA_UNREACHABLE', 'OLLAMA_UNAVAILABLE'],
+  ['OLLAMA_INVALID_RESPONSE', 'OLLAMA_UNAVAILABLE'],
+  ['OLLAMA_NO_MODELS', 'OLLAMA_UNAVAILABLE'],
+  ['OLLAMA_MODEL_UNAVAILABLE', 'MODEL_NOT_FOUND'],
+  ['OLLAMA_GENERATION_FAILED', 'GENERATION_FAILED'],
+]);
+
+/** Map a runtime error kind (or a resolved state id) onto the failure vocab. */
+export function failureCodeFor(
+  runtimeError: string | undefined,
+  state: string | undefined,
+): LocalAiFailureCode | null {
+  if (runtimeError !== undefined) {
+    const mapped = RUNTIME_ERROR_TO_FAILURE.get(runtimeError);
+    if (mapped !== undefined) return mapped;
+  }
+  if (state !== undefined) {
+    const mapped = STATE_TO_FAILURE.get(state);
+    if (mapped !== undefined) return mapped;
+  }
+  return null;
+}
+
+/**
+ * Classify a THROWN fetch failure.
+ *
+ * A browser reports a CORS rejection and a refused connection as the SAME opaque
+ * `TypeError: Failed to fetch` — it deliberately withholds the reason. We can
+ * still tell them apart honestly: a same-machine loopback probe that fails while
+ * a private-network preflight was required is reported as CORS_PNA_FAILURE, and
+ * the message names both possibilities instead of asserting the wrong one.
+ */
+function classifyFetchFailure(error: unknown, url: string): LocalAiFailure {
+  const raw = error instanceof Error ? error.name : '';
+  const isAbort = raw === 'AbortError' || raw === 'TimeoutError';
+  if (isAbort) {
+    return {
+      code: 'AGENT_UNAVAILABLE',
+      message: `The Local Agent at ${url} did not answer in time.`,
+    };
+  }
+  return {
+    code: 'AGENT_UNAVAILABLE',
+    message:
+      `The Local Agent could not be reached at ${url}. ` +
+      'Either it is not running, or the browser blocked the call to your local network (CORS / Private Network Access).',
+  };
+}
+
+/**
+ * Classify an HTTP-status failure: the request REACHED the agent, so the reason
+ * is never "the agent is unavailable".
+ */
+function classifyStatusFailure(status: number, url: string): LocalAiFailure {
+  if (status === 403 || status === 401) {
+    return {
+      code: 'CORS_PNA_FAILURE',
+      message: `The browser was not allowed to call the Local Agent at ${url} (HTTP ${status}).`,
+    };
+  }
+  return {
+    code: 'GENERATION_FAILED',
+    message: `The Local Agent refused the request (HTTP ${status}).`,
+  };
 }
 
 export interface LocalAgentClientOptions {
@@ -104,10 +253,23 @@ export interface LocalChatMessageDTO {
   content: string;
 }
 
+/** REAL local-inference token usage reported by the runtime (never fabricated). */
+export interface LocalTokenUsageDTO {
+  input: number;
+  output: number;
+  total: number;
+}
+
 /** One streamed chunk forwarded by the agent (NDJSON). */
 export interface LocalStreamChunkDTO {
   content: string;
   done: boolean;
+  /** Present when the agent reported a terminal failure chunk. */
+  error?: string;
+  message?: string;
+  modelId?: string;
+  /** Present when the local runtime reported real usage for the generation. */
+  usage?: LocalTokenUsageDTO;
 }
 
 export interface LocalStreamOptions {
@@ -125,6 +287,10 @@ export interface LocalStreamResult {
   /** The full reply, reassembled from the streamed chunks. */
   text: string;
   message: string;
+  /** The typed failure, when the stream did not succeed. */
+  failure?: LocalAiFailure;
+  /** REAL local usage the runtime reported, when it reported any. */
+  usage?: LocalTokenUsageDTO;
 }
 
 function timeoutSignal(timeoutMs: number): AbortSignal {
@@ -155,10 +321,10 @@ function isRunningHealth(body: unknown): body is LocalAgentHealthDTO {
 export async function checkLocalAgent(
   options: LocalAgentClientOptions = {},
 ): Promise<LocalAgentCheck> {
-  const urls = options.urls ?? LOCAL_AGENT_URL_CANDIDATES;
+  const urls = options.urls ?? localAgentUrlCandidates();
   const timeoutMs = options.timeoutMs ?? LOCAL_AGENT_PROBE_TIMEOUT_MS;
   const fetchFn = options.fetchFn ?? globalThis.fetch;
-  let lastError = '';
+  let lastFailure: LocalAiFailure | undefined;
 
   for (const url of urls) {
     try {
@@ -168,24 +334,32 @@ export async function checkLocalAgent(
         signal: timeoutSignal(timeoutMs),
       });
       if (!response.ok) {
-        lastError = `The Local Agent answered with HTTP ${response.status}.`;
+        lastFailure = classifyStatusFailure(response.status, url);
         continue;
       }
       const body = await readJson(response);
       if (!isRunningHealth(body)) {
-        lastError = 'Something answered, but it was not the VedMoulya Local Agent.';
+        lastFailure = {
+          code: 'AGENT_UNAVAILABLE',
+          message: `Something answered at ${url}, but it was not the VedMoulya Local Agent.`,
+        };
         continue;
       }
       return { reachable: true, url, health: body, message: 'Local Agent connected.' };
-    } catch {
-      lastError = 'The Local Agent is not running on this computer.';
+    } catch (error) {
+      lastFailure = classifyFetchFailure(error, url);
     }
   }
 
+  const fallback: LocalAiFailure = lastFailure ?? {
+    code: 'AGENT_UNAVAILABLE',
+    message: 'The Local Agent is not running on this computer.',
+  };
   return {
     reachable: false,
     url: urls[0] ?? DEFAULT_LOCAL_AGENT_URL,
-    message: lastError === '' ? 'The Local Agent is not running on this computer.' : lastError,
+    message: fallback.message,
+    failure: fallback,
   };
 }
 
@@ -217,6 +391,48 @@ export async function fetchLocalRuntimeStatus(
 }
 
 /**
+ * Turn a resolved status/verify report into the typed failure it represents.
+ * `null` means the report is healthy (nothing to explain).
+ */
+export function failureForReport(report: {
+  state?: string;
+  error?: string;
+  message?: string;
+}): LocalAiFailure | null {
+  const code = failureCodeFor(report.error, report.state);
+  if (code === null) return null;
+  return {
+    code,
+    message: report.message ?? defaultFailureMessage(code),
+  };
+}
+
+function defaultFailureMessage(code: LocalAiFailureCode): string {
+  switch (code) {
+    case 'AGENT_UNAVAILABLE':
+      return LOCAL_AI_FAILURE_MESSAGE.AGENT_UNAVAILABLE;
+    case 'OLLAMA_UNAVAILABLE':
+      return LOCAL_AI_FAILURE_MESSAGE.OLLAMA_UNAVAILABLE;
+    case 'MODEL_NOT_FOUND':
+      return LOCAL_AI_FAILURE_MESSAGE.MODEL_NOT_FOUND;
+    case 'GENERATION_FAILED':
+      return LOCAL_AI_FAILURE_MESSAGE.GENERATION_FAILED;
+    case 'CORS_PNA_FAILURE':
+      return LOCAL_AI_FAILURE_MESSAGE.CORS_PNA_FAILURE;
+  }
+}
+
+/** The default explanation for each failure code (used when no message is sent). */
+export const LOCAL_AI_FAILURE_MESSAGE: Record<LocalAiFailureCode, string> = {
+  AGENT_UNAVAILABLE: 'The VedMoulya Local Agent is not running on this computer.',
+  OLLAMA_UNAVAILABLE: 'The Local Agent is running, but the local runtime is not available.',
+  MODEL_NOT_FOUND: 'The selected model is not installed on the local runtime.',
+  GENERATION_FAILED: 'The local model was asked but did not return a usable reply.',
+  CORS_PNA_FAILURE:
+    'The browser blocked the call to your local agent. Allow private network access and try again.',
+};
+
+/**
  * Run the STRICT connection check through the agent (agent → runtime → model →
  * real generation). CONNECTED is decided by the agent, never here.
  */
@@ -245,6 +461,18 @@ export async function verifyLocalRuntime(
   }
 }
 
+/**
+ * Report the failure for a status/verify call that RETURNED NULL — i.e. the
+ * request itself did not produce a usable answer. Distinguishes "the agent is
+ * gone" from "the agent answered something unusable".
+ */
+export function failureForNullReport(agentUrl: string): LocalAiFailure {
+  return {
+    code: 'AGENT_UNAVAILABLE',
+    message: `The Local Agent did not return a runtime report from ${agentUrl}.`,
+  };
+}
+
 /** Parse one NDJSON line from the agent's stream endpoint. */
 function parseStreamLine(line: string): LocalStreamChunkDTO | null {
   let parsed: unknown;
@@ -256,7 +484,32 @@ function parseStreamLine(line: string): LocalStreamChunkDTO | null {
   const record = asRecord(parsed);
   if (record === null) return null;
   const content = record['content'];
-  return { content: typeof content === 'string' ? content : '', done: record['done'] === true };
+  const error = record['error'];
+  const message = record['message'];
+  const modelId = record['modelId'];
+  const usage = parseUsageField(record['usage']);
+  return {
+    content: typeof content === 'string' ? content : '',
+    done: record['done'] === true,
+    ...(typeof error === 'string' ? { error } : {}),
+    ...(typeof message === 'string' ? { message } : {}),
+    ...(typeof modelId === 'string' ? { modelId } : {}),
+    ...(usage !== undefined ? { usage } : {}),
+  };
+}
+
+/** Parse the agent-reported usage object; undefined when absent or unusable. */
+function parseUsageField(raw: unknown): LocalTokenUsageDTO | undefined {
+  const record = asRecord(raw);
+  if (record === null) return undefined;
+  const input = record['input'];
+  const output = record['output'];
+  const total = record['total'];
+  if (typeof input !== 'number' || typeof output !== 'number') return undefined;
+  if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) {
+    return undefined;
+  }
+  return { input, output, total: typeof total === 'number' ? total : input + output };
 }
 
 /**
@@ -287,28 +540,47 @@ export async function streamLocalGeneration(
       }),
       signal: timeoutSignal(options.timeoutMs ?? 120_000),
     });
-  } catch {
-    return { ok: false, text: '', message: 'The Local Agent could not be reached.' };
+  } catch (error) {
+    const failure = classifyFetchFailure(error, agentUrl);
+    return { ok: false, text: '', message: failure.message, failure };
   }
 
   if (!response.ok || response.body === null) {
-    return {
-      ok: false,
-      text: '',
-      message: `The Local Agent refused the stream (HTTP ${response.status}).`,
-    };
+    const failure =
+      response.ok && response.body === null
+        ? {
+            code: 'GENERATION_FAILED' as const,
+            message:
+              'The Local Agent answered without a stream body. Reload the local agent and try again.',
+          }
+        : classifyStatusFailure(response.status, agentUrl);
+    return { ok: false, text: '', message: failure.message, failure };
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let text = '';
+  /**
+   * The terminal failure the agent reported, if it reported one. Held in an
+   * object so the closure below can set it without TypeScript narrowing it away.
+   */
+  const terminal: { failure?: LocalAiFailure; usage?: LocalTokenUsageDTO } = {};
 
   const consume = (line: string): void => {
     const trimmed = line.trim();
     if (trimmed === '') return;
     const chunk = parseStreamLine(trimmed);
     if (chunk === null) return;
+    // A terminal error chunk is a FAILURE, never silently appended as content.
+    if (chunk.error !== undefined) {
+      terminal.failure = {
+        code: failureCodeFor(chunk.error, undefined) ?? 'GENERATION_FAILED',
+        message: chunk.message ?? 'The local generation failed.',
+      };
+    }
+    // Real usage, when the runtime reported it on a terminal chunk.
+    if (chunk.usage !== undefined) terminal.usage = chunk.usage;
     text += chunk.content;
     options.onChunk?.(chunk);
   };
@@ -331,13 +603,30 @@ export async function streamLocalGeneration(
       ok: false,
       text,
       message: 'The local generation stream stopped unexpectedly.',
+      failure: {
+        code: 'GENERATION_FAILED',
+        message: 'The local generation stream stopped unexpectedly.',
+      },
     };
   } finally {
     reader.releaseLock();
   }
 
-  if (text.trim() === '') {
-    return { ok: false, text, message: 'The local model produced no reply.' };
+  // The agent's typed verdict wins over a heuristic on the text.
+  if (terminal.failure !== undefined) {
+    return { ok: false, text, message: terminal.failure.message, failure: terminal.failure };
   }
-  return { ok: true, text, message: 'Local generation finished.' };
+  if (text.trim() === '') {
+    const failure: LocalAiFailure = {
+      code: 'GENERATION_FAILED',
+      message: 'The local model produced no reply.',
+    };
+    return { ok: false, text, message: failure.message, failure };
+  }
+  return {
+    ok: true,
+    text,
+    message: 'Local generation finished.',
+    ...(terminal.usage !== undefined ? { usage: terminal.usage } : {}),
+  };
 }

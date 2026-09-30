@@ -302,13 +302,12 @@ export class CostLedger {
     engineAccountsUsage: boolean,
   ): void {
     if (span.kind === 'ai') {
-      // A trace with an engine rollup keeps its pre-existing counting (every
-      // ai span). A trace WITHOUT one (direct Ask VedMoulya, Mission AI steps)
-      // counts ACTUAL provider executions — so a request that never reached a
-      // provider (e.g. failed selection, or a pure optimization/validation
-      // span) is never reported as an AI call.
+      // Count each provider attempt once, regardless of engine-level rollups.
+      // A cache hit has no provider_execution span, so preserve its single-call
+      // count on the run span instead of counting every AI span.
       const isProviderExecution = span.name === 'ai.provider_execution';
-      if (engineAccountsUsage || isProviderExecution) {
+      const isCachedRun = engineAccountsUsage && aiRuntimeCacheHit(span);
+      if (isProviderExecution || isCachedRun) {
         const provider = stringAttr(span.attributes.provider) ?? 'unknown';
         const entry = ensureProvider(byProvider, provider);
         entry.calls += 1;
@@ -316,8 +315,12 @@ export class CostLedger {
         totals.aiCalls += 1;
         totals.latencyMs += span.durationMs ?? 0;
         row.aiCalls += 1;
-        if (span.name === 'ai.retry') totals.retries += 1;
       }
+      // Retry accounting is INDEPENDENT of provider-execution counting: an
+      // `ai.retry` span is a retry whether or not it also carries provider
+      // execution attributes, and it must never be dropped because a trace
+      // happened to be engine-rollup authoritative.
+      if (span.name === 'ai.retry') totals.retries += 1;
     }
 
     // AI runtime usage (AI-RUNTIME-002 attributes): only counted when the
@@ -445,8 +448,11 @@ function aiRuntimeUsage(span: TraceSpan): AiRuntimeUsage | undefined {
   if (stringAttr(span.attributes.status) !== 'success') return undefined;
   const tokensInput = numAttr(span.attributes.input_tokens);
   const tokensOutput = numAttr(span.attributes.output_tokens);
+  const tokensTotal =
+    span.attributes.total_tokens === undefined
+      ? tokensInput + tokensOutput
+      : numAttr(span.attributes.total_tokens);
   const costUsd = numAttr(span.attributes.cost);
-  const tokensTotal = tokensInput + tokensOutput;
   if (tokensTotal === 0 && costUsd === 0) return undefined;
   return { tokensInput, tokensOutput, tokensTotal, costUsd };
 }

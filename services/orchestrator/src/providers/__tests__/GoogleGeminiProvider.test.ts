@@ -146,6 +146,7 @@ describe('GoogleGeminiProvider', () => {
     streamTextMock.mockReturnValue({
       textStream: textStream(),
       usage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+      finalStep: Promise.resolve({ response: { modelId: 'gemini-2.0-flash' } }),
     });
     const events: unknown[] = [];
     for await (const event of provider.stream({ messages: MESSAGES, model: 'gemini' })) {
@@ -211,6 +212,7 @@ describe('GoogleGeminiProvider', () => {
     streamTextMock.mockReturnValue({
       textStream: textStream(),
       usage: Promise.resolve({ inputTokens: 5, outputTokens: 2, totalTokens: 7 }),
+      finalStep: Promise.resolve({ response: { modelId: 'gemini-2.0-flash' } }),
     });
 
     const provider = new GoogleGeminiProvider(FAKE_API_KEY);

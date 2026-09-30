@@ -267,4 +267,55 @@ describe('OllamaRuntimeAdapter — generation', () => {
     expect(chunks.join('')).toBe('hello');
     expect(done).toBe(true);
   });
+
+  // ── Real usage propagation (item 5) ──────────────────────────────────────
+
+  it('reports REAL usage on a successful generate (prompt_eval_count / eval_count)', async () => {
+    const adapter = new OllamaRuntimeAdapter({
+      fetchFn: fetchDouble({
+        tags: () => Promise.resolve(jsonResponse({ models: [{ name: 'llama3.2' }] })),
+        chat: () =>
+          Promise.resolve(
+            jsonResponse({
+              message: { content: 'hi' },
+              prompt_eval_count: 11,
+              eval_count: 7,
+            }),
+          ),
+      }),
+    });
+    const result = await adapter.generate({ messages: [{ role: 'user', content: 'hi' }] });
+    expect(result.ok).toBe(true);
+    expect(result.usage).toEqual({ input: 11, output: 7, total: 18 });
+  });
+
+  it('omits usage when the runtime reports none (never fabricated)', async () => {
+    const adapter = new OllamaRuntimeAdapter({ fetchFn: fetchDouble({}) });
+    const result = await adapter.generate({ messages: [{ role: 'user', content: 'hi' }] });
+    expect(result.ok).toBe(true);
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('carries REAL usage on the terminal stream chunk', async () => {
+    const ndjson = [
+      '{"message":{"content":"he"},"done":false}',
+      '{"message":{"content":"llo"},"done":false}',
+      '{"message":{"content":""},"done":true,"prompt_eval_count":9,"eval_count":4}',
+    ].join('\n');
+    const adapter = new OllamaRuntimeAdapter({
+      fetchFn: ((input: RequestInfo | URL) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.endsWith('/api/version'))
+          return Promise.resolve(jsonResponse({ version: '0.34.4' }));
+        if (url.endsWith('/api/tags')) return Promise.resolve(jsonResponse(TAGS));
+        return Promise.resolve(new Response(ndjson, { status: 200 }));
+      }) as unknown as typeof fetch,
+    });
+    let usage: { input: number; output: number; total: number } | undefined;
+    for await (const chunk of adapter.stream({ messages: [{ role: 'user', content: 'hi' }] })) {
+      if (chunk.done) usage = chunk.usage;
+    }
+    expect(usage).toEqual({ input: 9, output: 4, total: 13 });
+  });
 });

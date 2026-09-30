@@ -1,4 +1,5 @@
 export const name = 'shared' as const;
+export * from './economics/currency.js';
 
 export type { QuickActionDTO } from './types/QuickActionDTO.js';
 

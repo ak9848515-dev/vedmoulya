@@ -138,6 +138,7 @@ describe('DeepSeekProvider', () => {
     streamTextMock.mockReturnValue({
       textStream: textStream(),
       usage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+      finalStep: Promise.resolve({ response: { modelId: 'deepseek-chat' } }),
     });
     const events: unknown[] = [];
     for await (const event of provider.stream({ messages: MESSAGES, model: 'deepseek' })) {
@@ -203,6 +204,7 @@ describe('DeepSeekProvider', () => {
     streamTextMock.mockReturnValue({
       textStream: textStream(),
       usage: Promise.resolve({ inputTokens: 5, outputTokens: 2, totalTokens: 7 }),
+      finalStep: Promise.resolve({ response: { modelId: 'deepseek-chat' } }),
     });
 
     const provider = new DeepSeekProvider('sk-test');

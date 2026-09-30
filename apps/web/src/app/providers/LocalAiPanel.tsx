@@ -50,6 +50,15 @@ function isVerifyReport(report: LocalRuntimeStatusDTO | null): report is LocalRu
   return report !== null && Array.isArray((report as LocalRuntimeVerifyDTO).checks);
 }
 
+/** A REAL Local Agent execution (browser → agent → runtime) to attribute. */
+export interface LocalUsageInput {
+  provider: string;
+  model: string;
+  input: number;
+  output: number;
+  total: number;
+}
+
 function Row({
   label,
   value,
@@ -76,7 +85,14 @@ function Row({
 
 // ── The full panel ────────────────────────────────────────────────────────
 
-export function LocalAiPanelView({ localAi }: { localAi: LocalAiStatus }): React.ReactElement {
+export function LocalAiPanelView({
+  localAi,
+  onLocalUsage,
+}: {
+  localAi: LocalAiStatus;
+  /** Report a REAL local execution's usage so it enters owner-scoped telemetry. */
+  onLocalUsage?: (usage: LocalUsageInput) => void;
+}): React.ReactElement {
   const [prompt, setPrompt] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [output, setOutput] = useState('');
@@ -100,12 +116,32 @@ export function LocalAiPanelView({ localAi }: { localAi: LocalAiStatus }): React
     });
     setStreaming(false);
     setOutput((previous) => (result.text !== '' ? result.text : previous));
-    setStreamMessage(result.message);
-  }, [localAi.check, localAi.selectedModelId, prompt, streaming]);
+    // A typed failure names exactly which boundary broke (agent / runtime / model
+    // / generation); a plain message would collapse them.
+    setStreamMessage(
+      result.ok || result.failure === undefined
+        ? result.message
+        : `${result.failure.code} — ${result.failure.message}`,
+    );
+    // Telemetry is best-effort: only a SUCCESSFUL generation with REAL runtime
+    // usage is reported, and it never blocks or fails the generation itself.
+    if (result.ok && result.usage !== undefined) {
+      onLocalUsage?.({
+        provider: DEFAULT_LOCAL_RUNTIME_ID,
+        model: localAi.selectedModelId !== '' ? localAi.selectedModelId : 'unknown',
+        input: result.usage.input,
+        output: result.usage.output,
+        total: result.usage.total,
+      });
+    }
+  }, [localAi.check, localAi.selectedModelId, prompt, streaming, onLocalUsage]);
 
   const { check, report, agentReachable, checking, connecting, selectedModelId } = localAi;
   const verify = isVerifyReport(report) ? report : null;
-  const tone = report?.tone ?? 'neutral';
+  // The tone is the SHARED snapshot's — which only turns 'ok' for a measured,
+  // complete connection. A /health 200 renders as neutral, not green.
+  const tone = localAi.snapshot.tone;
+  const failure = localAi.failure;
 
   return (
     <section
@@ -131,8 +167,8 @@ export function LocalAiPanelView({ localAi }: { localAi: LocalAiStatus }): React
       <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
         <Row
           label="Local Agent"
-          value={agentReachable ? 'Connected' : 'Not connected'}
-          tone={agentReachable ? 'ok' : 'neutral'}
+          value={agentReachable ? 'Reachable' : 'Unavailable'}
+          tone={agentReachable ? 'neutral' : 'error'}
           testId="local-ai-agent-status"
         />
         <Row
@@ -149,11 +185,26 @@ export function LocalAiPanelView({ localAi }: { localAi: LocalAiStatus }): React
         />
         <Row
           label="Connection"
-          value={report?.label ?? (agentReachable ? 'Checking…' : 'Not connected')}
+          value={
+            // "Connected" requires a REAL measured connection — never a /health 200.
+            localAi.connected
+              ? 'Connected'
+              : (report?.label ?? (agentReachable ? 'Checking…' : 'Not connected'))
+          }
           tone={tone}
           testId="local-ai-connection"
         />
       </dl>
+
+      {failure !== null ? (
+        <p
+          data-testid="local-ai-failure"
+          data-failure-code={failure.code}
+          className="mt-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200"
+        >
+          <span className="font-medium">{failure.code}</span> — {failure.message}
+        </p>
+      ) : null}
 
       {report !== null && report.models.length > 0 ? (
         <div className="mt-3">
@@ -302,9 +353,13 @@ export function LocalAiPanelView({ localAi }: { localAi: LocalAiStatus }): React
 }
 
 /** Self-contained panel: owns its own live state when nothing is passed in. */
-export function LocalAiPanel(): React.ReactElement {
+export function LocalAiPanel({
+  onLocalUsage,
+}: {
+  onLocalUsage?: (usage: LocalUsageInput) => void;
+} = {}): React.ReactElement {
   const localAi = useLocalAiStatus();
-  return <LocalAiPanelView localAi={localAi} />;
+  return <LocalAiPanelView localAi={localAi} onLocalUsage={onLocalUsage} />;
 }
 
 // ── The compact overview card ─────────────────────────────────────────────
@@ -313,7 +368,9 @@ export function LocalAiPanel(): React.ReactElement {
 
 export function LocalAiOverviewCard({ localAi }: { localAi: LocalAiStatus }): React.ReactElement {
   const { snapshot } = localAi;
-  const connectionLabel = snapshot.state !== null ? snapshot.label : snapshot.label;
+  // The snapshot already carries the measured verdict and its label; the card
+  // only renders it. It never promotes a /health 200 into "Connected".
+  const connectionLabel = snapshot.connected ? 'Connected' : snapshot.label;
   return (
     <section
       data-testid="local-ai-overview-card"

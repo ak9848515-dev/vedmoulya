@@ -57,6 +57,7 @@ import {
   useSetProviderEnabled,
   useSetProviderPreferences,
   useProviderUsageDetail,
+  useRecordLocalAiUsage,
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
 import { ProvidersOverview } from './ProvidersOverview.js';
@@ -79,6 +80,56 @@ import {
   isContractProviderFamily,
   providerIdentity,
 } from './provider-ux.js';
+import {
+  convertUsdToInr,
+  fetchUsdToInrReferenceRate,
+  formatInr,
+  type ExchangeRateProvider,
+} from '@vedmoulya/shared';
+
+// ── Injected USD→INR conversion (A2/A4/A5) ────────────────────────────────────
+// Live FX comes from an injected exchange-rate provider (operator wiring).
+// Currency conversion never hard-codes a rate, never manufactures cost, and
+// never pretends USD==INR: without an injected rate the screen renders an
+// explicit unavailable label.
+
+function usdToInrLabel(usdAmount: number, fx?: ExchangeRateProvider): string {
+  const rate = fx?.usdToInrRate();
+  const converted = convertUsdToInr({
+    usdAmount,
+    ...(rate === undefined ? {} : { rate, source: fx?.source() }),
+  });
+  if (!converted.available) return 'FX unavailable';
+  return formatInr(converted.costInr);
+}
+
+function CostInr({
+  usdAmount,
+  fx,
+}: {
+  usdAmount: number;
+  fx?: ExchangeRateProvider;
+}): React.JSX.Element {
+  const rate = fx?.usdToInrRate();
+  const converted = convertUsdToInr({
+    usdAmount,
+    ...(rate === undefined ? {} : { rate, source: fx?.source() }),
+  });
+  if (!converted.available) {
+    return (
+      <span title="Reference FX unavailable; INR conversion could not be calculated">
+        FX unavailable
+      </span>
+    );
+  }
+  return (
+    <span
+      title={`INR reference rate ${String(converted.fxRate)} (${converted.fxSource}; published ${fx?.observedAt() ?? 'unknown'}; converted ${converted.convertedAt})`}
+    >
+      {formatInr(converted.costInr)}
+    </span>
+  );
+}
 
 // ── Lazy-loaded views (progressive disclosure + a lean first load) ──────────
 // The provider list is what opens first. The configuration experience, the
@@ -228,6 +279,16 @@ type ProvidersView =
   | { kind: 'usage' };
 
 export default function ProvidersPage(): React.JSX.Element {
+  const [fx, setFx] = useState<ExchangeRateProvider | undefined>();
+  useEffect(() => {
+    let active = true;
+    void fetchUsdToInrReferenceRate().then((rateProvider) => {
+      if (active) setFx(rateProvider);
+    });
+    return (): void => {
+      active = false;
+    };
+  }, []);
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
@@ -298,6 +359,7 @@ export default function ProvidersPage(): React.JSX.Element {
         {view.kind === 'usage' ? (
           <UsageDetailView
             userId={userId}
+            fx={fx}
             onBack={() => {
               setView({ kind: 'list' });
             }}
@@ -306,6 +368,7 @@ export default function ProvidersPage(): React.JSX.Element {
           <ProviderDetailView
             userId={userId}
             providerId={view.providerId}
+            fx={fx}
             onBack={() => {
               setView({ kind: 'list' });
             }}
@@ -575,6 +638,17 @@ function ProviderExperienceView({
   const runtimeStatus = useProviderRuntimeStatus(userId);
   const setEnabledMutation = useSetProviderEnabled();
   const setPrefsMutation = useSetProviderPreferences();
+  const recordLocalUsage = useRecordLocalAiUsage();
+  // LOCAL AI telemetry — report a real local execution's usage so it lands in
+  // the SAME owner-scoped ledger. Best-effort: a telemetry failure must never
+  // affect the local generation.
+  const handleLocalUsage = useCallback(
+    (usage: { provider: string; model: string; input: number; output: number; total: number }) => {
+      if (!userId) return;
+      recordLocalUsage.mutate({ userId, ...usage });
+    },
+    [userId, recordLocalUsage],
+  );
   const [updatingProvider, setUpdatingProvider] = useState<string | null>(null);
   // MANDATORY-PROVIDER INVARIANT (PART 8) — the server refuses unsafe
   // enable/disable transitions; its reason is surfaced here verbatim.
@@ -707,7 +781,7 @@ function ProviderExperienceView({
       ) : null}
 
       {/* ── Local AI (minimal): the Local Agent bridge on this computer ── */}
-      <LocalAiPanelView localAi={localAi} />
+      <LocalAiPanelView localAi={localAi} onLocalUsage={handleLocalUsage} />
 
       {/* ── Screen 1: VedMoulya's AI + Other AI ───────────────────────── */}
       <ProvidersOverview
@@ -825,9 +899,11 @@ function ProviderExperienceView({
 function UsageDetailView({
   userId,
   onBack,
+  fx,
 }: {
   userId: string;
   onBack: () => void;
+  fx?: ExchangeRateProvider;
 }): React.JSX.Element {
   const { data, isLoading } = useProviderUsageDetail(userId);
 
@@ -869,8 +945,8 @@ function UsageDetailView({
             bg: 'bg-[#F5F3FF]',
           },
           {
-            label: 'Cost (USD)',
-            value: `$${totals.costUsd.toFixed(4)}`,
+            label: 'Cost (INR)',
+            value: usdToInrLabel(totals.costUsd, fx),
             icon: <CircleDollarSign className="h-4 w-4 text-[#F59E0B]" />,
             bg: 'bg-[#FFFBEB]',
           },
@@ -897,6 +973,14 @@ function UsageDetailView({
           </div>
         ))}
       </div>
+      <p
+        data-testid="usage-fx-provenance"
+        className="text-[11px] text-[#64748B] dark:text-[#94A3B8]"
+      >
+        {fx
+          ? `INR reference rate ${String(fx.usdToInrRate())} · ${fx.source()} · published ${fx.observedAt()}`
+          : 'INR reference rate unavailable; costs cannot be converted right now.'}
+      </p>
 
       {/* OpenAI ORGANIZATION usage — real per-model numbers from OpenAI for
           the platform's own key (see OpenAIOrgUsagePanel); shown before the
@@ -919,7 +1003,9 @@ function UsageDetailView({
                 <span className="text-[#64748B] dark:text-[#94A3B8]">
                   {fmtTokens(p.tokensTotal)} tokens
                 </span>
-                <span className="text-[#64748B] dark:text-[#94A3B8]">${p.costUsd.toFixed(4)}</span>
+                <span className="text-[#64748B] dark:text-[#94A3B8]">
+                  <CostInr usdAmount={p.costUsd} fx={fx} />
+                </span>
               </div>
             ))}
           </div>
@@ -945,7 +1031,12 @@ function UsageDetailView({
                   {m.modelId}
                 </span>
                 <span className="text-[#64748B] dark:text-[#94A3B8]">{m.calls} calls</span>
-                <span className="text-[#64748B] dark:text-[#94A3B8]">${m.costUsd.toFixed(4)}</span>
+                <span className="text-[#64748B] dark:text-[#94A3B8]">
+                  {fmtTokens(m.tokensTotal)} tokens
+                </span>
+                <span className="text-[#64748B] dark:text-[#94A3B8]">
+                  <CostInr usdAmount={m.costUsd} fx={fx} />
+                </span>
               </div>
             ))}
           </div>
@@ -968,7 +1059,9 @@ function UsageDetailView({
                 <span className="text-[#374151] dark:text-[#E2E8F0]">
                   {fmtTokens(ex.tokensTotal)}
                 </span>
-                <span>${ex.costUsd.toFixed(4)}</span>
+                <span>
+                  <CostInr usdAmount={ex.costUsd} fx={fx} />
+                </span>
                 <span>{ex.aiCalls} calls</span>
               </div>
             ))}

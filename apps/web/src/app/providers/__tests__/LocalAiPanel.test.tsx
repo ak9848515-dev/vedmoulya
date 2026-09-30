@@ -22,6 +22,11 @@ vi.mock('../local-ai-agent.js', () => ({
   DEFAULT_LOCAL_RUNTIME_ID: 'ollama',
   LOCAL_AGENT_URL_CANDIDATES: ['http://127.0.0.1:43117'],
   LOCAL_AGENT_PROBE_TIMEOUT_MS: 2500,
+  failureForNullReport: (url: string) => ({
+    code: 'AGENT_UNAVAILABLE',
+    message: `No report from ${url}`,
+  }),
+  failureForReport: () => null,
   checkLocalAgent: vi.fn(),
   fetchLocalRuntimeStatus: vi.fn(),
   verifyLocalRuntime: vi.fn(),
@@ -56,6 +61,7 @@ const STATUS_REPORT = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   mockedStatus.mockResolvedValue(null);
   mockedVerify.mockResolvedValue(null);
   mockedStream.mockResolvedValue({ ok: true, text: '', message: 'Local generation finished.' });
@@ -73,7 +79,7 @@ describe('LocalAiPanel', () => {
 
     expect(screen.getByTestId('local-ai-panel')).toBeTruthy();
     await waitFor(() => {
-      expect(screen.getByTestId('local-ai-agent-status').textContent).toBe('Not connected');
+      expect(screen.getByTestId('local-ai-agent-status').textContent).toBe('Unavailable');
     });
     expect(screen.getByTestId('local-ai-runtime').textContent).toBe('—');
     expect(screen.getByTestId('local-ai-connection').textContent).toBe('Not connected');
@@ -97,7 +103,7 @@ describe('LocalAiPanel', () => {
     render(<LocalAiPanel />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('local-ai-agent-status').textContent).toBe('Connected');
+      expect(screen.getByTestId('local-ai-agent-status').textContent).toBe('Reachable');
     });
     expect(screen.getByTestId('local-ai-runtime').textContent).toBe('Ollama');
     expect(screen.getByTestId('local-ai-model').textContent).toBe('qwen2.5-coder:7b-instruct');
@@ -107,6 +113,36 @@ describe('LocalAiPanel', () => {
     );
     expect(screen.getByTestId('local-ai-model-select')).toBeTruthy();
     expect(screen.getByTestId('local-ai-connect').hasAttribute('disabled')).toBe(false);
+  });
+
+  it('carries the selected model to the agent and retains it in browser storage', async () => {
+    const secondModel = {
+      id: 'qwen2.5-coder:3b',
+      name: 'qwen2.5-coder:3b',
+      runtime: 'ollama',
+      capabilities: ['completion'],
+      capabilitiesProvenance: 'MEASURED' as const,
+    };
+    mockedCheck.mockResolvedValue({
+      reachable: true,
+      url: 'http://127.0.0.1:43117',
+      message: 'Local Agent reachable.',
+    });
+    mockedStatus.mockImplementation(async (_url, _runtime, modelId) => ({
+      ...STATUS_REPORT,
+      models: [...STATUS_REPORT.models, secondModel],
+      selectedModelId: modelId ?? STATUS_REPORT.selectedModelId,
+    }));
+
+    render(<LocalAiPanel />);
+    const select = await screen.findByTestId('local-ai-model-select');
+    fireEvent.change(select, { target: { value: secondModel.id } });
+
+    await waitFor(() => {
+      expect(mockedStatus).toHaveBeenCalledWith('http://127.0.0.1:43117', 'ollama', secondModel.id);
+    });
+    expect(window.localStorage.getItem('vedmoulya.localAi.selectedModelId')).toBe(secondModel.id);
+    expect((select as HTMLSelectElement).value).toBe(secondModel.id);
   });
 
   it('runs the strict connect check through the agent and shows the evidence', async () => {
@@ -192,5 +228,81 @@ describe('LocalAiPanel', () => {
     expect(screen.getByTestId('local-ai-stream-status').textContent).toBe(
       'Local generation finished.',
     );
+  });
+
+  it('reports the REAL runtime usage to the telemetry bridge after a successful generation', async () => {
+    mockedCheck.mockResolvedValue({
+      reachable: true,
+      url: 'http://127.0.0.1:43117',
+      health: {
+        status: 'RUNNING',
+        version: '1.0.0',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        runtimes: ['ollama'],
+      },
+      message: 'Local Agent connected.',
+    });
+    mockedStatus.mockResolvedValue(STATUS_REPORT);
+    mockedStream.mockResolvedValue({
+      ok: true,
+      text: 'Hello',
+      message: 'Local generation finished.',
+      usage: { input: 12, output: 5, total: 17 },
+    });
+
+    const onLocalUsage = vi.fn();
+    render(<LocalAiPanel onLocalUsage={onLocalUsage} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('local-ai-prompt')).toBeTruthy();
+    });
+    fireEvent.change(screen.getByTestId('local-ai-prompt'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByTestId('local-ai-generate'));
+
+    await waitFor(() => {
+      expect(onLocalUsage).toHaveBeenCalledTimes(1);
+    });
+    expect(onLocalUsage).toHaveBeenCalledWith({
+      provider: 'ollama',
+      model: 'qwen2.5-coder:7b-instruct',
+      input: 12,
+      output: 5,
+      total: 17,
+    });
+  });
+
+  it('does NOT report telemetry for a failed generation', async () => {
+    mockedCheck.mockResolvedValue({
+      reachable: true,
+      url: 'http://127.0.0.1:43117',
+      health: {
+        status: 'RUNNING',
+        version: '1.0.0',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        runtimes: ['ollama'],
+      },
+      message: 'Local Agent connected.',
+    });
+    mockedStatus.mockResolvedValue(STATUS_REPORT);
+    mockedStream.mockResolvedValue({
+      ok: false,
+      text: '',
+      message: 'The local model produced no reply.',
+      failure: { code: 'GENERATION_FAILED', message: 'The local model produced no reply.' },
+    });
+
+    const onLocalUsage = vi.fn();
+    render(<LocalAiPanel onLocalUsage={onLocalUsage} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('local-ai-prompt')).toBeTruthy();
+    });
+    fireEvent.change(screen.getByTestId('local-ai-prompt'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByTestId('local-ai-generate'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('local-ai-stream-status').textContent).toContain(
+        'GENERATION_FAILED',
+      );
+    });
+    expect(onLocalUsage).not.toHaveBeenCalled();
   });
 });

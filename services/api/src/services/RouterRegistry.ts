@@ -1962,6 +1962,19 @@ const aiExplainSelectionInput = z.object({
   requestedOutputTokens: z.number().int().min(1).max(64000).optional(),
 });
 
+// LOCAL AI — the browser reports its Local Agent execution's REAL usage. No
+// cost is ever accepted (local inference is priced at zero, never invented).
+const aiLocalUsageInput = z.object({
+  userId: z.string().min(1),
+  provider: z.string().min(1).max(64),
+  model: z.string().min(1).max(200),
+  input: z.number().int().min(0).max(100_000_000),
+  output: z.number().int().min(0).max(100_000_000),
+  total: z.number().int().min(0).max(100_000_000).optional(),
+  mode: z.string().min(1).max(64).optional(),
+  capability: z.string().min(1).max(64).optional(),
+});
+
 // ── Enterprise RAG schemas (EPIC-005 / AI-RUNTIME-002) ──────────────────────
 
 const ragIngestInput = z.object({
@@ -5437,6 +5450,20 @@ export function createAppRouter(services: ApiApplicationService) {
       explainSelection: standardProcedure
         .input(aiExplainSelectionInput)
         .query(({ input, ctx }) => createAIRouter(services.ai).explainSelection(input, ctx)),
+      // LOCAL AI — browser → Local Agent → Ollama work is part of VedMoulya AI
+      // usage telemetry. The browser reports the runtime's REAL token counts
+      // here; this records them on the SAME owner-scoped trace/CostLedger the
+      // direct AI path uses (no second telemetry system, no invented cost).
+      recordLocalUsage: heavyProcedure
+        .input(aiLocalUsageInput)
+        .mutation(({ input, ctx }) =>
+          createAIRouter(
+            services.ai,
+            undefined,
+            undefined,
+            services.recordLocalAiUsage,
+          ).recordLocalUsage(input, ctx),
+        ),
     }),
 
     // ── Autonomous Planning Intelligence (BLD-017A) ──────────────────────────

@@ -249,4 +249,43 @@ describe('ModelSelectionIntelligence — EPIC-012B intelligence-layer facts', ()
     expect(result.selected.resourceType).toBe('LOCAL');
     expect(result.selected.freeToUse).toBe(true);
   });
+
+  // ── A6/E — paid-model rationale uses the INJECTED FX rate ─────────────────
+
+  it('renders a paid-model cost rationale in INR from the injected FX rate', async () => {
+    const p = ports([
+      candidate({ providerId: 'paid', benchmarkScore: 95, costPer1KInput: 3, costPer1KOutput: 15 }),
+    ]);
+    const fx = {
+      usdToInrRate: () => 80,
+      source: () => 'live:test',
+      observedAt: () => '2026-09-29',
+    };
+    const msi = new ModelSelectionIntelligence(p.intelligence, p.strategy, fx);
+    const result = await msi.decide({
+      capability: 'reasoning',
+      estimatedInputTokens: 1000,
+      budgetPolicy: 'allow_within_budget',
+    });
+    const costReason = result.whySummary.find((s) => s.includes('Lower estimated cost'));
+    expect(costReason).toBeDefined();
+    expect(costReason).not.toContain('FX unavailable');
+    expect(costReason).toContain('₹');
+  });
+
+  it('keeps the explicit FX-unavailable label when no rate is injected (never invents a rate)', async () => {
+    const p = ports([
+      candidate({ providerId: 'paid', benchmarkScore: 95, costPer1KInput: 3, costPer1KOutput: 15 }),
+    ]);
+    const msi = new ModelSelectionIntelligence(p.intelligence, p.strategy);
+    const result = await msi.decide({
+      capability: 'reasoning',
+      estimatedInputTokens: 1000,
+      budgetPolicy: 'allow_within_budget',
+    });
+    const costReason = result.whySummary.find((s) => s.includes('Lower estimated cost'));
+    expect(costReason).toBeDefined();
+    expect(costReason).toContain('FX unavailable');
+    expect(costReason).not.toContain('$');
+  });
 });

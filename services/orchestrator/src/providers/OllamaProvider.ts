@@ -45,6 +45,30 @@ export interface OllamaProviderOptions {
   timeoutMs?: number;
   /** Health probe timeout in ms (default 1500). */
   healthTimeoutMs?: number;
+  /** Streaming chunk size in characters for local chunked streaming. */
+  streamChunkSize?: number;
+  /**
+   * EXPLICIT opt-in (default false): when the configured model is not
+   * installed, fall back to the first INSTALLED chat model. Without it, an
+   * unavailable model is a TYPED `MODEL_NOT_FOUND` failure — the adapter never
+   * silently substitutes a different model than the one it was asked for.
+   */
+  fallbackToInstalledModel?: boolean;
+}
+
+/**
+ * Typed failure: the requested/configured model is not installed on the local
+ * runtime. Carries a stable `code` so the runtime and telemetry can classify it
+ * without parsing the message.
+ */
+export class OllamaModelNotFoundError extends Error {
+  readonly code = 'MODEL_NOT_FOUND';
+  constructor(readonly modelId: string) {
+    super(
+      `Ollama provider does not support model "${modelId}" — it is not installed on this runtime.`,
+    );
+    this.name = 'OllamaModelNotFoundError';
+  }
 }
 
 const DEFAULT_MODEL = 'llama3.2';
@@ -71,8 +95,16 @@ export class OllamaProvider implements ProviderAdapter {
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly healthTimeoutMs: number;
+  private readonly streamChunkSize: number;
+  private readonly fallbackToInstalledModel: boolean;
   /** The INSTALLED model execution resolves to, once the runtime was probed. */
   private resolvedModel: string | undefined;
+  /**
+   * Why resolution did not produce a model: the requested model is not
+   * installed (`MODEL_NOT_FOUND`) vs. the runtime could not be listed at all
+   * (`RUNTIME_UNAVAILABLE`). `undefined` once a model resolved.
+   */
+  private resolutionFailure: 'MODEL_NOT_FOUND' | 'RUNTIME_UNAVAILABLE' | undefined;
   /** Bounded cache of the local runtime's installed chat models. */
   private discovery: { models: string[]; at: number } | undefined;
   /** In-flight resolution, so concurrent callers share one /api/tags probe. */
@@ -90,6 +122,8 @@ export class OllamaProvider implements ProviderAdapter {
     this.model = options.model?.trim() || DEFAULT_MODEL;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.healthTimeoutMs = options.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
+    this.streamChunkSize = options.streamChunkSize ?? 120;
+    this.fallbackToInstalledModel = options.fallbackToInstalledModel ?? false;
   }
 
   /**
@@ -169,8 +203,29 @@ export class OllamaProvider implements ProviderAdapter {
     if (this.resolving) return this.resolving;
     this.resolving = (async (): Promise<void> => {
       const installed = await this.discoverInstalledChatModels();
-      if (installed.length === 0) return;
-      this.resolvedModel = installed.includes(this.model) ? this.model : installed[0];
+      if (installed.length === 0) {
+        // The runtime could not be listed (down/empty): NOT proof the model is
+        // missing, so keep the configured preference and let the chat call fail
+        // loudly with the real transport error.
+        this.resolvedModel = undefined;
+        this.resolutionFailure = 'RUNTIME_UNAVAILABLE';
+        return;
+      }
+      if (installed.includes(this.model)) {
+        this.resolvedModel = this.model;
+        this.resolutionFailure = undefined;
+        return;
+      }
+      if (this.fallbackToInstalledModel) {
+        // EXPLICIT fallback was requested: the first installed chat model.
+        this.resolvedModel = installed[0];
+        this.resolutionFailure = undefined;
+        return;
+      }
+      // The configured model is not installed and no fallback was requested:
+      // refuse explicitly instead of silently running a different model.
+      this.resolvedModel = undefined;
+      this.resolutionFailure = 'MODEL_NOT_FOUND';
     })();
     try {
       await this.resolving;
@@ -243,12 +298,20 @@ export class OllamaProvider implements ProviderAdapter {
     if (request.modelId === undefined) {
       await this.resolveModel();
     }
+    // A configured preference that is not installed is a TYPED failure — the
+    // adapter never silently substitutes a different installed model.
+    if (
+      request.modelId === undefined &&
+      this.resolvedModel === undefined &&
+      this.resolutionFailure === 'MODEL_NOT_FOUND'
+    ) {
+      throw new OllamaModelNotFoundError(this.model);
+    }
     const effectiveModel = this.resolvedModel ?? this.model;
-    // Phase B — explicit unsupported-model error (never silent substitution).
+    // Phase B — an explicitly requested model this adapter cannot run is a
+    // typed, non-substituting failure.
     if (request.modelId !== undefined && request.modelId !== effectiveModel) {
-      throw new Error(
-        `Ollama provider does not support model "${request.modelId}" (configured model: ${effectiveModel})`,
-      );
+      throw new OllamaModelNotFoundError(request.modelId);
     }
     const startedAt = Date.now();
     const response = await this.fetchWithTimeout(
@@ -346,5 +409,46 @@ export class OllamaProvider implements ProviderAdapter {
         : message,
     );
     return this.execute({ ...request, messages });
+  }
+
+  /**
+   * B4 — local streaming parity: Ollama has no SDK streaming contract, so the
+   * deterministic local execution result is re-emitted as identical streaming
+   * events (content chunks + ONE terminal `done` with the ACTUAL resolved
+   * model, real token usage and zero cost). The event is generated from the
+   * same result the non-streaming path returns — never a second execution, so
+   * token/cost telemetry cannot double-count and the recorded model always
+   * equals the model non-streaming execution would record.
+   */
+  async *stream(request: {
+    messages: Array<{ role: string; content: string }>;
+    model: string;
+    maxTokens?: number;
+    modelId?: string;
+  }): AsyncIterable<unknown> {
+    const startedAt = Date.now();
+    const result = await this.execute(request);
+    const size = Math.max(1, this.streamChunkSize);
+    for (let offset = 0; offset < result.content.length; offset += size) {
+      yield {
+        type: 'content',
+        data: { text: result.content.slice(offset, offset + size) },
+        timestamp: new Date().toISOString(),
+      };
+    }
+    yield {
+      type: 'done',
+      data: {
+        modelId: result.model,
+        latencyMs: Date.now() - startedAt,
+        tokenUsage: {
+          input: result.tokenUsage.input,
+          output: result.tokenUsage.output,
+          total: result.tokenUsage.total,
+        },
+        cost: result.cost,
+      },
+      timestamp: new Date().toISOString(),
+    };
   }
 }

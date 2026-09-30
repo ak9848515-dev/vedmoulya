@@ -943,7 +943,7 @@ export class AIOrchestrationService extends BaseService {
       optimizationSpan.setAttribute('compression_ratio', optimization.compressionRatio);
     }
     optimizationSpan.end();
-    const candidates = this.selectCandidates(request.capability, request.qualityTier);
+    let candidates = this.selectCandidates(request.capability, request.qualityTier);
     // Phase B — stream the advisor-selected model when the advisor is wired.
     const routingIntent: RoutingIntent = { modelByProvider: new Map() };
     if (this.advisor) {
@@ -961,6 +961,7 @@ export class AIOrchestrationService extends BaseService {
         explanation.fallback.forEach((fallback) => {
           routingIntent.modelByProvider.set(fallback.providerId, fallback.modelId);
         });
+        candidates = this.orderCandidatesByAdvisor(candidates, explanation);
       } catch (error) {
         // Advisor failure is non-fatal: deterministic registration order.
         this.logger.warn('Provider advisor failed for stream; using registration order', {
@@ -972,17 +973,21 @@ export class AIOrchestrationService extends BaseService {
     emit({ type: 'status', stage: 'selecting_model' });
 
     let final: AIResponse;
-    const streamingProvider = candidates.find((p) => typeof p.stream === 'function');
+    // Provider and model are one routing decision. Do not skip the selected
+    // provider in favor of a later adapter merely because it supports streaming;
+    // use the ordinary execute/fallback path if the selected adapter is not stream-capable.
+    const streamingProvider = candidates[0];
     // Generator methods must be bound to the adapter instance (`this` is
     // used for timeouts/usage inside the generator body).
     const streamFn = streamingProvider?.stream?.bind(streamingProvider);
-    if (streamingProvider && streamFn) {
+    if (streamingProvider !== undefined && streamFn !== undefined) {
       const requestedModel = routingIntent.modelByProvider.get(streamingProvider.name);
       const streamSpan = this.observability.startSpan(
         'ai.provider_execution',
         requestId,
         {
           provider: streamingProvider.name,
+          provider_family: streamingProvider.family,
           mode: 'stream',
           ...(requestedModel ? { requested_model: requestedModel } : {}),
           // capability is required on OrchestrateRequestDTO — always recorded.
@@ -992,11 +997,10 @@ export class AIOrchestrationService extends BaseService {
       );
       emit({ type: 'status', stage: 'streaming' });
       let text = '';
-      // REAL usage the provider adapter reports on its terminal `done` chunk
-      // (the same SDK usage its non-streaming `execute` path uses). Absent →
-      // the pre-existing deterministic output estimate is kept; nothing is
-      // invented.
-      let streamUsage: { input: number; output: number; cost?: number } | undefined;
+      // Only provider-reported terminal usage is attached to execution
+      // telemetry. Missing values remain unavailable instead of being estimated.
+      let streamUsage: { input: number; output: number; total?: number; cost?: number } | undefined;
+      let executedModelId: string | undefined;
       try {
         for await (const chunk of streamFn({
           messages,
@@ -1011,28 +1015,31 @@ export class AIOrchestrationService extends BaseService {
               latencyMs?: number;
               tokenUsage?: { input?: number; output?: number; total?: number };
               cost?: number;
+              modelId?: string;
             };
           };
           if (c.type === 'content' && c.data?.text) {
             text += c.data.text;
             emit({ type: 'content', stage: 'streaming', content: c.data.text });
           } else if (c.type === 'done' && c.data) {
-            // Only take the adapter's REAL numbers; a partially reported usage
-            // keeps the estimate for the part the provider did not supply.
+            if (typeof c.data.modelId === 'string' && c.data.modelId.trim() !== '') {
+              executedModelId = c.data.modelId;
+            }
+            // Only take provider-reported usage. Missing fields stay absent/zero;
+            // output length is not a substitute for the provider's token count.
             const usage = c.data.tokenUsage;
             if (usage !== undefined) {
               streamUsage = {
                 input: typeof usage.input === 'number' ? usage.input : 0,
-                output:
-                  typeof usage.output === 'number'
-                    ? usage.output
-                    : TokenEstimationService.estimateTokens(text),
+                output: typeof usage.output === 'number' ? usage.output : 0,
+                ...(typeof usage.total === 'number' ? { total: usage.total } : {}),
               };
             }
             if (typeof c.data.cost === 'number') {
               streamUsage = {
                 input: streamUsage?.input ?? 0,
-                output: streamUsage?.output ?? TokenEstimationService.estimateTokens(text),
+                output: streamUsage?.output ?? 0,
+                ...(streamUsage?.total !== undefined ? { total: streamUsage.total } : {}),
                 cost: c.data.cost,
               };
             }
@@ -1040,12 +1047,15 @@ export class AIOrchestrationService extends BaseService {
           }
         }
         streamSpan.setAttribute('status', 'success');
-        streamSpan.setAttribute(
-          'output_tokens',
-          streamUsage?.output ?? TokenEstimationService.estimateTokens(text),
-        );
+        if (executedModelId !== undefined) streamSpan.setAttribute('model', executedModelId);
+        else if (requestedModel !== undefined) streamSpan.setAttribute('model', requestedModel);
         if (streamUsage !== undefined) {
           streamSpan.setAttribute('input_tokens', streamUsage.input);
+          streamSpan.setAttribute('output_tokens', streamUsage.output);
+          streamSpan.setAttribute(
+            'total_tokens',
+            streamUsage.total ?? streamUsage.input + streamUsage.output,
+          );
         }
         // The provider's OWN pricing produced this cost; when the adapter cannot
         // price the call the attribute is simply absent (never a made-up value).
@@ -1055,7 +1065,7 @@ export class AIOrchestrationService extends BaseService {
         streamSpan.end();
         this.recordExecutionHealth({
           providerId: streamingProvider.name,
-          modelId: requestedModel,
+          modelId: executedModelId ?? requestedModel,
           ok: true,
         });
       } catch (error) {
@@ -1070,7 +1080,14 @@ export class AIOrchestrationService extends BaseService {
         emit({ type: 'error', data: { message: 'streaming failed' } });
         throw error;
       }
-      final = this.buildStreamedResponse(streamingProvider, text, request, aiRequest, streamUsage);
+      final = this.buildStreamedResponse(
+        streamingProvider,
+        text,
+        request,
+        aiRequest,
+        streamUsage,
+        executedModelId ?? requestedModel,
+      );
     } else {
       // Non-streaming provider: the full response is delivered as a single
       // content chunk, but the run still advertises the streaming stage so
@@ -1145,6 +1162,7 @@ export class AIOrchestrationService extends BaseService {
           {
             provider: provider.name,
             mode: 'structured',
+            provider_family: provider.family,
             attempt,
             ...(requestedModel ? { requested_model: requestedModel } : {}),
             ...(intent?.capability ? { capability: intent.capability } : {}),
@@ -1186,6 +1204,7 @@ export class AIOrchestrationService extends BaseService {
           executionSpan.setAttribute('model', response.model);
           executionSpan.setAttribute('input_tokens', response.tokenUsage.input);
           executionSpan.setAttribute('output_tokens', response.tokenUsage.output);
+          executionSpan.setAttribute('total_tokens', response.tokenUsage.total);
           executionSpan.setAttribute('cost', response.cost);
           executionSpan.setAttribute('latency_ms', response.latency);
           executionSpan.end();
@@ -1578,23 +1597,28 @@ export class AIOrchestrationService extends BaseService {
     text: string,
     _request: OrchestrateRequestDTO,
     _aiRequest: AIRequest,
-    usage?: { input: number; output: number; cost?: number },
+    usage?: { input: number; output: number; total?: number; cost?: number },
+    modelId?: string,
   ): AIResponse {
-    // The adapter's REAL usage when it supplied one; otherwise the deterministic
-    // estimate the streamed path has always used. Cost is USD from the
+    // The adapter's REAL usage when it supplied one; unavailable usage stays
+    // zero. Cost is USD from the
     // provider's own pricing, and stays 0 when the adapter could not price the
     // call (never fabricated).
-    const outputTokens = usage?.output ?? TokenEstimationService.estimateTokens(text);
+    const outputTokens = usage?.output ?? 0;
     const inputTokens = usage?.input ?? 0;
     return {
       content: text,
       provider: provider.name,
-      model: provider.name,
+      model: modelId ?? 'unknown',
       confidence: 0.9,
       qualityScore: 8.0,
       latency: 0,
       cost: usage?.cost ?? 0,
-      tokenUsage: { input: inputTokens, output: outputTokens, total: inputTokens + outputTokens },
+      tokenUsage: {
+        input: inputTokens,
+        output: outputTokens,
+        total: usage?.total ?? inputTokens + outputTokens,
+      },
       validation: {
         passed: true,
         checks: [{ name: 'format', passed: true, score: 10 }],
@@ -1604,7 +1628,7 @@ export class AIOrchestrationService extends BaseService {
       traceId: `stream-${String(Date.now())}`,
       metadata: {
         providerFamily: provider.family as import('@vedmoulya/ai').ProviderFamily,
-        modelVersion: provider.name,
+        modelVersion: modelId ?? 'unknown',
         processingTime: 0,
         contextUsed: [],
         routingDecision: {
@@ -1659,6 +1683,7 @@ export class AIOrchestrationService extends BaseService {
             provider: provider.name,
             attempt,
             mode: 'text',
+            provider_family: provider.family,
             ...(requestedModel ? { requested_model: requestedModel } : {}),
             ...(intent?.capability ? { capability: intent.capability } : {}),
           },
@@ -1677,6 +1702,7 @@ export class AIOrchestrationService extends BaseService {
           executionSpan.setAttribute('model', response.model);
           executionSpan.setAttribute('input_tokens', response.tokenUsage.input);
           executionSpan.setAttribute('output_tokens', response.tokenUsage.output);
+          executionSpan.setAttribute('total_tokens', response.tokenUsage.total);
           executionSpan.setAttribute('cost', response.cost);
           executionSpan.setAttribute('latency_ms', response.latency);
           executionSpan.end();

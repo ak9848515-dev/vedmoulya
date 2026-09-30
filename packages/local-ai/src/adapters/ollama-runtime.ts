@@ -27,6 +27,7 @@
 import type {
   LocalChatMessage,
   LocalGenerateChunk,
+  LocalTokenUsage,
   LocalGenerateRequest,
   LocalGenerateResult,
   LocalModelDescriptor,
@@ -141,6 +142,24 @@ export function parseOllamaChatContent(body: unknown): string | undefined {
   return typeof content === 'string' ? content : undefined;
 }
 
+/**
+ * REAL Ollama token usage from a `/api/chat` payload or NDJSON line.
+ * `prompt_eval_count` / `eval_count` are the counts Ollama actually computed;
+ * anything else is absent (never invented).
+ */
+export function parseOllamaUsage(body: unknown): LocalTokenUsage | undefined {
+  const record = asRecord(body);
+  if (record === null) return undefined;
+  const rawInput = record['prompt_eval_count'];
+  const rawOutput = record['eval_count'];
+  const hasInput = typeof rawInput === 'number' && Number.isFinite(rawInput) && rawInput >= 0;
+  const hasOutput = typeof rawOutput === 'number' && Number.isFinite(rawOutput) && rawOutput >= 0;
+  if (!hasInput && !hasOutput) return undefined;
+  const input = hasInput ? rawInput : 0;
+  const output = hasOutput ? rawOutput : 0;
+  return { input, output, total: input + output };
+}
+
 /** Parse one NDJSON stream line into a chunk (undefined for unusable lines). */
 export function parseOllamaStreamLine(line: string): LocalGenerateChunk | undefined {
   let parsed: unknown;
@@ -153,9 +172,11 @@ export function parseOllamaStreamLine(line: string): LocalGenerateChunk | undefi
   if (record === null) return undefined;
   const message = asRecord(record['message']);
   const content = message?.['content'];
+  const usage = parseOllamaUsage(record);
   return {
     content: typeof content === 'string' ? content : '',
     done: record['done'] === true,
+    ...(usage !== undefined ? { usage } : {}),
   };
 }
 
@@ -477,6 +498,7 @@ export class OllamaRuntimeAdapter implements LocalRuntime {
         message: 'Ollama answered but produced no reply.',
       };
     }
+    const usage = parseOllamaUsage(body);
     return {
       runtime: this.id,
       modelId,
@@ -484,12 +506,24 @@ export class OllamaRuntimeAdapter implements LocalRuntime {
       content,
       latencyMs,
       message: `Ollama answered on ${modelId}.`,
+      ...(usage !== undefined ? { usage } : {}),
     };
   }
 
   async *stream(request: LocalGenerateRequest): AsyncGenerator<LocalGenerateChunk> {
+    // A stream that cannot start must SAY WHY. Returning silently here is what
+    // made a stopped Ollama and a missing model look identical to the browser.
     const resolved = await this.resolveModel(request.modelId);
-    if ('error' in resolved) return;
+    if ('error' in resolved) {
+      yield {
+        content: '',
+        done: true,
+        error: resolved.error,
+        message: resolved.message,
+        ...(request.modelId !== undefined ? { modelId: request.modelId } : {}),
+      };
+      return;
+    }
     const modelId = resolved.modelId;
     let response: Response;
     try {
@@ -506,10 +540,34 @@ export class OllamaRuntimeAdapter implements LocalRuntime {
         }),
         signal: AbortSignal.timeout(request.timeoutMs ?? this.generateTimeoutMs),
       });
-    } catch {
+    } catch (error) {
+      yield {
+        content: '',
+        done: true,
+        error: classifyNetworkError(error),
+        message: 'The generation could not reach Ollama. Check that it is still running.',
+        modelId,
+      };
       return;
     }
-    if (!response.ok || response.body === null) return;
+    if (!response.ok || response.body === null) {
+      yield {
+        content: '',
+        done: true,
+        error:
+          response.status === 404
+            ? 'MODEL_UNAVAILABLE'
+            : response.ok
+              ? 'INVALID_RESPONSE'
+              : 'GENERATION_FAILED',
+        message:
+          response.status === 404
+            ? `Ollama does not have the model "${modelId}".`
+            : `Ollama refused the streaming request (HTTP ${response.status}).`,
+        modelId,
+      };
+      return;
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

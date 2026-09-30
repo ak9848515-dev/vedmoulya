@@ -283,9 +283,14 @@ export class VercelAIProvider implements ProviderAdapter {
       const usage = await result.usage;
       const inputTokens = usage.inputTokens ?? 0;
       const outputTokens = usage.outputTokens ?? 0;
+      const response = (await result.finalStep).response;
+      const modelId = response.modelId;
+      const requestedModel = request.modelId ?? this.modelId;
+      const executedModel = modelId && modelId.trim().length > 0 ? modelId : requestedModel;
       yield {
         type: 'done',
         data: {
+          modelId: executedModel,
           latencyMs: Date.now() - startedAt,
           tokenUsage: {
             input: inputTokens,

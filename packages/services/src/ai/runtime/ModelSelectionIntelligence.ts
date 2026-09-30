@@ -27,6 +27,11 @@ import {
   type ProviderSelectionExplanation,
   type ExecutionStrategyPort,
 } from './ProviderRoutingAdvisor.js';
+import {
+  conversionInputsFromProvider,
+  formatUsdAsInr,
+  type ExchangeRateProvider,
+} from '@vedmoulya/shared';
 
 export type PrecisionRequirement = 'standard' | 'high';
 export type BudgetPolicy = 'never_paid' | 'ask_before_paid' | 'allow_within_budget';
@@ -134,13 +139,16 @@ function resourceFacts(candidate: ProviderCandidateIntelligence): {
 export class ModelSelectionIntelligence {
   private readonly advisor: ProviderRoutingAdvisor;
   private readonly providerIntelligence: ProviderIntelligencePort;
+  private readonly fx?: ExchangeRateProvider;
 
   constructor(
     providerIntelligence: ProviderIntelligencePort,
     executionStrategy: ExecutionStrategyPort,
+    fx?: ExchangeRateProvider,
   ) {
     this.providerIntelligence = providerIntelligence;
     this.advisor = new ProviderRoutingAdvisor(providerIntelligence, executionStrategy);
+    this.fx = fx;
   }
 
   /**
@@ -436,7 +444,9 @@ export class ModelSelectionIntelligence {
 
   private fmtCost(cost: number): string {
     if (cost <= 0) return 'free';
-    if (cost < 0.01) return `$${cost.toFixed(4)}`;
-    return `$${cost.toFixed(3)}`;
+    // A6/E — user-facing economics are INR via the centralized conversion seam.
+    // No fallback $ string is emitted: without injected FX the caller sees an
+    // explicit unavailable label (never USD shown as ₹, never USD==INR).
+    return formatUsdAsInr(cost, conversionInputsFromProvider(this.fx));
   }
 }

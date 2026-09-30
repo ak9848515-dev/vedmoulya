@@ -311,9 +311,18 @@ export class GoogleGeminiProvider implements ProviderAdapter {
       const usage = await result.usage;
       const inputTokens = usage.inputTokens ?? 0;
       const outputTokens = usage.outputTokens ?? 0;
+      const requestedModel = request.modelId ?? this.modelId;
+      const finalStep = (await result.finalStep) as
+        { response?: { modelId?: unknown } } | undefined;
+      const response = finalStep?.response;
+      const responseModel =
+        typeof response?.modelId === 'string' && response.modelId.trim().length > 0
+          ? response.modelId
+          : undefined;
       yield {
         type: 'done',
         data: {
+          modelId: responseModel ?? requestedModel,
           latencyMs: Date.now() - startedAt,
           tokenUsage: {
             input: inputTokens,

@@ -136,7 +136,11 @@ describe('OllamaProvider (same provider contract as every other provider)', () =
       }),
     );
     // 'llama3.2' is the default preference and is NOT in the installed set.
-    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    // Falling back to an installed model is an EXPLICIT opt-in.
+    const provider = new OllamaProvider({
+      baseUrl: 'http://127.0.0.1:11434',
+      fallbackToInstalledModel: true,
+    });
     const response = await provider.execute({
       messages: [{ role: 'user', content: 'hello' }],
       model: 'ollama',
@@ -203,7 +207,10 @@ describe('OllamaProvider (same provider contract as every other provider)', () =
         return chatResponse('chat model answer');
       }),
     );
-    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    const provider = new OllamaProvider({
+      baseUrl: 'http://127.0.0.1:11434',
+      fallbackToInstalledModel: true,
+    });
     await provider.execute({ messages: [{ role: 'user', content: 'hi' }], model: 'ollama' });
     // The embedding model is listed first but must never be chosen for chat.
     expect(JSON.parse(chatBodies[0] ?? '{}').model).toBe('qwen2.5-coder:3b');
@@ -222,7 +229,10 @@ describe('OllamaProvider (same provider contract as every other provider)', () =
           ),
       ),
     );
-    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    const provider = new OllamaProvider({
+      baseUrl: 'http://127.0.0.1:11434',
+      fallbackToInstalledModel: true,
+    });
     // Before the probe the configured preference is what routing would see.
     expect(provider.configuredModel).toBe('llama3.2');
     await provider.getHealth();
@@ -314,5 +324,98 @@ describe('OllamaProvider (same provider contract as every other provider)', () =
       if (SAVED.google === undefined) delete process.env.AI_GOOGLE_API_KEY;
       else process.env.AI_GOOGLE_API_KEY = SAVED.google;
     }
+  });
+
+  // ── Item 6 — no SILENT substitution when a model is unavailable ──────────
+
+  it('refuses with a TYPED MODEL_NOT_FOUND when the configured model is not installed (no substitution)', async () => {
+    const chatBodies: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).endsWith('/api/tags')) {
+          return new Response(
+            JSON.stringify({
+              models: [{ name: 'qwen2.5-coder:3b', capabilities: ['completion'] }],
+            }),
+            { status: 200 },
+          );
+        }
+        if (typeof init?.body === 'string') chatBodies.push(init.body);
+        return chatResponse('should not run');
+      }),
+    );
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    await expect(
+      provider.execute({ messages: [{ role: 'user', content: 'x' }], model: 'ollama' }),
+    ).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' });
+    // No other installed model was silently run.
+    expect(chatBodies).toHaveLength(0);
+  });
+
+  it('reports the typed MODEL_NOT_FOUND code on an explicitly requested unavailable modelId', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => chatResponse('nope')),
+    );
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' });
+    await expect(
+      provider.execute({
+        messages: [{ role: 'user', content: 'x' }],
+        model: 'ollama',
+        modelId: 'qwen2',
+      }),
+    ).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' });
+  });
+
+  it('streams a typed MODEL_NOT_FOUND failure instead of silently re-targeting a model', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) =>
+        String(url).endsWith('/api/tags')
+          ? new Response(
+              JSON.stringify({
+                models: [{ name: 'qwen2.5-coder:3b', capabilities: ['completion'] }],
+              }),
+              { status: 200 },
+            )
+          : chatResponse('nope'),
+      ),
+    );
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    await expect(
+      (async (): Promise<void> => {
+        for await (const chunk of provider.stream({
+          messages: [{ role: 'user', content: 'x' }],
+          model: 'ollama',
+        })) {
+          void chunk;
+        }
+      })(),
+    ).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' });
+  });
+
+  it('executes normally when the configured model IS installed (no fallback needed)', async () => {
+    const chatBodies: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).endsWith('/api/tags')) {
+          return new Response(
+            JSON.stringify({ models: [{ name: 'llama3.2', capabilities: ['completion'] }] }),
+            { status: 200 },
+          );
+        }
+        if (typeof init?.body === 'string') chatBodies.push(init.body);
+        return chatResponse('ok');
+      }),
+    );
+    const provider = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434' });
+    const response = await provider.execute({
+      messages: [{ role: 'user', content: 'x' }],
+      model: 'ollama',
+    });
+    expect(response.model).toBe('llama3.2');
+    expect(JSON.parse(chatBodies[0] ?? '{}').model).toBe('llama3.2');
   });
 });

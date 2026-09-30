@@ -67,6 +67,11 @@ export class MockProvider implements ProviderAdapter {
     }
     const lastMessage = request.messages[request.messages.length - 1];
     const input = lastMessage?.content ?? '';
+    const tokenUsage = {
+      input: Math.ceil(input.length / 4),
+      output: 50,
+      total: Math.ceil(input.length / 4) + 50,
+    };
 
     return Promise.resolve({
       content: `Mock response to: "${input.substring(0, 50)}..."`,
@@ -76,11 +81,7 @@ export class MockProvider implements ProviderAdapter {
       qualityScore: 7.5,
       latency: 50,
       cost: 0.0001,
-      tokenUsage: {
-        input: Math.ceil(input.length / 4),
-        output: 50,
-        total: Math.ceil(input.length / 4) + 50,
-      },
+      tokenUsage,
       validation: {
         passed: true,
         checks: [
@@ -106,5 +107,45 @@ export class MockProvider implements ProviderAdapter {
         validationDetails: [],
       },
     });
+  }
+
+  /**
+   * B4 — deterministic streaming parity: the SAME fixed mock result the
+   * non-streaming path returns is re-emitted as streaming events (content +
+   * ONE terminal `done` with the fixed executed model, real token usage and
+   * real cost). No second execution occurs, so token/cost telemetry cannot
+   * double-count and both runtime paths record identical provider/model data.
+   */
+  async *stream(request: {
+    messages: Array<{ role: string; content: string }>;
+    model: string;
+    maxTokens?: number;
+    modelId?: string;
+  }): AsyncIterable<unknown> {
+    if (request.modelId !== undefined && !this.supportedModelIds.includes(request.modelId)) {
+      throw new Error(
+        `Mock provider does not support model "${request.modelId}" (fixed model: mock-v1)`,
+      );
+    }
+    const result = await this.execute(request);
+    yield {
+      type: 'content',
+      data: { text: result.content },
+      timestamp: new Date().toISOString(),
+    };
+    yield {
+      type: 'done',
+      data: {
+        modelId: result.model,
+        latencyMs: result.latency,
+        tokenUsage: {
+          input: result.tokenUsage.input,
+          output: result.tokenUsage.output,
+          total: result.tokenUsage.total,
+        },
+        cost: result.cost,
+      },
+      timestamp: new Date().toISOString(),
+    };
   }
 }

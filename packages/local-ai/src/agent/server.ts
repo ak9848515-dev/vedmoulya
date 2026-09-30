@@ -161,7 +161,10 @@ export function createLocalAgentServer(options: LocalAgentServerOptions): Server
   // Explicit list wins; otherwise the host environment may configure it. This
   // keeps ANY entrypoint (not only the CLI) configurable via the env var.
   const allowed =
-    options.allowedOrigins ?? parseAllowedOrigins(process.env[LOCAL_AGENT_ALLOWED_ORIGINS_ENV]);
+    options.allowedOrigins ??
+    parseAllowedOrigins(
+      Object.entries(process.env).find(([name]) => name === LOCAL_AGENT_ALLOWED_ORIGINS_ENV)?.[1],
+    );
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const origin = resolveOrigin(req, allowed);
@@ -243,6 +246,9 @@ export function createLocalAgentServer(options: LocalAgentServerOptions): Server
             'cache-control': 'no-store',
             ...corsHeaders(origin),
           });
+          // Chunks are forwarded verbatim, INCLUDING a terminal chunk that carries
+          // `error` — so a runtime that is down or a model that is missing reaches
+          // the browser as a typed failure instead of an empty, "successful" stream.
           for await (const chunk of agent.stream(runtimeId, request)) {
             res.write(`${JSON.stringify(chunk)}\n`);
           }

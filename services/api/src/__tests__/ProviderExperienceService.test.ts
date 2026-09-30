@@ -386,14 +386,34 @@ describe('ProviderExperienceService — usage detail + model usage', () => {
         spans: [
           {
             kind: 'ai',
-            attributes: { provider: 'p1', model: 'gpt-4', cost_usd: 0.01 },
+            name: 'ai.provider_execution',
+            attributes: {
+              provider: 'p1',
+              model: 'gpt-4',
+              status: 'success',
+              input_tokens: 12,
+              output_tokens: 8,
+              cost: 0.01,
+            },
             durationMs: 30,
           },
-          { kind: 'ai', attributes: { provider: 'p1', model: 42 }, durationMs: 10 },
           {
             kind: 'ai',
-            attributes: { provider: 'p1', model: 'm2', cost_usd: 'nope' },
+            name: 'ai.provider_execution',
+            attributes: { provider: 'p1', model: 42, status: 'success' },
+            durationMs: 10,
+          },
+          {
+            kind: 'ai',
+            name: 'ai.provider_execution',
+            attributes: { provider: 'p1', model: 'm2', status: 'success', cost: 'nope' },
             durationMs: 5,
+          },
+          { kind: 'ai', name: 'ai.stream_run', attributes: { provider: 'p1', model: 'gpt-4' } },
+          {
+            kind: 'ai',
+            name: 'ai.provider_execution',
+            attributes: { provider: 'p1', model: 'failed', status: 'error' },
           },
           { kind: 'http', attributes: {} },
         ],
@@ -410,6 +430,7 @@ describe('ProviderExperienceService — usage detail + model usage', () => {
     expect(rows.map((r) => r.modelId)).toEqual(['gpt-4', 'unknown', 'm2']);
     expect(rows[0]?.calls).toBe(1);
     expect(rows[0]?.costUsd).toBe(0.01);
+    expect(rows[0]?.tokensTotal).toBe(20);
     expect(rows[2]?.costUsd).toBe(0);
   });
 
@@ -423,10 +444,26 @@ describe('ProviderExperienceService — usage detail + model usage', () => {
     const traces = [
       {
         spans: [
-          { kind: 'ai', attributes: { provider: 'p1', model: 'a' } },
-          { kind: 'ai', attributes: { provider: 'p1', model: 'a' } },
-          { kind: 'ai', attributes: { provider: 'p1', model: 'b' } },
-          { kind: 'ai', attributes: { provider: 'p1', model: 'a' } },
+          {
+            kind: 'ai',
+            name: 'ai.provider_execution',
+            attributes: { provider: 'p1', model: 'a', status: 'success' },
+          },
+          {
+            kind: 'ai',
+            name: 'ai.provider_execution',
+            attributes: { provider: 'p1', model: 'a', status: 'success' },
+          },
+          {
+            kind: 'ai',
+            name: 'ai.provider_execution',
+            attributes: { provider: 'p1', model: 'b', status: 'success' },
+          },
+          {
+            kind: 'ai',
+            name: 'ai.provider_execution',
+            attributes: { provider: 'p1', model: 'a', status: 'success' },
+          },
         ],
       },
     ];

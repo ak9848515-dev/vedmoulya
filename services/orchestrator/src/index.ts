@@ -221,6 +221,11 @@ export function registerPlatformProviders(
       new OllamaProvider({
         baseUrl: ollamaBaseUrl,
         model: providers?.ollama?.model ?? (process.env.AI_OLLAMA_MODEL?.trim() || undefined),
+        // BLD-023 — the DEPLOYMENT explicitly opts into installed-model fallback
+        // so local AI stays usable when the configured model was never pulled.
+        // A per-request `modelId` still refuses with a typed MODEL_NOT_FOUND;
+        // nothing is substituted silently without this explicit request.
+        fallbackToInstalledModel: true,
       }),
     );
   }

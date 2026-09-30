@@ -92,6 +92,7 @@ export interface ModelUsageRow {
   modelId: string;
   calls: number;
   latencyMs: number;
+  tokensTotal: number;
   costUsd: number;
 }
 
@@ -489,28 +490,56 @@ export class ProviderExperienceService {
     const map = new Map<string, ModelUsageRow>();
     for (const trace of traces) {
       for (const span of trace.spans) {
-        if (span.kind !== 'ai') continue;
+        // One row per successful provider execution. Including ai.run,
+        // ai.stream_run, selection and validation spans double-counted usage
+        // and sometimes grouped the request under a stale/unknown model.
+        if (
+          span.kind !== 'ai' ||
+          span.name !== 'ai.provider_execution' ||
+          span.attributes.status !== 'success'
+        )
+          continue;
         const provider = span.attributes.provider;
-        const model = span.attributes.model;
+        // Only executed-model attributes are authoritative. `requested_model`
+        // is intent and must not be presented as proof that the provider ran it.
+        // Keep the legacy `ai.model` alias for traces created before this span contract.
+        const model = span.attributes.model ?? span.attributes['ai.model'];
         if (typeof provider !== 'string') continue;
-        const modelId = typeof model === 'string' ? model : 'unknown';
+        const modelId = typeof model === 'string' && model.trim().length > 0 ? model : 'unknown';
         const key = `${provider}|${modelId}`;
         const row = map.get(key) ?? {
           providerId: provider,
           modelId,
           calls: 0,
           latencyMs: 0,
+          tokensTotal: 0,
           costUsd: 0,
         };
         row.calls += 1;
         row.latencyMs += span.durationMs ?? 0;
-        const cost = span.attributes.cost_usd;
+        row.tokensTotal +=
+          span.attributes.total_tokens === undefined
+            ? numUsageAttr(span.attributes.input_tokens) +
+              numUsageAttr(span.attributes.output_tokens)
+            : numUsageAttr(span.attributes.total_tokens);
+        // D2 — read the same `cost` attribute the ledger normalizes, with the
+        // legacy `cost_usd` key accepted only when `cost` is absent.
+        const cost = span.attributes.cost ?? span.attributes.cost_usd;
         if (typeof cost === 'number') row.costUsd += cost;
         map.set(key, row);
       }
     }
     return [...map.values()].sort((a, b) => b.calls - a.calls);
   }
+}
+
+function numUsageAttr(value: string | number | boolean | undefined): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+  return 0;
 }
 
 function defaultPrefs(): ProviderPreferences {

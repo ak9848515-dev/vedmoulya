@@ -25,6 +25,7 @@
 import type {
   LocalChatMessage,
   LocalGenerateChunk,
+  LocalTokenUsage,
   LocalGenerateRequest,
   LocalGenerateResult,
   LocalModelDescriptor,
@@ -96,6 +97,25 @@ export function parseOpenAiChatContent(body: unknown): string | undefined {
  * Returns undefined for lines that carry no data; a `[DONE]` sentinel becomes a
  * terminal chunk.
  */
+/**
+ * REAL OpenAI-compatible token usage (`prompt_tokens` / `completion_tokens`).
+ * Absent when the runtime did not report usage — never invented.
+ */
+export function parseOpenAiUsage(body: unknown): LocalTokenUsage | undefined {
+  const record = asRecord(body);
+  if (record === null) return undefined;
+  const usage = asRecord(record['usage']);
+  if (usage === null) return undefined;
+  const rawInput = usage['prompt_tokens'];
+  const rawOutput = usage['completion_tokens'];
+  const hasInput = typeof rawInput === 'number' && Number.isFinite(rawInput) && rawInput >= 0;
+  const hasOutput = typeof rawOutput === 'number' && Number.isFinite(rawOutput) && rawOutput >= 0;
+  if (!hasInput && !hasOutput) return undefined;
+  const input = hasInput ? rawInput : 0;
+  const output = hasOutput ? rawOutput : 0;
+  return { input, output, total: input + output };
+}
+
 export function parseOpenAiStreamLine(line: string): LocalGenerateChunk | undefined {
   const trimmed = line.trim();
   if (trimmed === '' || !trimmed.startsWith('data:')) return undefined;
@@ -110,13 +130,21 @@ export function parseOpenAiStreamLine(line: string): LocalGenerateChunk | undefi
   }
   const record = asRecord(parsed);
   if (record === null) return undefined;
+  const usage = parseOpenAiUsage(record);
   const choices = record['choices'];
-  if (!Array.isArray(choices)) return undefined;
+  if (!Array.isArray(choices)) {
+    // A usage-only final chunk (stream_options.include_usage) carries no choices.
+    return usage !== undefined ? { content: '', done: true, usage } : undefined;
+  }
   const first = asRecord(choices[0]);
   const delta = asRecord(first?.['delta']);
   const content = delta?.['content'];
   const done = first?.['finish_reason'] !== undefined && first['finish_reason'] !== null;
-  return { content: typeof content === 'string' ? content : '', done };
+  return {
+    content: typeof content === 'string' ? content : '',
+    done,
+    ...(usage !== undefined ? { usage } : {}),
+  };
 }
 
 /** The outcome of one HTTP probe, discriminated so classification is total. */
@@ -408,6 +436,7 @@ export class OpenAICompatibleRuntimeAdapter implements LocalRuntime {
         message: `${this.displayName} answered but produced no reply.`,
       };
     }
+    const usage = parseOpenAiUsage(body);
     return {
       runtime: this.id,
       modelId,
@@ -415,12 +444,24 @@ export class OpenAICompatibleRuntimeAdapter implements LocalRuntime {
       content,
       latencyMs,
       message: `${this.displayName} answered on ${modelId}.`,
+      ...(usage !== undefined ? { usage } : {}),
     };
   }
 
   async *stream(request: LocalGenerateRequest): AsyncGenerator<LocalGenerateChunk> {
+    // Same honesty rule as the Ollama adapter: a stream that cannot start reports
+    // a TERMINAL error chunk instead of ending silently with no content.
     const resolved = await this.resolveModel(request.modelId);
-    if ('error' in resolved) return;
+    if ('error' in resolved) {
+      yield {
+        content: '',
+        done: true,
+        error: resolved.error,
+        message: resolved.message,
+        ...(request.modelId !== undefined ? { modelId: request.modelId } : {}),
+      };
+      return;
+    }
     const modelId = resolved.modelId;
     let response: Response;
     try {
@@ -435,10 +476,34 @@ export class OpenAICompatibleRuntimeAdapter implements LocalRuntime {
         }),
         signal: AbortSignal.timeout(request.timeoutMs ?? this.generateTimeoutMs),
       });
-    } catch {
+    } catch (error) {
+      yield {
+        content: '',
+        done: true,
+        error: classifyNetworkError(error),
+        message: `The generation could not reach ${this.displayName}. Check that it is running.`,
+        modelId,
+      };
       return;
     }
-    if (!response.ok || response.body === null) return;
+    if (!response.ok || response.body === null) {
+      yield {
+        content: '',
+        done: true,
+        error:
+          response.status === 404
+            ? 'MODEL_UNAVAILABLE'
+            : response.ok
+              ? 'INVALID_RESPONSE'
+              : 'GENERATION_FAILED',
+        message:
+          response.status === 404
+            ? `${this.displayName} does not have the model "${modelId}".`
+            : `${this.displayName} refused the streaming request (HTTP ${response.status}).`,
+        modelId,
+      };
+      return;
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

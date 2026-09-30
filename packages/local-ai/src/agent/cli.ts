@@ -19,13 +19,14 @@ import {
 } from './server.js';
 
 function readPort(env: Record<string, string | undefined>): number {
-  const raw = env['VEDMOULYA_LOCAL_AGENT_PORT'];
+  const raw = env.VEDMOULYA_LOCAL_AGENT_PORT;
   const parsed = raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LOCAL_AGENT_PORT;
 }
 
 function readAllowedOrigins(env: Record<string, string | undefined>): readonly string[] {
-  return parseAllowedOrigins(env[LOCAL_AGENT_ALLOWED_ORIGINS_ENV]);
+  const raw = Object.entries(env).find(([name]) => name === LOCAL_AGENT_ALLOWED_ORIGINS_ENV)?.[1];
+  return parseAllowedOrigins(raw);
 }
 
 async function main(): Promise<void> {
