@@ -1001,6 +1001,9 @@ export class AIOrchestrationService extends BaseService {
       // telemetry. Missing values remain unavailable instead of being estimated.
       let streamUsage: { input: number; output: number; total?: number; cost?: number } | undefined;
       let executedModelId: string | undefined;
+      // Set only when the streamed run fails and a registered candidate answers
+      // instead (see the provider-fallback block in the catch below).
+      let fallbackResponse: AIResponse | undefined;
       try {
         for await (const chunk of streamFn({
           messages,
@@ -1076,18 +1079,67 @@ export class AIOrchestrationService extends BaseService {
           ok: false,
           failureReason: this.classifyFailure(error),
         });
-        runSpan.end('error', error instanceof Error ? error.message : String(error));
-        emit({ type: 'error', data: { message: 'streaming failed' } });
-        throw error;
+        // PROVIDER FALLBACK (Ask VedMoulya) — a streamed run must honour the SAME
+        // candidate fallback `orchestrate` already applies through
+        // executeWithRetryAndFallback. Previously ANY failure on the first
+        // candidate rethrew, so one exhausted provider (e.g. an OpenAI key with no
+        // remaining credit, or a provider returning 401) failed the whole request
+        // even though another registered candidate could answer — Ask failed while
+        // Mission, which runs the ordinary execute/fallback path, kept working.
+        //
+        // The stream stays fail-fast in the two cases where continuing would be
+        // dishonest or would change the retry budget:
+        //   • partial content already reached the consumer — replaying a second
+        //     provider's answer would duplicate it;
+        //   • no other candidate exists — the original error is surfaced as-is.
+        // Otherwise the run continues through the EXISTING
+        // executeWithRetryAndFallback path over the REMAINING candidates, so the
+        // already-failed provider is not attempted again (retry budget unchanged).
+        // Nothing is hidden: if every remaining candidate fails, that call throws
+        // its own real last error and it propagates unchanged.
+        if (text.length > 0 || candidates.length < 2) {
+          runSpan.end('error', error instanceof Error ? error.message : String(error));
+          emit({ type: 'error', data: { message: 'streaming failed' } });
+          throw error;
+        }
+        this.logger.warn('AI stream failed on the selected provider; falling back', {
+          requestId,
+          provider: streamingProvider.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        this.metrics.recordFallback();
+        try {
+          fallbackResponse = await this.executeWithRetryAndFallback(
+            candidates.slice(1),
+            messages,
+            request.constraints?.maxOutputTokens,
+            aiRequest,
+            requestId,
+            {
+              capability: request.capability,
+              modelByProvider: routingIntent.modelByProvider,
+            },
+          );
+        } catch (fallbackError) {
+          runSpan.end(
+            'error',
+            fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          );
+          emit({ type: 'error', data: { message: 'streaming failed' } });
+          throw fallbackError;
+        }
+        emit({ type: 'content', stage: 'streaming', content: fallbackResponse.content });
       }
-      final = this.buildStreamedResponse(
-        streamingProvider,
-        text,
-        request,
-        aiRequest,
-        streamUsage,
-        executedModelId ?? requestedModel,
-      );
+      final =
+        fallbackResponse ??
+        this.buildStreamedResponse(
+          streamingProvider,
+          text,
+          request,
+          aiRequest,
+          streamUsage,
+          executedModelId ?? requestedModel,
+        );
     } else {
       // Non-streaming provider: the full response is delivered as a single
       // content chunk, but the run still advertises the streaming stage so
