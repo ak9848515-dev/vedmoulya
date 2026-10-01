@@ -338,4 +338,72 @@ describe('GoogleGeminiProvider', () => {
     // the adapter's configured default.
     expect(call.model.modelId).toBe('gemini-2.5-pro');
   });
+
+  // ── Thinking budget ──────────────────────────────────────────────────────
+  // REGRESSION: Gemini 3.x thinking tokens count against `maxOutputTokens`, so
+  // an unbounded thinking pass could consume the whole caller budget and return
+  // EMPTY content while reporting success (reproduced live with gemini-3.5-flash:
+  // a 64-token budget produced 60 thinking tokens and "" text). The adapter
+  // therefore bounds thinking by default so the visible answer always fits.
+  describe('Gemini thinking budget', () => {
+    it('bounds thinking by default so the caller budget serves the visible answer', async () => {
+      const provider = new GoogleGeminiProvider(FAKE_API_KEY);
+      await provider.execute({ messages: MESSAGES, model: 'gemini', maxTokens: 64 });
+      const call = generateTextMock.mock.calls[0][0] as {
+        providerOptions?: { google?: { thinkingConfig?: { thinkingBudget?: number } } };
+      };
+      expect(call.providerOptions?.google?.thinkingConfig?.thinkingBudget).toBe(0);
+    });
+
+    it('honours an explicit thinkingBudget option', async () => {
+      const provider = new GoogleGeminiProvider(FAKE_API_KEY, { thinkingBudget: 512 });
+      await provider.execute({ messages: MESSAGES, model: 'gemini' });
+      const call = generateTextMock.mock.calls[0][0] as {
+        providerOptions?: { google?: { thinkingConfig?: { thinkingBudget?: number } } };
+      };
+      expect(call.providerOptions?.google?.thinkingConfig?.thinkingBudget).toBe(512);
+    });
+
+    it('omits the config for Pro models, which cannot disable thinking', async () => {
+      const provider = new GoogleGeminiProvider(FAKE_API_KEY, { modelId: 'gemini-2.5-pro' });
+      await provider.execute({ messages: MESSAGES, model: 'gemini' });
+      const call = generateTextMock.mock.calls[0][0] as { providerOptions?: unknown };
+      expect(call.providerOptions).toBeUndefined();
+    });
+
+    it('applies the bounded budget to streaming and structured calls too', async () => {
+      generateTextMock.mockResolvedValue({
+        output: Promise.resolve({ ok: true }),
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        finalStep: { response: { modelId: 'gemini-3.5-flash' } },
+      });
+      async function* textStream(): AsyncGenerator<string> {
+        yield 'x';
+      }
+      streamTextMock.mockReturnValue({
+        textStream: textStream(),
+        usage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+        finalStep: Promise.resolve({ response: { modelId: 'gemini-3.5-flash' } }),
+      });
+      const provider = new GoogleGeminiProvider(FAKE_API_KEY);
+
+      await provider.generateStructured({
+        messages: MESSAGES,
+        model: 'gemini',
+        schema: { type: 'object' },
+      });
+      const structuredCall = generateTextMock.mock.calls[0][0] as {
+        providerOptions?: { google?: { thinkingConfig?: { thinkingBudget?: number } } };
+      };
+      expect(structuredCall.providerOptions?.google?.thinkingConfig?.thinkingBudget).toBe(0);
+
+      for await (const _event of provider.stream({ messages: MESSAGES, model: 'gemini' })) {
+        void _event;
+      }
+      const streamCall = streamTextMock.mock.calls[0][0] as {
+        providerOptions?: { google?: { thinkingConfig?: { thinkingBudget?: number } } };
+      };
+      expect(streamCall.providerOptions?.google?.thinkingConfig?.thinkingBudget).toBe(0);
+    });
+  });
 });

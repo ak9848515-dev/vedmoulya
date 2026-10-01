@@ -66,6 +66,21 @@ export interface GoogleGeminiProviderOptions {
   structuredModelId?: string;
   /** Hard timeout for every call. Default: 60s. */
   timeoutMs?: number;
+  /**
+   * Gemini 3.x models emit internal "thinking" tokens that COUNT against the
+   * request's `maxOutputTokens`. An unbounded thinking pass can therefore consume
+   * the entire caller budget and the adapter returns EMPTY content while still
+   * reporting success — observed live with `gemini-3.5-flash`: a 64-token budget
+   * produced 60 thinking tokens and `""` text, so Ask VedMoulya showed its
+   * generic failure even though the provider answered.
+   *
+   * Bounding thinking keeps the caller's `maxOutputTokens` available for the
+   * VISIBLE answer and makes latency predictable. Default: 0 (thinking disabled),
+   * matching the adapter's contract that `maxTokens` is the visible output
+   * budget. Set a positive value to opt back into thinking. Pro variants cannot
+   * disable thinking, so the config is omitted for them (see `thinkingConfigFor`).
+   */
+  thinkingBudget?: number;
   /** Cost per 1K input tokens (USD) for the configured model. Default: 0.00125. */
   inputPer1K?: number;
   /** Cost per 1K output tokens (USD) for the configured model. Default: 0.01. */
@@ -99,6 +114,7 @@ export class GoogleGeminiProvider implements ProviderAdapter {
   private readonly modelId: string;
   private readonly structuredModelId: string;
   private readonly timeoutMs: number;
+  private readonly thinkingBudget: number;
   private readonly inputPer1K: number;
   private readonly outputPer1K: number;
 
@@ -107,6 +123,7 @@ export class GoogleGeminiProvider implements ProviderAdapter {
     this.modelId = options.modelId ?? 'gemini-3.5-flash';
     this.structuredModelId = options.structuredModelId ?? this.modelId;
     this.timeoutMs = options.timeoutMs ?? 60_000;
+    this.thinkingBudget = options.thinkingBudget ?? 0;
     // Registry estimates: $1.25/M input, $10/M output (catalog google entry).
     this.inputPer1K = options.inputPer1K ?? 0.00125;
     this.outputPer1K = options.outputPer1K ?? 0.01;
@@ -141,6 +158,19 @@ export class GoogleGeminiProvider implements ProviderAdapter {
     });
   }
 
+  /**
+   * Provider options that bound Gemini thinking so it cannot starve the
+   * caller's visible output budget (see `thinkingBudget`). Pro variants cannot
+   * fully disable thinking, so the config is omitted for them rather than
+   * sending an unsupported zero budget that the API would reject.
+   */
+  private thinkingConfigFor(
+    model: string,
+  ): { google: { thinkingConfig: { thinkingBudget: number } } } | undefined {
+    if (this.thinkingBudget === 0 && /pro/i.test(model)) return undefined;
+    return { google: { thinkingConfig: { thinkingBudget: this.thinkingBudget } } };
+  }
+
   async execute(request: {
     messages: Array<{ role: string; content: string }>;
     model: string;
@@ -155,11 +185,14 @@ export class GoogleGeminiProvider implements ProviderAdapter {
       // Phase B — execute the advisor-selected model when supplied; otherwise
       // fall back to this adapter's configured default. An unknown Gemini
       // model id makes the SDK throw → runtime classifies + falls back.
+      const model = request.modelId ?? this.modelId;
+      const providerOptions = this.thinkingConfigFor(model);
       const result = await generateText({
-        model: this.client()(request.modelId ?? this.modelId),
+        model: this.client()(model),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
+        ...(providerOptions ? { providerOptions } : {}),
         abortSignal,
       });
 
@@ -226,14 +259,17 @@ export class GoogleGeminiProvider implements ProviderAdapter {
 
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
+      const model = request.modelId ?? this.structuredModelId;
+      const providerOptions = this.thinkingConfigFor(model);
       const result = await generateText({
-        model: this.client()(request.modelId ?? this.structuredModelId),
+        model: this.client()(model),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
         output: Output.object({
           schema: jsonSchema(request.schema),
         }),
+        ...(providerOptions ? { providerOptions } : {}),
         abortSignal,
       });
 
@@ -296,11 +332,14 @@ export class GoogleGeminiProvider implements ProviderAdapter {
 
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
+      const model = request.modelId ?? this.modelId;
+      const providerOptions = this.thinkingConfigFor(model);
       const result = streamText({
-        model: this.client()(request.modelId ?? this.modelId),
+        model: this.client()(model),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
+        ...(providerOptions ? { providerOptions } : {}),
         abortSignal,
       });
 
