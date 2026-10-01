@@ -90,6 +90,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
           maxTokens,
           maxRuntimeMs,
           autonomyLevel,
+          allowCommandExecution,
         } = input as {
           userId: string;
           title: string;
@@ -101,6 +102,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
           maxTokens?: number;
           maxRuntimeMs?: number;
           autonomyLevel?: 'ASSISTED' | 'SUPERVISED' | 'CONTROLLED_AUTONOMOUS';
+          allowCommandExecution?: boolean;
         };
         const missionInput: CreateMissionInputView = {
           title,
@@ -112,6 +114,12 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
           maxTokens,
           maxRuntimeMs,
           autonomyLevel,
+          // Explicit operator/system override for the governed command tool.
+          // Without this the router DROPPED the flag, so a caller could never
+          // grant (or withhold) `run_command` and the objective-text heuristic
+          // was the only path — a repository-integration objective that did not
+          // match its regex silently lost EXECUTE and the plan could not run.
+          ...(allowCommandExecution !== undefined ? { allowCommandExecution } : {}),
         };
         const mission = await missionService.createAndRun(userId, missionInput);
         return toMissionView(mission);

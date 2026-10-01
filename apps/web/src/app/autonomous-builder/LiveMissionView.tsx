@@ -36,6 +36,31 @@ function unavailable(value: string | number | undefined | null, suffix = ''): st
   return `${value}${suffix}`;
 }
 
+/**
+ * Provider/model truth (PROVIDER-01 → Mission).
+ *
+ * The gateway sets `provider`/`model` ONLY from what an executed run actually
+ * recorded; when no run has produced one yet they are `undefined`. That is NOT
+ * an availability failure — rendering it as "Unavailable" made a mission that
+ * simply had not yet recorded a generation read as "the provider is down",
+ * which contradicts the runtime (the mission had plans, runs and checkpoints;
+ * it was never WAITING_FOR_PROVIDER).
+ *
+ * So a missing provider/model reports the honest "not yet run" fact. The
+ * alarming "Unavailable" wording is reserved for the case that genuinely means
+ * it: the mission is WAITING_FOR_PROVIDER (the runtime itself decided no
+ * capable provider can serve it right now).
+ */
+function providerOrModelValue(value: string | number | undefined | null, state: string): string {
+  if (value !== undefined && value !== null && value !== '' && !Number.isNaN(value)) {
+    return `${value}`;
+  }
+  if (state === 'WAITING_FOR_PROVIDER') {
+    return 'Unavailable';
+  }
+  return 'Not yet run';
+}
+
 export function LiveMissionView({
   status,
   onPause,
@@ -114,13 +139,13 @@ export function LiveMissionView({
           <dt className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Provider
           </dt>
-          <dd data-testid="fact-provider">{unavailable(status.provider)}</dd>
+          <dd data-testid="fact-provider">{providerOrModelValue(status.provider, status.state)}</dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Model
           </dt>
-          <dd data-testid="fact-model">{unavailable(status.model)}</dd>
+          <dd data-testid="fact-model">{providerOrModelValue(status.model, status.state)}</dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">

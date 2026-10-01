@@ -237,7 +237,7 @@ const DEFAULT_MAX_ACTIVITY = 200;
  * decides WHICH mission constraints are granted, never what a plan may do.
  */
 const REPOSITORY_DEVELOPMENT_PATTERN =
-  /(fix|repair|resolve).*(test|build|failure)|(test|build|failure).*(fix|repair|resolve)|failing tests?/i;
+  /(fix|repair|resolve|wiring|wire|connect|integrate|integration|implement|refactor|migrate|upgrade|configure|add|remove|update|dependenc|workspace|repository|repo)\b.*\b(test|build|failure|fail|package\.json|module|resolve|integration|work(?:space)?|repo(?:sitory)?|dependenc|import|export)|(test|build|failure|package\.json|module|workspace|repository|repo|dependenc|import|export)\b.*\b(fix|repair|resolve|wiring|wire|connect|integrate|integration|implement|refactor|migrate|upgrade|configure|update)|failing tests?/i;
 
 function isRepositoryDevelopmentMission(input: CreateMissionInputView): boolean {
   if (input.allowCommandExecution !== undefined) return input.allowCommandExecution;

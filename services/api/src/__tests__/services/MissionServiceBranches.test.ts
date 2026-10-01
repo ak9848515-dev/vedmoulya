@@ -296,6 +296,51 @@ describe('MissionService — repository-development constraint selection', () =>
     expect(documentation.constraints.grantedPermissionClasses).not.toContain('EXECUTE');
   });
 
+  it('grants run_command / EXECUTE to genuine repository-integration objectives', async () => {
+    const service = realService();
+
+    // Wiring / resolution / dependency objectives perform REAL repository work.
+    const integrations = [
+      'Implement integration: package.json: @vedmoulya/api does not resolve inside the workspace',
+      'Fix @vedmoulya/api module resolution in the workspace',
+      'Wire the dependency into the build',
+      'Integrate the new package.json dependency',
+      'Resolve the failing import in the module',
+    ];
+
+    for (const objective of integrations) {
+      const mission = await service.createMission('u-integration', {
+        title: 'Repository integration',
+        objective,
+      });
+      expect(mission.constraints.allowedTools).toContain('run_command');
+      expect(mission.constraints.grantedPermissionClasses).toContain('EXECUTE');
+    }
+  });
+
+  it('keeps documentation / research / chat objectives read+write-only (no run_command)', async () => {
+    const service = realService();
+
+    const nonRepository = [
+      'Improve the workspace documentation',
+      'Write documentation for the new feature',
+      'Research the best provider for this mission',
+      'Summarize the plan in chat',
+      'Explain how the mission controller works',
+    ];
+
+    for (const objective of nonRepository) {
+      const mission = await service.createMission('u-nonrepo', {
+        title: 'Non-repository work',
+        objective,
+      });
+      expect(mission.constraints.allowedTools).not.toContain('run_command');
+      expect(mission.constraints.allowedTools).toContain('workspace_read');
+      expect(mission.constraints.allowedTools).toContain('workspace_write');
+      expect(mission.constraints.grantedPermissionClasses).not.toContain('EXECUTE');
+    }
+  });
+
   it('lets an explicit operator override win over the objective heuristic', async () => {
     const service = realService();
 

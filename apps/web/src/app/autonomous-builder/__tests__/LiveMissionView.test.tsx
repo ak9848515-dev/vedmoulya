@@ -320,7 +320,7 @@ describe('LiveMissionView — honest state display (BLD-024)', () => {
     );
   });
 
-  it('NEVER fabricates: missing provider/model/attempt values display "Unavailable" and no percentage text exists', () => {
+  it('NEVER fabricates: missing values report honest "Not yet run" / "Unavailable" and no percentage text exists', () => {
     renderView({
       state: 'RUNNING',
       provider: undefined,
@@ -329,8 +329,13 @@ describe('LiveMissionView — honest state display (BLD-024)', () => {
       revisions: undefined,
       currentObjective: undefined,
     });
-    expect(screen.getByTestId('fact-provider').textContent).toBe('Unavailable');
-    expect(screen.getByTestId('fact-model').textContent).toBe('Unavailable');
+    // No executed run has recorded provider/model yet, and the mission is not
+    // WAITING_FOR_PROVIDER — that is the honest "not yet run" fact, NOT a
+    // provider outage. "Unavailable" stays reserved for values the runtime
+    // genuinely cannot produce (here: the attempt count).
+    expect(screen.getByTestId('fact-provider').textContent).toBe('Not yet run');
+    expect(screen.getByTestId('fact-model').textContent).toBe('Not yet run');
+    expect(screen.getByTestId('fact-retries').textContent).toBe('Unavailable');
     // No fabricated progress percentage anywhere in the live view.
     expect(screen.queryByText(/\d+% complete/i)).toBeNull();
     expect(screen.queryByText(/percent/i)).toBeNull();

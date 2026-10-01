@@ -6643,6 +6643,13 @@ export function createAppRouter(services: ApiApplicationService) {
             maxTokens: z.number().int().min(0).optional(),
             maxRuntimeMs: z.number().int().min(0).optional(),
             autonomyLevel: z.enum(['ASSISTED', 'SUPERVISED', 'CONTROLLED_AUTONOMOUS']).optional(),
+            // Explicit operator/system override for the governed command tool.
+            // MUST be declared here: Zod strips undeclared keys, so omitting it
+            // silently dropped the flag before MissionRouter could see it — a
+            // repository-integration objective then lost EXECUTE and the plan
+            // could not run. Optional because the service still applies its
+            // objective-text classification when the caller sends nothing.
+            allowCommandExecution: z.boolean().optional(),
           }),
         )
         .mutation(({ input }) => createMissionRouter(services.mission).createAndRun(input)),
