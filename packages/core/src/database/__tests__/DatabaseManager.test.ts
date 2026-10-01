@@ -41,6 +41,7 @@ describe('Shared Database Manager', () => {
     delete process.env.DB_POOL_MAX;
     delete process.env.EI_POOL_MAX;
     delete process.env.DB_POOL_MIN;
+    delete process.env.DB_CONNECT_TIMEOUT_S;
   });
 
   afterEach(async () => {
@@ -66,6 +67,29 @@ describe('Shared Database Manager', () => {
     databaseManager.getPool({ url: TEST_URL });
     expect(mockPostgres).toHaveBeenCalledWith(TEST_URL, expect.objectContaining({ max: 25 }));
   });
+  // PROD — a managed/serverless Postgres (Neon) suspends idle compute, and a
+  // COLD endpoint can take >8s to accept a connection. The runtime pool MUST
+  // tolerate that the same way the Neon-aware preflight probe does
+  // (scripts/lib/probes.ts uses connect_timeout: 20); a too-short timeout
+  // turns "the endpoint was asleep" into a hard `write CONNECT_TIMEOUT` while
+  // a mission is selecting its first objective. Regression: the default was 10s.
+  it('defaults connect_timeout to 20s so a cold serverless endpoint can wake', () => {
+    databaseManager.getPool({ url: TEST_URL });
+    expect(mockPostgres).toHaveBeenCalledWith(
+      TEST_URL,
+      expect.objectContaining({ connect_timeout: 20 }),
+    );
+  });
+
+  it('honours DB_CONNECT_TIMEOUT_S as an explicit override', () => {
+    process.env.DB_CONNECT_TIMEOUT_S = '45';
+    databaseManager.getPool({ url: TEST_URL });
+    expect(mockPostgres).toHaveBeenCalledWith(
+      TEST_URL,
+      expect.objectContaining({ connect_timeout: 45 }),
+    );
+  });
+
   it('honours EI_POOL_MAX only when DB_POOL_MAX is unset (deprecated alias)', () => {
     process.env.EI_POOL_MAX = '4';
     databaseManager.getPool({ url: TEST_URL });

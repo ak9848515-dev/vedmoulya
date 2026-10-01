@@ -25,9 +25,18 @@
 //   DB_POOL_MIN            minimum connections kept idle (default 2)
 //   DB_POOL_MAX            hard per-pool cap (default 10)
 //   EI_POOL_MAX            deprecated alias honoured when DB_POOL_MAX is unset
-//   DB_CONNECT_TIMEOUT_S   connect timeout in seconds (default 10)
+//   DB_CONNECT_TIMEOUT_S   connect timeout in seconds (default 20)
 //   DB_IDLE_TIMEOUT_S      idle connection timeout in seconds (default 30)
 //   DB_MAX_LIFETIME_S      max connection lifetime in seconds (default 1800)
+//
+// CONNECT TIMEOUT vs SERVERLESS POSTGRES. The default is deliberately 20s,
+// matching @vedmoulya/core's OWN Neon-aware preflight probe (scripts/lib/
+// probes.ts uses connect_timeout: 20 and documents that a COLD managed
+// endpoint "can take >8s to accept a connection"). A shorter runtime timeout
+// turns "the endpoint was asleep" into a hard `write CONNECT_TIMEOUT` — the
+// real regression this default avoids. It is still bounded (never a hang),
+// overridable via DB_CONNECT_TIMEOUT_S, and does NOT hide query errors: only
+// the connection STARTUP phase is granted more time.
 //
 // A pool is keyed by (url, budget). Two engines pointing at the same database
 // with the same budget ALWAYS share one physical pool. A dedicated pool is only
@@ -275,7 +284,9 @@ class SharedDatabaseManager implements DatabaseManager {
     const poolMin = positiveInt(options.poolMin, envInt('DB_POOL_MIN', 2));
     const connectTimeoutSeconds = positiveInt(
       options.connectTimeoutSeconds,
-      envInt('DB_CONNECT_TIMEOUT_S', 10),
+      // 20s matches the Neon-aware preflight probe (scripts/lib/probes.ts); a
+      // managed endpoint waking from suspend can exceed the previous 10s.
+      envInt('DB_CONNECT_TIMEOUT_S', 20),
     );
     const idleTimeoutSeconds = positiveInt(
       options.idleTimeoutSeconds,
