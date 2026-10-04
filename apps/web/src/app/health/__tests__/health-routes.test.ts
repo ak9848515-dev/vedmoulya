@@ -174,11 +174,11 @@ beforeEach(() => {
   stub.health.mockReset().mockResolvedValue(HEALTHY_DB);
   stub.getStats.mockReset().mockReturnValue(POOL_SNAPSHOT);
   stub.getServices.mockReset().mockReturnValue({});
-  process.env.NODE_ENV = SAVED_NODE_ENV;
+  vi.stubEnv('NODE_ENV', SAVED_NODE_ENV);
 });
 
 afterEach(() => {
-  process.env.NODE_ENV = SAVED_NODE_ENV;
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -239,7 +239,7 @@ describe('GET /health/ready — gateway + real database readiness', () => {
   });
 
   it('answers 503 in production when the database probe reports a DSN-bearing failure, sanitized', async () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     stub.health.mockResolvedValue(DSN_BEARING_DB_FAILURE);
 
     const { status, body, raw } = await call('ready');
@@ -254,7 +254,7 @@ describe('GET /health/ready — gateway + real database readiness', () => {
   });
 
   it('answers 503 in production when the probe THROWS a DSN-bearing error, sanitized', async () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     stub.health.mockRejectedValue(new TypeError(`Invalid URL: ${PG_DSN}`));
 
     const { status, body, raw } = await call('ready');
@@ -267,7 +267,7 @@ describe('GET /health/ready — gateway + real database readiness', () => {
   });
 
   it('never publishes an environment variable name or Redis DSN in production', async () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     stub.health.mockResolvedValue({
       ok: false,
       latencyMs: 3,
@@ -281,7 +281,7 @@ describe('GET /health/ready — gateway + real database readiness', () => {
   });
 
   it('sanitizes in EVERY mode — a dev-mode response is not a leak channel either', async () => {
-    process.env.NODE_ENV = 'test';
+    vi.stubEnv('NODE_ENV', 'test');
     stub.health.mockResolvedValue(DSN_BEARING_DB_FAILURE);
 
     const { status, body, raw } = await call('ready');
@@ -296,7 +296,7 @@ describe('GET /health/ready — gateway + real database readiness', () => {
   });
 
   it('refuses readiness when the gateway fails to initialize, in production regardless of database health', async () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     stub.getServices.mockImplementation(() => {
       throw new Error('gateway construction failed');
     });
@@ -313,7 +313,7 @@ describe('GET /health/ready — gateway + real database readiness', () => {
   });
 
   it('does not weaken readiness: a production database failure is blocking even with a healthy gateway', async () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     stub.getServices.mockReturnValue({});
     stub.health.mockResolvedValue({ ok: false, latencyMs: 9, error: 'connection refused' });
 
@@ -411,7 +411,7 @@ describe('health endpoints — no leaked secrets in any mode', () => {
 
   for (const mode of ['test', 'development', 'production', 'staging']) {
     it(`leaks nothing in NODE_ENV=${mode}, including with a credential-bearing failure`, async () => {
-      process.env.NODE_ENV = mode;
+      vi.stubEnv('NODE_ENV', mode);
       stub.health.mockResolvedValue(DSN_BEARING_DB_FAILURE);
       stub.getStats.mockReturnValue(POOL_SNAPSHOT);
 
