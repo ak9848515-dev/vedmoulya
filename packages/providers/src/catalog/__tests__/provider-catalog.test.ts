@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCatalogProviders, CATALOG_SIZE } from '../provider-catalog.js';
 import { PROVIDER_FAMILIES } from '../../domain/rules/ProviderRules.js';
+import { PROVIDER_PRESETS } from '@vedmoulya/shared';
 
 describe('provider catalog', () => {
   it('seeds the 7 built-in provider families (custom is user-added, not in catalog)', () => {
@@ -81,5 +82,75 @@ describe('provider catalog', () => {
         expect(provider.supportsCapability(entry.capability)).toBe(true);
       }
     }
+  });
+});
+
+// S3.1B.2 — Google retired the 2.5 generation for newer API keys ("no longer
+// available to new users" — verified 404 against the configured production
+// credential), so the catalog must not be able to SELECT a retired model.
+describe('provider catalog — Gemini model compatibility (S3.1B.2)', () => {
+  const google = (): ReturnType<typeof createCatalogProviders>[number] => {
+    const provider = createCatalogProviders().find((p) => p.id === 'google');
+    if (!provider) throw new Error('google must exist in the provider catalog');
+    return provider;
+  };
+
+  it('offers the model the configured production credential actually serves', () => {
+    expect(google().models.map((m) => m.id)).toContain('gemini-3.8-flash');
+  });
+
+  it('no longer advertises any retired Gemini model id', () => {
+    const ids = google().models.map((m) => m.id);
+    expect(ids).not.toContain('gemini-2.5-pro');
+    expect(ids).not.toContain('gemini-2.5-flash');
+    expect(ids.some((id) => id.startsWith('gemini-2.5-'))).toBe(false);
+  });
+
+  it('the Gemini default model id is not a retired generation', () => {
+    // The default itself is a FINAL-02 pinning contract (shared with the
+    // provider adapters) and is deliberately NOT re-picked by this repair.
+    // What matters here is that it can never point at a retired model.
+    const defaultModelId = PROVIDER_PRESETS.google.defaultModelId;
+    expect(defaultModelId).not.toMatch(/^gemini-2\.5-/);
+    expect(google().models.map((m) => m.id)).not.toContain(defaultModelId);
+  });
+
+  it('no selectable Gemini model id is retired, whatever the default is', () => {
+    // Guards the invariant the repair exists for: every model the google
+    // candidate can be routed to is a currently supported generation.
+    for (const model of google().models) {
+      expect(model.id).not.toMatch(/^gemini-2\.5-/);
+    }
+  });
+
+  it('preserves the Gemini generative capability metadata and provider semantics', () => {
+    const model = google().models.find((m) => m.id === 'gemini-3.8-flash');
+    expect(model).toBeDefined();
+    // Limits are the PROVIDER-REPORTED values for this model id, not a copy
+    // from the retired entry.
+    expect(model?.contextLength).toBe(1048576);
+    expect(model?.maxOutputTokens).toBe(65536);
+    expect(model?.streaming).toBe(true);
+    expect(model?.functionCalling).toBe(true);
+    expect(model?.embeddings).toBe(false);
+    // The provider itself is unchanged in family/name/ownership.
+    expect(google().family).toBe('google');
+    expect(google().name).toBe('Google (Gemini)');
+    // Gemini still declares the generative capability surface it always did.
+    for (const capability of ['reasoning', 'coding', 'vision', 'content_generation']) {
+      expect(google().supportsCapability(capability)).toBe(true);
+    }
+    // Embeddings are still served by the dedicated embedding model, not by the
+    // generative one.
+    expect(google().supportsCapability('embeddings')).toBe(true);
+    expect(google().models.find((m) => m.embeddings)?.id).toBe('text-embedding-004');
+  });
+
+  it('no unrelated provider model set was disturbed', () => {
+    const byId = new Map(createCatalogProviders().map((p) => [p.id, p]));
+    expect(byId.get('ollama')?.cost.tier).toBe('free');
+    expect(byId.get('mock')?.lifecycleStatus.value).toBe('testing');
+    expect(byId.get('anthropic')?.supportsCapability('embeddings')).toBe(false);
+    expect(createCatalogProviders()).toHaveLength(CATALOG_SIZE);
   });
 });

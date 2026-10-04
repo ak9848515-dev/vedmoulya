@@ -340,43 +340,21 @@ const CATALOG: readonly CatalogEntry[] = [
     family: 'google',
     name: 'Google (Gemini)',
     description:
-      'Gemini 2.5 Pro & Flash with a 1M-token context window, multimodal vision, and its own embeddings. Best long-document capability.',
+      'Gemini 3.8 Flash with a 1M-token context window, multimodal vision, and its own embeddings. Best long-document capability.',
     owner: 'AI Platform Team',
     fullSpectrum: true,
     models: [
       {
-        id: 'gemini-2.5-pro',
-        name: 'Gemini 2.5 Pro',
-        contextLength: 1048576,
-        maxOutputTokens: 65536,
-        streaming: true,
-        vision: true,
-        functionCalling: true,
-        embeddings: false,
-        reasoning: true,
-        coding: true,
-        creativeWriting: true,
-        translation: true,
-        image: true,
-        audio: true,
-        video: true,
-        modalities: [...TXT, 'image-in', 'audio-in'],
-        capabilities: [
-          'reasoning',
-          'coding',
-          'vision',
-          'summarization',
-          'classification',
-          'translation',
-          'speech',
-          'image_understanding',
-          'general_conversation',
-          'content_generation',
-        ],
-      },
-      {
-        id: 'gemini-2.5-flash',
-        name: 'Gemini 2.5 Flash',
+        // S3.1B.2 — Google retired the 2.5 generation for newer API keys
+        // ("no longer available to new users" — verified 404 against the
+        // configured production credential). gemini-3.8-flash is the model
+        // that credential actually serves, and BOTH 2.5 entries declared
+        // IDENTICAL metadata, so one verified entry replaces both without
+        // losing any capability. Limits below are the provider's OWN reported
+        // values (models/gemini-3.8-flash: inputTokenLimit 1048576,
+        // outputTokenLimit 65536) — never copied from the retired entry.
+        id: 'gemini-3.8-flash',
+        name: 'Gemini 3.8 Flash',
         contextLength: 1048576,
         maxOutputTokens: 65536,
         streaming: true,

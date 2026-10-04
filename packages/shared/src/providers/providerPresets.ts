@@ -85,6 +85,11 @@ export const PROVIDER_PRESETS: Readonly<Record<ProviderPresetId, ProviderPreset>
     defaultEndpoint: 'https://generativelanguage.googleapis.com',
     endpointUserConfigurable: false,
     modelDiscovery: 'rest_list',
+    // S3.1B.2 — the Gemini DEFAULT is a FINAL-02 pinning contract shared with the
+    // provider adapters and asserted by ProviderPresetsAlignment. It is left
+    // unchanged here on purpose: this sprint repairs the stale CATALOG ids
+    // (the retired gemini-2.5-* generation), it does not re-pick the platform
+    // default model. gemini-3.5-flash is not a retired model.
     defaultModelId: 'gemini-3.5-flash',
     deployment: 'cloud',
     simpleModeSupported: true,
