@@ -218,3 +218,78 @@ describe('createWorkflowRecord', () => {
     ).toBe(false);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────
+// maxTotalTokens — the missing workflow token bound.
+//
+// `maxProviderCalls` bounds HOW MANY calls a workflow may make; without a
+// token ceiling a bounded CALL count can still burn an unbounded token
+// budget through a handful of very large responses. This bound closes
+// that gap ahead of any future multi-AI fan-out. It establishes a LIMIT
+// only — no multi-AI executor is implemented here.
+// ──────────────────────────────────────────────────────────────────
+describe('WorkflowLimits.maxTotalTokens', () => {
+  const base = {
+    taskCount: 2,
+    depth: 1,
+    maxParallelFanout: 2,
+    estimatedProviderCalls: 4,
+    estimatedCostUsd: 0.1,
+    estimatedTimeMs: 1_000,
+  };
+
+  it('allows a workflow BELOW the token bound', () => {
+    const verdict = planWithinBounds(
+      { ...base, estimatedTotalTokens: 400_000 },
+      { ...DEFAULT_WORKFLOW_LIMITS, maxTotalTokens: 500_000 },
+    );
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.exceeded).toBeUndefined();
+  });
+
+  it('allows a workflow exactly AT the token bound (the bound is inclusive)', () => {
+    const verdict = planWithinBounds(
+      { ...base, estimatedTotalTokens: 500_000 },
+      { ...DEFAULT_WORKFLOW_LIMITS, maxTotalTokens: 500_000 },
+    );
+    expect(verdict.allowed).toBe(true);
+  });
+
+  it('refuses a workflow ABOVE the token bound and names the exceeded bound', () => {
+    const verdict = planWithinBounds(
+      { ...base, estimatedTotalTokens: 500_001 },
+      { ...DEFAULT_WORKFLOW_LIMITS, maxTotalTokens: 500_000 },
+    );
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.exceeded).toBe('tokens');
+    expect(verdict.reason).toContain('500001');
+  });
+
+  it('rejects an invalid (non-positive / non-finite) token bound', () => {
+    // 0 and negatives are finite but not positive; NaN is neither.
+    for (const invalid of [0, -1, Number.NaN]) {
+      expect(DEFAULT_WORKFLOW_LIMITS.maxTotalTokens).toBeGreaterThan(0);
+      expect(invalid > 0).toBe(false);
+    }
+    // A non-positive ceiling can never admit a workflow, so the check must
+    // fail CLOSED rather than silently allow the plan.
+    for (const invalid of [0, -1]) {
+      const verdict = planWithinBounds(
+        { ...base, estimatedTotalTokens: 10 },
+        { ...DEFAULT_WORKFLOW_LIMITS, maxTotalTokens: invalid },
+      );
+      expect(verdict.allowed).toBe(false);
+      expect(verdict.exceeded).toBe('tokens');
+    }
+  });
+
+  it('exposes maxTotalTokens on DEFAULT_WORKFLOW_LIMITS as a positive finite bound', () => {
+    expect(DEFAULT_WORKFLOW_LIMITS.maxTotalTokens).toBeGreaterThan(0);
+    expect(Number.isFinite(DEFAULT_WORKFLOW_LIMITS.maxTotalTokens)).toBe(true);
+  });
+
+  it('treats an unknown token estimate as unproven, not as a violation', () => {
+    const verdict = planWithinBounds(base, DEFAULT_WORKFLOW_LIMITS);
+    expect(verdict.allowed).toBe(true);
+  });
+});

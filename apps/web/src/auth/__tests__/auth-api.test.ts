@@ -155,6 +155,33 @@ describe('signUpWithEmail', () => {
       signUpWithEmail({ email: 'a@b.com', password: 'Secret123', displayName: 'T' }),
     ).rejects.toThrow(TypeError);
   });
+
+  it('reports the production email-verification state (no session)', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ success: true, data: { verificationRequired: true } }, 201),
+    );
+    const response = await signUpWithEmail({
+      email: 'verify@vedmoulya.com',
+      password: 'Secret123',
+      displayName: 'V',
+    });
+    expect(response.verificationRequired).toBe(true);
+    expect(response.session).toBeUndefined();
+  });
+
+  it('does not throw on a partial success envelope with no data', async () => {
+    // REGRESSION: `'verificationRequired' in undefined` threw a TypeError that
+    // callers classified as "offline" — a false network failure after a
+    // successful (201) registration.
+    fetchMock.mockResolvedValue(jsonResponse({ success: true }, 201));
+    const response = await signUpWithEmail({
+      email: 'partial@vedmoulya.com',
+      password: 'Secret123',
+      displayName: 'P',
+    });
+    expect(response.verificationRequired).toBeUndefined();
+    expect(response.session).toBeUndefined();
+  });
 });
 
 describe('fetchGoogleAuthUrl', () => {

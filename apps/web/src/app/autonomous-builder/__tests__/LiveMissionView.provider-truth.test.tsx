@@ -19,7 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { LiveMissionView } from '../LiveMissionView.js';
-import type { MissionStatusView } from '../../lib/api-client.js';
+import type { MissionStatusView } from '../../../lib/api-client.js';
 
 const noop = async (): Promise<void> => undefined;
 

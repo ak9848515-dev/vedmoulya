@@ -327,6 +327,8 @@ export interface WorkflowDecomposition {
     depth: number;
     maxParallelFanout: number;
     estimatedProviderCalls: number;
+    /** Total tokens the workflow is expected to consume across all calls. */
+    estimatedTotalTokens?: number;
     estimatedCostUsd?: number;
     estimatedTimeMs?: number;
   };

@@ -114,6 +114,24 @@ export interface RoutingIntent {
   capability?: string;
   /** Provider id (adapter name) → advisor-selected model id. */
   modelByProvider: Map<string, string>;
+  /**
+   * WHICH product surface owns this execution (MISSION / ASK / BRAIN / …).
+   * Recorded on the execution span so the durable usage ledger attributes the
+   * event to the REAL source instead of guessing. Undefined ⇒ nothing is
+   * recorded and the ledger falls back to its own inference.
+   */
+  aiSource?: string;
+  /**
+   * The Mission that OWNS this execution, when the execution was issued by the
+   * autonomous Mission runtime. Recorded on the execution span so the durable
+   * usage ledger attributes the event to the real Mission instead of guessing.
+   *
+   * Both values are OPTIONAL and are supplied only by the Mission path: a
+   * generic Ask/Brain/Daily-AI execution carries neither, and never infers one.
+   */
+  missionId?: string;
+  /** The Mission objective this execution serves (Mission path only). */
+  objectiveId?: string;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -737,6 +755,9 @@ export class AIOrchestrationService extends BaseService {
       ? await this.executeStructured(candidates, messages, request, aiRequest, requestId, {
           capability: request.capability,
           modelByProvider: routingIntent.modelByProvider,
+          aiSource: request.aiSource,
+          missionId: request.missionId,
+          objectiveId: request.objectiveId,
         })
       : await this.executeWithRetryAndFallback(
           candidates,
@@ -747,6 +768,9 @@ export class AIOrchestrationService extends BaseService {
           {
             capability: request.capability,
             modelByProvider: routingIntent.modelByProvider,
+            aiSource: request.aiSource,
+            missionId: request.missionId,
+            objectiveId: request.objectiveId,
           },
         );
 
@@ -1118,6 +1142,9 @@ export class AIOrchestrationService extends BaseService {
             {
               capability: request.capability,
               modelByProvider: routingIntent.modelByProvider,
+              aiSource: request.aiSource,
+              missionId: request.missionId,
+              objectiveId: request.objectiveId,
             },
           );
         } catch (fallbackError) {
@@ -1155,6 +1182,9 @@ export class AIOrchestrationService extends BaseService {
         {
           capability: request.capability,
           modelByProvider: routingIntent.modelByProvider,
+          aiSource: request.aiSource,
+          missionId: request.missionId,
+          objectiveId: request.objectiveId,
         },
       );
       emit({ type: 'content', stage: 'streaming', content: final.content });
@@ -1738,6 +1768,9 @@ export class AIOrchestrationService extends BaseService {
             provider_family: provider.family,
             ...(requestedModel ? { requested_model: requestedModel } : {}),
             ...(intent?.capability ? { capability: intent.capability } : {}),
+            ...(intent?.aiSource ? { ai_source: intent.aiSource } : {}),
+            ...(intent?.missionId ? { mission_id: intent.missionId } : {}),
+            ...(intent?.objectiveId ? { objective_id: intent.objectiveId } : {}),
           },
           { userId: requestId ? this.requestUser(aiRequest) : undefined },
         );
@@ -1840,6 +1873,23 @@ export class AIOrchestrationService extends BaseService {
       const hasNext = candidateIndex < candidates.length - 1;
       const fallback = fallbackRule(true, hasNext, aiRequest.attempts);
       if (fallback.passed && hasNext) {
+        // MOCK SAFETY — a synthetic provider may only run when NO real adapter
+        // could serve the capability. If a real provider existed and failed,
+        // falling through to the deterministic mock would turn a real failure
+        // into a SYNTHETIC SUCCESS. Stop here and fail honestly instead.
+        const next = candidates[candidateIndex + 1];
+        if (
+          next !== undefined &&
+          this.isSyntheticProvider(next) &&
+          this.hasRealCandidate(candidates)
+        ) {
+          this.logger.warn('Refusing synthetic fallback: every real AI provider failed', {
+            from: provider.name,
+            synthetic: next.name,
+          });
+          this.metrics.recordFailure();
+          throw this.honestProviderFailure(candidates, lastError, provider.name);
+        }
         const fallbackSpan = this.observability.startSpan(
           'ai.fallback',
           requestId ?? 'unknown',
@@ -1857,6 +1907,47 @@ export class AIOrchestrationService extends BaseService {
     }
 
     throw lastError ?? new Error('All AI providers failed');
+  }
+
+  /**
+   * A provider whose output is SYNTHETIC — not real model inference.
+   *
+   * The deterministic mock stays registered for development, tests and explicit
+   * opt-in, but it must never impersonate real AI on a user-facing request.
+   */
+  private isSyntheticProvider(provider: ProviderAdapter): boolean {
+    return provider.family === 'mock';
+  }
+
+  /** True when at least one REAL (non-synthetic) adapter can serve. */
+  private hasRealCandidate(candidates: ProviderAdapter[]): boolean {
+    return candidates.some((candidate) => !this.isSyntheticProvider(candidate));
+  }
+
+  /**
+   * The honest failure raised when every real provider failed and the synthetic
+   * fallback was refused. It reuses the runtime's existing provider vocabulary
+   * (no parallel error system) and always names what actually happened, so the
+   * user is never told "AI completed successfully".
+   */
+  private honestProviderFailure(
+    candidates: ProviderAdapter[],
+    lastError: Error | undefined,
+    lastRealProvider: string,
+  ): Error {
+    const realNames = candidates.filter((p) => !this.isSyntheticProvider(p)).map((p) => p.name);
+    if (realNames.length === 0) {
+      // No real provider was ever configured — the honest answer is that there
+      // is nothing executable, not a synthetic answer.
+      return new NotFoundError('Provider', 'no real AI provider is configured');
+    }
+    const error = new Error(
+      `All configured AI providers failed (${realNames.join(', ')}). ` +
+        `Last failure from ${lastRealProvider}: ${lastError?.message ?? 'unknown error'}. ` +
+        'No synthetic provider was used.',
+    );
+    error.name = 'ProviderExecutionFailed';
+    return error;
   }
 
   /** Small helper: recover the requesting user for span correlation. */

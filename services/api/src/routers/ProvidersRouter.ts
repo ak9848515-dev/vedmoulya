@@ -13,6 +13,7 @@ import {
   type TestableProviderFamily,
 } from '../services/ProviderConnectionTester.js';
 import type { OpenAIOrgPeriod } from '../services/ProviderUsageIngestor.js';
+import type { AiControlCenterService } from '../observability/AiControlCenter.js';
 import {
   ProviderSetupOrchestrator,
   type ProviderStatus,
@@ -21,6 +22,7 @@ import type { TRPCContext } from '../router.js';
 import {
   fromServiceResult,
   successResponse,
+  errorResponse,
   type ApiResponse,
 } from '../services/ResponseMapper.js';
 
@@ -195,6 +197,16 @@ export interface ProvidersHandlers {
     input: { userId: string; family: string },
     _ctx: TRPCContext,
   ) => Promise<ApiResponse>;
+  /**
+   * SPRINT — the honest AI Control Center board for ONE owner: real calendar-day
+   * / calendar-month usage (cloud vs local), per-provider quota (UNKNOWN stays
+   * UNKNOWN), and the user-budget-vs-platform-allowance distinction. The UI reads
+   * this instead of deriving any balance itself.
+   */
+  getControlCenter: (
+    input: { userId: string; timezone?: string },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
 }
 
 export function createProvidersRouter(
@@ -202,6 +214,7 @@ export function createProvidersRouter(
   experienceService?: ProviderExperienceService,
   credentialService?: ProviderCredentialService,
   setupOrchestrator?: ProviderSetupOrchestrator,
+  controlCenterService?: AiControlCenterService,
 ): ProvidersHandlers {
   const svc = providersService;
   const exp = experienceService;
@@ -215,6 +228,13 @@ export function createProvidersRouter(
   const experience = (): ProviderExperienceService => {
     if (!exp) throw new Error('Provider experience service is not configured');
     return exp;
+  };
+  // SPRINT — the AI Control Center is optional so the constructor signature stays
+  // backward compatible with every existing call site; when it is absent the
+  // procedure reports an honest, explicit error instead of a fabricated board.
+  const controlCenter = (): AiControlCenterService => {
+    if (!controlCenterService) throw new Error('AI Control Center service is not configured');
+    return controlCenterService;
   };
 
   // EPIC-019 — the runtime registry (packages/core/src/startup/provider-runtime.ts)
@@ -569,6 +589,29 @@ export function createProvidersRouter(
           testedAt: new Date().toISOString(),
         });
       }
+    },
+
+    // ── SPRINT — AI Control Center (the honest usage board) ─────────────────
+    //    Composes the durable usage ledger with the provider registry. Cloud and
+    //    LOCAL usage are reported separately, provider quota stays UNKNOWN when
+    //    the provider reports nothing, and a platform allowance is never
+    //    presented as the user's own budget.
+    getControlCenter: async (input, _ctx): Promise<ApiResponse> => {
+      const overview = await experience().getOverview(input.userId);
+      if (!overview.success || !overview.data) {
+        return errorResponse(
+          new Error(overview.error ?? 'Unable to load provider experience'),
+          0,
+          'Unable to load the AI usage board for this account.',
+        );
+      }
+      const board = await controlCenter().getControlCenter(
+        input.userId,
+        overview.data.providers,
+        overview.data.preferences.budgets,
+        input.timezone,
+      );
+      return successResponse(board);
     },
   };
 }

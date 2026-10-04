@@ -19,7 +19,6 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@vedmoulya/ai-world": "*",
     "@vedmoulya/brain": "*",
     "@vedmoulya/capability-marketplace": "*",
     "@vedmoulya/core": "*",

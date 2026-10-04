@@ -105,9 +105,30 @@ const VERIFICATION_EXPECTATION_RULES: Array<{ keywords: string[]; expectation: s
 const PLACEHOLDER_PHRASING =
   /(^|\s)(todo|tbd|fill this in|as you like|you decide|whatever you want|something similar|etc)(\s|$|\.)/i;
 
-/** Collapse whitespace deterministically. */
+/** A closed fenced block: the deterministic literal-artifact channel. */
+const FENCED_BLOCK_GLOBAL = /```[\s\S]*?```/g;
+
+/**
+ * Collapse whitespace deterministically.
+ *
+ * REAL-08 — a CLOSED fenced code block is a deterministic, literal artifact
+ * body. Collapsing its whitespace would corrupt it (every newline became a
+ * space, which is exactly why multi-line content could never be authored), so
+ * fenced blocks are lifted out, the surrounding prose is collapsed exactly as
+ * before, and the blocks are restored verbatim. An UNCLOSED fence is not
+ * matched here and collapses normally — the consumers fail closed on it.
+ */
 function normalizeText(text: string): string {
-  return text.trim().replace(/\s+/g, ' ');
+  const blocks: string[] = [];
+  const lifted = text.trim().replace(FENCED_BLOCK_GLOBAL, (block) => {
+    blocks.push(block);
+    return ` FENCEDBLOCK${blocks.length - 1} `;
+  });
+  const collapsed = lifted.replace(/\s+/g, ' ');
+  if (blocks.length === 0) return collapsed;
+  return collapsed.replace(/\s*FENCEDBLOCK(\d+)\s*/g, (_match, index: string) => {
+    return blocks[Number(index)] ?? '';
+  });
 }
 
 export class GoalUnderstandingService {

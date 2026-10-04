@@ -76,6 +76,7 @@ import type {
   FactoryCapabilityPlan,
 } from '@vedmoulya/capability-marketplace';
 import type { CapabilityId } from '@vedmoulya/capability-marketplace';
+import type { AiControlCenterDTO } from '../app/providers/ai-control-center-types.js';
 import type {
   ExecutionRun,
   RunIntelligence,
@@ -622,6 +623,30 @@ export function useAIReadiness(userId: string, capability?: CapabilityType) {
  */
 export function useRecordLocalAiUsage() {
   return api.ai.recordLocalUsage.useMutation();
+}
+
+// ── SPRINT — AI Control Center hook ──────────────────────────────────────────
+// The providers screen reads usage ONLY through this hook. The timezone is
+// resolved from the browser so "today"/"this month" use the user's calendar day
+// (the gateway falls back to UTC if the value is not a valid IANA zone).
+
+/** Browser IANA timezone; `undefined` server-side / on failure (→ UTC). */
+function browserTimezone(): string | undefined {
+  if (typeof Intl === 'undefined') return undefined;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function useAiControlCenter(userId: string, timezone?: string) {
+  const tz = timezone ?? browserTimezone();
+  const q = api.providers.getControlCenter.useQuery(
+    { userId, ...(tz !== undefined ? { timezone: tz } : {}) },
+    { enabled: Boolean(userId) },
+  );
+  return { ...q, data: unwrap<AiControlCenterDTO>(q.data) };
 }
 
 // ── EPIC-012A — Provider Experience Hooks ───────────────────────────────────

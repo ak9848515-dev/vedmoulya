@@ -1,14 +1,14 @@
-// ──────────────────────────────────────────────────────────────────
-// VedMoulya — Mission Runtime E2E (BLD-022)
+﻿// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// VedMoulya â€” Mission Runtime E2E (BLD-022)
 //
-// Runs the REAL composition — real MissionControllerService, real
+// Runs the REAL composition â€” real MissionControllerService, real
 // PlanningApplicationService/PlannerService, real AgentExecutionService,
 // real AIOrchestrationService with registered providers, real governed
-// ToolRegistry executing a real (temporary) workspace — and proves the
-// required behaviors A–H. The only test doubles are provider ADAPTERS
+// ToolRegistry executing a real (temporary) workspace â€” and proves the
+// required behaviors Aâ€“H. The only test doubles are provider ADAPTERS
 // implementing the frozen ProviderAdapter contract (simulating a real
-// provider failing/recovering) — no runtime layer is mocked.
-// ──────────────────────────────────────────────────────────────────
+// provider failing/recovering) â€” no runtime layer is mocked.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -122,8 +122,147 @@ const workspaceAuditWrites = (runtime: MissionRuntime): number =>
     .filter((event) => event.toolName === WORKSPACE_WRITE_TOOL && event.outcome === 'success')
     .length;
 
-describe('Mission Runtime E2E — real composition (BLD-022)', () => {
-  it('TEST A: two sequential objectives — plan, AI execution, ToolRuntime change, verification, checkpoint, autonomous continuation, no second user prompt', async () => {
+/**
+ * A REAL (non-synthetic) provider that always serves. It exists so failover
+ * tests can prove real-provider routing instead of leaning on MockProvider â€”
+ * a synthetic provider is deliberately refused once a real one has failed,
+ * which is the anti-fabrication guarantee this suite must respect.
+
+ */
+function realAlternateProvider(): ProviderAdapter {
+  return {
+    name: 'real-alternate',
+    family: 'flaky-test',
+    capabilities: ALL_CAPABILITIES,
+    isHealthy: async () => true,
+    getHealth: async () => ({
+      providerId: 'real-alternate',
+      status: 'healthy',
+      latency: 1,
+      errorRate: 0,
+      lastChecked: new Date(),
+      isRateLimited: false,
+      rateLimitRemaining: 100,
+      rateLimitReset: null,
+    }),
+    async execute(request: Parameters<ProviderAdapter['execute']>[0]): Promise<AIResponse> {
+      const prompt = JSON.stringify(request.messages ?? []);
+      return {
+        content: `Confirmed against the observed request. ${prompt}`,
+        provider: 'real-alternate',
+        model: 'real-alternate-deterministic',
+        confidence: 0.9,
+        qualityScore: 8,
+        latency: 1,
+        cost: 0,
+        tokenUsage: { input: 10, output: 20, total: 30 },
+        validation: {
+          passed: true,
+          checks: [{ name: 'format', passed: true, score: 10 }],
+          overallScore: 8,
+          decision: 'pass' as const,
+        },
+        traceId: 'trace-real-alternate',
+        metadata: {
+          providerFamily: 'ollama' as const,
+          modelVersion: 'real-alternate-deterministic',
+          processingTime: 1,
+          contextUsed: ['system', 'user'],
+          routingDecision: {
+            selectedProvider: 'real-alternate',
+            reason: 'deterministic real alternate provider',
+            alternativesConsidered: [],
+            strategy: 'balanced' as const,
+          },
+          validationDetails: [],
+        },
+      };
+    },
+  };
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// FILE-ARTIFACT TOOL PROVISIONING â€” deterministic integration proof.
+//
+// The live Mission failure was diagnosed to the planner: a "create a file
+// with exact contents" objective matched no tool-bearing template and fell
+// through to GENERIC (aiStep only â‡’ zero tool actions). These tests prove
+// the fix end-to-end through the REAL composition: real governed workspace
+// tools, the real AgentExecutionEngine, real verification, real checkpoint.
+//
+// The AI is a deterministic stub HERE ONLY â€” this test proves tool
+// provisioning and dispatch. The real-provider proof is the live harness.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+describe('file-artifact objective reaches the real workspace tools', () => {
+  it('writes and reads back the exact content through governed tools', async () => {
+    const workspace = newWorkspace();
+    const runtime = makeRuntime(workspace, { workspaceTools: true });
+    const objective =
+      'Create a file named mission-acceptance.txt with exact contents VEDMOULYA_MISSION_ACCEPTANCE_OK';
+
+    const mission = await runtime.controller.createMission({
+      userId: 'acceptance-1',
+      title: 'File artifact acceptance',
+      objective,
+      mode: 'DEVELOPMENT',
+      workspace,
+      constraints: devConstraints(),
+      initialObjectives: [objective],
+    });
+    await runtime.controller.startMission(mission.missionId);
+    const completed = await runtime.controller.runAutonomousLoop(mission.missionId);
+
+    // EXACT content, read from the real filesystem â€” not a substring match.
+    const file = path.join(workspace, 'mission-acceptance.txt');
+    expect(existsSync(file)).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe('VEDMOULYA_MISSION_ACCEPTANCE_OK');
+
+    // REAL governed tool calls happened (write + read-back). Bounded recovery
+    // may re-run a step, so assert presence and the exact count observed by the
+    // budget rather than an exact single write.
+    const audit = runtime.toolRegistry.getAuditTrail();
+    expect(audit.filter((e) => e.toolName === 'workspace_write').length).toBeGreaterThan(0);
+    expect(audit.filter((e) => e.toolName === 'workspace_read').length).toBeGreaterThan(0);
+    expect(completed.budgetUsage.toolCallsExecuted).toBeGreaterThanOrEqual(2);
+
+    // REAL verification, memory-bearing evidence and a checkpoint.
+    expect(completed.objectives[0]?.state).toBe('VERIFIED');
+    expect(completed.objectives[0]?.verifiedOutcome?.achieved).toBe(true);
+    expect(completed.objectives[0]?.verifiedOutcome?.evidence.length).toBeGreaterThan(0);
+    expect(completed.checkpoints.length).toBeGreaterThan(0);
+    expect(completed.state).toBe('COMPLETED');
+  });
+
+  it('E: a tool name the principal does not hold is still refused', async () => {
+    const workspace = newWorkspace();
+    const runtime = makeRuntime(workspace, { workspaceTools: true });
+    // READ-only principal: the plan may not write.
+    const mission = await runtime.controller.createMission({
+      userId: 'acceptance-2',
+      title: 'Read-only principal',
+      objective: 'Inspect the workspace',
+      mode: 'DEVELOPMENT',
+      workspace,
+      constraints: { allowedTools: ['workspace_read'], grantedPermissionClasses: ['READ'] },
+      initialObjectives: [
+        'Create a file named mission-acceptance.txt with exact contents VEDMOULYA_MISSION_ACCEPTANCE_OK',
+      ],
+    });
+    await runtime.controller.startMission(mission.missionId);
+    const completed = await runtime.controller.runAutonomousLoop(mission.missionId);
+
+    // The authorization boundary is unchanged: no write ever happened.
+    expect(existsSync(path.join(workspace, 'mission-acceptance.txt'))).toBe(false);
+    expect(
+      runtime.toolRegistry.getAuditTrail().filter((e) => e.toolName === 'workspace_write'),
+    ).toHaveLength(0);
+    expect(completed.state).not.toBe('COMPLETED');
+  });
+});
+
+describe('Mission Runtime E2E â€” real composition (BLD-022)', () => {
+  it('TEST A: two sequential objectives â€” plan, AI execution, ToolRuntime change, verification, checkpoint, autonomous continuation, no second user prompt', async () => {
     const workspace = newWorkspace();
     const runtime = makeRuntime(workspace);
     const mission = await runtime.controller.createMission({
@@ -139,7 +278,7 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
       ],
     });
     await runtime.controller.startMission(mission.missionId);
-    // ONE autonomous loop call drives BOTH objectives — no second prompt.
+    // ONE autonomous loop call drives BOTH objectives â€” no second prompt.
     const completed = await runtime.controller.runAutonomousLoop(mission.missionId);
 
     expect(completed.state).toBe('COMPLETED');
@@ -163,14 +302,18 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(readFileSync(betaPath, 'utf8')).toContain('beta sprint summary content');
   });
 
-  it('TEST B: primary provider fails at execution → existing routing fallback → alternate provider serves → mission continues', async () => {
+  it('TEST B: primary provider fails at execution â†’ existing routing fallback â†’ alternate provider serves â†’ mission continues', async () => {
     const workspace = newWorkspace();
     let flakyProvider: FlakyProvider | undefined;
     const runtime = makeRuntime(workspace, {
+      workspaceTools: true,
       providers: (orchestrator) => {
         flakyProvider = new FlakyProvider('flaky-primary');
         orchestrator.registerProvider(flakyProvider);
-        orchestrator.registerProvider(new MockProvider());
+        // The alternate must be a REAL provider: a synthetic one is refused
+        // once a real provider existed and failed, so using MockProvider here
+        // would no longer prove failover â€” it would prove nothing executes.
+        orchestrator.registerProvider(realAlternateProvider());
       },
     });
     const mission = await runtime.controller.createMission({
@@ -195,7 +338,7 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(done.budgetUsage.objectivesCompleted).toBe(1);
   });
 
-  it('TEST C: all providers unavailable → WAITING_FOR_PROVIDER, no fabricated execution, no busy loop, checkpoint persisted', async () => {
+  it('TEST C: all providers unavailable â†’ WAITING_FOR_PROVIDER, no fabricated execution, no busy loop, checkpoint persisted', async () => {
     const workspace = newWorkspace();
     const flaky = new FlakyProvider('down-provider');
     flaky.healthStatus = 'down';
@@ -228,8 +371,8 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(checkpoint?.remainingWork.some((work) => work.includes('blocked-notes.md'))).toBe(true);
   });
 
-  it('TEST D: required tool unavailable → governed denial, honest failure, no fabricated success', async () => {
-    // D1 — the tool is not registered on the governed registry at all.
+  it('TEST D: required tool unavailable â†’ governed denial, honest failure, no fabricated success', async () => {
+    // D1 â€” the tool is not registered on the governed registry at all.
     const workspace1 = newWorkspace();
     const runtime1 = makeRuntime(workspace1, { workspaceTools: false });
     const mission1 = await runtime1.controller.createMission({
@@ -249,10 +392,10 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(done1.objectives[0]?.state).toBe('FAILED');
     expect(done1.objectives[0]?.verifiedOutcome).toBeUndefined();
     expect(existsSync(path.join(workspace1, 'denied-notes.md'))).toBe(false);
-    expect(done1.state).toBe('FAILED'); // nothing achieved → honest failure
+    expect(done1.state).toBe('FAILED'); // nothing achieved â†’ honest failure
   });
 
-  it('TEST D2: tool exists but mission constraints deny it → pre-execution refusal', async () => {
+  it('TEST D2: tool exists but mission constraints deny it â†’ pre-execution refusal', async () => {
     const workspace2 = newWorkspace();
     const runtime2 = makeRuntime(workspace2);
     const mission2 = await runtime2.controller.createMission({
@@ -276,7 +419,7 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(workspaceAuditWrites(runtime2)).toBe(0);
   });
 
-  it('TEST E: crash simulation → restart → recovery from persisted checkpoint, no duplicate verified objective', async () => {
+  it('TEST E: crash simulation â†’ restart â†’ recovery from persisted checkpoint, no duplicate verified objective', async () => {
     const workspace = newWorkspace();
     const { InMemoryMissionStore, InMemoryCheckpointStore } =
       await import('@vedmoulya/mission-controller');
@@ -298,14 +441,14 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
       ],
     });
     await beforeCrash.controller.startMission(mission.missionId);
-    // Objective 1 completes + checkpoints — then the "process" dies.
+    // Objective 1 completes + checkpoints â€” then the "process" dies.
     await beforeCrash.controller.runNextObjective(mission.missionId);
     const missionAfterCrash = await stores.missions.get(mission.missionId);
     expect(missionAfterCrash?.objectives[0]?.state).toBe('VERIFIED');
 
     // Fresh "process": new runtime over the SAME durable stores. Recovery
     // resumes from the last verified checkpoint and runs the next objective
-    // only — objective 1 is never re-executed (no duplicate work).
+    // only â€” objective 1 is never re-executed (no duplicate work).
     const afterRestart = makeRuntime(workspace, { stores });
     const recovered = await afterRestart.controller.resumeFromCheckpoint(mission.missionId);
 
@@ -314,7 +457,7 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(recovered.objectives[1]?.state).toBe('VERIFIED'); // resumed + finished
     // The restarted registry audited exactly ONE workspace write (objective 2).
     expect(workspaceAuditWrites(afterRestart)).toBe(1);
-    // The autonomous loop then completes the mission — still no duplicate work.
+    // The autonomous loop then completes the mission â€” still no duplicate work.
     const completed = await afterRestart.controller.runAutonomousLoop(mission.missionId);
     expect(completed.state).toBe('COMPLETED');
     expect(completed.outcome).toBe('ACHIEVED');
@@ -325,7 +468,7 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(checkpoints).toHaveLength(2); // no duplicate checkpointed work
   });
 
-  it('TEST F: high-risk git operation → approval required → cannot execute without approval', async () => {
+  it('TEST F: high-risk git operation â†’ approval required â†’ cannot execute without approval', async () => {
     const workspace = newWorkspace();
     const runtime = makeRuntime(workspace);
     const adapter = runtime.ports.gitSafety;
@@ -335,7 +478,7 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(adapter.requiresApproval('production_deploy')).toBe(true);
     expect(adapter.requiresApproval('change_secrets')).toBe(true);
 
-    // Without approval: refused — nothing executed, decision audited.
+    // Without approval: refused â€” nothing executed, decision audited.
     const denied = await adapter.requestOperation('force_push', {}, { approved: false });
     expect(denied.allowed).toBe(false);
     expect(denied.executed).toBe(false);
@@ -345,7 +488,7 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
       adapter.getAuditTrail().some((event) => event.operation === 'force_push' && !event.allowed),
     ).toBe(true);
 
-    // With approval but no operator-bound executor: explicit refusal — never faked.
+    // With approval but no operator-bound executor: explicit refusal â€” never faked.
     const approvedUnbound = await adapter.requestOperation(
       'force_push',
       {},
@@ -378,7 +521,7 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(runtime.controller.getGitSafety().requiresApproval('history_rewrite')).toBe(true);
   });
 
-  it('TEST G: verification failure → bounded recovery/retry → no false completion', async () => {
+  it('TEST G: verification failure â†’ bounded recovery/retry â†’ no false completion', async () => {
     const workspace = newWorkspace();
     const runtime = makeRuntime(workspace, {
       contentPolicy: (content) =>
@@ -404,14 +547,14 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(done.state).toBe('FAILED');
     expect(done.objectives[0]?.verifiedOutcome).toBeUndefined();
     expect(existsSync(path.join(workspace, 'forbidden-notes.md'))).toBe(false);
-    // The checkpoint records the retry-queued failure honestly — never
+    // The checkpoint records the retry-queued failure honestly â€” never
     // VERIFIED, never claimed complete (verifiedOutcome is absent).
     const checkpoint = await runtime.stores.checkpoints.getLatestForMission(mission.missionId);
     expect(checkpoint?.verifiedOutcome).toBeUndefined();
     expect(checkpoint?.state).not.toBe('VERIFIED');
   });
 
-  it('TEST H: mission budget exhausted → autonomous execution stops safely', async () => {
+  it('TEST H: mission budget exhausted â†’ autonomous execution stops safely', async () => {
     const workspace = newWorkspace();
     const runtime = makeRuntime(workspace);
     const mission = await runtime.controller.createMission({
@@ -438,5 +581,98 @@ describe('Mission Runtime E2E — real composition (BLD-022)', () => {
     expect(done.objectives[1]?.verifiedOutcome).toBeUndefined();
     expect(existsSync(path.join(workspace, 'budget-a-notes.md'))).toBe(true);
     expect(existsSync(path.join(workspace, 'budget-b-notes.md'))).toBe(false);
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // MISSION IDENTITY → AI USAGE
+  //
+  // The Mission runtime already knew its own missionId/objectiveId
+  // (`executionContext` on executePlan), but the adapter used it only to
+  // index a lookup and then DISCARDED it — so no provider execution could
+  // ever be attributed to a Mission. These tests prove the identity now
+  // survives into the run that issues every AI execution, and that a
+  // generic (Ask/Brain-shaped) run never gains an invented Mission.
+  // ──────────────────────────────────────────────────────────────────
+  describe('mission identity reaches the AI execution run', () => {
+    it('carries the real missionId/objectiveId onto the Mission AI run', async () => {
+      const workspace = newWorkspace();
+      const runtime = makeRuntime(workspace, { workspaceTools: true });
+      const objective =
+        'Create a file named identity-probe.txt with exact contents VEDMOULYA_IDENTITY_PROBE';
+
+      const mission = await runtime.controller.createMission({
+        userId: 'identity-user-1',
+        title: 'Identity propagation',
+        objective,
+        mode: 'DEVELOPMENT',
+        workspace,
+        constraints: devConstraints(),
+        initialObjectives: [objective],
+      });
+      const objectiveId = mission.objectives[0]!.objectiveId;
+      await runtime.controller.startMission(mission.missionId);
+      await runtime.controller.runAutonomousLoop(mission.missionId);
+
+      const run = runtime.runs.forObjective(mission.missionId, objectiveId);
+      expect(run).toBeDefined();
+      expect(run?.userId).toBe('identity-user-1');
+      expect(run?.missionContext).toEqual({ missionId: mission.missionId, objectiveId });
+    });
+
+    it('a generic (non-Mission) run carries no mission identity at all', async () => {
+      const workspace = newWorkspace();
+      const runtime = makeRuntime(workspace, { workspaceTools: true });
+
+      // This is the Ask/Brain/generic-AI shape: no missionContext supplied,
+      // so nothing downstream can invent a Mission from it.
+      const bare = await runtime.agent.start({
+        userId: 'generic-user',
+        goal: 'Answer a question',
+        plan: { objective: 'Answer a question', steps: [] },
+        autonomyLevel: 'SUPERVISED',
+      });
+      expect(bare.missionContext).toBeUndefined();
+      expect(bare.userId).toBe('generic-user');
+    });
+
+    it('two users never share mission identity', async () => {
+      const a = newWorkspace();
+      const b = newWorkspace();
+      const runtime = makeRuntime(a, { workspaceTools: true });
+      const objA = 'Create a file named iso-a.txt with exact contents ISO_A';
+      const objB = 'Create a file named iso-b.txt with exact contents ISO_B';
+
+      const missionA = await runtime.controller.createMission({
+        userId: 'iso-user-A',
+        title: 'A',
+        objective: objA,
+        mode: 'DEVELOPMENT',
+        workspace: a,
+        constraints: devConstraints(),
+        initialObjectives: [objA],
+      });
+      const missionB = await runtime.controller.createMission({
+        userId: 'iso-user-B',
+        title: 'B',
+        objective: objB,
+        mode: 'DEVELOPMENT',
+        workspace: b,
+        constraints: devConstraints(),
+        initialObjectives: [objB],
+      });
+      expect(missionA.missionId).not.toBe(missionB.missionId);
+      expect(missionA.objectives[0]!.objectiveId).not.toBe(missionB.objectives[0]!.objectiveId);
+
+      await runtime.controller.startMission(missionA.missionId);
+      await runtime.controller.runAutonomousLoop(missionA.missionId);
+      const runA = runtime.runs.forObjective(
+        missionA.missionId,
+        missionA.objectives[0]!.objectiveId,
+      );
+      // Each run records only its OWN identity — no cross-user bleed.
+      expect(runA?.missionContext?.missionId).toBe(missionA.missionId);
+      expect(runA?.missionContext?.missionId).not.toBe(missionB.missionId);
+      expect(runA?.userId).toBe('iso-user-A');
+    });
   });
 });

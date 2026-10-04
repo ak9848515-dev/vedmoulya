@@ -153,6 +153,18 @@ export interface MissionObjective {
    * authoritative — this history never grants an extra retry.
    */
   diagnosisHistory?: MissionFailureDiagnosisRecord[];
+  /**
+   * SCOPE-01 — present only when this objective came from REPOSITORY
+   * DISCOVERY rather than from the user's declared scope. The record keeps the
+   * classification auditable on the objective itself (and keeps discovered work
+   * distinguishable from requested work for the mission scope report).
+   */
+  discovery?: {
+    classification: DiscoveredWorkScope;
+    kind: DiscoveredWorkKind;
+    label: string;
+    rationale: string;
+  };
 }
 
 /**
@@ -329,6 +341,12 @@ export interface ObjectiveSelectionResult {
   priority: number;
   providerStatus: { available: boolean; providerId?: string; modelId?: string };
   discoveredObjective?: Partial<MissionObjective>;
+  /**
+   * Every item the repository inspection surfaced, classified. Present even
+   * when nothing was selected, so OPTIONAL / OUT_OF_SCOPE work stays visible
+   * and auditable instead of silently disappearing.
+   */
+  scopeReport?: MissionScopeReport;
 }
 
 export interface MissionProgress {
@@ -361,6 +379,73 @@ export interface RepositoryInspectionEvidence {
     branch: string;
     modifiedFiles: string[];
   };
+}
+
+// ── Mission Scope Awareness (real repository missions) ──────────────────────
+//
+// A real monorepo inspection legitimately returns work the user never asked
+// for. Without a distinction, ANY such item is promoted to a Mission objective
+// and consumes the objective budget, so a Mission whose DECLARED objectives all
+// verified could still end FAILED with "Maximum objectives reached".
+//
+// Classification reuses the EXISTING objective/dependency model — it adds no
+// task manager, no scheduler and no new state machine:
+//
+//   REQUIRED     the item is named by a DECLARED objective (or the mission
+//                goal) → work the user explicitly scoped. It becomes a real
+//                objective and the declaring objective DEPENDS on it (the
+//                existing `dependencies` field the selectors already enforce),
+//                so it genuinely blocks.
+//   OPTIONAL     related to the requested work (referenced by the mission goal
+//                but by no single declared objective) → recorded and surfaced,
+//                never auto-executed, never blocking.
+//   OUT_OF_SCOPE belongs to the repository but to no part of the requested work
+//                → reported only, never executed.
+//
+// Nothing is hidden, nothing is force-completed, and the inspector is never
+// suppressed: every discovered item appears in the persisted scope report.
+export type DiscoveredWorkScope = 'REQUIRED' | 'OPTIONAL' | 'OUT_OF_SCOPE';
+
+export type DiscoveredWorkKind =
+  'FAILING_TEST' | 'INCOMPLETE_PACKAGE' | 'MISSING_INTEGRATION' | 'ARCHITECTURAL_GAP' | 'TODO';
+
+export interface DiscoveredWorkItem {
+  /** Which inspection signal produced this item. */
+  kind: DiscoveredWorkKind;
+  /** The raw inspection label, unchanged, as reported by the inspector. */
+  label: string;
+  /** The objective title this item would take (the existing title shape). */
+  title: string;
+  classification: DiscoveredWorkScope;
+  /** Deterministic, human-readable justification (no model involved). */
+  rationale: string;
+  /**
+   * Declared objectives that explicitly name this item. Non-empty only for
+   * REQUIRED work — these are the objectives that become blocked on it.
+   */
+  blockingObjectiveIds: string[];
+  /** TRUE when the item became (or is queued to become) a real objective. */
+  executed: boolean;
+}
+
+export interface RequestedWorkSummary {
+  total: number;
+  verified: number;
+  failed: number;
+  pending: number;
+}
+
+export interface MissionScopeReport {
+  /** The work the user actually asked for. */
+  requestedWork: RequestedWorkSummary;
+  required: DiscoveredWorkItem[];
+  optional: DiscoveredWorkItem[];
+  outOfScope: DiscoveredWorkItem[];
+  /**
+   * One-line, stable summary safe to append to a mission outcome reason, so the
+   * final result can never read as "completed" while ignoring discovered work.
+   */
+  summary: string;
 }
 
 export type GitOperation =
@@ -398,10 +483,33 @@ export interface CreateMissionInput {
   budget?: Partial<MissionBudget>;
   constraints?: MissionConstraints;
   initialObjectives?: string[];
+  /**
+   * Optional EXPLICIT dependency declarations for the initial objectives.
+   * Each entry references objectives by their INDEX in `initialObjectives` and
+   * the controller resolves those indexes to the generated objective ids,
+   * writing them into the objective's EXISTING `dependencies` field. The
+   * EXISTING objective selectors (`DevelopmentObjectiveSelector` /
+   * `DeterministicObjectiveSelector`) already enforce that field: a dependent
+   * objective becomes selectable only once every prerequisite is VERIFIED.
+   *
+   * This is NOT a new dependency engine — it only populates the existing
+   * contract from the create path (which previously always produced
+   * `dependencies: []`). Omitted = the previous behavior exactly
+   * (independent initial objectives, ordered only by priority).
+   */
+  objectiveDependencies?: InitialObjectiveDependency[];
   successCriteria?: string[];
   mode?: MissionMode;
   workspace?: string;
   repository?: string;
+}
+
+/** One explicit prerequisite declaration for the initial objectives. */
+export interface InitialObjectiveDependency {
+  /** Index into `CreateMissionInput.initialObjectives` that OWNS the dependency. */
+  objectiveIndex: number;
+  /** Indexes (same array) this objective depends on; all must be VERIFIED first. */
+  dependsOn: number[];
 }
 
 export interface Mission {
@@ -426,6 +534,12 @@ export interface Mission {
   currentObjectiveId?: string;
   outcome?: MissionOutcome;
   outcomeReason?: string;
+  /**
+   * Persisted classification of every discovered repository item. Distinguishes
+   * REQUESTED WORK from DISCOVERED RELATED WORK and DISCOVERED OUT-OF-SCOPE WORK
+   * in the final result.
+   */
+  scopeReport?: MissionScopeReport;
   error?: string;
   startedAt?: string;
   finishedAt?: string;

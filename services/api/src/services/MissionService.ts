@@ -37,7 +37,11 @@ import {
 } from '@vedmoulya/execution-memory';
 import { PostgresMemoryRepository } from '@vedmoulya/memory-intelligence';
 import { MISSION_TERMINAL_STATES } from '@vedmoulya/mission-controller';
-import type { Mission, MissionObjective } from '@vedmoulya/mission-controller';
+import type {
+  InitialObjectiveDependency,
+  Mission,
+  MissionObjective,
+} from '@vedmoulya/mission-controller';
 import { redactSecrets } from '@vedmoulya/services';
 import type { AIObservability } from '@vedmoulya/services';
 import { logger } from '@vedmoulya/core';
@@ -56,6 +60,12 @@ export interface MissionObjectiveView {
   verifiedAt?: string;
   verificationMethod?: string;
   retryCount: number;
+  /**
+   * SCOPE-01 — present only for objectives created from REPOSITORY DISCOVERY,
+   * carrying the REQUIRED / OPTIONAL / OUT_OF_SCOPE classification so a caller
+   * can always tell requested work from discovered work.
+   */
+  discovery?: MissionObjective['discovery'];
 }
 
 export interface MissionCheckpointView {
@@ -113,6 +123,12 @@ export interface MissionStatusView {
   finishedAt?: string;
   currentObjective?: MissionObjectiveView;
   objectives: MissionObjectiveView[];
+  /**
+   * SCOPE-01 — the persisted classification of everything the repository
+   * inspection surfaced: requested work, discovered REQUIRED / OPTIONAL /
+   * OUT_OF_SCOPE work. Absent only when no inspection has run yet.
+   */
+  scopeReport?: Mission['scopeReport'];
   checkpoints: MissionCheckpointView[];
   budgetUsage: {
     objectivesCompleted: number;
@@ -147,6 +163,14 @@ export interface CreateMissionInputView {
   objective: string;
   workspace?: string;
   initialObjectives?: string[];
+  /**
+   * Optional explicit prerequisites for the initial objectives (indexes into
+   * `initialObjectives`). Populates the objectives' EXISTING `dependencies`
+   * field so the existing selector only runs a dependent objective after its
+   * prerequisites are VERIFIED. Omitted = previous behavior. See
+   * `InitialObjectiveDependency`.
+   */
+  objectiveDependencies?: InitialObjectiveDependency[];
   maxObjectives?: number;
   maxCostUsd?: number;
   maxTokens?: number;
@@ -517,6 +541,7 @@ export class MissionService {
             grantedPermissionClasses: ['READ', 'WRITE'],
           },
       initialObjectives: input.initialObjectives,
+      objectiveDependencies: input.objectiveDependencies,
     });
     return mission;
   }
@@ -779,6 +804,7 @@ export class MissionService {
       verifiedAt: objective.verifiedOutcome?.verifiedAt,
       verificationMethod: objective.verifiedOutcome?.method,
       retryCount: objective.retryCount,
+      discovery: objective.discovery,
     }));
     const current = mission.objectives.find((o) => o.objectiveId === mission.currentObjectiveId);
 
@@ -818,6 +844,7 @@ export class MissionService {
         ? objectives.find((o) => o.objectiveId === current.objectiveId)
         : undefined,
       objectives,
+      scopeReport: mission.scopeReport,
       checkpoints: this.checkpointViews(mission),
       budgetUsage: {
         objectivesCompleted: mission.budgetUsage.objectivesCompleted,

@@ -434,6 +434,10 @@ export class AgentExecutionEngine {
         goalId: run.goalId,
         planId: run.planId,
         userId: run.userId,
+        // Mission identity rides every AI execution of a Mission run, so each
+        // provider_execution span (retry or fallback included) is attributed to
+        // the same real Mission. Absent for a generic run.
+        ...(run.missionContext !== undefined ? { missionContext: run.missionContext } : {}),
         capability: action.capability,
         requiredCapabilities:
           action.requiredCapabilities !== undefined && action.requiredCapabilities.length > 0

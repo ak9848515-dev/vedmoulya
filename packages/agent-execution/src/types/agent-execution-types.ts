@@ -462,6 +462,12 @@ export interface AgentExecutionRun {
   goalId: string;
   planId: string;
   userId: string;
+  /**
+   * Mission identity when the Mission runtime started this run; absent for a
+   * generic run. Carried unchanged onto every AI execution of the run so usage
+   * telemetry is attributed to the real Mission.
+   */
+  missionContext?: { missionId: string; objectiveId: string };
   goal: string;
   objective: string;
   autonomyLevel: AgentAutonomyLevel;

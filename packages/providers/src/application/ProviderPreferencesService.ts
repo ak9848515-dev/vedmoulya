@@ -114,6 +114,20 @@ export class ProviderPreferencesService {
     }
 
     const current = (await this.store.get(userId)) ?? defaultProviderPreferences(userId);
+    const nowIso = new Date().toISOString();
+    const mergedBudgets: ProviderBudgets = { ...current.budgets, ...(patch.budgets ?? {}) };
+    // A-4 — BUDGET PROVENANCE. When the USER explicitly writes a monthly token
+    // limit, it becomes a real USER budget (source=USER + configuredAt stamp).
+    // An untouched record keeps the PLATFORM allowance provenance, so the UI can
+    // never present a platform default as the user's own budget.
+    if (patch.budgets?.monthlyTokenBudget !== undefined) {
+      mergedBudgets.monthlyTokenBudgetSource = 'USER';
+      mergedBudgets.monthlyTokenBudgetConfiguredAt =
+        patch.budgets.monthlyTokenBudget > 0 ? nowIso : undefined;
+      if (patch.budgets.monthlyTokenBudget <= 0) {
+        delete mergedBudgets.monthlyTokenBudget;
+      }
+    }
     const next: ProviderPreferences = {
       userId,
       disabledProviderIds: patch.disabledProviderIds
@@ -128,8 +142,8 @@ export class ProviderPreferencesService {
           ? (patch.preferredModelId ?? undefined)
           : current.preferredModelId,
       budgetPolicy: patch.budgetPolicy ?? current.budgetPolicy,
-      budgets: { ...current.budgets, ...(patch.budgets ?? {}) },
-      updatedAt: new Date().toISOString(),
+      budgets: mergedBudgets,
+      updatedAt: nowIso,
     };
 
     // SERVER-SIDE DOMAIN INVARIANTS (Part 8) — never frontend-only.

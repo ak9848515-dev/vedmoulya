@@ -110,6 +110,14 @@ export {
 } from './adapters/WorkspaceDevTemplate.js';
 export type { WorkspaceFileTarget } from './adapters/WorkspaceDevTemplate.js';
 
+// REAL-08 — test-verified development template (bounded MULTI-LINE content +
+// REAL allowlisted command verification through the governed command tool)
+export {
+  createTestVerifiedTemplate,
+  extractTestVerifiedFileTarget,
+} from './adapters/TestVerificationTemplate.js';
+export type { TestVerifiedFileTarget } from './adapters/TestVerificationTemplate.js';
+
 // Durable mission persistence (existing WriteThroughDocumentStore infra)
 export {
   CHECKPOINTS_TABLE,

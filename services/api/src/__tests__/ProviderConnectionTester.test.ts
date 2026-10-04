@@ -298,6 +298,22 @@ describe('ProviderConnectionTester (FINAL-02 — connection + model discovery)',
       expect(result.runtimeNote).toMatch(/AI execution is live/);
     });
 
+    it('names the ACTUAL family for a platform credential (never hardcodes Gemini)', async () => {
+      // Regression: a deployment OpenRouter credential was reported as
+      // "Connected to Google Gemini via this server's configured credential".
+      const result = await testProviderConnection({
+        family: 'openrouter',
+        fetchFn: okFetch({ data: [{ id: 'openrouter/model-x' }] }),
+        env: { AI_OPENROUTER_API_KEY: 'server-key' },
+      });
+
+      expect(result.connected).toBe(true);
+      expect(result.serverManagedKey).toBe(true);
+      expect(result.credentialSource).toBe('PLATFORM');
+      expect(result.message).toContain('OpenRouter');
+      expect(result.message).not.toContain('Google Gemini');
+    });
+
     it('with a server key present, a user key still takes precedence', async () => {
       const fetchFn = okFetch({ models: [] });
       const result = await testProviderConnection({

@@ -21,9 +21,7 @@
   "dependencies": {
     "@vedmoulya/ai-world": "*",
     "@vedmoulya/brain": "*",
-    "@vedmoulya/capability-marketplace": "*",
-    "@vedmoulya/execution-bridge": "*",
-    "@vedmoulya/providers": "*"
+    "@vedmoulya/capability-marketplace": "*"
   },
   "devDependencies": {
     "typescript": "*",

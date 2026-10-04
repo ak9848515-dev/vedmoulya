@@ -58,6 +58,11 @@ export interface StartAgentExecutionInput {
   plan: Omit<AgentPlan, 'goalId' | 'planId'> & Partial<Pick<AgentPlan, 'goalId' | 'planId'>>;
   autonomyLevel?: AgentAutonomyLevel;
   budget?: Partial<AgentRunBudgetConfig>;
+  /**
+   * Mission identity for this run. Optional and additive — supplied only by
+   * the Mission runtime, so an ordinary run carries no Mission at all.
+   */
+  missionContext?: { missionId: string; objectiveId: string };
 }
 
 export interface AgentRunStatusDTO {
@@ -123,6 +128,8 @@ export class AgentExecutionService {
       goalId: plan.goalId,
       planId: plan.planId,
       userId: input.userId,
+      // Carried verbatim from the Mission runtime; absent for a generic run.
+      ...(input.missionContext !== undefined ? { missionContext: input.missionContext } : {}),
       goal: input.goal,
       objective: plan.objective,
       autonomyLevel: input.autonomyLevel ?? 'SUPERVISED',

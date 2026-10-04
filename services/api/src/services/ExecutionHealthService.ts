@@ -134,6 +134,7 @@ export function computeScopeHealth(
   let consecutiveFailures = 0;
   let lastSuccessAt: number | undefined;
   let lastFailureAt: number | undefined;
+  let lastFailureReason: string | undefined;
   let newestAuthFailureAt: number | undefined;
 
   // Iterate oldest → newest; track the trailing consecutive-failure streak.
@@ -158,7 +159,13 @@ export function computeScopeHealth(
           newestAuthFailureAt = event.at;
         }
       } else if (event.reason === 'unsupported_model') unsupportedCount += 1;
-      if (lastFailureAt === undefined || event.at > lastFailureAt) lastFailureAt = event.at;
+      if (lastFailureAt === undefined || event.at > lastFailureAt) {
+        lastFailureAt = event.at;
+        // SPRINT (Phase 1) — the actual classified reason of the NEWEST failure.
+        // The per-reason tallies above cover only four reasons, so readiness
+        // could not otherwise tell a network failure from an internal one.
+        lastFailureReason = event.reason ?? 'internal_error';
+      }
     }
     totalWeight += recencyWeight(now - event.at, halfLifeMs);
   }
@@ -214,6 +221,7 @@ export function computeScopeHealth(
     unsupportedCount,
     lastSuccessAt: lastSuccessAt !== undefined ? new Date(lastSuccessAt).toISOString() : undefined,
     lastFailureAt: lastFailureAt !== undefined ? new Date(lastFailureAt).toISOString() : undefined,
+    lastFailureReason,
     detail,
   };
 }

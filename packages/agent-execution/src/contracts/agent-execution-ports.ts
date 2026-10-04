@@ -50,6 +50,12 @@ export interface AgentAiActionInput {
   expectedOutcome?: string;
   /** Summaries of earlier observations in this step (sliced, sanitized). */
   previousObservations?: string[];
+  /**
+   * The Mission that OWNS this execution, when the autonomous Mission runtime
+   * issued it. Optional and additive: a generic Ask/Brain/Daily-AI execution
+   * omits it entirely, so the ID can never be inferred from anything else.
+   */
+  missionContext?: { missionId: string; objectiveId: string };
 }
 
 export interface AgentAiActionResult {

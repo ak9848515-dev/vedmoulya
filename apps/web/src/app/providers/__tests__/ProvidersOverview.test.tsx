@@ -403,11 +403,13 @@ describe('ProvidersOverview — Local AI card', () => {
       checking: false,
       connecting: false,
       state: 'OLLAMA_CONNECTED',
+      connected: true,
       label: 'Connected',
       tone: 'ok',
       message: 'Ollama answered on qwen2.5-coder:3b.',
       runtimeName: 'Ollama',
       modelId: 'qwen2.5-coder:3b',
+      failure: null,
       ...snapshot,
     };
     return {
@@ -421,6 +423,8 @@ describe('ProvidersOverview — Local AI card', () => {
       snapshot: merged,
       refresh: vi.fn(() => Promise.resolve()),
       connect: vi.fn(() => Promise.resolve()),
+      failure: merged.failure,
+      connected: merged.connected,
     };
   }
 

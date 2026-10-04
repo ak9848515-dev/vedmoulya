@@ -87,6 +87,7 @@ import {
   MissionLearningRetrievalAdapter,
 } from '../adapters/MemoryOptimizationPorts.js';
 import { createWorkspaceFileTemplate } from '../adapters/WorkspaceDevTemplate.js';
+import { createTestVerifiedTemplate } from '../adapters/TestVerificationTemplate.js';
 import { createOrchestratorRoutingPorts } from '../adapters/OrchestratorRoutingPorts.js';
 import { MissionFailureClassifierAdapter } from '../adapters/MissionFailureClassifierAdapter.js';
 import { MissionDiagnosisAdapter } from '../adapters/DiagnosisRepairAdapter.js';
@@ -351,6 +352,14 @@ export function buildMissionRuntimeComponents(
       // Specific deterministic templates precede the generic fallback so
       // matched goals (e.g. "create the workspace file X …") get the
       // smallest tool-driven plan instead of the generic AI-only plan.
+      //
+      // REAL-08 — the test-verified template precedes the workspace-file
+      // template on purpose: its goal phrase requires REAL command evidence,
+      // while the workspace-file template verifies by read-back only. It
+      // stays governed end to end — the write and the read are the same
+      // path-jailed workspace tools, and the verification command is an entry
+      // of the fixed COMMAND_CATALOG (never a model-chosen shell string).
+      createTestVerifiedTemplate(),
       createWorkspaceFileTemplate(),
       ...PLAN_TEMPLATES,
       ...(options.extraPlannerTemplates ?? []),

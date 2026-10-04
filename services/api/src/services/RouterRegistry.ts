@@ -3717,6 +3717,27 @@ export function createAppRouter(services: ApiApplicationService) {
             ctx,
           ),
         ),
+      // SPRINT — the honest AI Control Center board: real calendar-day/month
+      // usage (cloud vs local), per-provider quota (UNKNOWN stays UNKNOWN) and
+      // the user-budget-vs-platform-allowance distinction. Standard tier — it is
+      // a pure ledger query, never a live provider call.
+      getControlCenter: standardProcedure
+        .input(
+          z.object({
+            userId: z.string().min(1),
+            /** IANA timezone used for the calendar-day/month boundary. */
+            timezone: z.string().max(64).optional(),
+          }),
+        )
+        .query(({ input, ctx }) =>
+          createProvidersRouter(
+            services.providers,
+            services.providerExperience,
+            undefined,
+            undefined,
+            services.aiControlCenter,
+          ).getControlCenter(input, ctx),
+        ),
       // OpenAI ORGANIZATION usage per model (real Today/This-week/This-month
       // windows from /v1/organization/usage/completions; requires an org
       // admin-scope key; unavailable states are honest, never fabricated).
@@ -6638,6 +6659,19 @@ export function createAppRouter(services: ApiApplicationService) {
             objective: z.string().min(3).max(2000),
             workspace: z.string().max(500).optional(),
             initialObjectives: z.array(z.string().min(3).max(2000)).max(50).optional(),
+            // Optional explicit prerequisites for the initial objectives
+            // (indexes into initialObjectives). Populates the objectives'
+            // EXISTING `dependencies` field so the selector runs a dependent
+            // objective only after its prerequisites are VERIFIED.
+            objectiveDependencies: z
+              .array(
+                z.object({
+                  objectiveIndex: z.number().int().min(0).max(49),
+                  dependsOn: z.array(z.number().int().min(0).max(49)).max(50),
+                }),
+              )
+              .max(50)
+              .optional(),
             maxObjectives: z.number().int().min(1).max(100).optional(),
             maxCostUsd: z.number().min(0).optional(),
             maxTokens: z.number().int().min(0).optional(),

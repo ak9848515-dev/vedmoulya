@@ -28,8 +28,23 @@ export const DEFAULT_BUDGET_POLICY: BudgetPolicy = 'ask_before_paid';
  */
 export const DEFAULT_PRIMARY_BRAIN_PROVIDER_ID = 'google';
 
-/** Default monthly token budget used for the aggregate usage indicator. */
+/**
+ * The historical platform default monthly token figure. It was previously
+ * written into every new account's preferences, which made a fabricated
+ * "1M token balance" look like a real USER budget.
+ *
+ * MIGRATION (A-4): this value is now treated as a PLATFORM_ALLOWANCE — never as
+ * a user budget — until the user explicitly configures one. Accounts that never
+ * chose a budget therefore report "Not configured", which is the truth.
+ */
 export const DEFAULT_MONTHLY_TOKEN_BUDGET = 1_000_000;
+
+/**
+ * Where a monthly token budget came from.
+ *   USER    — the account holder explicitly configured it (real budget)
+ *   PLATFORM— a VedMoulya allowance/default (never presented as user budget)
+ */
+export type MonthlyTokenBudgetSource = 'USER' | 'PLATFORM';
 
 export interface ProviderBudgets {
   /** Per-request spend cap in USD. */
@@ -38,8 +53,16 @@ export interface ProviderBudgets {
   dailyUsd?: number;
   /** Monthly spend cap in USD. */
   monthlyUsd?: number;
-  /** Monthly TOKEN budget (the "1M" in the usage indicator). */
+  /**
+   * Monthly TOKEN limit. NOT a "balance": it is a limit the user (or the
+   * platform) declared. The provenance is tracked in `monthlyTokenBudgetSource`
+   * so the UI can say "your budget" vs "VedMoulya allowance" vs "not configured".
+   */
   monthlyTokenBudget?: number;
+  /** Provenance of `monthlyTokenBudget` — USER or PLATFORM. */
+  monthlyTokenBudgetSource?: MonthlyTokenBudgetSource;
+  /** ISO timestamp the USER last configured a token budget (absent = never). */
+  monthlyTokenBudgetConfiguredAt?: string;
 }
 
 /**
@@ -82,7 +105,14 @@ export function defaultProviderPreferences(userId: string): ProviderPreferences 
     // be confused with the runtime/platform AI_DEFAULT_PROVIDER.
     preferredProviderId: DEFAULT_PRIMARY_BRAIN_PROVIDER_ID,
     budgetPolicy: DEFAULT_BUDGET_POLICY,
-    budgets: { monthlyTokenBudget: DEFAULT_MONTHLY_TOKEN_BUDGET },
+    // A-4 MIGRATION: the seeded 1M figure is a PLATFORM_ALLOWANCE, never a user
+    // budget. It carries no `monthlyTokenBudgetConfiguredAt`, so every consumer
+    // reports it as "VedMoulya allowance / not your budget" until the user sets
+    // one explicitly (which stamps source=USER + configuredAt).
+    budgets: {
+      monthlyTokenBudget: DEFAULT_MONTHLY_TOKEN_BUDGET,
+      monthlyTokenBudgetSource: 'PLATFORM',
+    },
     updatedAt: new Date().toISOString(),
   };
 }

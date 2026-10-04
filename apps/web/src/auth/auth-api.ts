@@ -173,11 +173,18 @@ export async function signUpWithEmail(params: SignUpParams): Promise<SignUpRespo
   // The endpoint's `data` is polymorphic: in development/test it is the full
   // AuthSession; in production/staging it is `{ verificationRequired: true }`
   // with NO session. Normalize both into the SignUpResponse contract.
-  const data = await request<SignUpResponse | AuthSession>('sign-up', {
+  // `data` is deliberately `unknown`: the envelope's payload is polymorphic and
+  // may even be absent on a partial success, so the guard below is a genuine
+  // runtime check rather than a redundant one.
+  const data: unknown = await request<unknown>('sign-up', {
     method: 'POST',
     body: JSON.stringify(params),
   });
-  if ('verificationRequired' in data) {
+  // Defensive: a partial/malformed success envelope leaves `data` undefined,
+  // and `'verificationRequired' in undefined` throws a TypeError — which the
+  // session manager maps to "offline", a FALSE network failure. Only test the
+  // flag on a real object.
+  if (data !== null && typeof data === 'object' && 'verificationRequired' in data) {
     return { verificationRequired: true };
   }
   return { session: data as AuthSession };

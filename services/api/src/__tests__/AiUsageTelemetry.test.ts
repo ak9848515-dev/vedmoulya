@@ -541,6 +541,28 @@ describe('Mission AI execution — owner-scoped telemetry in the SAME ledger', (
     // Attribution is exclusive: no other user sees the mission's usage.
     expect(ledger.compute(store, { userId: 'someone-else' }).totals.tokensTotal).toBe(0);
 
+    // ── MISSION IDENTITY reached the provider execution spans ────────────────
+    // The Mission runtime owns its identity; it is propagated verbatim, never
+    // invented by the recorder.
+    const missionSpans = store
+      .list({ userId: owner })
+      .flatMap((t) => t.spans)
+      .filter((s) => s.name === 'ai.provider_execution');
+    expect(missionSpans.length).toBeGreaterThan(0);
+    const objectiveIds = new Set(done.objectives.map((o) => o.objectiveId));
+    const seenObjectiveIds = new Set<string>();
+    for (const span of missionSpans) {
+      const attrs = (span as unknown as { attributes?: Record<string, unknown> }).attributes ?? {};
+      expect(attrs.ai_source).toBe('MISSION');
+      expect(attrs.mission_id).toBe(mission.missionId);
+      // Every execution is attributed to a REAL objective of THIS mission.
+      // This mission has more than one, so identity is exact per execution.
+      const spanObjectiveId = attrs.objective_id as string;
+      expect(objectiveIds.has(spanObjectiveId)).toBe(true);
+      seenObjectiveIds.add(spanObjectiveId);
+    }
+    expect(seenObjectiveIds.size).toBeGreaterThan(0);
+
     // ── Direct AI usage lands in the SAME ledger for the same owner ─────────
     const directAdapter = new RecordingAdapter('user-gemini', 'google');
     const directAi = new AIOrchestrationService({ observability, retryBaseDelayMs: 1 });

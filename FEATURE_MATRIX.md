@@ -13,10 +13,10 @@
 | ----------------------------------------------------------------------------------------- | ----------- | -------------------------------- | --------------------- |
 | Life OS Dashboard                                                                         | 🟢 COMPLETE | `packages/services` + `apps/web` | OS-002                |
 | Identity & Auth (JWT, refresh, Google OAuth, bcrypt)                                      | 🟢 COMPLETE | `services/identity`              | OS-002                |
-| Career module                                                                             | 🟢 COMPLETE | `services/career`                | OS-002                |
-| Learning module                                                                           | 🟢 COMPLETE | `services/learning`              | OS-002                |
-| Business module                                                                           | 🟢 COMPLETE | `services/business`              | OS-002                |
-| Marketplace module                                                                        | 🟢 COMPLETE | `services/marketplace`           | OS-002                |
+| Career module                                                                             | 🟢 COMPLETE | `packages/services` + `apps/web` | OS-002                |
+| Learning module                                                                           | 🟢 COMPLETE | `packages/services` + `apps/web` | OS-002                |
+| Business module                                                                           | 🟢 COMPLETE | `packages/services` + `apps/web` | OS-002                |
+| Marketplace module                                                                        | 🟢 COMPLETE | `packages/services` + `apps/web` | OS-002                |
 | Notifications                                                                             | 🟢 COMPLETE | `services/notifications`         | OS-002                |
 | AI Content Agency (AC-001/002/002.5)                                                      | 🟢 COMPLETE | `services/content-agency`        | AC-002.5 CLIENT READY |
 | Client Ops (CRM, proposals, contracts, quotations, invoices, payments, documents, portal) | 🟢 COMPLETE | `services/content-agency`        | OS-002                |

@@ -58,6 +58,7 @@ import {
   useSetProviderPreferences,
   useProviderUsageDetail,
   useRecordLocalAiUsage,
+  useAiControlCenter,
 } from '../../lib/api-client.js';
 import dynamic from 'next/dynamic';
 import { ProvidersOverview } from './ProvidersOverview.js';
@@ -67,7 +68,7 @@ import { ProviderConnectFlow } from './ProviderConnectFlow.js';
 import { ProviderConfigureExperience } from './ProviderConfigureExperience.js';
 import { SimpleProviderConfig } from './SimpleProviderConfig.js';
 import { OpenAIOrgUsagePanel } from './OpenAIOrgUsagePanel.js';
-import { AIBalanceWidget } from './AIBalanceWidget.js';
+import { AiControlCenterBoard } from './AiControlCenterBoard.js';
 import {
   UsageAvailabilityWidget,
   ReadinessLegend,
@@ -769,12 +770,10 @@ function ProviderExperienceView({
     };
   });
 
-  // AI Balance — ONE aggregated number over measured ledger usage.
-  const balance = {
-    tokensUsed: data.usage.tokensUsed,
-    tokenBudget: data.usage.tokenBudget,
-    budgetConfigured: Boolean(preferences.budgets.monthlyTokenBudget),
-  };
+  // SPRINT — the honest AI Control Center board. Every number (today, this
+  // month, per-provider usage, quota, cost, budget) comes from the durable
+  // usage ledger; nothing is derived or defaulted client-side.
+  const { data: controlCenter } = useAiControlCenter(userId);
 
   return (
     <div className="space-y-6">
@@ -837,8 +836,17 @@ function ProviderExperienceView({
         </div>
         {showAdvanced ? (
           <div className="mt-4 space-y-4">
-            {/* Usage & availability (measured usage + readiness legend) */}
-            <AIBalanceWidget balance={balance} onViewAll={onUsageClick} />
+            {/* SPRINT — the AI Control Center: measured usage, provider quota,
+                budget provenance and LOCAL AI kept explicitly separate. */}
+            {controlCenter ? (
+              <AiControlCenterBoard board={controlCenter} />
+            ) : (
+              <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#0F172A] p-4 shadow-sm">
+                <p className="text-[12px] text-[#64748B] dark:text-[#94A3B8]">
+                  Usage board unavailable — figures appear once real AI usage is recorded.
+                </p>
+              </div>
+            )}
             <UsageAvailabilityWidget
               rows={usageRows}
               summary={summary}

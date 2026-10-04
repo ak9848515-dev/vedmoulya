@@ -22,7 +22,6 @@
     "@vedmoulya/adaptive-loop": "*",
     "@vedmoulya/agent-execution": "*",
     "@vedmoulya/ai": "*",
-    "@vedmoulya/core": "*",
     "@vedmoulya/execution-memory": "*",
     "@vedmoulya/experience-optimization": "*",
     "@vedmoulya/planning": "*"

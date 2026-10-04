@@ -29,18 +29,18 @@ tests/         Shared Vitest setup
 
 ## Packages
 
-| Package                 | Purpose                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------ |
-| `packages/core`         | DI container, event bus, fail-fast config, logging, metrics, tracing, health   |
-| `packages/domain`       | Domain entities, value objects, factories (framework-free)                     |
-| `packages/services`     | Application services (dashboard, career, learning, business, AI orchestration) |
-| `packages/ai`           | AI domain types — requests, responses, capabilities, providers                 |
-| `packages/ui`           | UI component library (Radix UI + Tailwind, 30+ components)                     |
-| `packages/config`       | Shared configuration contracts                                                 |
-| `packages/information`  | Information/intelligence data contracts                                        |
-| `packages/intelligence` | Intelligence domain types                                                      |
-| `packages/shared`       | Shared types, DTOs, utilities                                                  |
-| `packages/testing`      | Test helpers and fixtures                                                      |
+| Package                 | Purpose                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `packages/core`         | DI container, event bus, fail-fast config, logging, metrics, tracing, health              |
+| `packages/domain`       | Domain entities, value objects, factories (framework-free)                                |
+| `packages/services`     | Application services (dashboard, career, learning, business, AI orchestration)            |
+| `packages/ai`           | AI domain types — requests, responses, capabilities, providers                            |
+| `packages/ui`           | UI component library (Radix UI + Tailwind, 30+ components)                                |
+| `packages/core`         | Typed configuration (`core/src/config`), startup preflight (`core/src/startup/preflight`) |
+| `packages/information`  | Information/intelligence data contracts                                                   |
+| `packages/intelligence` | Intelligence domain types                                                                 |
+| `packages/shared`       | Shared types, DTOs, utilities                                                             |
+| `packages/testing`      | Test helpers and fixtures                                                                 |
 
 > 10 packages total (`packages/*`). Workspace tooling lives in `tooling/`.
 
@@ -67,13 +67,19 @@ tests/         Shared Vitest setup
 
 ### Vertical Platforms
 
-| Service                  | Entry                           | Responsibility                     |
-| ------------------------ | ------------------------------- | ---------------------------------- |
-| `services/learning`      | `serviceName = 'learning'`      | Learning paths, assessment         |
-| `services/marketplace`   | `serviceName = 'marketplace'`   | Asset catalog, provider mgmt       |
-| `services/notifications` | `serviceName = 'notifications'` | Notifications, preferences         |
-| `services/career`        | `serviceName = 'career'`        | Career paths, skills, job matching |
-| `services/business`      | `serviceName = 'business'`      | Analytics, KPIs, goals, finances   |
+| Service                  | Entry                           | Responsibility             |
+| ------------------------ | ------------------------------- | -------------------------- |
+| `services/notifications` | `serviceName = 'notifications'` | Notifications, preferences |
+
+> Career, learning, business and marketplace are **application boundaries owned by
+> `packages/services/src/<domain>/`** (`CareerApplicationService`,
+> `LearningApplicationService`, `BusinessApplicationService`,
+> `MarketplaceApplicationService`), exposed through `services/api` routers and
+> consumed by `apps/web`. Capability-level discovery lives in
+> `packages/learning-intelligence` and `packages/capability-marketplace`.
+> The former `services/{career,learning,business,marketplace}` placeholder
+> workspaces were removed: they were one-line stubs with no consumer, and the
+> real capability already lived in `packages/services`.
 
 ---
 

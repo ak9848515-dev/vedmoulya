@@ -18,11 +18,13 @@ const CONNECTED_SNAPSHOT: LocalAiSnapshot = {
   checking: false,
   connecting: false,
   state: 'OLLAMA_CONNECTED',
+  connected: true,
   label: 'Connected',
   tone: 'ok',
   message: 'Ollama answered on qwen2.5-coder:3b.',
   runtimeName: 'Ollama',
   modelId: 'qwen2.5-coder:3b',
+  failure: null,
 };
 
 function stubStatus(
@@ -41,6 +43,8 @@ function stubStatus(
     snapshot: merged,
     refresh: vi.fn(() => Promise.resolve()),
     connect: vi.fn(() => Promise.resolve()),
+    failure: merged.failure,
+    connected: merged.connected,
     ...overrides,
   };
 }
@@ -61,6 +65,7 @@ describe('LocalAiOverviewCard', () => {
       <LocalAiOverviewCard
         localAi={stubStatus({
           agentReachable: false,
+          connected: false,
           state: 'LOCAL_AGENT_NOT_RUNNING',
           label: 'Local Agent not connected',
           tone: 'neutral',

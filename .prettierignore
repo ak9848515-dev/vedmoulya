@@ -31,6 +31,13 @@ test-results/
 *.log
 *.log.*
 
+# Live acceptance evidence workspaces (generated per run; exact bytes are
+# asserted, so they must never be reformatted)
+_live*/
+_real08/
+_s3*/
+.mission-acceptance/
+
 # IDE / OS
 .vscode/
 .idea/

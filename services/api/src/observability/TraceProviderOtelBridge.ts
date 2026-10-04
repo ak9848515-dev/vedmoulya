@@ -25,7 +25,10 @@ import type { TelemetrySpanHandle } from '@vedmoulya/core';
  * reconstructs ENGINE → AI → PROVIDER → RETRY → FALLBACK → VALIDATION.
  */
 export class TraceProviderOtelBridge implements OtelBridge {
-  constructor(private readonly provider: ExecutionTraceProvider) {}
+  constructor(
+    private readonly provider: ExecutionTraceProvider,
+    private readonly onSpanEnd?: (info: { name: string; traceId: string; spanId: string }) => void,
+  ) {}
 
   startSpan(
     name: string,
@@ -49,6 +52,11 @@ export class TraceProviderOtelBridge implements OtelBridge {
     return {
       end: (status: 'ok' | 'error' = 'ok'): void => {
         handle.end(status === 'error' ? 'ERROR' : 'OK');
+        try {
+          this.onSpanEnd?.({ name, traceId: handle.traceId, spanId: handle.spanId });
+        } catch {
+          // Usage backfill is best-effort — never break telemetry.
+        }
       },
       setAttribute: (key: string, value: string | number | boolean): void => {
         handle.setAttribute(key, typeof value === 'string' ? redactSecrets(value) : value);

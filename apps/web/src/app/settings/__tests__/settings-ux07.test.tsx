@@ -137,6 +137,7 @@ function profile(overrides: Partial<ProfileView> = {}): ProfileView {
     purpose: 'building',
     primaryGoal: 'Launch the MVP',
     profileComplete: true,
+    googleLinked: false,
     ...overrides,
   };
 }

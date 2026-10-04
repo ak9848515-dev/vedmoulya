@@ -23,6 +23,7 @@ import {
   createEmptyBudgetUsage,
 } from '../domain/mission-budget-enforcer.js';
 import { calculateProgress } from '../domain/mission-progress-calculator.js';
+import { renderScopeSummary } from '../domain/mission-scope-classifier.js';
 import type {
   CheckpointStore,
   ClockPort,
@@ -249,19 +250,13 @@ export class MissionControllerService {
     const now = clock.now();
     const missionId = idGenerator.generateId('mission');
 
-    const mission: Mission = {
-      missionId,
-      userId: input.userId,
-      title: input.title,
-      objective: input.objective,
-      description: input.description ?? input.objective,
-      autonomyLevel: input.autonomyLevel ?? 'CONTROLLED_AUTONOMOUS',
-      budget: createDefaultBudget(input.budget),
-      budgetUsage: createEmptyBudgetUsage(),
-      constraints: input.constraints ?? {},
-      state: 'CREATED',
-      stateHistory: ['CREATED'],
-      objectives: (input.initialObjectives ?? []).map((obj, idx) => ({
+    // Initial objectives are created here (the create path previously always
+    // produced `dependencies: []`). Explicit `objectiveDependencies` are
+    // resolved below to the generated objective ids and written into the
+    // objective's EXISTING `dependencies` field — the objective selectors
+    // already enforce it. No dependency engine is added.
+    const initialObjectives: MissionObjective[] = (input.initialObjectives ?? []).map(
+      (obj, idx) => ({
         objectiveId: idGenerator.generateId('obj'),
         missionId,
         title: obj,
@@ -279,7 +274,29 @@ export class MissionControllerService {
         maxRetries: input.budget?.maxRetries ?? 3,
         createdAt: now,
         updatedAt: now,
-      })),
+      }),
+    );
+    for (const declaration of input.objectiveDependencies ?? []) {
+      const dependent = initialObjectives[declaration.objectiveIndex];
+      if (!dependent) continue;
+      dependent.dependencies = declaration.dependsOn
+        .map((index) => initialObjectives[index]?.objectiveId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    }
+
+    const mission: Mission = {
+      missionId,
+      userId: input.userId,
+      title: input.title,
+      objective: input.objective,
+      description: input.description ?? input.objective,
+      autonomyLevel: input.autonomyLevel ?? 'CONTROLLED_AUTONOMOUS',
+      budget: createDefaultBudget(input.budget),
+      budgetUsage: createEmptyBudgetUsage(),
+      constraints: input.constraints ?? {},
+      state: 'CREATED',
+      stateHistory: ['CREATED'],
+      objectives: initialObjectives,
       checkpoints: [],
       decisions: [],
       successCriteria: input.successCriteria ?? [],
@@ -413,6 +430,15 @@ export class MissionControllerService {
       providerStatus,
     );
 
+    // ── SCOPE-01 — persist the classification of everything the repository
+    //    inspection surfaced BEFORE acting on it, so requested work and
+    //    discovered work stay distinguishable in the durable record even when
+    //    the selector selected nothing.
+    if (selectionResult.scopeReport) {
+      mission.scopeReport = selectionResult.scopeReport;
+      this.recordActivity(mission, 'SCOPE_CLASSIFIED', selectionResult.scopeReport.summary);
+    }
+
     if (!selectionResult.selected) {
       const anyFailed = mission.objectives.some((o) => o.state === 'FAILED');
       const allTerminal =
@@ -475,9 +501,18 @@ export class MissionControllerService {
         maxRetries: mission.budget.maxRetries,
         createdAt: now,
         updatedAt: now,
+        discovery: selectionResult.discoveredObjective.discovery,
       };
       mission.objectives.push(objective);
       selectionResult.objectiveId = newObjId;
+      // SCOPE-01 — REQUIRED discovered work genuinely blocks the objectives
+      // that declared it. The edge is written into the EXISTING `dependencies`
+      // field the selectors already enforce, so the dependent objective simply
+      // is not selectable until this one is VERIFIED. No new scheduler.
+      this.linkRequiredDiscovery(mission, objective);
+      // The discovered item is now genuinely part of Mission work: mark it
+      // executed in the durable scope report so the final result is honest.
+      this.markScopeItemExecuted(mission, objective);
     }
 
     if (!objective) {
@@ -1045,11 +1080,15 @@ export class MissionControllerService {
     } else if (command.type === 'COMPLETE') {
       mission.outcome = this.determineOutcome(mission);
       mission.finishedAt = clock.now();
+      this.appendScopeSummary(mission);
     } else if (command.type === 'FAIL') {
       mission.outcome = 'FAILED';
       mission.outcomeReason = command.reason;
       mission.finishedAt = clock.now();
       mission.error = command.reason;
+      this.appendScopeSummary(mission);
+    } else if (command.type === 'BLOCK') {
+      mission.outcomeReason = command.reason;
     } else if (command.type === 'CANCEL') {
       mission.outcome = 'CANCELLED';
       mission.finishedAt = clock.now();
@@ -1057,8 +1096,6 @@ export class MissionControllerService {
       mission.outcome = 'FAILED';
       mission.outcomeReason = 'Approval rejected';
       mission.finishedAt = clock.now();
-    } else if (command.type === 'BLOCK') {
-      mission.outcomeReason = command.reason;
     }
 
     // BLD-025 §23 — durable bounded activity trail (rides the same save).
@@ -1694,6 +1731,74 @@ export class MissionControllerService {
   }
 
   /** Bounded durable activity trail (structural, sanitized, capped). */
+  /**
+   * SCOPE-01 — write the EXISTING dependency edge from every declared
+   * objective that explicitly referenced this REQUIRED discovered item to the
+   * discovered objective itself. The selectors already require all
+   * `dependencies` to be VERIFIED before an objective is selectable, so a
+   * genuinely blocking dependency keeps blocking; nothing new is introduced.
+   *
+   * Terminal objectives are left untouched: their history is already decided
+   * and rewiring it would rewrite a verified record.
+   */
+  private linkRequiredDiscovery(mission: Mission, discovered: MissionObjective): void {
+    const discovery = discovered.discovery;
+    if (!discovery) return;
+    const item = mission.scopeReport?.required.find(
+      (candidate) => candidate.kind === discovery.kind && candidate.label === discovery.label,
+    );
+    if (!item) return;
+    for (const dependentId of item.blockingObjectiveIds) {
+      if (dependentId === discovered.objectiveId) continue;
+      const dependent = mission.objectives.find((o) => o.objectiveId === dependentId);
+      if (!dependent) continue;
+      if (dependent.state === 'VERIFIED' || dependent.state === 'FAILED') continue;
+      if (dependent.dependencies.includes(discovered.objectiveId)) continue;
+      dependent.dependencies = [...dependent.dependencies, discovered.objectiveId];
+      dependent.updatedAt = this.options.clock.now();
+    }
+  }
+
+  /**
+   * SCOPE-01 — mark the classified item that just became a real objective as
+   * executed and re-render the durable summary, so the persisted report and
+   * the final outcome reason describe discovered work truthfully.
+   */
+  private markScopeItemExecuted(mission: Mission, objective: MissionObjective): void {
+    const report = mission.scopeReport;
+    const discovery = objective.discovery;
+    if (!report || !discovery) return;
+    const item = report.required.find(
+      (candidate) => candidate.kind === discovery.kind && candidate.label === discovery.label,
+    );
+    if (!item) return;
+    item.executed = true;
+    report.summary = renderScopeSummary(report);
+  }
+
+  /**
+   * SCOPE-01 — a terminal result must never read as plain success while
+   * discovered repository work was merely reported. When the persisted scope
+   * report holds work that was NOT executed (OPTIONAL / OUT_OF_SCOPE, or a
+   * REQUIRED item still outstanding), the one-line scope summary is appended
+   * to the durable outcome reason. The report itself always rides on
+   * `mission.scopeReport`; this only makes the human-readable reason honest.
+   */
+  private appendScopeSummary(mission: Mission): void {
+    const report = mission.scopeReport;
+    if (!report) return;
+    const unexecuted =
+      report.optional.length +
+      report.outOfScope.length +
+      report.required.filter((item) => !item.executed).length;
+    if (unexecuted === 0) return;
+    const summary = report.summary;
+    const base = mission.outcomeReason;
+    if (base && base.includes(summary)) return;
+    mission.outcomeReason = base ? `${base} — ${summary}` : summary;
+    if (mission.error) mission.error = mission.outcomeReason;
+  }
+
   private recordActivity(mission: Mission, kind: string, message: string): void {
     const max = this.options.maxActivityEvents ?? DEFAULT_MAX_ACTIVITY_EVENTS;
     const list = mission.activity ?? [];

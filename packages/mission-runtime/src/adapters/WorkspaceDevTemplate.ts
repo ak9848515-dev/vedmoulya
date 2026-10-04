@@ -7,9 +7,17 @@
 // other templates remain the frozen planning estate. The template matches
 // bounded "create/write the workspace file X ..." development goals and
 // emits ONE governed tool step (workspace_write through ToolRuntime,
-// verified by reading the file back) plus ONE AI confirmation step (real
-// provider execution through AIOrchestrationService). Every plan still
-// passes the full frozen validation pipeline before execution.
+// verified by DETERMINISTICALLY re-reading the file and asserting its exact
+// content) plus ONE real AI execution whose output is never the verdict.
+//
+// The AI confirmation is retained because it is the runtime's genuine
+// provider-execution/usage-identity surface (and the certification suite
+// exercises the provider-failure matrix through it). What changed is its
+// VERIFICATION: it is graded against the real artifact, so model wording
+// cannot decide success or failure. Semantic objectives
+// (summarize / analyze / classify / judge) remain on the other templates,
+// where AI reasoning is the requirement. Every plan still passes the full
+// frozen validation pipeline before execution.
 // ──────────────────────────────────────────────────────────────────
 
 import type { AgentPlan, VerificationPolicy } from '@vedmoulya/agent-execution';
@@ -43,18 +51,26 @@ export function extractWorkspaceFileTarget(goal: string): WorkspaceFileTarget | 
   return { relativePath, content: content.slice(0, 400) };
 }
 
-function rulePolicy(
-  checks: Array<{ name: string; kind: 'includes' | 'minLength'; text?: string; length?: number }>,
+/**
+ * Deterministic content verification: re-read the REAL artifact through the
+ * governed tool port and require the FULL content to equal the content the
+ * plan itself wrote. The verdict comes from real execution state — never from
+ * model prose — so a differently-worded (or missing) confirmation can never
+ * fail a correct write, and a tampered/missing file can never pass.
+ */
+function artifactContentVerification(
+  relativePath: string,
+  content: string,
   description: string,
 ): VerificationPolicy {
   return {
-    kind: 'rule',
+    kind: 'command',
     description,
-    checks: checks.map((check) =>
-      check.kind === 'minLength'
-        ? { name: check.name, kind: 'minLength' as const, length: check.length ?? 1 }
-        : { name: check.name, kind: check.kind, text: check.text ?? '' },
-    ),
+    command: {
+      toolName: 'workspace_read',
+      arguments: { relativePath, expectedContent: content },
+      expect: 'ok',
+    },
   };
 }
 
@@ -93,52 +109,51 @@ export function createWorkspaceFileTemplate(): PlanTemplate {
                 expectedOutcome: `workspace file ${target.relativePath} exists with the required content`,
               },
             ],
-            expectedOutcome: `workspace file ${target.relativePath} exists`,
-            verificationPolicy: {
-              kind: 'command',
-              description: `workspace file ${target.relativePath} must read back successfully`,
-              command: {
-                toolName: 'workspace_read',
-                arguments: { relativePath: target.relativePath },
-                expect: 'ok',
-              },
-            },
+            expectedOutcome: `workspace file ${target.relativePath} holds the exact required content`,
+            verificationPolicy: artifactContentVerification(
+              target.relativePath,
+              target.content,
+              `workspace file ${target.relativePath} must read back with the exact required content`,
+            ),
             recoveryPolicy: BOUNDED_RECOVERY,
           },
           {
             stepId: 'step-2',
-            objective: 'Confirm the verified workspace state',
+            objective: 'Confirm the created artifact holds the required content',
             capability: 'reasoning',
-            allowedTools: [],
+            // Verified against the REAL artifact, never the model's wording:
+            // an incorrect or differently-phrased reply can never fail a
+            // correct write. workspace_read is declared honestly because the
+            // verification command executes it through the governed tool port.
+            allowedTools: ['workspace_read'],
             dependencies: ['step-1'],
             actions: [
               {
                 actionId: 'step-2-confirm',
                 kind: 'ai',
                 capability: 'reasoning',
-                instruction: `verified status report: workspace file ${target.relativePath} was created through the governed tool runtime and read back successfully. Write a short 2-3 sentence status report that begins with the exact lowercase word "verified" followed by a colon.`,
-                expectedOutcome: 'explicit verified confirmation',
+                instruction: `The file ${target.relativePath} was written and read back through the governed workspace tools. Using ONLY the observed read-back content, state briefly whether it holds exactly the required content. Do not invent content you did not observe.`,
+                expectedOutcome: 'a grounded confirmation of the observed read-back',
               },
             ],
-            expectedOutcome: 'explicit verified confirmation',
-            verificationPolicy: rulePolicy(
-              [
-                { name: 'has-verified', kind: 'includes', text: 'verified' },
-                { name: 'length', kind: 'minLength', length: 20 },
-              ],
-              'the confirmation must explicitly state the verified workspace state',
+            expectedOutcome: 'a grounded confirmation of the observed read-back',
+            verificationPolicy: artifactContentVerification(
+              target.relativePath,
+              target.content,
+              `the artifact ${target.relativePath} must really hold the exact required content`,
             ),
             recoveryPolicy: BOUNDED_RECOVERY,
           },
         ],
-        finalVerification: rulePolicy(
-          [{ name: 'goal-verified', kind: 'includes', text: 'verified' }],
-          'the final summary must state the goal is verified',
+        finalVerification: artifactContentVerification(
+          target.relativePath,
+          target.content,
+          `the goal is verified only if ${target.relativePath} really holds the required content`,
         ),
         completionCriteria: [
           'workspace file written through the governed tool runtime',
-          'workspace file reads back successfully',
-          'execution verified the outcome explicitly',
+          'workspace file reads back through the governed read tool',
+          'read-back content equals the exact required content (deterministic)',
         ],
       };
     },

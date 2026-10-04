@@ -23,6 +23,10 @@ import {
   createCatalogProviders,
   createProviderCredentialCipher,
 } from '@vedmoulya/providers';
+// ── Dynamic AI Usage Ledger stores (canonical durable accounting spine) ─────
+import { InMemoryAiUsageStore } from '../observability/AiUsageLedger.js';
+import { PostgresAiUsageStore } from '../observability/AiUsageLedgerStore.js';
+import type { AiUsageStore } from '../observability/AiUsageLedgerTypes.js';
 import type { CapabilityRepository } from '@vedmoulya/capabilities';
 import { PostgresCapabilityRepository, createCatalogCapabilities } from '@vedmoulya/capabilities';
 import type { ContextRepository } from '@vedmoulya/context';
@@ -592,6 +596,40 @@ export function createProductionProviderPreferencesStore(): ProviderPreferencesS
   ensureTable(store, 'Provider preferences');
 
   providerPreferencesStoreSlot.instance = store;
+  return store;
+}
+
+/** Singleton slot for the durable AI usage ledger store. */
+const aiUsageStoreSlot: RepositorySlot<AiUsageStore> = {};
+
+/**
+ * Resolve the production AI USAGE ledger store — the ONE canonical, durable
+ * accounting spine for real AI execution (Ask / Mission / Brain / Local).
+ *
+ * Durability matters for accounting: the in-memory double loses every token,
+ * cost and quota signal on restart, so the Postgres store is used whenever a
+ * database is actually configured (including local development wired to Neon).
+ * It degrades to the bounded in-memory store ONLY when there is no database or
+ * under NODE_ENV=test (hermetic unit tests must not reach Postgres).
+ */
+export function createProductionAiUsageStore(): AiUsageStore {
+  if (aiUsageStoreSlot.instance) return aiUsageStoreSlot.instance;
+
+  const hasDatabase =
+    (process.env.IDENTITY_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim()) !== undefined &&
+    (process.env.IDENTITY_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim()) !== '';
+
+  if (isTestEnv() || !hasDatabase) {
+    const memoryStore = new InMemoryAiUsageStore();
+    aiUsageStoreSlot.instance = memoryStore;
+    return memoryStore;
+  }
+
+  const sql = createEISql('vedmoulya-ai-usage');
+  const store = new PostgresAiUsageStore(sql);
+  ensureTable(store, 'AI usage ledger');
+
+  aiUsageStoreSlot.instance = store;
   return store;
 }
 

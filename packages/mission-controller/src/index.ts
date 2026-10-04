@@ -3,6 +3,7 @@
 // Types
 export type {
   CreateMissionInput,
+  InitialObjectiveDependency,
   Mission,
   MissionAutonomyLevel,
   MissionBudget,
@@ -28,6 +29,11 @@ export type {
   MissionActivityEvent,
   MissionObjectiveLease,
   MissionFailureDiagnosisRecord,
+  DiscoveredWorkScope,
+  DiscoveredWorkKind,
+  DiscoveredWorkItem,
+  MissionScopeReport,
+  RequestedWorkSummary,
 } from './types/mission-types.js';
 export { MISSION_TERMINAL_STATES, OBJECTIVE_STATES } from './types/mission-types.js';
 
@@ -46,6 +52,15 @@ export { calculateProgress } from './domain/mission-progress-calculator.js';
 export { classifyFailure } from './domain/mission-failure-classifier.js';
 export { DeterministicObjectiveSelector } from './domain/objective-selector.js';
 export { DevelopmentObjectiveSelector } from './domain/development-objective-selector.js';
+// SCOPE-01 — deterministic REQUIRED / OPTIONAL / OUT_OF_SCOPE classification of
+// discovered repository work (pure domain functions, no new architecture).
+export {
+  classifyDiscoveredWork,
+  discoveredObjectiveTitle,
+  isDeclaredObjective,
+  itemsByScope,
+  renderScopeSummary,
+} from './domain/mission-scope-classifier.js';
 export { GitSafetyPolicy, classifyGitOperation } from './domain/git-safety-policy.js';
 export { SimpleGoalUnderstanding } from './domain/goal-understanding.js';
 export { SimpleProviderAvailability } from './domain/provider-availability.js';

@@ -96,13 +96,28 @@ export function createWorkspaceTools(
   const read: ToolDefinition = {
     name: WORKSPACE_READ_TOOL,
     description:
-      'Reads a bounded text file from the authorized workspace (mission-relative path only).',
+      'Reads a bounded text file from the authorized workspace (mission-relative path only). ' +
+      'Optionally asserts the read-back content (expectedContent exact match, or expectedMinLength) ' +
+      'so verification can be grounded in the REAL artifact through the governed tool path.',
     capability: 'knowledge',
     inputSchema: {
       type: 'object',
       properties: {
         relativePath: { type: 'string', required: true, minLength: 1, maxLength: 300 },
         maxBytes: { type: 'number', minimum: 1, maximum: DEFAULT_MAX_READ_BYTES },
+        /**
+         * Deterministic content assertion (verification only). When set, the
+         * read FAILS unless the file's FULL content equals this string
+         * exactly. The value comes from the deterministic plan builder — the
+         * model never supplies it — and is checked against the untruncated
+         * bytes, so a large file can never hide behind the read cap.
+         */
+        expectedContent: { type: 'string', maxLength: maxWriteBytes },
+        /**
+         * Deterministic non-empty assertion (verification only): the read
+         * FAILS unless the file's trimmed content is at least this long.
+         */
+        expectedMinLength: { type: 'number', minimum: 1, maximum: maxReadBytes },
       },
       additionalProperties: false,
     },
@@ -115,6 +130,28 @@ export function createWorkspaceTools(
         throw new Error(`file exceeds the bounded read size: ${relativePath}`);
       }
       const raw = fs.readFileSync(resolved, 'utf8');
+      // Deterministic assertions run against the FULL content, before any
+      // output truncation, so they inspect the real artifact — not a model's
+      // description of it.
+      const expectedRaw = args['expectedContent'];
+      if (expectedRaw !== undefined) {
+        if (typeof expectedRaw !== 'string') {
+          throw new Error(`expectedContent must be a string for ${relativePath}`);
+        }
+        if (raw !== expectedRaw) {
+          throw new Error(
+            `read-back content mismatch for ${relativePath}: expected ${String(expectedRaw.length)} chars, found ${String(raw.length)}`,
+          );
+        }
+      }
+      if (args['expectedMinLength'] !== undefined) {
+        const minLength = Number(args['expectedMinLength']);
+        if (raw.trim().length < minLength) {
+          throw new Error(
+            `read-back content for ${relativePath} is shorter than the required minimum: ${String(raw.trim().length)} < ${String(minLength)}`,
+          );
+        }
+      }
       const requested = Number(args['maxBytes'] ?? maxReadBytes);
       const cap = Math.min(
         maxReadBytes,

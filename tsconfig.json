@@ -9,7 +9,7 @@
     { "path": "packages/ui" },
     { "path": "packages/shared" },
     { "path": "packages/testing" },
-    { "path": "packages/config" },
+
     { "path": "packages/ai" },
     { "path": "packages/agent-execution" },
     { "path": "packages/planning" },

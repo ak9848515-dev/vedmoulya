@@ -280,6 +280,10 @@ export class AgentExecutionAdapter implements ExecutionPort {
       plan,
       autonomyLevel: 'CONTROLLED_AUTONOMOUS',
       budget,
+      // The Mission identity that already exists on this call is handed to the
+      // run verbatim, so every AI execution inside the objective is attributed
+      // to this real Mission + objective.
+      ...(executionContext !== undefined ? { missionContext: executionContext } : {}),
     });
     this.runs.remember(run, executionContext);
     const success = run.state === 'COMPLETED';

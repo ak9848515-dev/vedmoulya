@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Document the Learning Engine (`services/learning`): the service behind career and skill development, adaptive learning paths, knowledge retention, and learning analytics, reused by the Content Agency's learning workflows.
+Document the Learning Engine (`packages/services/src/learning`): the service behind career and skill development, adaptive learning paths, knowledge retention, and learning analytics, reused by the Content Agency's learning workflows.
 
 ## Scope
 
@@ -16,7 +16,7 @@ Document the Learning Engine (`services/learning`): the service behind career an
 
 ## Current Status
 
-Implemented as `services/learning` with application services and Postgres persistence; wired into the web app (learning page) and API gateway. Reuse pattern confirmed in EPIC-003 (no duplicated services).
+Implemented as `packages/services/src/learning` with application services and Postgres persistence; wired into the web app (learning page) and API gateway. Reuse pattern confirmed in EPIC-003 (no duplicated services).
 
 ## Architecture
 

@@ -21,7 +21,6 @@
   "dependencies": {
     "@vedmoulya/capabilities": "*",
     "@vedmoulya/context": "*",
-    "@vedmoulya/core": "*",
     "@vedmoulya/goals": "*",
     "@vedmoulya/knowledge-intelligence": "*",
     "@vedmoulya/memory-intelligence": "*"

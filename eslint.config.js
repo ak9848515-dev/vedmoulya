@@ -477,6 +477,12 @@ export default tseslint.config(
       '**/*.test.ts',
       '**/*.test.tsx',
       '**/.storybook/**',
+      // Acceptance-evidence scratch dirs (generated per run, not TS project
+      // members): _live*/, _real08/ and _s3*/ hold harness artifacts that the
+      // TS project service cannot resolve.
+      '_live*/',
+      '_real08/',
+      '_s3*/',
       // Generated build output (never authored, never linted):
       'apps/web/out/**', // Next.js static export
       'apps/web/android/**', // Capacitor wrapper incl. copied web assets

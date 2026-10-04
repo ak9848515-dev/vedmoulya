@@ -22,7 +22,6 @@
     "@vedmoulya/ai": "*",
     "@vedmoulya/capabilities": "*",
     "@vedmoulya/context": "*",
-    "@vedmoulya/core": "*",
     "@vedmoulya/execution-orchestrator": "*",
     "@vedmoulya/execution-strategy": "*",
     "@vedmoulya/goals": "*",

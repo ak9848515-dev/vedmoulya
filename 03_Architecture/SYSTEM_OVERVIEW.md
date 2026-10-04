@@ -36,8 +36,6 @@ services/memory      Memory engine
 services/knowledge   Knowledge graph service (pgvector)
 services/decision    Decision intelligence service
 services/execution   Execution engine (tasks, schedules)
-services/learning    Learning engine
-services/marketplace Marketplace service
 services/notifications Notifications service
 services/content-agency  AI Content Agency (AC-001 pipeline + AC-002 client ops)
 ```

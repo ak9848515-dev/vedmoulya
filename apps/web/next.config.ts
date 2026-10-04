@@ -275,7 +275,16 @@ const nextConfig: NextConfig = {
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.cdnfonts.com",
         "img-src 'self' data: blob: https:",
         "font-src 'self' data: https://fonts.gstatic.com https://fonts.cdnfonts.com",
-        "connect-src 'self' https: wss:",
+        // LOCAL AI — the browser reaches the user's VedMoulya Local Agent on
+        // the machine's loopback interface (`http://127.0.0.1:43117` /
+        // `http://localhost:43117`), NOT a cloud host. Without the loopback
+        // hosts here, `connect-src` blocks every Local Agent call before it
+        // leaves the browser, so Local AI is permanently reported
+        // AGENT_UNAVAILABLE even while the agent is running (verified live:
+        // "Connecting to 'http://127.0.0.1:43117/health' violates ...
+        // connect-src 'self' https: wss:"). Loopback only — this adds no
+        // external origin and the port stays operator-configurable.
+        "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:*",
         "frame-ancestors 'none'",
         "form-action 'self'",
         "base-uri 'self'",

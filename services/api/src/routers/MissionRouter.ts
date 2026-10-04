@@ -85,6 +85,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
           objective,
           workspace,
           initialObjectives,
+          objectiveDependencies,
           maxObjectives,
           maxCostUsd,
           maxTokens,
@@ -97,6 +98,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
           objective: string;
           workspace?: string;
           initialObjectives?: string[];
+          objectiveDependencies?: CreateMissionInputView['objectiveDependencies'];
           maxObjectives?: number;
           maxCostUsd?: number;
           maxTokens?: number;
@@ -109,6 +111,7 @@ export function createMissionRouter(missionService: MissionServiceLike): Mission
           objective,
           workspace,
           initialObjectives,
+          ...(objectiveDependencies !== undefined ? { objectiveDependencies } : {}),
           maxObjectives,
           maxCostUsd,
           maxTokens,

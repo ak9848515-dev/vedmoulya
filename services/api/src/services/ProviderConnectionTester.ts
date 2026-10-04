@@ -1201,8 +1201,12 @@ export async function testProviderConnection(
     return {
       connected: true,
       status: 'connected',
+      // The family label must follow the provider that actually answered. It was
+      // hardcoded to "Google Gemini", so an OpenRouter/OpenAI/DeepSeek
+      // credential authenticated by the deployment was reported as Gemini —
+      // the UI named the wrong AI. `${label}` is already the family's name.
       message: serverManagedKey
-        ? `Connected to Google Gemini via this server's configured credential — ${suffix}.`
+        ? `Connected to ${label} via this server's configured credential — ${suffix}.`
         : `Connected successfully — ${suffix} on ${label}.`,
       latencyMs,
       modelCount: models.length,

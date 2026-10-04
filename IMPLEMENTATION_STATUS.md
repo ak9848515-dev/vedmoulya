@@ -55,21 +55,21 @@
 
 ## 3. Module Implementation Status
 
-| Module            | Service                   | Status                         |
-| ----------------- | ------------------------- | ------------------------------ |
-| Identity          | `services/identity`       | 🟢 COMPLETE                    |
-| Knowledge         | `services/knowledge`      | 🟢 COMPLETE                    |
-| Memory            | `services/memory`         | 🟢 COMPLETE                    |
-| Decision          | `services/decision`       | 🟢 COMPLETE                    |
-| Execution         | `services/execution`      | 🟢 COMPLETE                    |
-| Orchestrator (AI) | `services/orchestrator`   | 🟢 COMPLETE                    |
-| Learning          | `services/learning`       | 🟢 COMPLETE                    |
-| Marketplace       | `services/marketplace`    | 🟢 COMPLETE                    |
-| Notifications     | `services/notifications`  | 🟢 COMPLETE                    |
-| Career            | `services/career`         | 🟢 COMPLETE                    |
-| Business          | `services/business`       | 🟢 COMPLETE                    |
-| Content Agency    | `services/content-agency` | 🟢 COMPLETE                    |
-| API Gateway       | `services/api`            | 🟢 COMPLETE (80.13% functions) |
+| Module            | Service                          | Status                         |
+| ----------------- | -------------------------------- | ------------------------------ |
+| Identity          | `services/identity`              | 🟢 COMPLETE                    |
+| Knowledge         | `services/knowledge`             | 🟢 COMPLETE                    |
+| Memory            | `services/memory`                | 🟢 COMPLETE                    |
+| Decision          | `services/decision`              | 🟢 COMPLETE                    |
+| Execution         | `services/execution`             | 🟢 COMPLETE                    |
+| Orchestrator (AI) | `services/orchestrator`          | 🟢 COMPLETE                    |
+| Learning          | `packages/services` + `apps/web` | 🟢 COMPLETE                    |
+| Marketplace       | `packages/services` + `apps/web` | 🟢 COMPLETE                    |
+| Notifications     | `services/notifications`         | 🟢 COMPLETE                    |
+| Career            | `packages/services` + `apps/web` | 🟢 COMPLETE                    |
+| Business          | `packages/services` + `apps/web` | 🟢 COMPLETE                    |
+| Content Agency    | `services/content-agency`        | 🟢 COMPLETE                    |
+| API Gateway       | `services/api`                   | 🟢 COMPLETE (80.13% functions) |
 
 ## 4. Post-V1 (NOT implemented — backlog)
 

@@ -51,6 +51,13 @@ export interface RuntimeExecutionHealth {
   /** ISO timestamps of the last outcome in the window. */
   lastSuccessAt?: string;
   lastFailureAt?: string;
+  /**
+   * SPRINT (Phase 1) — the classified reason of the NEWEST failure in the
+   * window (the runtime's existing failure vocabulary). The per-reason tallies
+   * above only cover four reasons, so a reader that needs the exact reason
+   * (e.g. the AI Control Center readiness surface) reads it from here.
+   */
+  lastFailureReason?: string;
   /** Reason for the current verdict (human-readable, e.g. auth failure). */
   detail?: string;
 }

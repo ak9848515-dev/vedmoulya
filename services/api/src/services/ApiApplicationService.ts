@@ -171,6 +171,9 @@ import { createOrchestrationAwarePlanSource } from '../infrastructure/Orchestrat
 import type { RequirementEnrichmentPort, RequirementSessionStore } from '@vedmoulya/requirements';
 import { createExperienceAICritiquePort } from '../infrastructure/ExperienceAICritiquePort.js';
 import { TraceProviderOtelBridge } from '../observability/TraceProviderOtelBridge.js';
+import { AiUsageRecorder } from '../observability/AiUsageRecorder.js';
+import type { AiUsageStore } from '../observability/AiUsageLedgerTypes.js';
+import { AiControlCenterService } from '../observability/AiControlCenter.js';
 import type { SchedulerRuntimeStatus } from '../observability/scheduler-cadence.js';
 import { OpsApplicationService } from './OpsApplicationService.js';
 import { CostLedger } from '../observability/CostLedger.js';
@@ -292,6 +295,7 @@ import {
   createProductionProviderCredentialService,
   createProductionProviderPreferencesStore,
   createProductionProviderRepository,
+  createProductionAiUsageStore,
   createProductionRagRepository,
   awaitAllEngineEnsureTables,
   createEISql,
@@ -475,6 +479,28 @@ export interface ApiApplicationServiceOptions {
    * classification call, non-fatal). Tests inject a stub or omit it.
    */
   requirementEnrichment?: RequirementEnrichmentPort;
+  /**
+   * Dynamic AI Usage Ledger override. Production default: Postgres-backed
+   * durable usage store; development/test: the bounded in-memory double.
+   * Tests inject a deterministic store (or reuse the default in-memory one).
+   */
+  aiUsageStore?: AiUsageStore;
+  /**
+   * BUDGET PROVENANCE MIGRATION (A-4 / §36) — how an existing record's
+   * `monthlyTokenBudget` is interpreted:
+   *
+   *  • `INFER` (default) — a record carrying the historical 1,000,000 default
+   *    and NO explicit source is reported as PLATFORM_ALLOWANCE (never a user
+   *    budget). This is the safe default: it can only ever make VedMoulya
+   *    LESS likely to claim a balance the user never set.
+   *  • `USER_ASSUMED`   — treat every stored limit as a user budget. This is
+   *    the old (misleading) behaviour and is provided only so an operator can
+   *    reproduce the previous screen during an investigation.
+   *
+   * No stored preference is MUTATED by the migration: reading is what changed,
+   * so rolling back is a config change, not a data migration.
+   */
+  budgetProvenanceMode?: 'INFER' | 'USER_ASSUMED';
   /**
    * Execution run store override (EPIC-014). Production default: Postgres
    * store (in-memory in dev/test — same convention as the capability plan
@@ -724,6 +750,30 @@ export class ApiApplicationService {
   /** The correlated execution-trace spine (also the engine TelemetryPort). */
   readonly traceProvider: ExecutionTraceProvider;
   /**
+   * SPRINT — Dynamic AI Usage Ledger. The ONE canonical, DURABLE AI execution
+   * accounting spine: every real provider execution writes one idempotent
+   * usage event (Ask / Mission / Brain / Local), aggregated by the provider
+   * usage board. Local AI events are observable but EXCLUDED from cloud totals.
+   */
+  readonly aiUsage: AiUsageRecorder;
+  /**
+   * SPRINT — AI Control Center: the honest usage/quota/budget board the AI
+   * Providers experience renders. Pure composition over the durable ledger +
+   * provider registry — never invents a balance, quota or remaining figure.
+   */
+  readonly aiControlCenter: AiControlCenterService;
+  /**
+   * SPRINT (Phase 1) — REAL runtime execution evidence per provider.
+   *
+   * This is the EXISTING `ExecutionHealthService` the AI runtime already reports
+   * every execution outcome to (via `healthFeedback`). It is promoted to a field
+   * (it was a constructor-local const) so the AI Control Center can derive
+   * readiness from what actually happened at runtime instead of from
+   * `configured && enabled`. It is NOT a second health system — the same
+   * instance already feeds the routing advisor and the provider health store.
+   */
+  readonly executionHealth: ExecutionHealthService;
+  /**
    * ASK VEDMOULYA — the AI runtime for ONE authenticated user. Resolves the
    * deployment orchestrator when no user credential can be stored, otherwise a
    * cached per-user orchestrator (platform providers + the owner's own
@@ -891,6 +941,12 @@ export class ApiApplicationService {
     // data (e.g. the factory goal attribute) can never leak secrets.
     this.traceProvider = new ExecutionTraceProvider({ redact: redactSecrets });
     const telemetry: TelemetryPort = this.traceProvider;
+    // ── Dynamic AI Usage Ledger (canonical accounting spine) ──────────────
+    //    DURABLE production dependency (Postgres) replacing the reliance on the
+    //    in-memory trace store for billing/usage/accounting. Every real
+    //    provider execution is recorded here exactly once (idempotent eventId);
+    //    the trace-store CostLedger remains the observability/anomaly view.
+    this.aiUsage = new AiUsageRecorder(options.aiUsageStore ?? createProductionAiUsageStore());
     // Owner-scoped boundary trace for direct AI requests (Ask VedMoulya). This
     // is the SAME trace spine every engine uses — one trace per AI request,
     // owned by the authenticated user; the AI runtime's spans parent under it.
@@ -1145,7 +1201,7 @@ export class ApiApplicationService {
     //    (immediate) AND throttled into the existing provider health store
     //    (durable, honest registry state). Never changes configuration, never
     //    disables a provider, never touches credentials.
-    const executionHealth = new ExecutionHealthService({
+    this.executionHealth = new ExecutionHealthService({
       persist: async (providerId, sample): Promise<void> => {
         // Persistence is best-effort: a missing provider (e.g. a runtime
         // adapter without a registry entry in hermetic tests) is silently
@@ -1167,7 +1223,7 @@ export class ApiApplicationService {
         this.providers,
         intelligenceStore,
         routingEvidence,
-        executionHealth,
+        this.executionHealth,
       ),
       createExecutionStrategyPort(this.executionStrategy),
       this.exchangeRate,
@@ -1189,11 +1245,11 @@ export class ApiApplicationService {
         this.providers,
         intelligenceStore,
         routingEvidence,
-        executionHealth,
+        this.executionHealth,
       ),
       executionStrategy: createExecutionStrategyPort(this.executionStrategy),
       rag: createRagRetrievalPort(this.rag),
-      healthFeedback: executionHealth,
+      healthFeedback: this.executionHealth,
     };
     this.ai.configureIntelligence(this.aiIntelligence);
 
@@ -1592,6 +1648,13 @@ export class ApiApplicationService {
         },
       },
     );
+
+    // ── SPRINT — AI Control Center (honest usage/quota/budget board) ────────
+    //    Pure composition over the durable usage ledger created above plus the
+    //    provider registry rows. It is the ONLY place the AI Providers
+    //    experience gets its numbers from, so the UI can never invent a
+    //    balance, a remaining-token figure or a cost.
+    this.aiControlCenter = new AiControlCenterService(this.aiUsage, this.executionHealth);
 
     // ── G9 — Provider Setup Orchestrator (one-click configuration) ────────
     //    Composes the SAME connection tester, encrypted credential service and
@@ -2546,10 +2609,41 @@ export class ApiApplicationService {
    */
   private createTraceBackedAiObservability(): AIObservability {
     return new AIObservability({
-      exporter: new OtelAIObservabilityExporter(new TraceProviderOtelBridge(this.traceProvider)),
+      exporter: new OtelAIObservabilityExporter(
+        new TraceProviderOtelBridge(this.traceProvider, this.onAiSpanEnd),
+      ),
       emitUserTenantCorrelation: true,
     });
   }
+
+  /**
+   * The canonical usage write hook: every completed `ai.provider_execution` span
+   * (Ask / Mission / Brain / loop / local backfill) is recorded ONCE into the
+   * durable AI usage ledger. Bound as a field so the observability factory can
+   * reuse the same closure without re-deriving state.
+   */
+  private readonly onAiSpanEnd = (info: {
+    name: string;
+    traceId: string;
+    spanId: string;
+  }): void => {
+    if (info.name !== 'ai.provider_execution') return;
+    const trace = this.traceProvider.getTrace(info.traceId);
+    if (trace === undefined) return;
+    const span = trace.spans.find((s) => s.spanId === info.spanId);
+    if (span === undefined) return;
+    void this.aiUsage
+      .recordFromSpan({
+        traceId: trace.traceId,
+        spanId: span.spanId,
+        attributes: span.attributes,
+        ...(span.durationMs !== undefined ? { durationMs: span.durationMs } : {}),
+        ...(trace.userId !== undefined ? { userId: trace.userId } : {}),
+        traceName: trace.name,
+        startedAt: span.startedAt,
+      })
+      .catch(() => undefined);
+  };
 
   /**
    * BLD-025 §1 — Discover-and-recover: fire-and-forget recovery of active

@@ -35,6 +35,13 @@ export interface WorkflowLimits {
   maxWorkflowDepth: number;
   maxWorkflowTasks: number;
   maxProviderCalls: number;
+  /**
+   * Hard ceiling on the TOTAL tokens a workflow may consume across every
+   * parent, child and synthesis call. `maxProviderCalls` bounds HOW MANY
+   * calls happen; this bounds HOW MUCH they cost in tokens, so a workflow
+   * cannot burn an unbounded budget through a few very large responses.
+   */
+  maxTotalTokens: number;
   maxWorkflowCostUsd: number;
   maxWorkflowTimeMs: number;
 }
@@ -47,6 +54,7 @@ export const DEFAULT_WORKFLOW_LIMITS: WorkflowLimits = {
   maxWorkflowDepth: 8,
   maxWorkflowTasks: 24,
   maxProviderCalls: 64,
+  maxTotalTokens: 500_000,
   maxWorkflowCostUsd: 5,
   maxWorkflowTimeMs: 600_000,
 };
@@ -85,6 +93,16 @@ export function planWithinBounds(
       exceeded: 'calls',
     };
   }
+  if (
+    plan.estimatedTotalTokens !== undefined &&
+    plan.estimatedTotalTokens > limits.maxTotalTokens
+  ) {
+    return {
+      allowed: false,
+      reason: `estimated tokens ${plan.estimatedTotalTokens} exceed ${limits.maxTotalTokens}.`,
+      exceeded: 'tokens',
+    };
+  }
   if (plan.estimatedCostUsd !== undefined && plan.estimatedCostUsd > limits.maxWorkflowCostUsd) {
     return {
       allowed: false,
@@ -115,6 +133,8 @@ export class WorkflowFactory {
     steps: Array<{ label: string; capability?: string; roleName?: string }>;
     /** Estimated USD — only when evidence exists. */
     estimatedCostUsd?: number;
+    /** Estimated total tokens — only when evidence exists. */
+    estimatedTotalTokens?: number;
     estimatedTimeMs?: number;
     limits?: WorkflowLimits;
   }): WorkflowResult<WorkflowDecomposition> {
@@ -142,6 +162,7 @@ export class WorkflowFactory {
       depth,
       maxParallelFanout,
       estimatedProviderCalls,
+      estimatedTotalTokens: input.estimatedTotalTokens,
       estimatedCostUsd: input.estimatedCostUsd,
       estimatedTimeMs: input.estimatedTimeMs,
     };

@@ -56,7 +56,7 @@ describe('checkLocalAgent', () => {
   });
 
   it('probes the candidate list in order', async () => {
-    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse(HEALTH))) as unknown as typeof fetch;
+    const fetchFn = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(HEALTH)));
     await checkLocalAgent({ fetchFn });
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(String(fetchFn.mock.calls[0]?.[0])).toContain(LOCAL_AGENT_URL_CANDIDATES[0] ?? '');
@@ -147,7 +147,7 @@ function ndjsonResponse(lines: string[], status = 200): Response {
 
 describe('streamLocalGeneration', () => {
   it('streams chunks incrementally and reassembles the reply', async () => {
-    const fetchFn = vi.fn(() =>
+    const fetchFn = vi.fn<typeof fetch>(() =>
       Promise.resolve(
         ndjsonResponse([
           '{"content":"he","done":false}',
@@ -155,7 +155,7 @@ describe('streamLocalGeneration', () => {
           '{"content":"","done":true}',
         ]),
       ),
-    ) as unknown as typeof fetch;
+    );
 
     const chunks: string[] = [];
     const result = await streamLocalGeneration(

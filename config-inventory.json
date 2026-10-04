@@ -1,0 +1,6070 @@
+{
+  "summary": {
+    "generatedFrom": "git ls-files",
+    "codeFilesScanned": 2837,
+    "totalDistinctVariables": 201,
+    "productionCodeVariables": 137,
+    "testOnlyVariables": 31,
+    "ciOnlyVariables": 33,
+    "secretShapedVariables": 19,
+    "classificationCounts": {
+      "OPTIONAL_DEVELOPMENT": 125,
+      "TEST_ONLY": 30,
+      "OPTIONAL_PRODUCTION": 6,
+      "REQUIRED_PRODUCTION": 4,
+      "CI_ONLY": 32,
+      "DEPRECATED": 4
+    },
+    "undocumentedProductionVariables": 68,
+    "requiredProductionVariables": [
+      "AUTH_JWT_SECRET",
+      "DATABASE_URL",
+      "IDENTITY_DATABASE_URL",
+      "REDIS_URL"
+    ]
+  },
+  "variables": [
+    {
+      "name": "A11Y_ALLOW_UI_ONLY_READINESS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "apps/web/playwright.config.ts",
+          "count": 2,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/playwright.config.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "A11Y_PORT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "apps/web/playwright.a11y.config.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "apps/web/playwright.config.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/playwright.a11y.config.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_ANTHROPIC_API_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 4,
+      "readInCiOrScripts": 0,
+      "totalReads": 5,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/LocalAiTelemetry.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ObservabilityWiring.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionEngineWiring.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "AI provider credential",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_CREDENTIAL_ENCRYPTION_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/infrastructure/ProductionRepositories.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_DEEPSEEK_API_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 5,
+      "readInCiOrScripts": 1,
+      "totalReads": 41,
+      "locations": [
+        {
+          "file": "apps/web/src/auth/__tests__/auth-app.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 12,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/runtime-verification-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/__tests__/index.test.ts",
+          "count": 18,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/orchestrator/src/providers/__tests__/OllamaProvider.test.ts",
+          "count": 4,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider credential",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_DEFAULT_PROVIDER",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 3,
+      "readInTests": 4,
+      "readInCiOrScripts": 1,
+      "totalReads": 38,
+      "locations": [
+        {
+          "file": "apps/web/src/auth/__tests__/auth-app.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 28,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/runtime-verification-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/routers/ProvidersRouter.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_PRODUCTION",
+      "requiredCondition": "required in production when AI execution is enabled",
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_ENABLE_MOCK",
+      "secret": false,
+      "kinds": ["env()", "process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 2,
+      "readInCiOrScripts": 2,
+      "totalReads": 18,
+      "locations": [
+        {
+          "file": "scripts/production-config-check.ts",
+          "count": 3,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/runtime-verification-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/orchestrator/src/__tests__/index.test.ts",
+          "count": 9,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 2,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_EXECUTION_MAX_COST_USD",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/GatewayPorts.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_EXECUTION_MAX_ITERATIONS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/GatewayPorts.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_EXECUTION_MAX_LATENCY_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/GatewayPorts.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_EXECUTION_MAX_TOKENS",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/GatewayPorts.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_GOOGLE_API_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 7,
+      "readInCiOrScripts": 0,
+      "totalReads": 35,
+      "locations": [
+        {
+          "file": "apps/web/src/auth/__tests__/auth-app.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/LocalAiTelemetry.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ObservabilityWiring.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionEngineWiring.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ProvidersRouterConnect.test.ts",
+          "count": 7,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/__tests__/index.test.ts",
+          "count": 18,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/orchestrator/src/providers/__tests__/OllamaProvider.test.ts",
+          "count": 4,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider credential",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_MAX_INPUT_TOKENS",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 7,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 6,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_MAX_OUTPUT_TOKENS",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 6,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 5,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_OLLAMA_BASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 12,
+      "totalReads": 13,
+      "locations": [
+        {
+          "file": "scripts/bld023-live-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-crash-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failure-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failures.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-product-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-lease-racer.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-recovery-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-restart-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_OLLAMA_MODEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 12,
+      "totalReads": 13,
+      "locations": [
+        {
+          "file": "scripts/bld023-live-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-crash-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failure-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failures.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-product-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-lease-racer.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-recovery-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-restart-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_OPENAI_API_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 8,
+      "readInCiOrScripts": 2,
+      "totalReads": 68,
+      "locations": [
+        {
+          "file": "apps/web/src/auth/__tests__/auth-app.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 32,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/integration-provider.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/runtime-verification-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/LocalAiTelemetry.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ObservabilityWiring.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 6,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionEngineWiring.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/__tests__/index.test.ts",
+          "count": 18,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/orchestrator/src/providers/__tests__/OllamaProvider.test.ts",
+          "count": 4,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider credential",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_OPENROUTER_API_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider credential",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_PROMPT_CACHE_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_PROVIDER_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 7,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 6,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_ROUTING_STRATEGY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 4,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_RUNTIME_LEGACY_RAW_FETCH",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 8,
+      "locations": [
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/orchestrator/src/__tests__/index.test.ts",
+          "count": 6,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_TOOL_ALLOWLIST",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 10,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 8,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_WORLD_CADENCE_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 11,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/scheduler-cadence.test.ts",
+          "count": 10,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/observability/scheduler-cadence.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_WORLD_CADENCE_INTERVAL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 5,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/scheduler-cadence.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/observability/scheduler-cadence.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_WORLD_CADENCE_PROACTIVE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/scheduler-cadence.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/observability/scheduler-cadence.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AI_WORLD_CADENCE_REFRESH_INTELLIGENCE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 6,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/scheduler-cadence.test.ts",
+          "count": 5,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/observability/scheduler-cadence.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider / execution configuration",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "API_CORS_ORIGIN",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 13,
+      "locations": [
+        {
+          "file": "services/memory/src/presentation/__tests__/MemoryController.test.ts",
+          "count": 13,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "API_HOST",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "API_PORT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "APP_NAME",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "APP_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/identity/src/auth/VerificationEmailSender.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "APP_VERSION",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 3,
+      "readInTests": 2,
+      "readInCiOrScripts": 0,
+      "totalReads": 8,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/observability/__tests__/ObservabilityExport.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/observability/otel.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/observability/startup.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AUTH_BCRYPT_ROUNDS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AUTH_JWT_EXPIRES_IN",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AUTH_JWT_SECRET",
+      "secret": true,
+      "kinds": ["env()", "process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 5,
+      "readInCiOrScripts": 17,
+      "totalReads": 58,
+      "locations": [
+        {
+          "file": "apps/web/e2e/helpers/auth.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 12,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 6,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/_e2e-token-probe.mjs",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/accuracy-evaluate.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/ai-smoke.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/app-factory-benchmark.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/brain-benchmark.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/continuous-intelligence-benchmark.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/e2e-session.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/loop-benchmark.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/planning-benchmark.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/planning-demo.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/production-benchmark.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/production-config-check.ts",
+          "count": 3,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/rag-calibrate.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/rag-evaluate.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/realworld-matrix.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/requirements-benchmark.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/token-benchmark.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "services/identity/__tests__/TokenServiceExtended.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "REQUIRED_PRODUCTION",
+      "requiredCondition": "required in every environment; strength enforced",
+      "purpose": "authentication signing secret",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "AUTH_REFRESH_EXPIRES_IN",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "BASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "apps/web/e2e/a11y.spec.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "BUILD_EXPORT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "apps/web/next.config.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/next.config.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "BUILD_TIMESTAMP",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 5,
+      "locations": [
+        {
+          "file": "packages/core/src/observability/__tests__/RuntimeMetrics.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/observability/runtime.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/observability/runtime.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "CI",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 8,
+      "locations": [
+        {
+          "file": "apps/web/playwright.a11y.config.ts",
+          "count": 3,
+          "scope": "production"
+        },
+        {
+          "file": "apps/web/playwright.config.ts",
+          "count": 5,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/playwright.a11y.config.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "COVERAGE_GATE_BATCH_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/coverage-gate-parallel.mjs",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "COVERAGE_GATE_CONCURRENCY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/coverage-gate-parallel.mjs",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "COVERAGE_GATE_FILTER",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/coverage-gate.mjs",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DATABASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 10,
+      "readInTests": 3,
+      "readInCiOrScripts": 3,
+      "totalReads": 19,
+      "locations": [
+        {
+          "file": "scripts/lib/probes.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/rag-live-verify.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/test-neon-connectivity.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionRepositories.ts",
+          "count": 4,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/content-agency/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/memory/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "REQUIRED_PRODUCTION",
+      "requiredCondition": null,
+      "purpose": "PostgreSQL connection string",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DB_CONNECT_TIMEOUT_S",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "packages/core/src/database/__tests__/DatabaseManager.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DB_POOL_MAX",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 6,
+      "readInTests": 5,
+      "readInCiOrScripts": 0,
+      "totalReads": 16,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/database/__tests__/DatabaseManager.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/content-agency/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/execution/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/memory/src/infrastructure/__tests__/DatabaseConnection.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "services/memory/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "bounded PostgreSQL connection-pool budget",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DB_POOL_MIN",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 6,
+      "readInTests": 3,
+      "readInCiOrScripts": 0,
+      "totalReads": 9,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/database/__tests__/DatabaseManager.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/content-agency/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/memory/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "bounded PostgreSQL connection-pool budget",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DB_TIMEOUT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 3,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 4,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/content-agency/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/DatabaseConnection.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_AI_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_AI_QUALITY_TIER",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_AI_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_CACHE_MAX_SIZE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_CACHE_TTL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_DATABASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "PostgreSQL connection string",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_DB_POOL_MAX",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_DEFAULT_CONFIDENCE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_DEFAULT_PRIORITY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_EXPLANATION_FORMAT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_INCLUDE_ALTERNATIVES",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_KNOWLEDGE_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_KNOWLEDGE_RETRY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_KNOWLEDGE_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_MAX_ALTERNATIVES",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_MEMORY_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_MEMORY_RETRY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_MEMORY_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "DECISION_SERVICE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/integration/DecisionEngineClient.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/integration/DecisionEngineClient.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EI_DATABASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/seed-ei.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "DEPRECATED",
+      "requiredCondition": null,
+      "purpose": "PostgreSQL connection string",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EI_POOL_MAX",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "packages/core/src/database/__tests__/DatabaseManager.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "DEPRECATED",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EMAIL_DELIVERY_MODE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/identity/__tests__/VerificationEmailSenderFailClosed.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/identity/src/auth/VerificationEmailSender.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EMAIL_FROM",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/identity/src/auth/VerificationEmailSender.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EMAIL_FROM_NAME",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/identity/src/auth/VerificationEmailSender.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_AI_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/integration/AIOrchestratorClient.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_AI_QUALITY_TIER",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_AI_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_ALLOW_PARALLEL_TASKS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_AUTO_RECOVERY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_CACHE_MAX_SIZE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/infrastructure/cache/ExecutionCache.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/infrastructure/cache/ExecutionCache.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_CACHE_TTL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/infrastructure/cache/ExecutionCache.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/infrastructure/cache/ExecutionCache.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_DATABASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 12,
+      "totalReads": 13,
+      "locations": [
+        {
+          "file": "scripts/bld023-live-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-crash-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failure-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failures.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-product-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-lease-racer.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-recovery-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-restart-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/execution/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "PostgreSQL connection string",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_DB_POOL_MAX",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_DECISION_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/integration/DecisionEngineClient.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/integration/DecisionEngineClient.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_DEFAULT_PLANNING_LEVEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_DEFAULT_TASK_DURATION",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_KNOWLEDGE_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/integration/KnowledgeGraphClient.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_KNOWLEDGE_RETRY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_KNOWLEDGE_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_MAX_MISSIONS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_MAX_RETRIES",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_MAX_TASKS_PER_DAY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_MAX_TASKS_PER_MISSION",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_MEMORY_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/integration/MemoryEngineClient.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_MEMORY_RETRY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_MEMORY_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "EXECUTION_RETRY_DELAY_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/execution/src/config/ExecutionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FF_AI_ASSISTANT_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 2,
+      "readInCiOrScripts": 0,
+      "totalReads": 30,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 28,
+          "scope": "test"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FF_MARKETPLACE_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 3,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FF_SOCIAL_LOGIN_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 3,
+      "readInCiOrScripts": 0,
+      "totalReads": 10,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL04_DB_FILE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/mission-runtime/src/__tests__/final-04-restart-worker.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL04_INTERRUPTED_AT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/mission-runtime/src/__tests__/final-04-restart-worker.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL04_MISSION_ID",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/mission-runtime/src/__tests__/final-04-restart-worker.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL04_PHASE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/mission-runtime/src/__tests__/final-04-restart-worker.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL04_VERIFIED_AT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/mission-runtime/src/__tests__/final-04-restart-worker.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL04_WORKSPACE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/mission-runtime/src/__tests__/final-04-restart-worker.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_CRASH_AT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_DEAD_PORT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-failures.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_GATE_PORT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_LEASE_TTL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 4,
+      "totalReads": 4,
+      "locations": [
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failure-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failures.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_MISSION_ID",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_MODE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 2,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "scripts/live-final05-failure-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_OBJECTIVES",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 2,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_RECONCILE_INTERVAL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_RECOVER_TIMEOUT_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_TAG",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 2,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_USER",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 3,
+      "totalReads": 3,
+      "locations": [
+        {
+          "file": "scripts/live-final05-failure-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_VERIFY_HOLD_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "FINAL05_WATCHDOG_INTERVAL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "GIT_SHA",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 13,
+      "locations": [
+        {
+          "file": "packages/core/src/observability/__tests__/RuntimeMetrics.test.ts",
+          "count": 12,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/observability/runtime.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/observability/runtime.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "GITHUB_SHA",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 9,
+      "locations": [
+        {
+          "file": "packages/core/src/observability/__tests__/RuntimeMetrics.test.ts",
+          "count": 8,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/observability/runtime.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/observability/runtime.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "GOOGLE_CLIENT_ID",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 3,
+      "readInCiOrScripts": 0,
+      "totalReads": 11,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/__tests__/GoogleProvider.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/src/auth/GoogleProvider.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_PRODUCTION",
+      "requiredCondition": "required when FF_SOCIAL_LOGIN_ENABLED=true",
+      "purpose": "read by services/identity/src/auth/GoogleProvider.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "GOOGLE_CLIENT_SECRET",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 2,
+      "readInCiOrScripts": 0,
+      "totalReads": 8,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/src/auth/GoogleProvider.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_PRODUCTION",
+      "requiredCondition": "required when FF_SOCIAL_LOGIN_ENABLED=true",
+      "purpose": "read by services/identity/src/auth/GoogleProvider.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "GOOGLE_REDIRECT_URI",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 5,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/identity/src/auth/GoogleProvider.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_PRODUCTION",
+      "requiredCondition": "required (external URL) when FF_SOCIAL_LOGIN_ENABLED=true",
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "IDENTITY_DATABASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 3,
+      "readInTests": 3,
+      "readInCiOrScripts": 1,
+      "totalReads": 32,
+      "locations": [
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 16,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/seed-ei.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 8,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionRepositories.ts",
+          "count": 4,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "REQUIRED_PRODUCTION",
+      "requiredCondition": null,
+      "purpose": "PostgreSQL connection string",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "KNOWLEDGE_DATABASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/knowledge/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "PostgreSQL connection string",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "KNOWLEDGE_SERVICE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 3,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 3,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/integration/KnowledgeGraphClient.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "LINT_CONCURRENCY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/lint.mjs",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "LINT_HEAP_MB",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/lint.mjs",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "LM_STUDIO_BASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/providers/src/infrastructure/LocalModelDiscovery.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/providers/src/infrastructure/LocalModelDiscovery.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "LOCAL_OPENAI_BASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/providers/src/infrastructure/LocalModelDiscovery.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/providers/src/infrastructure/LocalModelDiscovery.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "LOG_LEVEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 2,
+      "readInCiOrScripts": 3,
+      "totalReads": 6,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failures.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MEMORY_SERVICE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 3,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 3,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/integration/MemoryEngineClient.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_LIVE_DATABASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 12,
+      "totalReads": 12,
+      "locations": [
+        {
+          "file": "scripts/bld023-live-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-crash-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failure-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failures.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final06-product-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-lease-racer.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-recovery-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-restart-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "PostgreSQL connection string",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_LIVE_MISSION_ID",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-lease-racer.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_LIVE_RACE_LABEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-lease-racer.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_LIVE_RACE_ROUNDS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-restart-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_LIVE_WORKSPACE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 6,
+      "totalReads": 6,
+      "locations": [
+        {
+          "file": "scripts/live-crash-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-failure-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-gate-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-final05-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-lease-racer.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/live-recovery-worker.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_WATCHDOG_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/observability/mission-watchdog.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/observability/mission-watchdog.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_WATCHDOG_INTERVAL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/observability/mission-watchdog.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/observability/mission-watchdog.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_WATCHDOG_MAX_INTERVAL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/observability/mission-watchdog.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/observability/mission-watchdog.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "MISSION_WORKSPACE_ROOT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 7,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/services/MissionServiceBranches.test.ts",
+          "count": 5,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/services/MissionService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "NEON_DATABASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "DEPRECATED",
+      "requiredCondition": null,
+      "purpose": "PostgreSQL connection string",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "NEXT_PUBLIC_GATEWAY_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "apps/web/src/components/Providers.tsx",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/src/components/Providers.tsx",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "NEXT_PUBLIC_IDENTITY_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "apps/web/src/auth/config.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/src/auth/config.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "NEXT_PUBLIC_VEDMOULYA_LOCAL_AGENT_PORT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 6,
+      "locations": [
+        {
+          "file": "apps/web/src/app/providers/__tests__/local-ai-failures.test.ts",
+          "count": 5,
+          "scope": "test"
+        },
+        {
+          "file": "apps/web/src/app/providers/local-ai-agent.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/src/app/providers/local-ai-agent.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "NODE_ENV",
+      "secret": false,
+      "kinds": ["env()", "process.env"],
+      "readInProductionCode": 27,
+      "readInTests": 14,
+      "readInCiOrScripts": 18,
+      "totalReads": 162,
+      "locations": [
+        {
+          "file": "apps/web/next.config.ts",
+          "count": 2,
+          "scope": "production"
+        },
+        {
+          "file": "apps/web/scripts/run-next.mjs",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "apps/web/src/app/health/__tests__/health-routes.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "apps/web/src/app/health/ready/route.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "apps/web/src/components/PWAProvider.tsx",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "apps/web/src/lib/auth-app.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "apps/web/src/lib/server-env.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/bootstrap/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 8,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/constants/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 40,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/database/DatabaseManager.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "packages/voice/src/application/SpeechApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/voice/src/application/VoiceAssistantService.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "scripts/accuracy-evaluate.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/ai-smoke.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/app-factory-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/brain-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/continuous-intelligence-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/lib/probes.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/load-env.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/loop-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/planning-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/planning-demo.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/production-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/production-config-check.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/rag-calibrate.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/rag-evaluate.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/realworld-matrix.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/requirements-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/token-benchmark.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/GatewayRouterBranches.test.ts",
+          "count": 7,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/PersistenceStores.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 10,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/router-registry.test.ts",
+          "count": 6,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/PersistenceStores.ts",
+          "count": 2,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionRepositories.ts",
+          "count": 8,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/observability/startup.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/routers/ProvidersRouter.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/routers/RagRouter.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 2,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/services/InfrastructureHealthProbe.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/services/RouterRegistry.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/decision/src/infrastructure/persistence/__tests__/DatabaseConnection.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/identity/__tests__/AuthService.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/__tests__/GoogleProvider.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/__tests__/VerificationEmailSenderFailClosed.test.ts",
+          "count": 8,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/src/auth/AuthService.ts",
+          "count": 2,
+          "scope": "production"
+        },
+        {
+          "file": "services/identity/src/auth/GoogleProvider.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 3,
+          "scope": "production"
+        },
+        {
+          "file": "services/identity/src/infrastructure/persistence/VerificationTokenStore.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/memory/src/presentation/__tests__/MemoryController.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/__tests__/index.test.ts",
+          "count": 8,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 2,
+          "scope": "production"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "runtime mode selector (development/test/staging/production)",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "NODE_OPTIONS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/lint.mjs",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OLLAMA_BASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/providers/src/infrastructure/LocalModelDiscovery.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/providers/src/infrastructure/LocalModelDiscovery.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OLLAMA_MODEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-restart-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OLLAMA_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-restart-acceptance.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 6,
+      "readInCiOrScripts": 4,
+      "totalReads": 44,
+      "locations": [
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 8,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/ai-critique-verify.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/ai-live-smoke.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/ai-production-verify.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/integration-provider.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/LocalAiTelemetry.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ObservabilityWiring.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionEngineWiring.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/__tests__/index.test.ts",
+          "count": 24,
+          "scope": "test"
+        },
+        {
+          "file": "services/orchestrator/src/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/orchestrator/src/providers/__tests__/OllamaProvider.test.ts",
+          "count": 4,
+          "scope": "test"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider credential",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OPENAI_PRODUCTION_MODEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 2,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "scripts/ai-critique-verify.ts",
+          "count": 1,
+          "scope": "ci"
+        },
+        {
+          "file": "scripts/ai-production-verify.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OPENAI_SMOKE_MODEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/ai-live-smoke.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OPS_OPERATOR_IDS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/observability/OpsAudit.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/observability/OpsAudit.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "ORCHESTRATOR_SERVICE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 3,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 3,
+      "locations": [
+        {
+          "file": "services/decision/src/config/DecisionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/config/ExecutionConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/execution/src/integration/AIOrchestratorClient.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/decision/src/config/DecisionConfig.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OS_HEALTH_INTERVAL_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 6,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/os-health-scheduler.test.ts",
+          "count": 5,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/observability/os-health-scheduler.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/observability/os-health-scheduler.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OS_HEALTH_SCHEDULER_ENABLED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 6,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/os-health-scheduler.test.ts",
+          "count": 5,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/observability/os-health-scheduler.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/observability/os-health-scheduler.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+      "secret": false,
+      "kinds": ["env()", "process.env"],
+      "readInProductionCode": 4,
+      "readInTests": 2,
+      "readInCiOrScripts": 1,
+      "totalReads": 11,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/observability/__tests__/ObservabilityExport.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/observability/otel.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "scripts/production-config-check.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/ProductionAIConfig.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/ProductionAIConfig.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/observability/startup.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "OTEL_SERVICE_NAME",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 3,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 7,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "packages/core/src/observability/__tests__/ObservabilityExport.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/observability/otel.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/api/src/observability/startup.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "P",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "POSTGRES_TEST_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 3,
+      "readInCiOrScripts": 0,
+      "totalReads": 5,
+      "locations": [
+        {
+          "file": "packages/os-intelligence/src/infrastructure/__tests__/PostgresOSRepository.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/ConnectionBudgetConcurrency.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/__tests__/PersistenceStores.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "POSTGRES_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "DEPRECATED",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "RAG_ROLLBACK_VERIFY",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/rag-live-verify.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "RAG_VECTOR_DIMENSION",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/rag-live-verify.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "RATE_LIMIT_AUTH_MAX",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 4,
+      "locations": [
+        {
+          "file": "apps/web/src/lib/auth-rate-limit.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "apps/web/src/lib/auth-rate-limit.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/src/lib/auth-rate-limit.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "RATE_LIMIT_AUTH_WINDOW_MS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 4,
+      "locations": [
+        {
+          "file": "apps/web/src/lib/auth-rate-limit.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "apps/web/src/lib/auth-rate-limit.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by apps/web/src/lib/auth-rate-limit.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "RATE_LIMIT_BACKEND",
+      "secret": false,
+      "kinds": ["env()", "process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 4,
+      "locations": [
+        {
+          "file": "scripts/production-config-check.ts",
+          "count": 3,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/middleware/rate-limit.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/middleware/rate-limit.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "REDIS_TTL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "REDIS_URL",
+      "secret": false,
+      "kinds": ["env()", "process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 2,
+      "readInCiOrScripts": 1,
+      "totalReads": 17,
+      "locations": [
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 12,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/production-config-check.ts",
+          "count": 3,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/middleware/rate-limit.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "tests/vitest.setup.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "REQUIRED_PRODUCTION",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/middleware/rate-limit.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "SMTP_FROM",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 7,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 5,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "SMTP_HOST",
+      "secret": false,
+      "kinds": ["env()", "process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 3,
+      "readInCiOrScripts": 1,
+      "totalReads": 11,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "scripts/production-config-check.ts",
+          "count": 2,
+          "scope": "ci"
+        },
+        {
+          "file": "services/identity/__tests__/VerificationEmailSenderFailClosed.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/identity/src/auth/VerificationEmailSender.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "SMTP_PASS",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 2,
+      "readInCiOrScripts": 0,
+      "totalReads": 8,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_PRODUCTION",
+      "requiredCondition": "required when SMTP_HOST is configured",
+      "purpose": "read by services/identity/src/auth/VerificationEmailSender.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "SMTP_PORT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 2,
+      "readInTests": 2,
+      "readInCiOrScripts": 0,
+      "totalReads": 5,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/config/index.ts",
+          "count": 1,
+          "scope": "production"
+        },
+        {
+          "file": "services/identity/__tests__/VerificationEmailSenderFailClosed.test.ts",
+          "count": 1,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/config/index.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "SMTP_USER",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 2,
+      "readInCiOrScripts": 0,
+      "totalReads": 8,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "services/identity/src/auth/VerificationEmailSender.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_PRODUCTION",
+      "requiredCondition": "required when SMTP_HOST is configured",
+      "purpose": "read by services/identity/src/auth/VerificationEmailSender.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "T",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 0,
+      "readInCiOrScripts": 1,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "scripts/live-final05-certification.ts",
+          "count": 1,
+          "scope": "ci"
+        }
+      ],
+      "classification": "CI_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_BOOL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 2,
+      "readInCiOrScripts": 0,
+      "totalReads": 6,
+      "locations": [
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 2,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 4,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_DB_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 12,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 12,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_NUM",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "packages/core/src/core.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_OPT_SECRET",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 5,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 5,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_OPTIONAL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_PORT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 2,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_PROD_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 11,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 11,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_REDIS_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_REQUIRED",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 7,
+      "locations": [
+        {
+          "file": "packages/core/src/env/__tests__/index.test.ts",
+          "count": 7,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_REQUIRED_SECRET",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 5,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 5,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_SECRET",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 3,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 3,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "TEST_STAGING_SECRET",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 0,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "packages/core/src/config/__tests__/ConfigBranchCoverage.test.ts",
+          "count": 1,
+          "scope": "test"
+        }
+      ],
+      "classification": "TEST_ONLY",
+      "requiredCondition": null,
+      "purpose": "read by repository code",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VERCEL_ENV",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VERCEL_GIT_COMMIT_SHA",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 9,
+      "locations": [
+        {
+          "file": "packages/core/src/observability/__tests__/RuntimeMetrics.test.ts",
+          "count": 8,
+          "scope": "test"
+        },
+        {
+          "file": "packages/core/src/observability/runtime.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by packages/core/src/observability/runtime.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VITEST",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_ENABLE_MOCK",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 2,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 2,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_STT_API_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider credential",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_STT_BASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_STT_MODEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_TTS_API_KEY",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "AI provider credential",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_TTS_BASE_URL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_TTS_FORMAT",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_TTS_MODEL",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "VOICE_TTS_VOICE",
+      "secret": false,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 0,
+      "readInCiOrScripts": 0,
+      "totalReads": 1,
+      "locations": [
+        {
+          "file": "services/api/src/services/ApiApplicationService.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/services/ApiApplicationService.ts",
+      "documentedInExampleFile": true,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "WORLD_SIGNAL_BASE_URL",
+      "secret": false,
+      "kinds": ["env()", "process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 1,
+      "totalReads": 8,
+      "locations": [
+        {
+          "file": "scripts/production-config-check.ts",
+          "count": 3,
+          "scope": "ci"
+        },
+        {
+          "file": "services/api/src/__tests__/WorldBridgePorts.test.ts",
+          "count": 4,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/WorldBridgePorts.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/infrastructure/WorldBridgePorts.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    },
+    {
+      "name": "WORLD_SIGNAL_TOKEN",
+      "secret": true,
+      "kinds": ["process.env"],
+      "readInProductionCode": 1,
+      "readInTests": 1,
+      "readInCiOrScripts": 0,
+      "totalReads": 4,
+      "locations": [
+        {
+          "file": "services/api/src/__tests__/WorldBridgePorts.test.ts",
+          "count": 3,
+          "scope": "test"
+        },
+        {
+          "file": "services/api/src/infrastructure/WorldBridgePorts.ts",
+          "count": 1,
+          "scope": "production"
+        }
+      ],
+      "classification": "OPTIONAL_DEVELOPMENT",
+      "requiredCondition": null,
+      "purpose": "read by services/api/src/infrastructure/WorldBridgePorts.ts",
+      "documentedInExampleFile": false,
+      "default": null,
+      "defaultSource": null
+    }
+  ]
+}

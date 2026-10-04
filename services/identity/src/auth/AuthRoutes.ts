@@ -105,7 +105,18 @@ export function createAuthRouter(authService: AuthService): Hono {
         );
       }
 
-      return c.json({ success: true, data: result.session }, 201);
+      // Production/staging return `verificationRequired: true` with NO session
+      // (the account must verify its email before it can sign in). The route
+      // MUST forward that flag: returning `result.session` alone collapses the
+      // envelope to `{ success: true }` with `data: undefined`, and the web
+      // client then throws instead of showing the email-verification state.
+      return c.json(
+        {
+          success: true,
+          data: result.verificationRequired ? { verificationRequired: true } : result.session,
+        },
+        201,
+      );
     } catch (error) {
       return mapErrorToResponse(error, c);
     }

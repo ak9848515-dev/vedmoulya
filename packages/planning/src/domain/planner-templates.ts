@@ -377,6 +377,155 @@ const REPOSITORY_FIX_TEMPLATE: PlanTemplate = {
   },
 };
 
+// ── Template 2: workspace file artifact ────────────────────────────
+//
+// ROOT CAUSE FIX (this sprint).
+//
+// A live Mission whose objective was "create a file named X with exact
+// content Y" fell through every template to GENERIC, which is built
+// exclusively from aiStep(...) — it contains NO tool action at all. The
+// engine therefore had nothing to dispatch, so the mission burned one real
+// provider call per AI step and never once touched the workspace.
+//
+// This template restores the missing capability using ONLY what already
+// exists: the same `toolStep()` builder and the same governed
+// `workspace_write` / `workspace_read` tools the repository-fix template
+// already dispatches. No new registry, no new execution loop, no new
+// workspace abstraction, no new verification system.
+//
+//   step-1  artifact   governed workspace_write (exact literal content)
+//                      + governed workspace_read (read-back)
+//   step-2  confirm    AI reasoning over the REAL read-back observation
+//
+// The file target and content are extracted by the EXISTING deterministic
+// goal-extraction mechanism (same approach as extractRepositoryFixTarget).
+// The model never supplies a path, a filename, or file content — so a
+// hallucinated path can never become a write. If extraction yields no
+// target the template does not match at all, and the goal falls through to
+// the previous behaviour unchanged.
+//
+// Verification is deterministic. step-1 is verified by the REAL read-back
+// tool outcome (kind:'command'); step-2 is verified by deterministic text
+// rules over the read-back observation (kind:'rule') requiring the literal
+// content marker. Model prose alone can never mark this step verified.
+
+const FILE_TARGET_PATTERN =
+  /(?:file|named)\s+(?:called\s+)?["'`]?([A-Za-z0-9][A-Za-z0-9._\-/]{0,80}\.[A-Za-z0-9]{1,10})["'`]?/i;
+const FILE_CONTENT_PATTERN =
+  /(?:with|containing|content(?:\s+is)?|contents(?:\s+are)?|exact\s+contents?)\s*[:-]?\s*["'`]?([^\n"'`]{3,200})["'`]?/i;
+const FILE_INTENT_PATTERN =
+  /\b(create|write|save|add|produce|generate|put|store)\b[\s\S]{0,120}?\b(file|artifact|document|note)\b/i;
+
+/** Literal file target + content, or null when the goal states neither. */
+function extractFileArtifactTarget(goal: string): { relativePath: string; content: string } | null {
+  const pathMatch = FILE_TARGET_PATTERN.exec(goal);
+  const contentMatch = FILE_CONTENT_PATTERN.exec(goal);
+  if (!pathMatch?.[1] || !contentMatch?.[1]) return null;
+  // The goal may continue past the content ("... OK. Then read the file."),
+  // so the value ends at the first sentence boundary.
+  const firstSentence = contentMatch[1].trim().split(/(?<=[.!?])\s+/)[0] ?? '';
+  return {
+    relativePath: pathMatch[1].trim(),
+    // Drop the qualifier the pattern anchored on ("with exact contents X"
+    // means the content is X) and any trailing sentence punctuation.
+    content: firstSentence
+      .replace(/^(?:the\s+)?exact\s+contents?\s+/i, '')
+      .replace(/^contents?\s+/i, '')
+      .replace(/^content\s+/i, '')
+      .replace(/[.,;]+$/, '')
+      .trim(),
+  };
+}
+
+const FILE_ARTIFACT_TEMPLATE: PlanTemplate = {
+  id: 'file-artifact',
+  matches: (understanding) =>
+    FILE_INTENT_PATTERN.test(understanding.normalizedGoal) &&
+    extractFileArtifactTarget(understanding.normalizedGoal) !== null,
+  build: (understanding, planId): AgentPlan => {
+    const target = extractFileArtifactTarget(understanding.normalizedGoal);
+    if (!target) {
+      // Unreachable via matches(); defensive so a plan can never carry a
+      // step with an undefined file target.
+      throw new Error('file-artifact template requires a literal file target and content');
+    }
+    const { relativePath, content } = target;
+    return {
+      planId,
+      goalId: understanding.goalId,
+      objective: understanding.normalizedGoal,
+      steps: [
+        // REAL work, zero AI: the governed workspace tool performs the write
+        // and the read-back. The read-back is what verification inspects.
+        toolStep({
+          stepId: 'step-1',
+          objective: `Create ${relativePath} with the exact required content`,
+          capability: 'coding',
+          toolName: 'workspace_write',
+          args: { relativePath, content },
+          expectedOutcome: `${relativePath} is written with the exact required content and read back`,
+          extraActions: [
+            {
+              actionId: 'step-1-readback',
+              toolName: 'workspace_read',
+              args: { relativePath },
+            },
+          ],
+          verification: {
+            kind: 'command',
+            description: `${relativePath} must read back with the exact required content through the governed tool after the write`,
+            command: {
+              toolName: 'workspace_read',
+              // expectedContent is a DETERMINISTIC assertion (exact match on the
+              // real read-back) — the model never supplies it. Content is thus
+              // verified from execution state, not from model prose.
+              arguments: { relativePath, expectedContent: content },
+              expect: 'ok',
+            },
+          },
+        }),
+        // One real AI call that must reason over the ACTUAL read-back text.
+        //
+        // Its verification deliberately does NOT require the model to echo
+        // the literal content token. Echoing is a property of the model's
+        // verbosity, not of the artifact: a correct mission failed here
+        // because a perfectly good confirmation phrased the conclusion
+        // without repeating the string. Asserting the CONTENT is the job of
+        // the deterministic guarantees above — the plan writes literal args,
+        // and step-1's `kind:'command'` verification is the real read-back
+        // through the governed tool. What this step must genuinely prove is
+        // that the model was grounded in the observed read-back and named
+        // the file it is talking about.
+        aiStep(
+          'step-2',
+          'Confirm the created artifact holds the exact required content',
+          'reasoning',
+          'The file ' +
+            `${relativePath} ` +
+            'was written and read back through the governed workspace tools. ' +
+            'Using ONLY the observed read-back content, state whether it contains exactly the required ' +
+            `content: ${content}. ` +
+            'Do not invent or assume any content you did not observe; if the ' +
+            'observed content does not match, say so explicitly.',
+          rulePolicy(
+            [
+              { name: 'mentions-file', kind: 'includes', text: relativePath },
+              { name: 'confirmation-length', kind: 'minLength', length: 20 },
+            ],
+            `the confirmation must be grounded in the observed read-back of ${relativePath} and must name that file`,
+          ),
+          ['step-1'],
+        ),
+      ],
+      completionCriteria: [
+        `${relativePath} created through the governed workspace_write tool`,
+        `${relativePath} read back through the governed workspace_read tool`,
+        'exact required content confirmed from the real read-back observation',
+      ],
+    };
+  },
+};
+
 // ── Template 2: content creation (blog/article/copy/newsletter) ────
 
 const CONTENT_PATTERN =
@@ -722,6 +871,7 @@ const GENERIC_TEMPLATE: PlanTemplate = {
 
 export const PLAN_TEMPLATES: readonly PlanTemplate[] = [
   REPOSITORY_FIX_TEMPLATE,
+  FILE_ARTIFACT_TEMPLATE,
   CONTENT_TEMPLATE,
   ANALYSIS_TEMPLATE,
   LEARNING_TEMPLATE,

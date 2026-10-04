@@ -240,9 +240,9 @@ describe('streamLocalGeneration — every boundary is distinguishable', () => {
   });
 
   it('carries the selected model id on the wire', async () => {
-    const fetchFn = vi.fn(() =>
+    const fetchFn = vi.fn<typeof fetch>(() =>
       Promise.resolve(ndjsonResponse(['{"content":"ok","done":true}'])),
-    ) as unknown as typeof fetch;
+    );
 
     await streamLocalGeneration(AGENT, [{ role: 'user', content: 'hi' }], {
       modelId: 'qwen2.5-coder:3b',

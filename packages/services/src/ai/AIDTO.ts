@@ -55,6 +55,21 @@ export interface OrchestrateRequestDTO {
   /** Explicitly enable the EI-003 input-optimization pipeline. */
   enableOptimization?: boolean;
   /**
+   * WHICH product surface owns this request (MISSION / ASK / BRAIN / BUSINESS …).
+   * Recorded on the provider-execution span so the durable usage ledger
+   * attributes the event to the real source instead of inferring it. Optional:
+   * when omitted nothing is recorded and the ledger falls back to inference.
+   */
+  aiSource?: string;
+  /**
+   * Mission identity for THIS execution, when a Mission owns it. Optional by
+   * design: generic Ask/Brain/Daily-AI execution omits both, so no consumer
+   * can infer a Mission from a source label alone.
+   */
+  missionId?: string;
+  /** The Mission objective this execution serves (Mission path only). */
+  objectiveId?: string;
+  /**
    * Authoritative task capability requirements (Capability Intelligence).
    * Optional: when omitted the task requires exactly its routing `capability`
    * (cold-start behavior unchanged). When supplied, every listed capability

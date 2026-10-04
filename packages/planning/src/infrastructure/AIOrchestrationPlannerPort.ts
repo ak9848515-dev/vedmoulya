@@ -99,6 +99,9 @@ export class AIOrchestrationPlannerPort implements PlannerAiPort {
         PROPOSAL_SCHEMA_DESCRIPTION,
       ].join('\n'),
       userId: input.userId,
+      // Mission-owned planning is attributed to the MISSION surface so the
+      // durable usage ledger records the real source instead of inferring one.
+      aiSource: 'MISSION',
       context: {
         systemPrompt: PLANNING_SYSTEM_PROMPT,
       },

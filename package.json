@@ -53,9 +53,13 @@
     "ai:smoke": "npx tsx scripts/ai-smoke.ts",
     "ai:smoke:live": "npx tsx scripts/ai-live-smoke.ts",
     "bld023:live": "npx tsx scripts/bld023-live-acceptance.ts",
+    "mission:live:multi": "npx tsx scripts/live-multi-objective-acceptance.ts",
     "mission:live:restart": "npx tsx scripts/live-restart-acceptance.ts",
     "mission:live:final05": "npx tsx scripts/live-final05-certification.ts",
     "mission:live:final06": "npx tsx scripts/live-final06-certification.ts",
+    "mission:live:real08": "npx tsx scripts/live-real08-certification.ts",
+    "mission:live:real08:cloud-fallback": "npx tsx scripts/live-real08-cloud-fallback.ts",
+    "mission:live:real08:pg-recovery": "npx tsx scripts/live-real08-postgres-recovery.ts",
     "rag:eval": "npx tsx scripts/rag-evaluate.ts",
     "ai:benchmark": "npx tsx scripts/token-benchmark.ts",
     "outdated": "npm outdated",
@@ -87,7 +91,10 @@
     "production:benchmark": "npx tsx scripts/production-benchmark.ts",
     "quality:gates:verify": "npx tsx scripts/quality-gates-verify.ts",
     "planning:demo": "npx tsx scripts/planning-demo.ts",
-    "planning:benchmark": "npx tsx scripts/planning-benchmark.ts"
+    "planning:benchmark": "npx tsx scripts/planning-benchmark.ts",
+    "config:inventory": "node scripts/config-inventory.mjs config-inventory.json",
+    "config:classify": "node scripts/config-classify.mjs config-inventory.json",
+    "config:contract": "node scripts/check-config-contract.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

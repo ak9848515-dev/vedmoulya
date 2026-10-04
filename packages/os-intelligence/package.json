@@ -21,7 +21,6 @@
   "dependencies": {
     "@vedmoulya/capabilities": "*",
     "@vedmoulya/context": "*",
-    "@vedmoulya/core": "*",
     "@vedmoulya/enterprise-brain": "*",
     "@vedmoulya/execution-orchestrator": "*",
     "@vedmoulya/execution-strategy": "*",

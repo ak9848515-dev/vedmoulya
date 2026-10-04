@@ -227,6 +227,29 @@ describe('createAuthRouter', () => {
       expect(res.status).toBe(201);
     });
 
+    it('forwards the email-verification state (no session) instead of dropping it', async () => {
+      const service = mockAuthService();
+      (service.signUp as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        verificationRequired: true,
+      });
+      const res = await app(service).request('/sign-up', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: 'verify@b.com',
+          password: 'ValidPass1',
+          displayName: 'Verify',
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { data?: { verificationRequired?: boolean } };
+      // REGRESSION: this used to serialize as `{ success: true }` with
+      // `data: undefined`, so the web client threw and reported the user as
+      // "offline" even though registration succeeded.
+      expect(body.data?.verificationRequired).toBe(true);
+    });
+
     it('returns 400 for a weak password', async () => {
       const service = mockAuthService();
       const res = await app(service).request('/sign-up', {

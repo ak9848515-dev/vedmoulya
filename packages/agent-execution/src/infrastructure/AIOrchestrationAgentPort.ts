@@ -35,6 +35,15 @@ export class AIOrchestrationAgentPort implements AgentAiExecutionPort {
       qualityTier: input.qualityTier,
       userInput: input.instruction,
       userId: input.userId,
+      // Mission-owned AI work is attributed to the MISSION surface, never
+      // inferred as something else by the durable usage ledger.
+      aiSource: 'MISSION',
+      // Forwarded only when the Mission runtime started this run, so a generic
+      // Ask/Brain execution never carries Mission identity.
+      ...(input.missionContext !== undefined ? { missionId: input.missionContext.missionId } : {}),
+      ...(input.missionContext !== undefined
+        ? { objectiveId: input.missionContext.objectiveId }
+        : {}),
       context: {
         // Previous observations of this step are appended as execution context
         // for revision/recovery attempts (already sanitized + sliced by the
@@ -50,7 +59,6 @@ export class AIOrchestrationAgentPort implements AgentAiExecutionPort {
     });
     return this.toResult(response);
   }
-
   /**
    * Pure feasibility query for plan validation: can this step's capability
    * set be routed today? Delegates to the runtime's selection intelligence
