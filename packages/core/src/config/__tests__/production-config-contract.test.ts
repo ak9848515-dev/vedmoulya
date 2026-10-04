@@ -10,13 +10,54 @@
 // and one test asserts such a fixture can never appear in a diagnostic.
 // ─────────────────────────────────────────────────────────────────────────────
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requireExternalUrl, requireProdSecret, requireProdExternalUrl } from '../index.js';
 import { EnvironmentError } from '../../env/index.js';
 
 // Obviously-fake fixture. Never a real credential.
 const FAKE_SECRET = 'not-a-real-secret-fixture-value-0123456789';
+
+/**
+ * Repository root, derived from THIS MODULE's location.
+ *
+ * `packages/core/vitest.config.ts` deliberately sets `root` to the package
+ * directory (so vitest never walks up into repo-root workspace mode), which
+ * makes `process.cwd()` equal to `packages/core` during this run. The
+ * repository-level env templates therefore do NOT resolve from the cwd, and a
+ * cwd-relative lookup reads a path that does not exist. Anchoring to the module
+ * keeps the contract bound to the files that actually ship, whether the suite
+ * is run from the repo root or from the package.
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..');
+
+/**
+ * Runs `body` with `names` removed from `process.env`, then restores the exact
+ * original values (or their absence).
+ *
+ * Several assertions below verify what the production validators do when a
+ * variable is ABSENT. Without this, they silently depend on whatever the
+ * developer's shell or the CI runner happens to export — a CI job holding a
+ * valid-looking OpenAI key made the "no AI key required" contract assert
+ * against a configured key. The test now owns its own precondition; the
+ * assertions themselves are unchanged.
+ */
+const withEnvCleared = (names: readonly string[], body: () => void): void => {
+  const original = new Map<string, string | undefined>();
+  for (const name of names) {
+    original.set(name, process.env[name]);
+    delete process.env[name];
+  }
+  try {
+    body();
+  } finally {
+    for (const [name, value] of original) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+};
 
 const prodEnv = (): void => {
   vi.stubEnv('NODE_ENV', 'production');
@@ -103,15 +144,19 @@ describe('S1 production configuration — localhost refusal', () => {
 describe('S1 production configuration — optional providers absent', () => {
   it('does not require an AI provider key (authentication must still boot)', () => {
     prodEnv();
-    // No cloud key and no Ollama URL: this MUST NOT throw. Authentication
-    // (sign-in, sign-up, OAuth, session) never depends on an AI credential.
-    expect(requireProdSecret('AI_OPENAI_API_KEY', { minLength: 16 })).toBeUndefined();
+    withEnvCleared(['AI_OPENAI_API_KEY'], () => {
+      // No cloud key and no Ollama URL: this MUST NOT throw. Authentication
+      // (sign-in, sign-up, OAuth, session) never depends on an AI credential.
+      expect(requireProdSecret('AI_OPENAI_API_KEY', { minLength: 16 })).toBeUndefined();
+    });
   });
 
   it('does not require Ollama configuration to be present', () => {
     prodEnv();
-    expect(process.env.AI_OLLAMA_BASE_URL).toBeUndefined();
-    // Absent Ollama simply means the adapter is not registered — never a throw.
+    withEnvCleared(['AI_OLLAMA_BASE_URL'], () => {
+      expect(process.env.AI_OLLAMA_BASE_URL).toBeUndefined();
+      // Absent Ollama simply means the adapter is not registered — never a throw.
+    });
   });
 });
 
@@ -157,7 +202,7 @@ describe('S1 configuration — secrets never leak into diagnostics', () => {
 
   it('the example files contain no real-looking secret values', () => {
     for (const file of ['.env.example', '.env.production.example']) {
-      const text = readFileSync(resolve(process.cwd(), file), 'utf8');
+      const text = readFileSync(resolve(REPO_ROOT, file), 'utf8');
       // High-entropy provider key shapes must not appear in committed templates.
       expect(text).not.toMatch(/sk-[A-Za-z0-9]{32,}/);
       expect(text).not.toMatch(/AIza[A-Za-z0-9_-]{30,}/);
@@ -177,14 +222,14 @@ describe('S1 configuration — documented contract', () => {
   ] as const;
 
   it('every REQUIRED_PRODUCTION variable is named in .env.production.example', () => {
-    const text = readFileSync(resolve(process.cwd(), '.env.production.example'), 'utf8');
+    const text = readFileSync(resolve(REPO_ROOT, '.env.production.example'), 'utf8');
     const declared = new Set([...text.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]));
     const missing = REQUIRED_PRODUCTION.filter((name) => !declared.has(name));
     expect(missing).toEqual([]);
   });
 
   it('every REQUIRED_PRODUCTION variable is named in .env.example', () => {
-    const text = readFileSync(resolve(process.cwd(), '.env.example'), 'utf8');
+    const text = readFileSync(resolve(REPO_ROOT, '.env.example'), 'utf8');
     const declared = new Set([...text.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]));
     const missing = REQUIRED_PRODUCTION.filter((name) => !declared.has(name));
     expect(missing).toEqual([]);
