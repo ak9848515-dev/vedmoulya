@@ -54,6 +54,8 @@ export interface NormalizedOpportunity {
   estimatedEffort?: { label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' };
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
   automationPotential: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+  /** Capabilities the source stated the work needs — qualification input. */
+  requiredCapabilities?: string[];
   /** The verbatim URL, when the source gave one. Provenance only. */
   url?: string;
 }
@@ -160,6 +162,17 @@ export function normalizeExternalOpportunity(raw: unknown): NormalizeResult {
   const requirements = Array.isArray(r.requirements)
     ? r.requirements.filter((q): q is string => typeof q === 'string').slice(0, 25)
     : [];
+  // The source's stated requirements ARE the capability requirements. They are
+  // carried separately (not only as prose evidence) because capability fit is
+  // the one qualification axis that must be machine-comparable.
+  const requiredCapabilities = Array.from(
+    new Set(
+      requirements
+        .map((q) => sanitizeSourceText(q, 60))
+        .filter((q) => q.length > 0)
+        .map((q) => q.toLowerCase()),
+    ),
+  ).slice(0, 20);
   const rawUrl = typeof r.url === 'string' ? r.url.trim() : '';
 
   // Hard secret rejection across EVERY free-text field before anything is kept.
@@ -264,6 +277,7 @@ export function normalizeExternalOpportunity(raw: unknown): NormalizeResult {
         r.automationPotential === 'LOW'
           ? r.automationPotential
           : 'UNKNOWN',
+      ...(requiredCapabilities.length > 0 ? { requiredCapabilities } : {}),
       ...(url !== undefined ? { url } : {}),
     },
   };

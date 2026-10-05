@@ -102,6 +102,7 @@ import {
   PostgresSettingsStore as PostgresControlSettingsStore,
   PostgresEmergencyStopStore as PostgresControlEmergencyStopStore,
   PostgresOpportunityStore as PostgresControlOpportunityStore,
+  PostgresOpportunityMissionLinkStore as PostgresControlOpportunityMissionLinkStore,
 } from '@vedmoulya/control-plane';
 import type { WorldStores } from '@vedmoulya/world-model';
 import {
@@ -275,6 +276,7 @@ function createPostgresStores(): PersistenceBundle {
   const controlSettings = new PostgresControlSettingsStore(sql);
   const controlStops = new PostgresControlEmergencyStopStore(sql);
   const controlOpportunities = new PostgresControlOpportunityStore(sql);
+  const controlOpportunityMissionLinks = new PostgresControlOpportunityMissionLinkStore(sql);
   const worldEntities = new PostgresWorldEntityStore(sql);
   const worldRelations = new PostgresWorldRelationStore(sql);
   const worldUnits = new PostgresWorldBusinessUnitStore(sql);
@@ -307,6 +309,7 @@ function createPostgresStores(): PersistenceBundle {
       settings: controlSettings,
       emergencyStop: controlStops,
       opportunities: controlOpportunities,
+      opportunityMissionLinks: controlOpportunityMissionLinks,
     },
     world: {
       entities: worldEntities,
@@ -349,6 +352,7 @@ function createPostgresStores(): PersistenceBundle {
     controlSettings,
     controlStops,
     controlOpportunities,
+    controlOpportunityMissionLinks,
     worldEntities,
     worldRelations,
     worldUnits,
@@ -517,6 +521,8 @@ export function resolvePersistenceBundle(
       settings: overrides.control?.settings ?? base.control.settings,
       emergencyStop: overrides.control?.emergencyStop ?? base.control.emergencyStop,
       opportunities: overrides.control?.opportunities ?? base.control.opportunities,
+      opportunityMissionLinks:
+        overrides.control?.opportunityMissionLinks ?? base.control.opportunityMissionLinks,
     },
     world: overrides.world ?? base.world,
   };

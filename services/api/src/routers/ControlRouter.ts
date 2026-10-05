@@ -20,19 +20,29 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
-import type { ActiveIntelligenceControlPlane } from '@vedmoulya/control-plane';
+import type {
+  ActiveIntelligenceControlPlane,
+  OpportunityLifecycleRecord,
+} from '@vedmoulya/control-plane';
 import type { TRPCContext } from '../services/RouterRegistry.js';
 import type { ApiResponse } from '../services/ResponseMapper.js';
 import type { ErrorCode } from '../middleware/error.js';
 import { successResponse } from '../services/ResponseMapper.js';
 import type { OpportunityApprovalPort } from '../infrastructure/OpportunityApprovalPorts.js';
 import { normalizeExternalOpportunity } from '../services/OpportunitySourceAdapter.js';
+import type { OpportunityQualification } from '../services/OpportunityQualification.js';
+import type { MissionLaunchPort } from '../infrastructure/OpportunityMissionPorts.js';
 
 /** S5 — the acquisition dependencies a router needs. Deliberately narrow: the
  *  approval authority and nothing else. The normalizer is a pure import. No
  *  Mission service, no payment, no bidding — the router cannot reach them. */
 export interface OpportunityAcquisitionDeps {
   approval: OpportunityApprovalPort;
+  /** S5.1 — qualification (reuses the canonical assessor). */
+  qualify: (record: OpportunityLifecycleRecord) => OpportunityQualification;
+  /** S5.1 — the EXISTING canonical Mission creation path. Injected so the
+   *  acquisition layer can never reach a Mission engine directly. */
+  mission: MissionLaunchPort;
 }
 
 /** Map an acquisition outcome onto the closed ErrorCode set, preserving the
@@ -132,6 +142,13 @@ export const controlInputs = {
     userId: z.string().min(1),
     opportunityId: z.string().min(1).max(128),
   }),
+  // S5.1 — qualification + Mission handoff. `userId` is never an input
+  // field: these procedures read identity from the session, so a client
+  // cannot qualify, approve or launch against another account.
+  opportunityQualify: z.object({ id: z.string().min(1).max(128) }),
+  opportunityStartMission: z.object({ id: z.string().min(1).max(128) }),
+  opportunityMissionLookup: z.object({ opportunityId: z.string().min(1).max(128) }),
+  missionOpportunityLookup: z.object({ missionId: z.string().min(1).max(128) }),
   gate: z.object({
     userId: z.string().min(1),
     action: z.string().min(1).max(300),
@@ -162,6 +179,19 @@ export interface ControlHandlers {
   transitionOpportunity: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
   importOpportunity: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
   requestOpportunityApproval: (
+    input: Record<string, unknown>,
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
+  qualifyOpportunity: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
+  startMissionForOpportunity: (
+    input: Record<string, unknown>,
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
+  getMissionForOpportunity: (
+    input: Record<string, unknown>,
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
+  getOpportunityForMission: (
     input: Record<string, unknown>,
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;
@@ -337,8 +367,157 @@ export function createControlRouter(
         riskLevel: normalized.data.riskLevel,
         automationPotential: normalized.data.automationPotential,
         sourceRef: normalized.data.sourceRef,
+        ...(normalized.data.requiredCapabilities !== undefined
+          ? { requiredCapabilities: normalized.data.requiredCapabilities }
+          : {}),
       });
       return Promise.resolve(successResponse(record));
+    },
+
+    // ── S5.1 — qualification ────────────────────────────────────────────────
+    // Loads the canonical record with the SESSION user, so another user's
+    // opportunity is simply not found. Its ONLY effect is the legal
+    // DISCOVERED → ASSESSED step. It never approves, never creates a Mission.
+    qualifyOpportunity: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const id = input.id as string;
+      const record = plane.listOpportunities(ownerId).find((o) => o.id === id);
+      if (record === undefined) {
+        return Promise.resolve(acquisitionError('NOT_FOUND', 'Opportunity not found.', 404));
+      }
+      if (acquisition === undefined) {
+        return Promise.resolve(
+          acquisitionError('QUALIFICATION_UNAVAILABLE', 'Qualification is not configured.', 503),
+        );
+      }
+      if (record.status !== 'DISCOVERED') {
+        // Idempotent read: re-qualifying an already-assessed opportunity is
+        // refused rather than silently re-scoring a moved-on record.
+        return Promise.resolve(
+          acquisitionError(
+            'INVALID_STATE',
+            `Only a DISCOVERED opportunity can be qualified (this one is ${record.status}).`,
+            409,
+          ),
+        );
+      }
+      const result = acquisition.qualify(record);
+      // The one and only structural effect: the legal ASSESSED transition.
+      // No approval is attached, so the lifecycle can never move past
+      // PRESENTED on the strength of a score.
+      plane.transitionOpportunity({
+        ownerId,
+        id: record.id,
+        to: 'ASSESSED',
+        note: 'qualified — advisory only, no approval granted',
+      });
+      const updated = plane.listOpportunities(ownerId).find((o) => o.id === id);
+      return Promise.resolve(
+        successResponse({
+          ...result,
+          // The stored state is returned so the caller sees ASSESSED, not
+          // APPROVED, and can never infer an approval from the score.
+          status: updated?.status ?? 'ASSESSED',
+        }),
+      );
+    },
+
+    // ── S5.1 — approved opportunity → canonical Mission ──────────────────────
+    // Order matters: verify APPROVED → create the Mission through the EXISTING
+    // path → only then persist the association. A Mission failure therefore
+    // never leaves a dangling association, and a persistence failure is
+    // reported honestly instead of being reported as a completed linkage.
+    startMissionForOpportunity: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const id = input.id as string;
+      if (acquisition === undefined) {
+        return Promise.resolve(
+          acquisitionError('MISSION_UNAVAILABLE', 'Mission creation is not configured.', 503),
+        );
+      }
+      const record = plane.listOpportunities(ownerId).find((o) => o.id === id);
+      if (record === undefined) {
+        return Promise.resolve(acquisitionError('NOT_FOUND', 'Opportunity not found.', 404));
+      }
+      if (record.status !== 'APPROVED') {
+        return Promise.resolve(
+          acquisitionError(
+            'APPROVAL_REQUIRED',
+            `Only an APPROVED opportunity may start a Mission (this one is ${record.status}).`,
+            403,
+          ),
+        );
+      }
+
+      // Idempotency BEFORE creating anything: an approved opportunity that
+      // already has a Mission must never create a second one.
+      const existing = plane.getMissionForOpportunity(ownerId, record.id);
+      if (existing !== undefined) {
+        return Promise.resolve(
+          successResponse({
+            opportunityId: record.id,
+            missionId: existing.missionId,
+            created: false,
+            alreadyLinked: true,
+          }),
+        );
+      }
+
+      const launched = await acquisition.mission.launch({
+        userId: ownerId,
+        title: record.title,
+        description: record.description,
+      });
+      if (!launched.success) {
+        // No association is written. Nothing claims a Mission exists.
+        return Promise.resolve(acquisitionError(launched.code, launched.message, 502));
+      }
+
+      let missionId: string;
+      try {
+        const link = plane.linkOpportunityToMission({
+          userId: ownerId,
+          opportunityId: record.id,
+          missionId: launched.missionId,
+          createdAt: new Date().toISOString(),
+        });
+        missionId = link.missionId;
+      } catch (error) {
+        // The Mission WAS created but the association was not persisted. We
+        // say exactly that — we never report a linkage that does not exist,
+        // and we never pretend the Mission does not exist either.
+        return Promise.resolve(
+          acquisitionError(
+            'ASSOCIATION_PERSIST_FAILED',
+            `Mission ${launched.missionId} was created but the opportunity association could not be persisted: ${
+              error instanceof Error ? error.message : 'unknown error'
+            }`,
+            500,
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        successResponse({
+          opportunityId: record.id,
+          missionId,
+          created: true,
+          alreadyLinked: false,
+        }),
+      );
+    },
+
+    // ── S5.1 — owner-scoped association lookups (minimum read surface) ───────
+    getMissionForOpportunity: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const link = plane.getMissionForOpportunity(ownerId, input.opportunityId as string);
+      return Promise.resolve(successResponse(link ?? null));
+    },
+
+    getOpportunityForMission: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const link = plane.getOpportunityForMission(ownerId, input.missionId as string);
+      return Promise.resolve(successResponse(link ?? null));
     },
 
     // S5 — register the approval request with the EXISTING Brain authority.

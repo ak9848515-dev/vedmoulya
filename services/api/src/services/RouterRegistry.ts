@@ -2576,6 +2576,8 @@ export function createAppRouter(services: ApiApplicationService) {
   // from here, so the acquisition path structurally cannot commit to work.
   const acquisitionDeps: OpportunityAcquisitionDeps = {
     approval: services.opportunityApproval,
+    qualify: (record) => services.opportunityQualifier.qualify(record),
+    mission: services.opportunityMissionLaunch,
   };
 
   return router({
@@ -6202,6 +6204,41 @@ export function createAppRouter(services: ApiApplicationService) {
         .input(controlInputs.opportunityApprovalRequest)
         .mutation(({ input, ctx }) =>
           createControlRouter(services.controlPlane, acquisitionDeps).requestOpportunityApproval(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      // ── S5.1 — qualification + approved-opportunity Mission handoff. Neither
+      //    procedure accepts a userId: identity comes from the session, so a
+      //    client can never qualify or launch against another account.
+      qualifyOpportunity: standardProcedure
+        .input(controlInputs.opportunityQualify)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).qualifyOpportunity(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      startMissionForOpportunity: standardProcedure
+        .input(controlInputs.opportunityStartMission)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).startMissionForOpportunity(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      getMissionForOpportunity: standardProcedure
+        .input(controlInputs.opportunityMissionLookup)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).getMissionForOpportunity(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      getOpportunityForMission: standardProcedure
+        .input(controlInputs.missionOpportunityLookup)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).getOpportunityForMission(
             { ...(input as Record<string, unknown>), userId: ctx.userId },
             ctx,
           ),

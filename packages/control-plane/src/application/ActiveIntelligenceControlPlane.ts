@@ -22,6 +22,7 @@ import type {
   ObservationSnapshot,
   OpportunityLifecycleRecord,
   OpportunitySourceRef,
+  OpportunityMissionAssociation,
   OpportunityStatus,
 } from '../types/control-types.js';
 import type {
@@ -269,8 +270,46 @@ export class ActiveIntelligenceControlPlane {
     recommendedWorkflow?: string[];
     /** S5 — external provenance / dedup discriminator. */
     sourceRef?: OpportunitySourceRef;
+    /** S5.1 — capabilities the source stated the work needs. */
+    requiredCapabilities?: string[];
   }): OpportunityLifecycleRecord {
     return this.opportunities.discover(input);
+  }
+
+  // ── S5.1 · Opportunity ↔ Mission association ───────────────────────────────
+  // The association is ONLY ever written after the opportunity reaches
+  // APPROVED and the canonical Mission creation path has already succeeded.
+  // It is never created on import and never creates a Mission.
+
+  /** Durable link. Idempotent by (userId, opportunityId). */
+  linkOpportunityToMission(link: OpportunityMissionAssociation): OpportunityMissionAssociation {
+    const record = this.opportunities.get(link.userId, link.opportunityId);
+    if (!record) {
+      throw new Error('Opportunity not found.');
+    }
+    // Fail closed: only an APPROVED opportunity may ever be linked to work.
+    if (record.status !== 'APPROVED') {
+      throw new Error('Only an APPROVED opportunity may be linked to a Mission.');
+    }
+    return this.stores.opportunityMissionLinks.save(link);
+  }
+
+  getMissionForOpportunity(
+    userId: string,
+    opportunityId: string,
+  ): OpportunityMissionAssociation | undefined {
+    return this.stores.opportunityMissionLinks.getByOpportunity(userId, opportunityId);
+  }
+
+  getOpportunityForMission(
+    userId: string,
+    missionId: string,
+  ): OpportunityMissionAssociation | undefined {
+    return this.stores.opportunityMissionLinks.getByMission(userId, missionId);
+  }
+
+  listOpportunityMissionLinks(userId: string): OpportunityMissionAssociation[] {
+    return this.stores.opportunityMissionLinks.list(userId);
   }
 
   transitionOpportunity(input: {

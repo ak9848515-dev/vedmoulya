@@ -82,6 +82,8 @@ export class OpportunityLifecycle {
      *  re-discovered posting collapses onto ONE record while a genuinely
      *  different posting stays separate. Absent → legacy title key. */
     sourceRef?: OpportunitySourceRef;
+    /** Capabilities the source stated the work needs — qualification input. */
+    requiredCapabilities?: string[];
   }): OpportunityLifecycleRecord {
     const stableKey =
       input.sourceRef !== undefined
@@ -96,6 +98,9 @@ export class OpportunityLifecycle {
       ownerId: input.ownerId,
       stableKey,
       ...(input.sourceRef !== undefined ? { sourceRef: input.sourceRef } : {}),
+      ...(input.requiredCapabilities !== undefined
+        ? { requiredCapabilities: input.requiredCapabilities.slice(0, 20) }
+        : {}),
       title: input.title.slice(0, 160),
       description: input.description.slice(0, 1000),
       category: input.category,

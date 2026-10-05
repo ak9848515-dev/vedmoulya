@@ -151,6 +151,10 @@ export interface OpportunityLifecycleRecord {
   stableKey: string;
   /** External provenance, when the opportunity was discovered by a source. */
   sourceRef?: OpportunitySourceRef;
+  /** Capabilities the work needs — ONLY when the source actually stated them.
+   *  Mirrors the existing Brain `Opportunity.requiredCapabilities` field, and
+   *  is the only input the assessor uses for capability fit. */
+  requiredCapabilities?: string[];
   title: string;
   description: string;
   category: string;
@@ -221,4 +225,36 @@ export interface CycleOutcome {
   emergencyStopped: boolean;
   /** The cycle NEVER executes anything — this is a structural guarantee. */
   executedNothing: true;
+}
+
+// ── S5.1 · Opportunity ↔ Mission association ───────────────────────────────
+
+/**
+ * The durable link between an APPROVED opportunity and the Mission that
+ * delivers it. Deliberately NOT a field on the Mission model: the Mission
+ * engine is a frozen, pre-existing architecture, and acquisition provenance
+ * belongs to the control plane that governs the opportunity.
+ *
+ * `userId` is the owner, so every read/write is owner-scoped exactly like the
+ * opportunity itself. `opportunityId` is unique per owner, which is what makes
+ * the association idempotent without a second deduplication system.
+ */
+export interface OpportunityMissionAssociation {
+  userId: string;
+  opportunityId: string;
+  missionId: string;
+  createdAt: string;
+}
+
+/** Owner-scoped persistence seam for the association. */
+export interface OpportunityMissionLinkStore {
+  /** Idempotent by (userId, opportunityId) — returns the EXISTING link when
+   *  one is already present, so a repeated call never duplicates. */
+  save(link: OpportunityMissionAssociation): OpportunityMissionAssociation;
+  getByOpportunity(
+    userId: string,
+    opportunityId: string,
+  ): OpportunityMissionAssociation | undefined;
+  getByMission(userId: string, missionId: string): OpportunityMissionAssociation | undefined;
+  list(userId: string): OpportunityMissionAssociation[];
 }

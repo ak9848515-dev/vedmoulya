@@ -13,6 +13,8 @@ import type {
   AutonomySettings,
   EmergencyStopState,
   OpportunityLifecycleRecord,
+  OpportunityMissionAssociation,
+  OpportunityMissionLinkStore,
 } from '../types/control-types.js';
 
 interface SettingsStoreSeam {
@@ -89,5 +91,39 @@ export class PostgresOpportunityStore
 
   list(ownerId: string): OpportunityLifecycleRecord[] {
     return this.all(ownerId).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  }
+}
+
+/** Owner-scoped Opportunity ↔ Mission associations — keyed (user, opportunityId).
+ *  Idempotent by construction: `save` returns the existing link instead of
+ *  writing a second one, so a retried handoff can never duplicate a Mission. */
+export class PostgresOpportunityMissionLinkStore
+  extends WriteThroughDocumentStore<OpportunityMissionAssociation>
+  implements OpportunityMissionLinkStore
+{
+  constructor(sql: postgres.Sql, table = 'control_opportunity_mission_links') {
+    super(sql, table);
+  }
+
+  save(link: OpportunityMissionAssociation): OpportunityMissionAssociation {
+    const existing = this.read(link.userId, link.opportunityId);
+    if (existing) return existing;
+    this.write(link.userId, link.opportunityId, link);
+    return link;
+  }
+
+  getByOpportunity(
+    userId: string,
+    opportunityId: string,
+  ): OpportunityMissionAssociation | undefined {
+    return this.read(userId, opportunityId);
+  }
+
+  getByMission(userId: string, missionId: string): OpportunityMissionAssociation | undefined {
+    return this.all(userId).find((l) => l.missionId === missionId);
+  }
+
+  list(userId: string): OpportunityMissionAssociation[] {
+    return this.all(userId).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }
 }

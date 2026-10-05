@@ -255,6 +255,11 @@ import {
   type OpportunityApprovalPort,
 } from '../infrastructure/OpportunityApprovalPorts.js';
 import {
+  createMissionLaunchPort,
+  type MissionLaunchPort,
+} from '../infrastructure/OpportunityMissionPorts.js';
+import { createOpportunityQualifier } from './OpportunityQualification.js';
+import {
   createCommandCenterPresentationPort,
   createWorldActionPort,
   createWorldApprovalPort,
@@ -723,6 +728,10 @@ export class ApiApplicationService {
   readonly controlPlane: ActiveIntelligenceControlPlane;
   /** S5 — the approval authority for the opportunity lifecycle. */
   readonly opportunityApproval: OpportunityApprovalPort;
+  /** S5.1 — advisory qualification over the canonical assessor. */
+  readonly opportunityQualifier: ReturnType<typeof createOpportunityQualifier>;
+  /** S5.1 — seam over the EXISTING canonical Mission creation path. */
+  readonly opportunityMissionLaunch: MissionLaunchPort;
 
   // ── SPRINT-032 — World Model & Business Operating System (composition seam) ──
   /** The minimum useful world representation for better decisions: a bounded
@@ -1886,6 +1895,25 @@ export class ApiApplicationService {
     // Brain approval authority and mints the grant server-side, so a client can
     // never satisfy the lifecycle's approval guard with a record it wrote.
     this.opportunityApproval = createOpportunityApprovalPort(this.brain);
+
+    // ── S5.1 · qualification + Mission handoff ──────────────────────────────
+    // Qualification reuses the EXISTING canonical assessor and relevance
+    // scorer; it holds no approval power. The Mission handoff is a seam over
+    // the EXISTING `mission.createAndRun` — no Mission engine is duplicated.
+    this.opportunityQualifier = createOpportunityQualifier({
+      brain: this.brain,
+      now: () => new Date().toISOString(),
+    });
+    this.opportunityMissionLaunch = createMissionLaunchPort({
+      createAndRun: async (userId, input) => {
+        try {
+          const mission = await this.mission.createAndRun(userId, input as never);
+          return { missionId: mission.missionId };
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : 'Mission creation failed.' };
+        }
+      },
+    });
 
     // ── SPRINT-032 — World Model & Business Operating System ─────────
     //    Composes the EXISTING Brain (tasks/opportunities), the EXISTING

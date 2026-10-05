@@ -10,6 +10,7 @@ import type {
   AutonomySettings,
   EmergencyStopState,
   OpportunityLifecycleRecord,
+  OpportunityMissionLinkStore,
 } from '../types/control-types.js';
 
 /** Brain surface: pending approvals + outcome memory (owner-scoped). */
@@ -58,4 +59,6 @@ export interface ControlStores {
     getByKey(ownerId: string, stableKey: string): OpportunityLifecycleRecord | undefined;
     list(ownerId: string): OpportunityLifecycleRecord[];
   };
+  /** S5.1 — durable Opportunity ↔ Mission association (owner-scoped). */
+  opportunityMissionLinks: OpportunityMissionLinkStore;
 }

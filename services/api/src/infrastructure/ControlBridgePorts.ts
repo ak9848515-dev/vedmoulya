@@ -107,6 +107,7 @@ export function createControlStores(stores: {
   settings: ControlStores['settings'];
   emergencyStop: ControlStores['emergencyStop'];
   opportunities: ControlStores['opportunities'];
+  opportunityMissionLinks: ControlStores['opportunityMissionLinks'];
 }): ControlStores {
   return stores;
 }
