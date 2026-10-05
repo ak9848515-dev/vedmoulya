@@ -121,6 +121,11 @@ export const MEMORY_CATEGORIES = [
   'ROUTING_SIGNAL',
   'USER_PREFERENCE',
   'TASK_PATTERN',
+  // S4.1 — a VERIFIED Mission objective that was actually DELIVERED to a
+  // commercial client. Semantically distinct from USER_PREFERENCE: it records
+  // a proven business outcome (and the ClientOps document it produced), never
+  // a stated or inferred user preference.
+  'DELIVERY_OUTCOME',
 ] as const;
 
 export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];

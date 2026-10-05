@@ -6700,6 +6700,54 @@ export function createAppRouter(services: ApiApplicationService) {
         .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
         .query(({ input }) => createMissionRouter(services.mission).status(input)),
 
+      // S4.1 — governed VERIFIED-outcome → ClientOps delivery handoff.
+      // Prepares a DRAFT deliverable only: it never sends a proposal,
+      // quotation, contract or invoice, never requests payment, and never
+      // transfers money. `pendingApproval` stays true on every success.
+      // `userId` is NOT an input field — it comes from the verified session,
+      // so a client can never assert whose Mission it is delivering. The
+      // auth middleware plus the bridge's own ownership re-check enforce that
+      // the caller owns the Mission, that the objective belongs to it, and
+      // that the objective is VERIFIED.
+      deliver: standardProcedure
+        .input(
+          z.object({
+            missionId: z.string().min(1).max(128),
+            objectiveId: z.string().min(1).max(128),
+            clientId: z.string().min(1).max(128),
+            deliverableName: z.string().min(1).max(200),
+            deliverableContent: z.string().min(1).max(200_000),
+            deliverableMime: z.string().max(120).optional(),
+            opportunityId: z.string().max(128).optional(),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          const result = await services.missionClientOpsHandoff.handoffVerifiedOutcome({
+            ...input,
+            // Identity comes from the authenticated session, never the client.
+            userId: ctx.userId,
+          });
+          if (!result.ok) {
+            throw new TRPCError({
+              code:
+                result.reason === 'NOT_OWNER' || result.reason === 'MISSION_NOT_FOUND'
+                  ? 'FORBIDDEN'
+                  : result.reason === 'CLIENTOPS_FAILURE'
+                    ? 'INTERNAL_SERVER_ERROR'
+                    : 'BAD_REQUEST',
+              message: result.message,
+            });
+          }
+          return {
+            ok: true as const,
+            documentId: result.documentId,
+            created: result.created,
+            // Consequential actions are never taken here.
+            pendingApproval: result.pendingApproval,
+            memoryRecorded: result.memoryRecorded,
+          };
+        }),
+
       pause: standardProcedure
         .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
         .mutation(({ input }) => createMissionRouter(services.mission).pause(input)),

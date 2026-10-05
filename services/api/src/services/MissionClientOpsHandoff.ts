@@ -124,6 +124,13 @@ export interface HandoffAccepted {
   created: boolean;
   /** Always true: a draft is prepared, never externally sent. */
   pendingApproval: true;
+  /**
+   * S4.1 — whether the delivery outcome was durably written to memory.
+   * `false` means the ClientOps deliverable EXISTS but its memory outcome was
+   * NOT recorded: an honest PARTIAL state, never reported as fully completed.
+   * `undefined` when no memory port is wired at all.
+   */
+  memoryRecorded?: boolean;
 }
 
 export interface HandoffRejected {
@@ -279,8 +286,11 @@ export class MissionClientOpsHandoffService {
       return rejected('CLIENTOPS_FAILURE', 'the deliverable could not be stored in ClientOps');
     }
 
-    // Phase 7 — memory is AFTER a successful delivery, and a memory failure
-    // never reports a commercial outcome that did not happen.
+    // Phase 7 / S4.1 — memory is AFTER a successful delivery. A memory failure
+    // never rolls back a valid ClientOps document and never claims a
+    // commercial completion that did not happen: it is reported as an honest
+    // PARTIAL state via `memoryRecorded: false`.
+    let memoryRecorded: boolean | undefined;
     if (this.options.memory !== undefined) {
       try {
         await this.options.memory.recordDeliveryOutcome({
@@ -291,14 +301,19 @@ export class MissionClientOpsHandoffService {
           documentId,
           source: 'mission-verified-handoff',
         });
+        memoryRecorded = true;
       } catch {
-        // Reported through the returned result's honesty guarantee below: the
-        // deliverable EXISTS, so this is not a failure — but memory was not
-        // written and nothing claims it was.
+        memoryRecorded = false;
       }
     }
 
-    return { ok: true, documentId, created: true, pendingApproval: true };
+    return {
+      ok: true,
+      documentId,
+      created: true,
+      pendingApproval: true,
+      ...(memoryRecorded !== undefined ? { memoryRecorded } : {}),
+    };
   }
 
   private async findExisting(

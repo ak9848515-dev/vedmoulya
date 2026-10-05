@@ -45,6 +45,9 @@ const CATEGORY_TO_TYPE: Record<MemoryCategory, MemoryType> = {
   ROUTING_SIGNAL: 'provider',
   USER_PREFERENCE: 'user_preference',
   TASK_PATTERN: 'learning',
+  // S4.1 — a verified commercial delivery. It is a LEARNING fact about a
+  // proven outcome, not a user preference and not a provider signal.
+  DELIVERY_OUTCOME: 'learning',
 };
 
 function confidenceLevel(

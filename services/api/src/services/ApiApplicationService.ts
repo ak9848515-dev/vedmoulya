@@ -235,6 +235,9 @@ import {
   MissionClientOpsHandoffService,
   type HandoffMissionView,
 } from './MissionClientOpsHandoff.js';
+import { DeliveryOutcomeMemory } from './DeliveryOutcomeMemory.js';
+import { MemoryIntelligenceStoreAdapter } from '@vedmoulya/execution-memory';
+import { PostgresMemoryRepository } from '@vedmoulya/memory-intelligence';
 import {
   createMissionUserProviderRegistrar,
   createUserAiOrchestratorResolver,
@@ -1144,6 +1147,24 @@ export class ApiApplicationService {
         },
       },
       clientOps: clientOpsRepository,
+      // S4.1 — persist the delivery outcome through the EXISTING memory
+      // architecture (PostgresMemoryRepository → MemoryIntelligenceStoreAdapter
+      // → ExecutionMemoryStore). Same repository, same table and same contract
+      // Mission already uses: never a second memory system, and never the
+      // USER_PREFERENCE path. Absent a database the handoff simply runs
+      // without memory rather than pretending one was written.
+      ...(this.hasDatabase()
+        ? {
+            // The DatabaseManager shares ONE physical pool for an identical
+            // URL + budget, so this registers a consumer rather than opening
+            // a new database or a new memory system.
+            memory: new DeliveryOutcomeMemory({
+              store: new MemoryIntelligenceStoreAdapter(
+                new PostgresMemoryRepository(createEISql('vedmoulya-delivery-memory')),
+              ),
+            }),
+          }
+        : {}),
     });
 
     // ── Create the Enterprise Capability Registry (EPIC-004 / EI-001) ────
