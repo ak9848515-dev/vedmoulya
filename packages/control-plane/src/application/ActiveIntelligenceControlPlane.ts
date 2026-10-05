@@ -294,6 +294,26 @@ export class ActiveIntelligenceControlPlane {
     return this.stores.opportunityMissionLinks.save(link);
   }
 
+  /**
+   * S5.2 — claim-scoped link. Identical to linkOpportunityToMission except it
+   * also accepts PLANNED, which is ONLY producible as this boundary's own
+   * launch claim (APPROVED → PLANNED inside startMissionForOpportunity,
+   * immediately after the APPROVED + approval check). The router is the sole
+   * caller; the public linkOpportunityToMission above stays APPROVED-only.
+   */
+  linkClaimedOpportunityToMission(
+    link: OpportunityMissionAssociation,
+  ): OpportunityMissionAssociation {
+    const record = this.opportunities.get(link.userId, link.opportunityId);
+    if (!record) {
+      throw new Error('Opportunity not found.');
+    }
+    if (record.status !== 'APPROVED' && record.status !== 'PLANNED') {
+      throw new Error('Only an APPROVED opportunity may be linked to a Mission.');
+    }
+    return this.stores.opportunityMissionLinks.save(link);
+  }
+
   getMissionForOpportunity(
     userId: string,
     opportunityId: string,

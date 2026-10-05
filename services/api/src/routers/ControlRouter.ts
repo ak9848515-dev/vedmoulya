@@ -45,6 +45,14 @@ export interface OpportunityAcquisitionDeps {
   mission: MissionLaunchPort;
 }
 
+// S5.2 — in-process launch collapse. Concurrent startMission calls for the
+// same (owner, opportunity) in THIS process share one in-flight execution,
+// so only ONE MissionLaunchPort.createAndRun can run per key. This is a
+// request-collapsing join, NOT the production guarantee: the durable
+// APPROVED → PLANNED claim + idempotent association below remain the real
+// cross-process boundary.
+const missionLaunchInFlight = new Map<string, Promise<ApiResponse>>();
+
 /** Map an acquisition outcome onto the closed ErrorCode set, preserving the
  *  honest, specific reason in `details.opportunityCode` (same discipline as
  *  `fromControlResult`, which preserves `controlCode`). */
@@ -435,76 +443,168 @@ export function createControlRouter(
           acquisitionError('MISSION_UNAVAILABLE', 'Mission creation is not configured.', 503),
         );
       }
-      const record = plane.listOpportunities(ownerId).find((o) => o.id === id);
-      if (record === undefined) {
-        return Promise.resolve(acquisitionError('NOT_FOUND', 'Opportunity not found.', 404));
-      }
-      if (record.status !== 'APPROVED') {
-        return Promise.resolve(
-          acquisitionError(
-            'APPROVAL_REQUIRED',
-            `Only an APPROVED opportunity may start a Mission (this one is ${record.status}).`,
-            403,
-          ),
-        );
-      }
+      // S5.2 — collapse concurrent in-process launches for the same key onto
+      // one shared execution. The first caller runs the body below; joiners
+      // await the same promise. Cross-process duplicates are still handled by
+      // the durable claim + idempotent association inside the body.
+      const inFlightKey = `${ownerId}:${id}`;
+      const joined = missionLaunchInFlight.get(inFlightKey);
+      if (joined !== undefined) return joined;
+      const execution = (async (): Promise<ApiResponse> => {
+        const record = plane.listOpportunities(ownerId).find((o) => o.id === id);
+        if (record === undefined) {
+          return Promise.resolve(acquisitionError('NOT_FOUND', 'Opportunity not found.', 404));
+        }
+        if (record.status !== 'APPROVED') {
+          // S5.2 — completed launch (PLANNED + association present) returns the
+          // existing linkage deterministically: one Mission, one association,
+          // no second createAndRun. An interrupted claim (PLANNED with NO
+          // association — launch or link failed mid-flight) falls through and
+          // is reclaimed below. Any other non-APPROVED status is refused.
+          const completed =
+            record.status === 'PLANNED' &&
+            plane.getMissionForOpportunity(ownerId, record.id) !== undefined;
+          if (completed) {
+            const done = plane.getMissionForOpportunity(ownerId, record.id);
+            return Promise.resolve(
+              successResponse({
+                opportunityId: record.id,
+                missionId: done?.missionId,
+                created: false,
+                alreadyLinked: true,
+              }),
+            );
+          }
+          const interrupted =
+            record.status === 'PLANNED' &&
+            plane.getMissionForOpportunity(ownerId, record.id) === undefined;
+          if (!interrupted) {
+            return Promise.resolve(
+              acquisitionError(
+                'APPROVAL_REQUIRED',
+                `Only an APPROVED opportunity may start a Mission (this one is ${record.status}).`,
+                403,
+              ),
+            );
+          }
+        }
 
-      // Idempotency BEFORE creating anything: an approved opportunity that
-      // already has a Mission must never create a second one.
-      const existing = plane.getMissionForOpportunity(ownerId, record.id);
-      if (existing !== undefined) {
+        // Idempotency BEFORE creating anything: an approved opportunity that
+        // already has a Mission must never create a second one.
+        const existing = plane.getMissionForOpportunity(ownerId, record.id);
+        if (existing !== undefined) {
+          return Promise.resolve(
+            successResponse({
+              opportunityId: record.id,
+              missionId: existing.missionId,
+              created: false,
+              alreadyLinked: true,
+            }),
+          );
+        }
+
+        // S5.2 — synchronous launch claim using the EXISTING guarded lifecycle:
+        // APPROVED → PLANNED is a legal one-step transition and the store write
+        // is synchronous, so a concurrent duplicate in this process observes
+        // PLANNED (not APPROVED) and is refused below instead of reaching
+        // MissionLaunchPort.createAndRun a second time. No in-memory lock, no
+        // new store, no Mission change — the lifecycle IS the atomic claim.
+        const claimed = plane.transitionOpportunity({
+          ownerId,
+          id: record.id,
+          to: 'PLANNED',
+          note: 'mission launch claimed — association pending',
+        });
+        if (!claimed.success) {
+          // A concurrent request already claimed (or moved) this opportunity.
+          // Deterministic, recoverable: retrying after the winner finishes
+          // returns the existing linkage via the alreadyLinked path above.
+          return Promise.resolve(
+            acquisitionError(
+              'LAUNCH_IN_PROGRESS',
+              'Another launch already claimed this opportunity. Retry to receive the existing Mission linkage.',
+              409,
+            ),
+          );
+        }
+
+        const launched = await acquisition.mission.launch({
+          userId: ownerId,
+          title: record.title,
+          description: record.description,
+        });
+        if (!launched.success) {
+          // The launch failed AFTER the claim was taken. The
+          // PLANNED-without-association state left behind is the durable,
+          // explicitly recoverable interrupted-claim state that the guard above
+          // already reclaims on the next call. No association is written.
+          // Nothing claims a Mission exists.
+          return Promise.resolve(acquisitionError(launched.code, launched.message, 502));
+        }
+
+        let missionId: string;
+        let recovered = false;
+        try {
+          // Persist the association. The save is idempotent by
+          // (userId, opportunityId) — if a concurrent request already wrote the
+          // link, this returns the EXISTING one. When the existing missionId
+          // differs from the one just launched, the loser does NOT silently
+          // create a second Mission: it reconciles onto the winner and reports
+          // the duplicate honestly. Retry once on transient failure.
+          const persist = (): { missionId: string; duplicate: boolean } => {
+            const link = plane.linkClaimedOpportunityToMission({
+              userId: ownerId,
+              opportunityId: record.id,
+              missionId: launched.missionId,
+              createdAt: new Date().toISOString(),
+            });
+            return { missionId: link.missionId, duplicate: link.missionId !== launched.missionId };
+          };
+          try {
+            const first = persist();
+            missionId = first.missionId;
+            recovered = first.duplicate;
+          } catch {
+            // Retry once — the save is idempotent so this either creates
+            // the link or returns the existing one without duplicating.
+            const second = persist();
+            missionId = second.missionId;
+            recovered = second.duplicate;
+          }
+        } catch (error) {
+          // The Mission WAS created but the association was not persisted even
+          // after retry. The PLANNED-without-association state left behind is
+          // the durable interrupted-claim state: a later call reclaims it via
+          // the guard above (same Mission launch is NOT retried silently — the
+          // caller retries the whole startMission call, which reclaims the
+          // claim and launches exactly once). We say exactly what happened.
+          return Promise.resolve(
+            acquisitionError(
+              'ASSOCIATION_PERSIST_FAILED',
+              `Mission ${launched.missionId} was created but the opportunity association could not be persisted: ${error instanceof Error ? error.message : 'unknown error'}`,
+              500,
+            ),
+          );
+        }
+
         return Promise.resolve(
           successResponse({
             opportunityId: record.id,
-            missionId: existing.missionId,
-            created: false,
-            alreadyLinked: true,
+            missionId,
+            created: !recovered,
+            alreadyLinked: recovered,
+            ...(recovered ? { recoveredMissionId: launched.missionId } : {}),
           }),
         );
-      }
-
-      const launched = await acquisition.mission.launch({
-        userId: ownerId,
-        title: record.title,
-        description: record.description,
-      });
-      if (!launched.success) {
-        // No association is written. Nothing claims a Mission exists.
-        return Promise.resolve(acquisitionError(launched.code, launched.message, 502));
-      }
-
-      let missionId: string;
+      })();
+      missionLaunchInFlight.set(inFlightKey, execution);
       try {
-        const link = plane.linkOpportunityToMission({
-          userId: ownerId,
-          opportunityId: record.id,
-          missionId: launched.missionId,
-          createdAt: new Date().toISOString(),
-        });
-        missionId = link.missionId;
-      } catch (error) {
-        // The Mission WAS created but the association was not persisted. We
-        // say exactly that — we never report a linkage that does not exist,
-        // and we never pretend the Mission does not exist either.
-        return Promise.resolve(
-          acquisitionError(
-            'ASSOCIATION_PERSIST_FAILED',
-            `Mission ${launched.missionId} was created but the opportunity association could not be persisted: ${
-              error instanceof Error ? error.message : 'unknown error'
-            }`,
-            500,
-          ),
-        );
+        return await execution;
+      } finally {
+        if (missionLaunchInFlight.get(inFlightKey) === execution) {
+          missionLaunchInFlight.delete(inFlightKey);
+        }
       }
-
-      return Promise.resolve(
-        successResponse({
-          opportunityId: record.id,
-          missionId,
-          created: true,
-          alreadyLinked: false,
-        }),
-      );
     },
 
     // ── S5.1 — owner-scoped association lookups (minimum read surface) ───────

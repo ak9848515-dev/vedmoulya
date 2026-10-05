@@ -48,16 +48,25 @@ const POSTING = {
   requirements: ['typescript', 'api design'],
 };
 
-function harness(opts: { missionFails?: boolean; missionThrows?: boolean } = {}) {
+function harness(
+  opts: {
+    missionFails?: boolean;
+    missionThrows?: boolean;
+    sharePlane?: ActiveIntelligenceControlPlane;
+    shareStores?: InMemoryControlStores;
+  } = {},
+) {
   const brain = createBrain();
-  const stores = new InMemoryControlStores();
-  const plane = new ActiveIntelligenceControlPlane({
-    brain: { listTasksWithApprovals: () => [], outcomeCount: () => 0 },
-    proactive: { refresh: async () => ({ success: true }), listRecommendations: () => [] },
-    fabric: {} as never,
-    stores,
-    now: () => '2026-10-05T00:00:00.000Z',
-  });
+  const stores = opts.shareStores ?? new InMemoryControlStores();
+  const plane =
+    opts.sharePlane ??
+    new ActiveIntelligenceControlPlane({
+      brain: { listTasksWithApprovals: () => [], outcomeCount: () => 0 },
+      proactive: { refresh: async () => ({ success: true }), listRecommendations: () => [] },
+      fabric: {} as never,
+      stores,
+      now: () => '2026-10-05T00:00:00.000Z',
+    });
   const launched: Array<{ userId: string; title: string }> = [];
   let n = 0;
   const mission = createMissionLaunchPort({
@@ -278,7 +287,7 @@ describe('S5.1 — approved opportunity → Mission', () => {
     expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(0);
   });
 
-  it('14. association persistence failure is reported honestly', async () => {
+  it('14. association failure after retry is reported honestly', async () => {
     const h = harness();
     const id = await approvedOpportunity(h);
     // Break the store AFTER approval, so the Mission is created but the link
@@ -296,6 +305,209 @@ describe('S5.1 — approved opportunity → Mission', () => {
     // claiming a linkage that does not exist.
     expect(h.launched).toHaveLength(1);
     expect(started.error.message).toMatch(/was created but/);
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(0);
+  });
+
+  it('14b. transient association failure is absorbed by the idempotent retry', async () => {
+    const h = harness();
+    const id = await approvedOpportunity(h);
+    let saveCalls = 0;
+    const realSave = h.stores.opportunityMissionLinks.save.bind(h.stores.opportunityMissionLinks);
+    Object.defineProperty(h.stores.opportunityMissionLinks, 'save', {
+      value: (link: {
+        userId: string;
+        opportunityId: string;
+        missionId: string;
+        createdAt: string;
+      }) => {
+        saveCalls++;
+        if (saveCalls === 1) throw new Error('store offline');
+        return realSave(link);
+      },
+    });
+    const started = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+    // The first save failed, but the retry succeeded — honest success.
+    expect(started.success).toBe(true);
+    const data = started.data as { missionId: string; created: boolean; alreadyLinked: boolean };
+    expect(data.created).toBe(true);
+    expect(data.alreadyLinked).toBe(false);
+    expect(saveCalls).toBe(2);
+    // Exactly one Mission was created.
+    expect(h.launched).toHaveLength(1);
+    // Exactly one association exists, bound to the launched Mission.
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(1);
+    expect(h.plane.getMissionForOpportunity(OWNER, id)?.missionId).toBe(data.missionId);
+  });
+}); // end S5.1 — association is idempotent, user-isolated, honest
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S5.2 — Opportunity → Mission reliability hardening
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S5.2 — Opportunity → Mission reliability hardening', () => {
+  it('S5.2-1. sequential duplicate launch → one Mission, one association', async () => {
+    const h = harness();
+    const id = await approvedOpportunity(h);
+    const first = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+    expect(first.success).toBe(true);
+    const missionId1 = (first.data as { missionId: string }).missionId;
+    const second = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+    expect(second.success).toBe(true);
+    const data2 = second.data as { missionId: string; alreadyLinked: boolean };
+    expect(data2.missionId).toBe(missionId1);
+    expect(data2.alreadyLinked).toBe(true);
+    expect(h.launched).toHaveLength(1);
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(1);
+  });
+
+  it('S5.2-2. concurrent duplicate launch → one Mission, one association', async () => {
+    const h = harness();
+    const id = await approvedOpportunity(h);
+    // Two concurrent launches share one in-process execution; both callers
+    // receive the SAME response object, one Mission, one association.
+    const [a, b] = await Promise.all([
+      h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx),
+      h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx),
+    ]);
+    expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
+    const ma = (a.data as { missionId: string }).missionId;
+    const mb = (b.data as { missionId: string }).missionId;
+    expect(ma).toBe(mb);
+    expect(h.launched).toHaveLength(1);
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(1);
+  });
+
+  it('S5.2-3. association retry reuses the existing Mission', async () => {
+    const h = harness();
+    const id = await approvedOpportunity(h);
+    let calls = 0;
+    const realSave = h.stores.opportunityMissionLinks.save.bind(h.stores.opportunityMissionLinks);
+    Object.defineProperty(h.stores.opportunityMissionLinks, 'save', {
+      value: (link: {
+        userId: string;
+        opportunityId: string;
+        missionId: string;
+        createdAt: string;
+      }) => {
+        calls++;
+        if (calls === 1) throw new Error('transient');
+        return realSave(link);
+      },
+    });
+    const started = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+    expect(started.success).toBe(true);
+    const data = started.data as { missionId: string };
+    expect(h.launched).toHaveLength(1);
+    expect(h.plane.getMissionForOpportunity(OWNER, id)?.missionId).toBe(data.missionId);
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(1);
+  });
+
+  it('S5.2-4. different opportunities → independent Missions', async () => {
+    const h = harness();
+    const id1 = await approvedOpportunity(h, h.ctx as never, 'ref-1');
+    const id2 = await approvedOpportunity(h, h.ctx as never, 'ref-2');
+    const m1 = await h.router.startMissionForOpportunity({ id: id1, userId: OWNER }, h.ctx);
+    const m2 = await h.router.startMissionForOpportunity({ id: id2, userId: OWNER }, h.ctx);
+    expect(m1.success).toBe(true);
+    expect(m2.success).toBe(true);
+    const id1m = (m1.data as { missionId: string }).missionId;
+    const id2m = (m2.data as { missionId: string }).missionId;
+    expect(id1m).not.toBe(id2m);
+    expect(h.launched).toHaveLength(2);
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(2);
+  });
+
+  it('S5.2-5. different users → isolated Missions and associations', async () => {
+    const h = harness();
+    const idA = await approvedOpportunity(h, h.ctx as never, 'user-a-ref');
+    const mA = await h.router.startMissionForOpportunity({ id: idA, userId: OWNER }, h.ctx);
+    expect(mA.success).toBe(true);
+    const missionA = (mA.data as { missionId: string }).missionId;
+
+    const otherImport = await h.router.importOpportunity(
+      { userId: OTHER, opportunity: { ...POSTING, sourceReference: 'user-a-ref' } },
+      h.otherCtx,
+    );
+    expect(otherImport.success).toBe(true);
+    const idB = (otherImport.data as OpportunityLifecycleRecord).id;
+    for (const to of ['ASSESSED', 'SHORTLISTED', 'PRESENTED'] as const) {
+      const r = await h.router.transitionOpportunity(
+        { userId: OTHER, id: idB, to, note: 'walk' },
+        h.otherCtx,
+      );
+      expect(r.success).toBe(true);
+    }
+    const req = await h.router.requestOpportunityApproval(
+      { userId: OTHER, opportunityId: idB },
+      h.otherCtx,
+    );
+    const taskId = (req.data as { taskId: string }).taskId;
+    const approved = await h.router.transitionOpportunity(
+      { userId: OTHER, id: idB, to: 'APPROVED', note: 'ok', approvalTaskId: taskId },
+      h.otherCtx,
+    );
+    expect(approved.success).toBe(true);
+    const mB = await h.router.startMissionForOpportunity({ id: idB, userId: OTHER }, h.otherCtx);
+    expect(mB.success).toBe(true);
+    const missionB = (mB.data as { missionId: string }).missionId;
+    expect(missionA).not.toBe(missionB);
+    expect(h.plane.getMissionForOpportunity(OTHER, idA)).toBeUndefined();
+    expect(h.plane.getOpportunityForMission(OTHER, missionA)).toBeUndefined();
+    expect(h.plane.listOpportunityMissionLinks(OTHER)).toHaveLength(1);
+  });
+
+  it('S5.2-6. unapproved opportunity → no Mission', async () => {
+    const h = harness();
+    const imported = await h.router.importOpportunity(
+      { userId: OWNER, opportunity: POSTING },
+      h.ctx,
+    );
+    expect(imported.success).toBe(true);
+    const id = (imported.data as OpportunityLifecycleRecord).id;
+    const started = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+    expect(started.success).toBe(false);
+    expect(h.launched).toHaveLength(0);
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(0);
+  });
+
+  it('S5.2-7. mission engine failure → no association, honest error', async () => {
+    const h = harness({ missionFails: true });
+    const id = await approvedOpportunity(h);
+    const started = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+    expect(started.success).toBe(false);
+    if (started.success) return;
+    expect(started.error.details?.opportunityCode).toBe('MISSION_CREATION_FAILED');
+    // The engine was invoked once; no association was persisted for a
+    // Mission that does not exist.
+    expect(h.launched).toHaveLength(1);
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(0);
+  });
+
+  it('S5.2-8. interrupted claim (PLANNED, no link) is reclaimed, not refused', async () => {
+    // First attempt fails AFTER the APPROVED → PLANNED claim was taken.
+    const failing = harness({ missionFails: true });
+    const id = await approvedOpportunity(failing);
+    const failed = await failing.router.startMissionForOpportunity(
+      { id, userId: OWNER },
+      failing.ctx,
+    );
+    expect(failed.success).toBe(false);
+    expect(failing.plane.getMissionForOpportunity(OWNER, id)).toBeUndefined();
+    // Engine recovers. A fresh router over the SAME plane + stores reclaims
+    // the durable interrupted claim and launches exactly one Mission.
+    const recovered = harness({ sharePlane: failing.plane, shareStores: failing.stores });
+    const retry = await recovered.router.startMissionForOpportunity(
+      { id, userId: OWNER },
+      recovered.ctx,
+    );
+    expect(retry.success).toBe(true);
+    const data = retry.data as { missionId: string; created: boolean; alreadyLinked: boolean };
+    expect(data.created).toBe(true);
+    expect(data.alreadyLinked).toBe(false);
+    expect(recovered.launched).toHaveLength(1);
+    expect(recovered.plane.getMissionForOpportunity(OWNER, id)?.missionId).toBe(data.missionId);
+    expect(recovered.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(1);
   });
 });
 
