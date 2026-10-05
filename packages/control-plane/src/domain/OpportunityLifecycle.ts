@@ -15,7 +15,11 @@
 // moves. Discovery/scoring/execution live in the frozen estate.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { OpportunityLifecycleRecord, OpportunityStatus } from '../types/control-types.js';
+import type {
+  OpportunityLifecycleRecord,
+  OpportunitySourceRef,
+  OpportunityStatus,
+} from '../types/control-types.js';
 import { OPPORTUNITY_TRANSITIONS } from '../types/control-types.js';
 
 export interface OpportunityStore {
@@ -73,8 +77,16 @@ export class OpportunityLifecycle {
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
     automationPotential: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
     recommendedWorkflow?: string[];
+    /** S5 — external provenance. When present it becomes the dedup
+     *  discriminator (source + sourceReference) instead of the title, so a
+     *  re-discovered posting collapses onto ONE record while a genuinely
+     *  different posting stays separate. Absent → legacy title key. */
+    sourceRef?: OpportunitySourceRef;
   }): OpportunityLifecycleRecord {
-    const stableKey = `${input.ownerId}:${input.title.trim().toLowerCase()}`;
+    const stableKey =
+      input.sourceRef !== undefined
+        ? `${input.ownerId}:${input.sourceRef.source.toLowerCase()}:${input.sourceRef.sourceReference.toLowerCase()}`
+        : `${input.ownerId}:${input.title.trim().toLowerCase()}`;
     const existing = this.store.getByKey(input.ownerId, stableKey);
     if (existing) return existing;
 
@@ -83,6 +95,7 @@ export class OpportunityLifecycle {
       id: `opp-${Math.random().toString(36).slice(2, 10)}`,
       ownerId: input.ownerId,
       stableKey,
+      ...(input.sourceRef !== undefined ? { sourceRef: input.sourceRef } : {}),
       title: input.title.slice(0, 160),
       description: input.description.slice(0, 1000),
       category: input.category,

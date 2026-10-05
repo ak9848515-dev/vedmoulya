@@ -21,6 +21,10 @@ export const SENSITIVE_ACTIONS = [
   'share',
   'install',
   'connect_account',
+  // S5 — accepting EXTERNAL work is a commitment to deliver, exactly like the
+  // actions above. It is governed through the canonical opportunity lifecycle
+  // and always requires explicit human approval before a Mission may start.
+  'accept_work',
 ] as const;
 
 export type SensitiveAction = (typeof SENSITIVE_ACTIONS)[number];

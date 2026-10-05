@@ -21,6 +21,7 @@ import type {
   GateDecision,
   ObservationSnapshot,
   OpportunityLifecycleRecord,
+  OpportunitySourceRef,
   OpportunityStatus,
 } from '../types/control-types.js';
 import type {
@@ -266,6 +267,8 @@ export class ActiveIntelligenceControlPlane {
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
     automationPotential: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
     recommendedWorkflow?: string[];
+    /** S5 — external provenance / dedup discriminator. */
+    sourceRef?: OpportunitySourceRef;
   }): OpportunityLifecycleRecord {
     return this.opportunities.discover(input);
   }

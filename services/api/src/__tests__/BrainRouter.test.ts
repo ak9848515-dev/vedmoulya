@@ -491,12 +491,23 @@ describe('brain.* EPIC-020 — continuous intelligence surface', () => {
     const opportunities = await caller.brain.listOpportunities({ userId: contCtx.userId });
     expect(opportunities.success).toBe(true);
     const first = opportunities.data![0];
+    // S5 — brain opportunities are a TRIAGE inbox, not the acquisition path.
+    // `ACCEPTED` used to be freely settable, which made it a second, unguarded
+    // approval route competing with the canonical control-plane lifecycle. It
+    // is now refused; triage statuses remain mutable and owner-scoped.
     const updated = await caller.brain.updateOpportunity({
+      userId: contCtx.userId,
+      opportunityId: first!.id,
+      status: 'RECOMMENDED',
+    });
+    expect(updated.data!.status).toBe('RECOMMENDED');
+
+    const refused = await caller.brain.updateOpportunity({
       userId: contCtx.userId,
       opportunityId: first!.id,
       status: 'ACCEPTED',
     });
-    expect(updated.data!.status).toBe('ACCEPTED');
+    expect(refused.success).toBe(false);
 
     const events = await caller.brain.listIntelligenceEvents({ userId: contCtx.userId });
     expect(events.data!.some((e) => e.id === 'evt-suspicious-repo')).toBe(true);

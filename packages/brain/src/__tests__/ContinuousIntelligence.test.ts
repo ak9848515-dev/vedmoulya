@@ -588,17 +588,30 @@ describe('BrainApplicationService — EPIC-020 continuous orchestration', () => 
     expect(result.data!.opportunities).toHaveLength(1); // blocked repo screened out
     expect(result.data!.opportunities[0]?.category).toBe('cost_saving');
 
-    // IDOR: another user sees none of it.
+    // IDOR: another user sees none of it. The probe uses a VALID triage status
+    // so this can only fail because the record is not u2's — not because the
+    // status itself was refused.
     expect(service.listOpportunities('u2').data).toHaveLength(0);
     expect(service.listIntelligenceEvents('u2').data).toHaveLength(0);
-    expect(
-      service.updateOpportunity('u2', result.data!.opportunities[0]!.id, 'ACCEPTED').success,
-    ).toBe(false);
+    const idor = service.updateOpportunity('u2', result.data!.opportunities[0]!.id, 'RECOMMENDED');
+    expect(idor.success).toBe(false);
+    if (idor.success) throw new Error('cross-user update must be refused');
+    expect(idor.code).toBe('NOT_FOUND');
 
-    // Owner can update.
-    const updated = service.updateOpportunity('u1', result.data!.opportunities[0]!.id, 'ACCEPTED');
-    expect(updated.data?.status).toBe('ACCEPTED');
-    expect(opportunities.list('u1')[0]?.status).toBe('ACCEPTED');
+    // Owner can update (triage statuses only).
+    const updated = service.updateOpportunity(
+      'u1',
+      result.data!.opportunities[0]!.id,
+      'RECOMMENDED',
+    );
+    expect(updated.data?.status).toBe('RECOMMENDED');
+    expect(opportunities.list('u1')[0]?.status).toBe('RECOMMENDED');
+
+    // S5 — ACCEPTED is closed: brain opportunities are an AI-notice inbox, and
+    // acceptance is governed solely by the canonical control-plane lifecycle.
+    const accepted = service.updateOpportunity('u1', result.data!.opportunities[0]!.id, 'ACCEPTED');
+    expect(accepted.success).toBe(false);
+    expect(opportunities.list('u1')[0]?.status).toBe('RECOMMENDED');
   });
 
   it('learns from outcomes: adaptive scores + memory + recurrence opportunity', async () => {

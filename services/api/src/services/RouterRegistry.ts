@@ -72,6 +72,7 @@ import {
 import { createProactiveRouter, proactiveInputs } from '../routers/ProactiveRouter.js';
 import { createFabricRouter, fabricInputs } from '../routers/FabricRouter.js';
 import { createControlRouter, controlInputs } from '../routers/ControlRouter.js';
+import type { OpportunityAcquisitionDeps } from '../routers/ControlRouter.js';
 import { createWorldRouter, worldInputs } from '../routers/WorldRouter.js';
 import { checkRateLimitInternal, RateLimitTiers } from '../middleware/rate-limit.js';
 import type { RateLimitConfig } from '../middleware/rate-limit.js';
@@ -2569,6 +2570,14 @@ const portalTokenInvoice = z.object({ token: z.string().min(16), invoiceId: z.st
  */
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function createAppRouter(services: ApiApplicationService) {
+  // S5 — acquisition dependencies. The approval authority is the EXISTING
+  // Brain (the only entity that may grant approval); the normalizer is pure
+  // and has no store. No Mission, payment or bidding capability is reachable
+  // from here, so the acquisition path structurally cannot commit to work.
+  const acquisitionDeps: OpportunityAcquisitionDeps = {
+    approval: services.opportunityApproval,
+  };
+
   return router({
     // ── Platform Health (health tier: 200 req/min) ──────────────────────────
     health: router({
@@ -6169,8 +6178,31 @@ export function createAppRouter(services: ApiApplicationService) {
       transitionOpportunity: standardProcedure
         .input(controlInputs.opportunityTransition)
         .mutation(({ input, ctx }) =>
-          createControlRouter(services.controlPlane).transitionOpportunity(
+          createControlRouter(services.controlPlane, acquisitionDeps).transitionOpportunity(
             input as Record<string, unknown>,
+            ctx,
+          ),
+        ),
+      // ── S5 — opportunity acquisition foundation. Import normalizes an
+      //    UNTRUSTED external payload into the EXISTING canonical record
+      //    (idempotent by owner + source + sourceReference). Approval is
+      //    NEVER a client-written record: the caller registers a request with
+      //    the EXISTING Brain authority and the authority mints the grant.
+      //    `userId` is spread AFTER the input so the session identity always
+      //    wins — a client can never import or approve into another account.
+      importOpportunity: standardProcedure
+        .input(controlInputs.opportunityImport)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).importOpportunity(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      requestOpportunityApproval: standardProcedure
+        .input(controlInputs.opportunityApprovalRequest)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).requestOpportunityApproval(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
             ctx,
           ),
         ),

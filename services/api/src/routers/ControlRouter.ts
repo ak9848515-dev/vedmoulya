@@ -23,7 +23,40 @@ import { z } from 'zod';
 import type { ActiveIntelligenceControlPlane } from '@vedmoulya/control-plane';
 import type { TRPCContext } from '../services/RouterRegistry.js';
 import type { ApiResponse } from '../services/ResponseMapper.js';
+import type { ErrorCode } from '../middleware/error.js';
 import { successResponse } from '../services/ResponseMapper.js';
+import type { OpportunityApprovalPort } from '../infrastructure/OpportunityApprovalPorts.js';
+import { normalizeExternalOpportunity } from '../services/OpportunitySourceAdapter.js';
+
+/** S5 — the acquisition dependencies a router needs. Deliberately narrow: the
+ *  approval authority and nothing else. The normalizer is a pure import. No
+ *  Mission service, no payment, no bidding — the router cannot reach them. */
+export interface OpportunityAcquisitionDeps {
+  approval: OpportunityApprovalPort;
+}
+
+/** Map an acquisition outcome onto the closed ErrorCode set, preserving the
+ *  honest, specific reason in `details.opportunityCode` (same discipline as
+ *  `fromControlResult`, which preserves `controlCode`). */
+const acquisitionError = (
+  opportunityCode: string,
+  message: string,
+  statusCode: number,
+): ApiResponse => {
+  const code: ErrorCode =
+    statusCode === 403
+      ? 'AUTHORIZATION_ERROR'
+      : statusCode === 503
+        ? 'SERVICE_UNAVAILABLE'
+        : opportunityCode === 'SECRET_REJECTED'
+          ? 'VALIDATION_ERROR'
+          : 'VALIDATION_ERROR';
+  return {
+    success: false,
+    error: { code, message, statusCode, details: { opportunityCode } },
+    meta: { timestamp: new Date().toISOString(), duration: 0, version: '1.0.0' },
+  };
+};
 
 const userIdInput = z.object({ userId: z.string().min(1) });
 
@@ -74,14 +107,11 @@ export const controlInputs = {
       'COMPLETED',
     ]),
     note: z.string().max(400),
-    approval: z
-      .object({
-        id: z.string().min(1),
-        grantedBy: z.string().min(1),
-        grantedAt: z.string().min(1),
-        scope: z.string().min(1),
-      })
-      .optional(),
+    // S5 — the APPROVED transition no longer accepts a client-written approval
+    // record. The client supplies the EXISTING Brain approval task id and the
+    // authority mints the record (infrastructure/OpportunityApprovalPorts).
+    // `approvalTaskId` is IGNORED for every other target state.
+    approvalTaskId: z.string().min(1).max(128).optional(),
     execution: z
       .object({
         id: z.string().min(1),
@@ -89,6 +119,18 @@ export const controlInputs = {
         verified: z.boolean(),
       })
       .optional(),
+  }),
+  // S5 — acquisition entry point. The payload is UNTRUSTED external input and
+  // is validated field-by-field by the normalizer, not by a wide zod object.
+  opportunityImport: z.object({
+    userId: z.string().min(1),
+    opportunity: z.unknown(),
+  }),
+  // S5 — ask the EXISTING approval authority to register a request. It does
+  // not approve; it returns the task id the human decides on.
+  opportunityApprovalRequest: z.object({
+    userId: z.string().min(1),
+    opportunityId: z.string().min(1).max(128),
   }),
   gate: z.object({
     userId: z.string().min(1),
@@ -118,6 +160,11 @@ export interface ControlHandlers {
   briefing: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   listOpportunities: (input: { userId: string }, ctx: TRPCContext) => Promise<ApiResponse>;
   transitionOpportunity: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
+  importOpportunity: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
+  requestOpportunityApproval: (
+    input: Record<string, unknown>,
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
   gateAction: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
 }
 
@@ -141,7 +188,12 @@ function fromControlResult<T>(
   };
 }
 
-export function createControlRouter(plane: ActiveIntelligenceControlPlane): ControlHandlers {
+export function createControlRouter(
+  plane: ActiveIntelligenceControlPlane,
+  /** S5 — optional acquisition dependencies. Absent (e.g. a slim test double)
+   *  the APPROVED transition fails closed rather than trusting an input record. */
+  acquisition?: OpportunityAcquisitionDeps,
+): ControlHandlers {
   return {
     getSettings: async (input): Promise<ApiResponse> =>
       Promise.resolve(successResponse(plane.getSettings(input.userId) ?? null)),
@@ -204,19 +256,111 @@ export function createControlRouter(plane: ActiveIntelligenceControlPlane): Cont
       Promise.resolve(successResponse(plane.listOpportunities(input.userId))),
 
     transitionOpportunity: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const to = input.to as string;
+      let approval: { id: string; grantedBy: string; grantedAt: string; scope: string } | undefined;
+
+      // S5 — APPROVED is the ONLY state that needs authority, and the authority
+      // now produces the record. There is deliberately NO path where a
+      // caller-supplied record satisfies the guard.
+      if (to === 'APPROVED') {
+        if (acquisition === undefined) {
+          return Promise.resolve(
+            acquisitionError(
+              'APPROVAL_UNAVAILABLE',
+              'The approval authority is not configured.',
+              503,
+            ),
+          );
+        }
+        const taskId = input.approvalTaskId;
+        if (typeof taskId !== 'string' || taskId.length === 0) {
+          return Promise.resolve(
+            acquisitionError(
+              'APPROVAL_REQUIRED',
+              'APPROVED requires an approval task from the approval authority (approvalTaskId).',
+              400,
+            ),
+          );
+        }
+        const decision = acquisition.approval.approve({
+          userId: ownerId,
+          taskId,
+          opportunityId: String(input.id),
+        });
+        if (!decision.success) {
+          return Promise.resolve(acquisitionError(decision.code, decision.message, 403));
+        }
+        approval = decision.data;
+      }
+
       const result = plane.transitionOpportunity({
-        ownerId: input.userId as string,
+        ownerId,
         id: input.id as string,
-        to: input.to as never,
+        to: to as never,
         note: input.note as string,
-        approval: input.approval as
-          { id: string; grantedBy: string; grantedAt: string; scope: string } | undefined,
+        ...(approval !== undefined ? { approval } : {}),
         execution: input.execution as
           { id: string; completedAt: string; verified: boolean } | undefined,
       });
+      if (result.success) return Promise.resolve(successResponse(result.record));
+      return Promise.resolve(
+        fromControlResult(
+          result as
+            { success: true; data: unknown } | { success: false; error: string; code: string },
+          400,
+        ),
+      );
+    },
+
+    // S5 — the missing acquisition entry point. Normalizes an untrusted
+    // external payload into the EXISTING canonical record. Idempotent through
+    // the canonical stable key (owner + source + sourceReference).
+    importOpportunity: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const normalized = normalizeExternalOpportunity(input.opportunity);
+      if (!normalized.success) {
+        return Promise.resolve(acquisitionError(normalized.code, normalized.message, 400));
+      }
+      const record = plane.discoverOpportunity({
+        ownerId,
+        title: normalized.data.title,
+        description: normalized.data.description,
+        category: normalized.data.category,
+        evidence: normalized.data.evidence,
+        ...(normalized.data.estimatedValue !== undefined
+          ? { estimatedValue: normalized.data.estimatedValue }
+          : {}),
+        ...(normalized.data.estimatedEffort !== undefined
+          ? { estimatedEffort: normalized.data.estimatedEffort }
+          : {}),
+        riskLevel: normalized.data.riskLevel,
+        automationPotential: normalized.data.automationPotential,
+        sourceRef: normalized.data.sourceRef,
+      });
+      return Promise.resolve(successResponse(record));
+    },
+
+    // S5 — register the approval request with the EXISTING Brain authority.
+    // It never approves; it only creates the task the human will decide on.
+    requestOpportunityApproval: async (input): Promise<ApiResponse> => {
+      if (acquisition === undefined) {
+        return Promise.resolve(
+          acquisitionError(
+            'APPROVAL_UNAVAILABLE',
+            'The approval authority is not configured.',
+            503,
+          ),
+        );
+      }
+      const ownerId = input.userId as string;
+      const result = acquisition.approval.requestApproval({
+        userId: ownerId,
+        opportunityId: typeof input.opportunityId === 'string' ? input.opportunityId : '',
+      });
       return result.success
-        ? Promise.resolve(successResponse(result.record))
-        : Promise.resolve(fromControlResult(result, 400));
+        ? Promise.resolve(successResponse(result.data))
+        : Promise.resolve(acquisitionError(result.code, result.message, 403));
     },
 
     gateAction: async (input): Promise<ApiResponse> => {

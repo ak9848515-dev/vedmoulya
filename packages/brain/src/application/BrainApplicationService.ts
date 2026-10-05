@@ -623,6 +623,18 @@ export class BrainApplicationService {
     opportunityId: string,
     status: Opportunity['status'],
   ): ServiceResult<Opportunity> {
+    // S5 — this inbox is NOT the acquisition path. `ACCEPTED` used to be
+    // freely settable here, which made it a SECOND, UNGUARDED approval route
+    // competing with the canonical control-plane lifecycle (where APPROVED
+    // requires a real approval-authority record). Brain opportunities are
+    // AI "we noticed something" notices: triage states only. Anything that
+    // commits to work must go through the canonical lifecycle.
+    if (status === 'ACCEPTED') {
+      return err(
+        'ACCEPTED is not available on brain opportunities. Use the canonical control-plane opportunity lifecycle, where APPROVED requires the approval authority.',
+        'NOT_ALLOWED',
+      );
+    }
     if (!this.opts.opportunities) return err('Opportunity store not configured.', 'NOT_CONFIGURED');
     const updated = this.opts.opportunities.update(userId, opportunityId, { status });
     if (!updated) return err('Opportunity not found.', 'NOT_FOUND');

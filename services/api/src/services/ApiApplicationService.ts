@@ -251,6 +251,10 @@ import {
   createControlStores,
 } from '../infrastructure/ControlBridgePorts.js';
 import {
+  createOpportunityApprovalPort,
+  type OpportunityApprovalPort,
+} from '../infrastructure/OpportunityApprovalPorts.js';
+import {
   createCommandCenterPresentationPort,
   createWorldActionPort,
   createWorldApprovalPort,
@@ -717,6 +721,8 @@ export class ApiApplicationService {
    *  stays with the Brain, execution with the execution bridge, memory/learning
    *  with the existing outcome memory. */
   readonly controlPlane: ActiveIntelligenceControlPlane;
+  /** S5 — the approval authority for the opportunity lifecycle. */
+  readonly opportunityApproval: OpportunityApprovalPort;
 
   // ── SPRINT-032 — World Model & Business Operating System (composition seam) ──
   /** The minimum useful world representation for better decisions: a bounded
@@ -1874,6 +1880,12 @@ export class ApiApplicationService {
       fabric: createControlFabricPort(this.fabric),
       stores: createControlStores(persistence.control),
     });
+
+    // ── S5 — opportunity acquisition authority ────────────────────────────
+    // The ONLY route to an APPROVED opportunity. It delegates to the EXISTING
+    // Brain approval authority and mints the grant server-side, so a client can
+    // never satisfy the lifecycle's approval guard with a record it wrote.
+    this.opportunityApproval = createOpportunityApprovalPort(this.brain);
 
     // ── SPRINT-032 — World Model & Business Operating System ─────────
     //    Composes the EXISTING Brain (tasks/opportunities), the EXISTING

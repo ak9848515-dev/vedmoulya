@@ -133,11 +133,24 @@ export interface OpportunityEvidence {
   status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN';
 }
 
+/** External provenance of an opportunity. Present only when the opportunity
+ *  came from an external source adapter (S5 acquisition foundation); the
+ *  pre-existing internally-derived opportunities simply omit it. */
+export interface OpportunitySourceRef {
+  /** Adapter/source identity, e.g. 'rss-feed', 'manual-import'. */
+  source: string;
+  /** Source-native id or canonical URL — the dedup discriminator. */
+  sourceReference: string;
+}
+
 export interface OpportunityLifecycleRecord {
   id: string;
   ownerId: string;
-  /** Stable key (owner + title) — idempotency. */
+  /** Stable key — idempotency. Owner + (source + sourceReference) for an
+   *  externally-sourced opportunity, owner + title otherwise. */
   stableKey: string;
+  /** External provenance, when the opportunity was discovered by a source. */
+  sourceRef?: OpportunitySourceRef;
   title: string;
   description: string;
   category: string;
