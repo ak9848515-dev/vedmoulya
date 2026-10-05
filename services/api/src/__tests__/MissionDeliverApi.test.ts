@@ -94,9 +94,10 @@ function api(ownerId: string) {
   ) {
     return service.handoffVerifiedOutcome({
       ...input,
-      ...(input as Record<string, never>),
+      // Spread LAST so the session identity always wins over any value the
+      // caller could put in the body — mirroring the RouterRegistry procedure.
       userId: sessionUserId,
-    } as Parameters<typeof service.handoffVerifiedOutcome>[0]);
+    });
   }
 
   return { deliver, clientOps, store, service };
