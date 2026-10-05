@@ -696,6 +696,84 @@ describe('MissionService — detached loop failure classification', () => {
     ).toBe(true);
   });
 
+  // CONNECT_TIMEOUT — a real production Mission failure. postgres.js composes
+  // its connection error as 'write <CODE> <host>:<port>' but destructures
+  // host/port off a socket whose fields it only assigns on its TCP branch, so
+  // the message can render as a literal `undefined:undefined`. The loop used to
+  // propagate `error.message` alone, discarding the code/address/port the
+  // driver HAD already resolved — leaving nothing diagnosable.
+  it('CONNECT_TIMEOUT: keeps the driver code/address/port and never emits undefined:undefined', async () => {
+    const { runtime } = runtimeDouble(mission({ state: 'RUNNING' }));
+    const connectTimeout = Object.assign(new Error('write CONNECT_TIMEOUT undefined:undefined'), {
+      code: 'CONNECT_TIMEOUT',
+      errno: 'CONNECT_TIMEOUT',
+      address: 'db.internal',
+      port: 5432,
+    });
+    runtime.controller.runAutonomousLoop.mockRejectedValue(connectTimeout);
+    const service = new MissionService();
+    service.setRuntimeForTesting(runtime);
+
+    await service.startAutonomousLoop('u-1', 'm-1');
+    await flush();
+
+    const view = await service.getStatus('u-1', 'm-1');
+    const failure = view.activity.find((event) => event.kind === 'MISSION_FAILED');
+    // The meaningless pair is gone…
+    expect(failure?.message).not.toContain('undefined:undefined');
+    // …and the real diagnostic survived.
+    expect(failure?.message).toContain('write CONNECT_TIMEOUT');
+    expect(failure?.message).toContain('code=CONNECT_TIMEOUT');
+    expect(failure?.message).toContain('address=db.internal');
+    expect(failure?.message).toContain('port=5432');
+  });
+
+  it('CONNECT_TIMEOUT: classifies a timeout with no resolvable address honestly', async () => {
+    const { runtime } = runtimeDouble(mission({ state: 'RUNNING' }));
+    const noAddress = Object.assign(new Error('write CONNECT_TIMEOUT undefined:undefined'), {
+      code: 'CONNECT_TIMEOUT',
+    });
+    runtime.controller.runAutonomousLoop.mockRejectedValue(noAddress);
+    const service = new MissionService();
+    service.setRuntimeForTesting(runtime);
+
+    await service.startAutonomousLoop('u-1', 'm-1');
+    await flush();
+
+    const view = await service.getStatus('u-1', 'm-1');
+    const failure = view.activity.find((event) => event.kind === 'MISSION_FAILED');
+    expect(failure?.message).not.toContain('undefined:undefined');
+    expect(failure?.message).toContain('code=CONNECT_TIMEOUT');
+    // Never invent an address that was not actually resolved.
+    expect(failure?.message).not.toContain('address=');
+  });
+
+  it('CONNECT_TIMEOUT: surfaces the cause chain without leaking credentials', async () => {
+    const { runtime } = runtimeDouble(mission({ state: 'RUNNING' }));
+    const cause = Object.assign(
+      new Error('connect ECONNREFUSED postgres://user:hunter2@db.internal:5432/prod'),
+      { code: 'ECONNREFUSED', name: 'Error' },
+    );
+    const wrapper = Object.assign(new Error('write CONNECT_TIMEOUT undefined:undefined'), {
+      code: 'CONNECT_TIMEOUT',
+      cause,
+    });
+    runtime.controller.runAutonomousLoop.mockRejectedValue(wrapper);
+    const service = new MissionService();
+    service.setRuntimeForTesting(runtime);
+
+    await service.startAutonomousLoop('u-1', 'm-1');
+    await flush();
+
+    const view = await service.getStatus('u-1', 'm-1');
+    const failure = view.activity.find((event) => event.kind === 'MISSION_FAILED');
+    expect(failure?.message).toContain('causeCode=ECONNREFUSED');
+    // Only the cause's CODE is surfaced — never its message (which carried a
+    // full connection string with a password).
+    expect(failure?.message).not.toContain('hunter2');
+    expect(failure?.message).not.toContain('postgres://');
+  });
+
   it('stays silent when the loop stopped because the mission became terminal', async () => {
     // The mission is RUNNING when the loop starts and terminal when it stops.
     const { runtime, state } = runtimeDouble(mission({ state: 'RUNNING' }));

@@ -263,6 +263,77 @@ const DEFAULT_MAX_ACTIVITY = 200;
 const REPOSITORY_DEVELOPMENT_PATTERN =
   /(fix|repair|resolve|wiring|wire|connect|integrate|integration|implement|refactor|migrate|upgrade|configure|add|remove|update|dependenc|workspace|repository|repo)\b.*\b(test|build|failure|fail|package\.json|module|resolve|integration|work(?:space)?|repo(?:sitory)?|dependenc|import|export)|(test|build|failure|package\.json|module|workspace|repository|repo|dependenc|import|export)\b.*\b(fix|repair|resolve|wiring|wire|connect|integrate|integration|implement|refactor|migrate|upgrade|configure|update)|failing tests?/i;
 
+/**
+ * A socket field pair that carries NO information. postgres.js composes its
+ * connection errors as `'write ' + code + ' ' + (options.path || host + ':' + port)`
+ * but destructures `host`/`port` off the SOCKET, whose fields it only assigns
+ * on its TCP branch. When that branch is not taken those two values are
+ * `undefined` and the message degrades to a literal `undefined:undefined`.
+ */
+const MEANINGLESS_HOST_PORT = 'undefined:undefined';
+
+/**
+ * A safe, bounded diagnostic TOKEN: a code/errno/host identifier only.
+ * Anything containing whitespace, a URL delimiter or an `=` is rejected, so a
+ * connection string, a query parameter or a credential can never be emitted.
+ */
+function safeErrorToken(value: unknown, maxLength = 64): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const token = value.trim();
+  if (token.length === 0 || token.length > maxLength) return undefined;
+  return /[\s@/?#=&:]/.test(token) ? undefined : token;
+}
+
+/**
+ * Describe a detached-loop throw WITHOUT losing the diagnostic the driver
+ * already carries.
+ *
+ * The autonomous loop runs detached, so this catch is the ONLY place its
+ * failure becomes observable. Propagating `error.message` alone discarded
+ * `code` / `errno` / `address` / `port` / `cause` — the very fields that make
+ * a connection failure diagnosable — which is why a database connect timeout
+ * surfaced as a bare `write CONNECT_TIMEOUT undefined:undefined`.
+ *
+ * Only safe scalar identifiers are surfaced. Never a URL, a connection string,
+ * a credential, a query body, or a stack.
+ */
+function describeLoopFailure(error: unknown): {
+  message: string;
+  meta: Record<string, string | number>;
+} {
+  // A non-Error rejection keeps its previous, already-honest wording.
+  if (!(error instanceof Error)) return { message: 'unknown loop error', meta: {} };
+
+  const raw = error as Error & {
+    code?: unknown;
+    errno?: unknown;
+    address?: unknown;
+    port?: unknown;
+    cause?: unknown;
+  };
+  const cause = raw.cause as (Error & { code?: unknown }) | undefined;
+
+  const code = safeErrorToken(raw.code);
+  const errno = safeErrorToken(raw.errno);
+  const address = safeErrorToken(raw.address);
+  const port = typeof raw.port === 'number' && Number.isFinite(raw.port) ? raw.port : undefined;
+  const causeName = safeErrorToken(cause?.name);
+  const causeCode = safeErrorToken(cause?.code);
+
+  const meta: Record<string, string | number> = {};
+  if (code !== undefined) meta['code'] = code;
+  if (errno !== undefined && errno !== code) meta['errno'] = errno;
+  if (address !== undefined) meta['address'] = address;
+  if (port !== undefined) meta['port'] = port;
+  if (causeName !== undefined) meta['causeName'] = causeName;
+  if (causeCode !== undefined) meta['causeCode'] = causeCode;
+
+  // Strip the meaningless pair rather than repeating it verbatim; when the
+  // driver DID resolve an address it is reported separately above.
+  const message = error.message.split(MEANINGLESS_HOST_PORT).join('(address unavailable)');
+  return { message, meta };
+}
+
 function isRepositoryDevelopmentMission(input: CreateMissionInputView): boolean {
   if (input.allowCommandExecution !== undefined) return input.allowCommandExecution;
   const goals = [input.objective, ...(input.initialObjectives ?? [])];
@@ -623,7 +694,7 @@ export class MissionService {
         // was paused/cancelled/completed between loop iterations — the loop
         // stops cleanly and the operator/terminal events are already or will
         // be recorded from mission state) from a REAL internal error.
-        const message = error instanceof Error ? error.message : 'unknown loop error';
+        const failure = describeLoopFailure(error);
         try {
           const runtime = await this.getRuntime();
           const mission = await runtime.stores.missions.get(missionId);
@@ -643,8 +714,22 @@ export class MissionService {
         } catch {
           // fall through to the honest error record below
         }
-        logger.error('MissionService: autonomous loop failed', { missionId, message });
-        this.recordSynthetic(missionId, 'MISSION_FAILED', `Autonomous loop error: ${message}`);
+        logger.error('MissionService: autonomous loop failed', {
+          missionId,
+          message: failure.message,
+          ...failure.meta,
+        });
+        const detail =
+          Object.keys(failure.meta).length > 0
+            ? ` [${Object.entries(failure.meta)
+                .map(([k, v]) => `${k}=${String(v)}`)
+                .join(' ')}]`
+            : '';
+        this.recordSynthetic(
+          missionId,
+          'MISSION_FAILED',
+          `Autonomous loop error: ${failure.message}${detail}`,
+        );
       })
       .finally(() => {
         this.loopsInFlight.delete(missionId);
