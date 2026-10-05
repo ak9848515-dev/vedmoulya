@@ -5431,6 +5431,8 @@ export function createAppRouter(services: ApiApplicationService) {
             services.ai,
             services.resolveAiOrchestrator,
             services.withOwnerTrace,
+            undefined,
+            services.flushAiUsage,
           ).orchestrate(input, ctx),
         ),
       listProviders: standardProcedure
@@ -5464,6 +5466,8 @@ export function createAppRouter(services: ApiApplicationService) {
             services.ai,
             services.resolveAiOrchestrator,
             services.withOwnerTrace,
+            undefined,
+            services.flushAiUsage,
           ).stream(input, ctx),
         ),
       // AI-RUNTIME-002: pure decision query — WHY would the runtime pick a

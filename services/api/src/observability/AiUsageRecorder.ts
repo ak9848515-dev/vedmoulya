@@ -5,6 +5,7 @@
 // real provider call. Failed calls with zero billable usage record zero.
 // ─────────────────────────────────────────────────────────────
 
+import { logger } from '@vedmoulya/core';
 import {
   buildEventId,
   isLocalProvider,
@@ -30,8 +31,26 @@ export interface RecordUsageInput extends Omit<
 export class AiUsageRecorder {
   constructor(private readonly store: AiUsageStore) {}
 
+  /**
+   * D1 — persistence lifecycle. Writes are SERIALIZED on one tail so a caller can
+   * await `drain()` and know every usage row for the request is durable before
+   * the response is returned. Same drain-tail mechanism the estate already uses
+   * for execution-health persistence (ExecutionHealthService.flushNow).
+   */
+  private drainTail: Promise<void> = Promise.resolve();
+
   getStore(): AiUsageStore {
     return this.store;
+  }
+
+  /**
+   * D1 — wait for every queued usage write to settle. The request boundary calls
+   * this BEFORE returning, so a completed AI request can never leave a billable
+   * row behind an unresolved promise (which a frozen serverless runtime drops).
+   * A failed write is already logged by `record`; this never rejects.
+   */
+  async drain(): Promise<void> {
+    await this.drainTail.catch(() => undefined);
   }
 
   /** Record one execution. Returns true when newly inserted. */
@@ -55,11 +74,31 @@ export class AiUsageRecorder {
       eventId,
       local,
     });
-    try {
-      return await this.store.record(event);
-    } catch {
-      return false;
-    }
+    // D1 — a persistence failure must be LOUD, not silent. Only safe metadata is
+    // reported (provider/model/execution id + a coarse reason classification) —
+    // never a connection string, SQL text, credential or user prompt.
+    let inserted = false;
+    const write = async (): Promise<void> => {
+      try {
+        inserted = await this.store.record(event);
+      } catch (error) {
+        logger.error('ai usage recording failed', {
+          reason: classifyRecordingFailure(error),
+          provider: event.provider,
+          model: event.model,
+          executionId: event.executionId,
+          eventId: event.eventId,
+          userId: event.userId,
+          local: event.local,
+        });
+        inserted = false;
+      }
+    };
+    // Serialized on the shared tail so ordering is deterministic and `drain()`
+    // covers this write. `write` never rejects, so the tail never poisons.
+    this.drainTail = this.drainTail.then(write, write);
+    await this.drainTail;
+    return inserted;
   }
 
   /** Backfill ONE event from a completed trace span (durable restart safety). */
@@ -132,6 +171,23 @@ export class AiUsageRecorder {
       attempt: typeof a.attempt === 'number' ? a.attempt : 0,
     });
   }
+}
+
+/**
+ * D1 — classify WHY a usage write failed, without ever echoing the raw driver
+ * error (which can carry a connection string). Only the shape of the failure is
+ * reported so operators get a signal without a secret reaching the logs.
+ */
+function classifyRecordingFailure(error: unknown): string {
+  if (error === null || typeof error !== 'object') return 'unknown';
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === 'string' && code.length > 0) {
+    // Postgres SQLSTATEs are safe identifiers (e.g. 23505, 57P01).
+    return /^[\w.]{1,32}$/.test(code) ? `db_${code}` : 'db_error';
+  }
+  const name = (error as { name?: unknown }).name;
+  if (name === 'AbortError' || name === 'TimeoutError') return 'db_timeout';
+  return 'db_error';
 }
 
 function inferSource(

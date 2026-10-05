@@ -127,13 +127,27 @@ export interface LocalUsageRecord {
 /** Record one Local Agent execution into the SAME owner-scoped telemetry spine. */
 export type AILocalUsageRecorder = (userId: string, usage: LocalUsageRecord) => Promise<void>;
 
+/**
+ * D1 — await every queued AI usage write. Injected by the gateway so a request
+ * that has produced a billable AI execution cannot return before its durable
+ * ledger row exists (a pending promise is dropped when the runtime freezes).
+ */
+export type AIUsageFlusher = () => Promise<void>;
+
 export function createAIRouter(
   ai: AIOrchestrationService,
   resolveUserOrchestrator?: AIUserOrchestratorResolver,
   withOwnerTrace?: AIOwnerTraceRunner,
   recordLocalUsage?: AILocalUsageRecorder,
+  flushUsage?: AIUsageFlusher,
 ): AIHandlers {
   const svc = ai;
+  // Telemetry/usage persistence NEVER fails an AI response: the recorder has
+  // already logged any write failure. Draining only guarantees ORDER, not success.
+  const flush = async (): Promise<void> => {
+    if (flushUsage === undefined) return;
+    await flushUsage().catch(() => undefined);
+  };
   // Execution routes through the OWNER's runtime when one is resolvable, so a
   // provider the user connected genuinely serves their request. Read-only
   // procedures keep the deployment orchestrator (identical behavior).
@@ -148,9 +162,15 @@ export function createAIRouter(
     orchestrate: async (input, _ctx): Promise<ApiResponse<OrchestrateResponseDTO>> =>
       runOwned(input.userId, async () => {
         const runtime = await runtimeFor(input.userId);
-        return successResponse(
-          await runtime.orchestrate(input as unknown as Parameters<typeof svc.orchestrate>[0]),
-        );
+        try {
+          return successResponse(
+            await runtime.orchestrate(input as unknown as Parameters<typeof svc.orchestrate>[0]),
+          );
+        } finally {
+          // D1 — the execution span has ended by now, so its usage row is queued:
+          // make it durable BEFORE the response leaves the request.
+          await flush();
+        }
       }),
     listProviders: (_input, _ctx) => Promise.resolve(successResponse(svc.listProviders())),
     listCapabilities: (_input, _ctx) => Promise.resolve(successResponse(svc.listCapabilities())),
@@ -174,9 +194,14 @@ export function createAIRouter(
     stream: async (input, _ctx): Promise<ApiResponse<StreamRunDTO>> =>
       runOwned(input.userId, async () => {
         const runtime = await runtimeFor(input.userId);
-        return successResponse(
-          await runtime.stream(input as unknown as Parameters<typeof svc.stream>[0]),
-        );
+        try {
+          return successResponse(
+            await runtime.stream(input as unknown as Parameters<typeof svc.stream>[0]),
+          );
+        } finally {
+          // D1 — same guarantee on the STREAM path, which is the Ask surface.
+          await flush();
+        }
       }),
     explainSelection: async (input, _ctx) =>
       successResponse(

@@ -796,6 +796,13 @@ export class ApiApplicationService {
    */
   readonly recordLocalAiUsage: (userId: string, usage: LocalUsageRecord) => Promise<void>;
   /**
+   * D1 — wait until every AI usage row produced by the current request is
+   * durable. Called by the AI request boundary BEFORE it returns, so a completed
+   * AI request can never report success while its billable usage row is still an
+   * unresolved promise (dropped whenever the serverless runtime freezes).
+   */
+  flushAiUsage: () => Promise<void>;
+  /**
    * The EI-002/EI-004/RAG/health wiring applied to the deployment orchestrator,
    * reused verbatim for each per-user orchestrator so routing/advisor behavior
    * is identical for every user (never re-derived, never duplicated).
@@ -947,6 +954,9 @@ export class ApiApplicationService {
     //    provider execution is recorded here exactly once (idempotent eventId);
     //    the trace-store CostLedger remains the observability/anomaly view.
     this.aiUsage = new AiUsageRecorder(options.aiUsageStore ?? createProductionAiUsageStore());
+    // D1 — the lifecycle-safe seam the AI request boundary awaits BEFORE it
+    // returns, so a completed AI request always has its usage row durable.
+    this.flushAiUsage = (): Promise<void> => this.aiUsage.drain();
     // Owner-scoped boundary trace for direct AI requests (Ask VedMoulya). This
     // is the SAME trace spine every engine uses — one trace per AI request,
     // owned by the authenticated user; the AI runtime's spans parent under it.
@@ -2632,7 +2642,11 @@ export class ApiApplicationService {
     if (trace === undefined) return;
     const span = trace.spans.find((s) => s.spanId === info.spanId);
     if (span === undefined) return;
-    void this.aiUsage
+    // D1 — the write is registered on the recorder's drain tail instead of being
+    // discarded. Telemetry stays non-blocking here (span.end() must never throw
+    // into the AI runtime), but the request boundary awaits `flushAiUsage()`
+    // before responding, so the row cannot be lost to a frozen runtime.
+    this.aiUsage
       .recordFromSpan({
         traceId: trace.traceId,
         spanId: span.spanId,
@@ -2642,7 +2656,15 @@ export class ApiApplicationService {
         traceName: trace.name,
         startedAt: span.startedAt,
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        // The recorder already logs store failures; this only covers a failure
+        // BEFORE the write was queued (malformed span). Never silent.
+        logger.error('ai usage recording could not be queued', {
+          reason: error instanceof Error ? error.name : 'unknown',
+          traceId: trace.traceId,
+          spanId: span.spanId,
+        });
+      });
   };
 
   /**

@@ -313,6 +313,24 @@ const handler = async (request: NextRequest): Promise<Response> => {
     router: api.getAppRouter(),
     createContext: () => api.createAuthContext(request.headers),
   });
+
+  // D1 — AI USAGE LEDGER DURABILITY (serverless boundary).
+  // A successful AI execution must leave a durable `ai_usage_events` row.
+  // The write is queued by the `ai.provider_execution` span-end hook, which must
+  // stay non-blocking (it runs inside the AI runtime). Draining it HERE — after
+  // dispatch and BEFORE the response leaves this invocation — is what makes the
+  // row survive: a serverless function is frozen the moment the response is
+  // returned, so any still-pending promise would be discarded silently.
+  //
+  // `flushAiUsage()` never rejects — a persistence failure is already logged by
+  // the recorder with safe metadata (provider/model/execution id + reason), so
+  // telemetry can never turn a successful AI response into an error.
+  //
+  // The AI router boundary (`ai.orchestrate` / `ai.stream`) drains the same tail
+  // before returning its own response; this call is the estate-wide backstop that
+  // also covers the Mission / Brain / control-plane paths.
+  await api.getServices().flushAiUsage();
+
   return withCorsHeaders(response, request);
 };
 
