@@ -232,6 +232,10 @@ import { createVoiceBrainPort, createVoiceAnswerPort } from '../infrastructure/V
 import { ProactiveIntelligenceService } from '@vedmoulya/proactive';
 import { MissionService } from './MissionService.js';
 import {
+  MissionClientOpsHandoffService,
+  type HandoffMissionView,
+} from './MissionClientOpsHandoff.js';
+import {
   createMissionUserProviderRegistrar,
   createUserAiOrchestratorResolver,
 } from './MissionUserProviders.js';
@@ -817,6 +821,13 @@ export class ApiApplicationService {
 
   // ── BLD-024 — Mission Control (thin boundary over the MissionRuntime) ────
   readonly mission: MissionService;
+  /**
+   * S4 — moves ONE VERIFIED Mission objective into the EXISTING ClientOps
+   * document store as a DRAFT deliverable. Composition only: it runs no agent
+   * and no loop, never mutates Mission state, and never sends anything
+   * externally. External submission remains under the existing approval policy.
+   */
+  readonly missionClientOpsHandoff: MissionClientOpsHandoffService;
 
   // ── Infrastructure Health (PH-002/T3 follow-up) ────────────────────────────
   readonly infrastructureHealth: InfrastructureHealthProbe;
@@ -1088,11 +1099,52 @@ export class ApiApplicationService {
     // ── Create the Client Operations module (EPIC-003 / AC-002) ─────────
     //    Reuses the AC-001 application service (clients, projects, content,
     //    invoices) and the shared AI Orchestrator — no duplicated logic.
+    const clientOpsRepository =
+      options.clientOpsRepository ?? createProductionClientOpsRepository();
     this.clientOps = new ClientOperationsApplicationService(
-      options.clientOpsRepository ?? createProductionClientOpsRepository(),
+      clientOpsRepository,
       this.contentAgency,
       new ClientOpsAIService(this.ai),
     );
+
+    // ── S4 — Mission → ClientOps revenue bridge ─────────────────────────
+    //    COMPOSITION ONLY. Mission still owns every autonomous lifecycle;
+    //    this bridge only moves a VERIFIED objective into the EXISTING
+    //    ClientOps document store as a DRAFT deliverable. It runs no agent,
+    //    no loop and no planning — and it never sends anything externally.
+    //    The Mission lookup reads the EXISTING owner-scoped status view, so
+    //    user isolation is enforced by Mission itself, not re-implemented.
+    this.missionClientOpsHandoff = new MissionClientOpsHandoffService({
+      missions: {
+        get: async (missionId: string, userId: string): Promise<HandoffMissionView | undefined> => {
+          const view = await this.mission.getStatus(userId, missionId);
+          return {
+            missionId: view.missionId,
+            userId: view.userId,
+            title: view.title,
+            objectives: view.objectives.map((objective) => ({
+              objectiveId: objective.objectiveId,
+              state: objective.state,
+              title: objective.title,
+              // A verified outcome exists exactly when the objective was
+              // verified; `verifiedAt` is the projection's own truth marker.
+              verifiedOutcome:
+                objective.verifiedAt === undefined
+                  ? null
+                  : {
+                      outcome: objective.title,
+                      ...(objective.verificationMethod !== undefined
+                        ? { method: objective.verificationMethod }
+                        : {}),
+                      evidence: objective.evidence,
+                      verifiedAt: objective.verifiedAt,
+                    },
+            })),
+          };
+        },
+      },
+      clientOps: clientOpsRepository,
+    });
 
     // ── Create the Enterprise Capability Registry (EPIC-004 / EI-001) ────
     //    A reusable platform catalog consumed by every business module.
