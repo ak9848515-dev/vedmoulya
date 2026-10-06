@@ -253,7 +253,11 @@ export interface BrainHandlers {
     input: {
       userId: string;
       opportunityId: string;
-      status: 'NEW' | 'RECOMMENDED' | 'ACCEPTED' | 'DISMISSED';
+      // `NOTED` = non-committing acknowledgment (triage). `ACCEPTED` is still
+      // accepted by the schema for symmetry with the domain union, but the
+      // application service refuses it (S5 — approval lives in the canonical
+      // control-plane lifecycle only).
+      status: 'NEW' | 'RECOMMENDED' | 'ACCEPTED' | 'NOTED' | 'DISMISSED';
     },
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;

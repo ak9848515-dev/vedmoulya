@@ -509,6 +509,15 @@ describe('brain.* EPIC-020 — continuous intelligence surface', () => {
     });
     expect(refused.success).toBe(false);
 
+    // The acknowledge affordance the /brain inbox and the E2E journey use:
+    // NOTED is the non-committing triage state that replaces ACCEPTED.
+    const noted = await caller.brain.updateOpportunity({
+      userId: contCtx.userId,
+      opportunityId: first!.id,
+      status: 'NOTED',
+    });
+    expect(noted.data!.status).toBe('NOTED');
+
     const events = await caller.brain.listIntelligenceEvents({ userId: contCtx.userId });
     expect(events.data!.some((e) => e.id === 'evt-suspicious-repo')).toBe(true);
     const reviewed = await caller.brain.updateIntelligenceEvent({

@@ -612,6 +612,13 @@ describe('BrainApplicationService — EPIC-020 continuous orchestration', () => 
     const accepted = service.updateOpportunity('u1', result.data!.opportunities[0]!.id, 'ACCEPTED');
     expect(accepted.success).toBe(false);
     expect(opportunities.list('u1')[0]?.status).toBe('RECOMMENDED');
+
+    // The inbox acknowledge affordance uses NOTED — a non-committing triage
+    // state ("I've seen this") that never acquires work and never approves.
+    const noted = service.updateOpportunity('u1', result.data!.opportunities[0]!.id, 'NOTED');
+    expect(noted.success).toBe(true);
+    expect(noted.data?.status).toBe('NOTED');
+    expect(opportunities.list('u1')[0]?.status).toBe('NOTED');
   });
 
   it('learns from outcomes: adaptive scores + memory + recurrence opportunity', async () => {

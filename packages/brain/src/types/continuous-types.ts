@@ -110,7 +110,15 @@ export interface Opportunity {
   estimatedValue?: { label: string; status: EvidenceStatus };
   source: 'ai-world-discovery' | 'scheduler-run' | 'task-outcome';
   createdAt: string;
-  status: 'NEW' | 'RECOMMENDED' | 'ACCEPTED' | 'DISMISSED';
+  /**
+   * Triage lifecycle of this AI notice. `NOTED` is the owner's non-committing
+   * acknowledgment ("I've seen this") used by the inbox UI — it never acquires
+   * work. `ACCEPTED` remains in the union for legacy records only: the
+   * application service refuses new transitions into it, because committing to
+   * work happens exclusively through the canonical control-plane lifecycle
+   * where APPROVED requires the approval authority (S5).
+   */
+  status: 'NEW' | 'RECOMMENDED' | 'ACCEPTED' | 'NOTED' | 'DISMISSED';
   // ── EPIC-020 (Outcome & Revenue layer) — money intelligence §3 ──
   /** Capabilities this opportunity needs — only when identifiable. */
   requiredCapabilities?: string[];

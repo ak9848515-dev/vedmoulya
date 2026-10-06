@@ -629,6 +629,9 @@ export class BrainApplicationService {
     // requires a real approval-authority record). Brain opportunities are
     // AI "we noticed something" notices: triage states only. Anything that
     // commits to work must go through the canonical lifecycle.
+    //
+    // The non-committing acknowledgment for this inbox is `NOTED` ("I've seen
+    // this") — it falls through below and stays purely triage.
     if (status === 'ACCEPTED') {
       return err(
         'ACCEPTED is not available on brain opportunities. Use the canonical control-plane opportunity lifecycle, where APPROVED requires the approval authority.',

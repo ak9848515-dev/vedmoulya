@@ -149,7 +149,15 @@ export function BrainOpportunitiesPanel({ userId }: { userId: string }): React.J
   const opportunities = useBrainListOpportunities(userId);
   const update = useBrainUpdateOpportunity();
   const items = (opportunities.data ?? [])
-    .filter((o) => o.status === 'NEW' || o.status === 'RECOMMENDED' || o.status === 'ACCEPTED')
+    .filter(
+      (o) =>
+        o.status === 'NEW' ||
+        o.status === 'RECOMMENDED' ||
+        // `ACCEPTED` is legacy-only (S5 refuses new acceptances); both render
+        // as "Noted" — an acknowledgment, never an approval.
+        o.status === 'ACCEPTED' ||
+        o.status === 'NOTED',
+    )
     .slice(0, 8);
 
   if (items.length === 0) {
@@ -167,7 +175,7 @@ export function BrainOpportunitiesPanel({ userId }: { userId: string }): React.J
     );
   }
 
-  const setStatus = (id: string, status: 'ACCEPTED' | 'DISMISSED'): void => {
+  const setStatus = (id: string, status: 'NOTED' | 'DISMISSED'): void => {
     void update.mutateAsync({ userId, opportunityId: id, status }).then(() => {
       void opportunities.refetch();
     });
@@ -205,7 +213,7 @@ export function BrainOpportunitiesPanel({ userId }: { userId: string }): React.J
                   Uncertainty {Math.round(o.uncertainty * 100)}% — evidence, not a promise.
                 </p>
               </div>
-              {o.status === 'ACCEPTED' ? (
+              {o.status === 'ACCEPTED' || o.status === 'NOTED' ? (
                 <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
                   <CheckCircle2 className="h-3 w-3" /> Noted
                 </span>
@@ -213,7 +221,10 @@ export function BrainOpportunitiesPanel({ userId }: { userId: string }): React.J
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     onClick={() => {
-                      setStatus(o.id, 'ACCEPTED');
+                      // `NOTED` — non-committing acknowledgment. `ACCEPTED`
+                      // is refused by the backend (S5): acceptance of work
+                      // happens only through the canonical approval flow.
+                      setStatus(o.id, 'NOTED');
                     }}
                     title="Acknowledge this opportunity"
                     className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors"

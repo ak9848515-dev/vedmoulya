@@ -1109,7 +1109,15 @@ const brainDailyPrioritiesInput = z.object({
 
 // ── EPIC-020 Continuous Intelligence input schemas (mission §3/§8/§12/§13) ──
 
-const brainOpportunityStatusEnum = z.enum(['NEW', 'RECOMMENDED', 'ACCEPTED', 'DISMISSED']);
+const brainOpportunityStatusEnum = z.enum([
+  'NEW',
+  'RECOMMENDED',
+  // `ACCEPTED` stays schema-valid so the domain service can refuse it with its
+  // own NOT_ALLOWED error instead of a validation error (S5).
+  'ACCEPTED',
+  'NOTED',
+  'DISMISSED',
+]);
 const brainIntelligenceEventStatusEnum = z.enum(['NEW', 'REVIEWED', 'RECOMMENDED', 'DISMISSED']);
 
 const brainOpportunityInput = z.object({
