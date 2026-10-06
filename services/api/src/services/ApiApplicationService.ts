@@ -242,6 +242,7 @@ import {
   type CommercialInvoiceView,
   type CommercialPaymentView,
 } from './CommercialOutcomeService.js';
+import { CommercialOutcomeLearning } from './CommercialOutcomeLearning.js';
 import { MemoryIntelligenceStoreAdapter } from '@vedmoulya/execution-memory';
 import { PostgresMemoryRepository } from '@vedmoulya/memory-intelligence';
 import {
@@ -1948,6 +1949,22 @@ export class ApiApplicationService {
             : { id: payment.id, invoiceId: payment.invoiceId };
         },
       },
+      // S6.2 — record the canonical commercial state as ONE truthful learning
+      // signal through the EXISTING memory architecture
+      // (PostgresMemoryRepository → MemoryIntelligenceStoreAdapter →
+      // ExecutionMemoryStore). Same repository/table/contract as S4.1's delivery
+      // memory — never a second memory system, never a financial ledger. Absent
+      // a database the write is honestly reported as not recorded rather than
+      // pretending memory exists.
+      ...(this.hasDatabase()
+        ? {
+            learning: new CommercialOutcomeLearning({
+              store: new MemoryIntelligenceStoreAdapter(
+                new PostgresMemoryRepository(createEISql('vedmoulya-commercial-learning')),
+              ),
+            }),
+          }
+        : {}),
     });
 
     // ── S5.1 · qualification + Mission handoff ──────────────────────────────

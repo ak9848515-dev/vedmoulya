@@ -6855,6 +6855,9 @@ export function createAppRouter(services: ApiApplicationService) {
             status: result.status,
             // Commercial action is never taken here — a human remains required.
             pendingHumanAction: result.pendingHumanAction,
+            // S6.2 — honest partial: the commercial outcome is recorded even
+            // when the learning signal could not be persisted.
+            learningRecorded: result.learningRecorded,
           };
         }),
 
@@ -6904,6 +6907,9 @@ export function createAppRouter(services: ApiApplicationService) {
             reconciled: result.reconciled,
             status: result.status,
             invoiceId: result.invoiceId,
+            // S6.2 — honest partial: reconciliation is never rolled back when
+            // the learning signal could not be persisted.
+            learningRecorded: result.learningRecorded,
           };
         }),
 

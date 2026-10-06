@@ -53,6 +53,10 @@ import {
   type ClientOpsDocumentStore,
   type MissionLookup,
 } from './MissionClientOpsHandoff.js';
+import type {
+  CommercialLearningSignal,
+  CommercialOutcomeLearningPort,
+} from './CommercialOutcomeLearning.js';
 
 /** The ONLY status S6.0 mints. A human is required to advance it further. */
 export const COMMERCIAL_OUTCOME_INITIAL_STATUS: CommercialOutcomeStatus = 'COMMERCIAL_PENDING';
@@ -98,6 +102,10 @@ export interface CommercialOutcomeAccepted {
   status: CommercialOutcomeStatus;
   /** Always true: the outcome awaits an explicit human commercial action. */
   pendingHumanAction: true;
+  /** S6.2 — true when the canonical commercial state is durably recorded as a
+   *  learning signal. False is an HONEST partial: the outcome was recorded but
+   *  learning persistence was unavailable/failed — never fabricated. */
+  learningRecorded: boolean;
 }
 
 export interface CommercialOutcomeRejected {
@@ -162,6 +170,10 @@ export interface CommercialOutcomeReconciled {
   reconciled: boolean;
   status: CommercialOutcomeStatus;
   invoiceId: string;
+  /** S6.2 — true when the canonical commercial state is durably recorded as a
+   *  learning signal. False is an HONEST partial: reconciliation is NOT rolled
+   *  back; only the learning write is reported as absent. */
+  learningRecorded: boolean;
 }
 
 export interface CommercialOutcomeReconcileRejected {
@@ -182,6 +194,9 @@ export interface CommercialOutcomeServiceOptions {
   invoices?: CommercialInvoiceLookup;
   /** S6.1 — canonical payment lookup (ClientOps). Optional, same rationale. */
   payments?: CommercialPaymentLookup;
+  /** S6.2 — truthful learning seam. Optional so S6.0/S6.1 callers stay valid;
+   *  when absent the learning write is honestly reported as not recorded. */
+  learning?: CommercialOutcomeLearningPort;
   now?: () => Date;
 }
 
@@ -190,6 +205,41 @@ export class CommercialOutcomeService {
 
   constructor(private readonly options: CommercialOutcomeServiceOptions) {
     this.now = options.now ?? ((): Date => new Date());
+  }
+
+  /**
+   * S6.2 — the ONE truthful learning signal for a canonical commercial state.
+   * References and the governed state only: ids, never invoice/payment payloads
+   * and never an amount. The outcome id is already deterministic per
+   * (owner, mission, objective), so the signal carries no extra identity.
+   */
+  private signalFor(record: CommercialOutcomeRecord): CommercialLearningSignal {
+    return {
+      userId: record.userId,
+      outcomeId: record.outcomeId,
+      missionId: record.missionId,
+      objectiveId: record.objectiveId,
+      status: record.status,
+      occurredAt: this.now().toISOString(),
+      clientId: record.clientId,
+      ...(record.opportunityId !== undefined ? { opportunityId: record.opportunityId } : {}),
+      ...(record.invoiceId !== undefined ? { invoiceId: record.invoiceId } : {}),
+      ...(record.paymentId !== undefined ? { paymentId: record.paymentId } : {}),
+    };
+  }
+
+  /**
+   * Persist the learning signal WITHOUT ever failing the commercial outcome.
+   * A missing or failing learning store is an HONEST partial result: it is
+   * reported as `false` and never rolls back the delivery/invoice/outcome.
+   */
+  private async recordLearning(signal: CommercialLearningSignal): Promise<boolean> {
+    if (this.options.learning === undefined) return false;
+    try {
+      return await this.options.learning.record(signal);
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -254,13 +304,15 @@ export class CommercialOutcomeService {
     const outcomeId = commercialOutcomeId(input.userId, input.missionId, input.objectiveId);
     const existing = this.options.outcomes.get(input.userId, outcomeId);
     if (existing !== undefined) {
-      // Idempotent replay — no second commercial record.
+      // Idempotent replay — no second commercial record. The learning signal
+      // for this canonical state is reaffirmed (idempotent, never duplicated).
       return {
         ok: true,
         outcomeId: existing.outcomeId,
         created: false,
         status: existing.status,
         pendingHumanAction: true,
+        learningRecorded: await this.recordLearning(this.signalFor(existing)),
       };
     }
 
@@ -298,6 +350,7 @@ export class CommercialOutcomeService {
       created: true,
       status: saved.status,
       pendingHumanAction: true,
+      learningRecorded: await this.recordLearning(this.signalFor(saved)),
     };
   }
 
@@ -384,6 +437,7 @@ export class CommercialOutcomeService {
         reconciled: false,
         status: existing.status,
         invoiceId,
+        learningRecorded: await this.recordLearning(this.signalFor(existing)),
       };
     }
 
@@ -410,6 +464,7 @@ export class CommercialOutcomeService {
       reconciled: true,
       status: saved.status,
       invoiceId,
+      learningRecorded: await this.recordLearning(this.signalFor(saved)),
     };
   }
 
