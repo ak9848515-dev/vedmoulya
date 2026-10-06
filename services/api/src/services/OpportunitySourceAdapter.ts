@@ -195,12 +195,12 @@ export function normalizeExternalOpportunity(raw: unknown): NormalizeResult {
       secretFields.push([`${key}.label`, typeof raw === 'string' ? raw : '']);
     }
   }
-  const secret = findSecret(secretFields);
-  if (secret !== undefined) {
+  const credentialMatch = findSecret(secretFields);
+  if (credentialMatch !== undefined) {
     return {
       success: false,
       code: 'SECRET_REJECTED',
-      message: `Refused to store an opportunity carrying a credential: ${secret}.`,
+      message: `Refused to store an opportunity carrying a credential: ${credentialMatch}.`,
     };
   }
 

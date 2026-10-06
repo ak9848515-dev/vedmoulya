@@ -9,7 +9,12 @@ import { Email, IdentityDomainService, UserFactory } from '@vedmoulya/domain';
 import { PasswordService } from './PasswordService.js';
 import { TokenService, type TokenPair, type AccessTokenPayload } from './TokenService.js';
 import { GoogleProvider } from './GoogleProvider.js';
+import { createOAuthState, hashOAuthState } from './OAuthState.js';
 import { IdentityEventPublisher } from '../infrastructure/events/IdentityEventPublisher.js';
+import {
+  type OAuthStateStore,
+  createOAuthStateStore,
+} from '../infrastructure/persistence/OAuthStateStore.js';
 import {
   type VerificationEmailSender,
   createVerificationEmailSender,
@@ -74,6 +79,10 @@ export interface SignInResult {
   success: boolean;
   session?: AuthSession;
   error?: string;
+  /** Machine-readable failure code, when one is more specific than the
+   *  transport's generic code (e.g. OAUTH_STATE_INVALID on a Google
+   *  callback whose server-issued state was missing, reused or expired). */
+  code?: string;
 }
 
 export interface SignUpResult {
@@ -94,6 +103,9 @@ export interface VerifyEmailResult {
 export interface AuthServiceOptions {
   verificationTokenStore?: VerificationTokenStore;
   emailSender?: VerificationEmailSender;
+  /** Server-side OAuth state authority. Absent → the env-driven default
+   *  (Postgres in production/staging, in-memory otherwise). */
+  oauthStateStore?: OAuthStateStore;
 }
 
 export class AuthService extends BaseService {
@@ -105,6 +117,7 @@ export class AuthService extends BaseService {
   private readonly eventPublisher: IdentityEventPublisher;
   private readonly verificationTokenStore: VerificationTokenStore;
   private readonly emailSender: VerificationEmailSender;
+  private readonly oauthStateStore: OAuthStateStore;
 
   constructor(
     repository: IdentityRepository,
@@ -120,6 +133,7 @@ export class AuthService extends BaseService {
     this.eventPublisher = eventPublisher;
     this.verificationTokenStore = options.verificationTokenStore ?? createVerificationTokenStore();
     this.emailSender = options.emailSender ?? createVerificationEmailSender();
+    this.oauthStateStore = options.oauthStateStore ?? createOAuthStateStore();
   }
 
   // ── Email/Password Sign-In ────────────────────────────────────────────
@@ -172,13 +186,63 @@ export class AuthService extends BaseService {
 
   // ── Google OAuth Sign-In ──────────────────────────────────────────────
 
-  /** Get Google OAuth authorization URL */
+  /** Get Google OAuth authorization URL for an already-minted state. */
   getGoogleAuthUrl(state: string, requestOrigin?: string): string {
     return this.googleProvider.getAuthorizationUrl(state, requestOrigin);
   }
 
-  /** Handle Google OAuth callback */
-  async signInWithGoogle(code: string, requestOrigin?: string): Promise<SignInResult> {
+  /**
+   * Begin the Google OAuth flow. The SERVER mints the `state`, persists only
+   * its hash (single-use, time-bounded) and returns the authorization URL
+   * plus the raw state. The raw value is the only copy that ever exists; the
+   * callback must present it for the exchange to be allowed.
+   */
+  async beginGoogleAuth(requestOrigin?: string): Promise<{ url: string; state: string }> {
+    const { state, stateHash, expiresAt } = createOAuthState();
+    await this.oauthStateStore.save(stateHash, expiresAt);
+    return { url: this.googleProvider.getAuthorizationUrl(state, requestOrigin), state };
+  }
+
+  /** Handle Google OAuth callback. The callback is processed ONLY when it
+   *  carries a state this server issued, that has not been consumed and has
+   *  not expired — a store failure fails closed. */
+  async signInWithGoogle(
+    code: string,
+    state: string,
+    requestOrigin?: string,
+  ): Promise<SignInResult> {
+    // SERVER-SIDE STATE VERIFICATION. This is the authoritative check; the
+    // client-side comparison in the web app is defence in depth, never the
+    // control.
+    if (typeof state !== 'string' || state.trim().length === 0) {
+      this.logger.warn('Google OAuth callback rejected: no state presented');
+      return {
+        success: false,
+        code: 'OAUTH_STATE_INVALID',
+        error: 'This sign-in attempt is invalid or has expired. Please try again.',
+      };
+    }
+    try {
+      const accepted = await this.oauthStateStore.consume(hashOAuthState(state));
+      if (!accepted) {
+        this.logger.warn('Google OAuth callback rejected: state was not issued by this server');
+        return {
+          success: false,
+          code: 'OAUTH_STATE_INVALID',
+          error: 'This sign-in attempt is invalid or has expired. Please try again.',
+        };
+      }
+    } catch (error) {
+      // An unverifiable state is never accepted — fail closed, do not fall
+      // through to the code exchange.
+      this.logger.error('Google OAuth state verification failed', { error });
+      return {
+        success: false,
+        code: 'OAUTH_STATE_INVALID',
+        error: 'This sign-in attempt could not be verified. Please try again.',
+      };
+    }
+
     try {
       const result = await this.googleProvider.handleCallback(code, requestOrigin);
 

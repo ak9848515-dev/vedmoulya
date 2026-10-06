@@ -21,10 +21,12 @@ import {
   createVerificationEmailSender,
   IdentityEventPublisher,
   createVerificationTokenStore,
+  createOAuthStateStore,
   LogVerificationEmailSender,
   UnavailableVerificationEmailSender,
   type VerificationEmailSender,
   type VerificationTokenStore,
+  type OAuthStateStore,
 } from '@vedmoulya/identity';
 import { createProductionIdentityRepository, awaitAllEngineEnsureTables } from '@vedmoulya/api';
 import { consumeAuthRequest, resolveClientIp } from './auth-rate-limit.js';
@@ -88,6 +90,14 @@ export async function getAuthApp(): Promise<Hono> {
         ensureTable?(): Promise<void>;
       }
     ).ensureTable?.();
+    // Server-side OAuth state table: a fresh production database must have
+    // `oauth_states` before the first sign-in can mint a state.
+    const oauthStateStore: OAuthStateStore = createOAuthStateStore();
+    await (
+      oauthStateStore as OAuthStateStore & {
+        ensureTable?(): Promise<void>;
+      }
+    ).ensureTable?.();
     const eventPublisher = new IdentityEventPublisher(new InMemoryEventBus());
     // SPRINT-098B — createVerificationEmailSender() throws when SMTP is not
     // configured (production defaults to SMTP mode). The auth app is decoupled
@@ -127,6 +137,7 @@ export async function getAuthApp(): Promise<Hono> {
     }
     const authService = new AuthService(repository, eventPublisher, {
       verificationTokenStore,
+      oauthStateStore,
       emailSender,
     });
     authApp = new Hono()

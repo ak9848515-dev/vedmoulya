@@ -147,13 +147,104 @@ describe('AuthService', () => {
       expect(url).toContain('state-123');
     });
 
-    it('returns an error when the Google callback fails', async () => {
+    // ── SERVER-SIDE STATE VERIFICATION ──────────────────────────────────
+    // The server mints and persists the state; the callback is processed only
+    // when it presents a state this server issued (single-use, unexpired).
+
+    it('beginGoogleAuth mints a state and embeds it in the authorization URL', async () => {
+      const repo = makeRepository();
+      const service = createService(repo);
+
+      const { url, state } = await service.beginGoogleAuth('https://app.example.com');
+      expect(url).toContain('https://accounts.google.com/o/oauth2/v2/auth');
+      expect(url).toContain(encodeURIComponent(state));
+      expect(state.length).toBeGreaterThan(0);
+    });
+
+    it('REJECTS a callback that presents no state (fail closed, no exchange)', async () => {
+      const repo = makeRepository();
+      const service = createService(repo);
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await service.signInWithGoogle('good-code', '');
+
+      expect(result.success).toBe(false);
+      expect(result.code).toBe('OAUTH_STATE_INVALID');
+      // No Google call is ever attempted without a verified state.
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('REJECTS a state this server never issued', async () => {
+      const repo = makeRepository();
+      const service = createService(repo);
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await service.signInWithGoogle('good-code', 'attacker-supplied-state');
+
+      expect(result.success).toBe(false);
+      expect(result.code).toBe('OAUTH_STATE_INVALID');
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('REJECTS a REUSED state (single-use, replay protection)', async () => {
+      const repo = makeRepository();
+      repo.findByEmail.mockResolvedValue(makeUser());
+      const service = createService(repo);
+      stubGoogleProfile({
+        id: 'g-replay',
+        email: 'test@example.com',
+        verified_email: true,
+        name: 'Test User',
+        given_name: 'Test',
+        family_name: 'User',
+      });
+
+      const { state } = await service.beginGoogleAuth();
+      const first = await service.signInWithGoogle('good-code', state);
+      expect(first.success).toBe(true);
+
+      // The SAME state presented again must be refused, and no second code
+      // exchange may happen.
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const second = await service.signInWithGoogle('good-code', state);
+      expect(second.success).toBe(false);
+      expect(second.code).toBe('OAUTH_STATE_INVALID');
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('fails closed when the state store itself errors', async () => {
+      const repo = makeRepository();
+      const service = new AuthService(repo as never, mockEventPublisher as never, {
+        oauthStateStore: {
+          save: vi.fn().mockResolvedValue(undefined),
+          consume: vi.fn().mockRejectedValue(new Error('store down')),
+        },
+      });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await service.signInWithGoogle('good-code', 'some-state');
+
+      expect(result.success).toBe(false);
+      expect(result.code).toBe('OAUTH_STATE_INVALID');
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('returns an error when the Google callback fails (with a valid state)', async () => {
       const repo = makeRepository();
       const service = createService(repo);
       const fetchMock = vi.fn().mockResolvedValue(new Response('nope', { status: 400 }));
       vi.stubGlobal('fetch', fetchMock);
 
-      const result = await service.signInWithGoogle('bad-code');
+      const { state } = await service.beginGoogleAuth();
+      const result = await service.signInWithGoogle('bad-code', state);
       expect(result.success).toBe(false);
       vi.unstubAllGlobals();
     });
@@ -185,7 +276,8 @@ describe('AuthService', () => {
         family_name: 'User',
       });
 
-      const result = await service.signInWithGoogle('good-code');
+      const { state } = await service.beginGoogleAuth();
+      const result = await service.signInWithGoogle('good-code', state);
 
       expect(result.success).toBe(true);
       expect(result.session?.userId).toBe(user.id);
@@ -210,7 +302,8 @@ describe('AuthService', () => {
         family_name: 'User',
       });
 
-      const result = await service.signInWithGoogle('good-code');
+      const { state } = await service.beginGoogleAuth();
+      const result = await service.signInWithGoogle('good-code', state);
 
       expect(result.success).toBe(true);
       expect(user.profile.givenName).toBe('Test');
@@ -234,7 +327,8 @@ describe('AuthService', () => {
         family_name: 'User',
       });
 
-      const result = await service.signInWithGoogle('good-code');
+      const { state } = await service.beginGoogleAuth();
+      const result = await service.signInWithGoogle('good-code', state);
 
       expect(result.success).toBe(true);
       expect(result.session?.userId).toBe(googleUser.id);
@@ -256,7 +350,8 @@ describe('AuthService', () => {
         family_name: 'Claim',
       });
 
-      const result = await service.signInWithGoogle('good-code');
+      const { state } = await service.beginGoogleAuth();
+      const result = await service.signInWithGoogle('good-code', state);
 
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/did not verify/i);
@@ -280,7 +375,8 @@ describe('AuthService', () => {
         family_name: 'User',
       });
 
-      const result = await service.signInWithGoogle('good-code');
+      const { state } = await service.beginGoogleAuth();
+      const result = await service.signInWithGoogle('good-code', state);
 
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/did not verify/i);
@@ -302,7 +398,8 @@ describe('AuthService', () => {
         family_name: 'New',
       });
 
-      const result = await service.signInWithGoogle('good-code');
+      const { state } = await service.beginGoogleAuth();
+      const result = await service.signInWithGoogle('good-code', state);
 
       // The first login SUCCEEDED and produced a session for the new user.
       expect(result.success).toBe(true);

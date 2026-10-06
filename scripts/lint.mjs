@@ -80,7 +80,11 @@ function runScope(scope, fix) {
   const t0 = Date.now();
   const cacheDir = path.join(root, 'node_modules', '.cache', 'eslint-lint');
   const cacheLocation = path.join(cacheDir, `${scope.label.replace(/[^a-z0-9_-]/gi, '_')}.json`);
-  const cmdArgs = [eslintBin, ...scope.args, '--cache', '--cache-location', cacheLocation];
+  // `--no-warn-ignored`: the root scope passes an explicit file list, so files the
+  // flat config ignores (e.g. untracked audit dirs) would otherwise each emit a
+  // "File ignored because of a matching ignore pattern" warning that is not
+  // actionable lint output.
+  const cmdArgs = [eslintBin, ...scope.args, '--no-warn-ignored', '--cache', '--cache-location', cacheLocation];
   if (fix) cmdArgs.push('--fix');
   const child = spawn(process.execPath, cmdArgs, {
     cwd: root,

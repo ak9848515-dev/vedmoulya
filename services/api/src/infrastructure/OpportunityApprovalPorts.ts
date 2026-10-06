@@ -36,6 +36,13 @@ export type OpportunityApprovalResult =
  *  string, so the authority's policy engine is what classifies the action. */
 export const OPPORTUNITY_APPROVAL_ACTION = 'accept_work' as const;
 
+export type OpportunityApprovalDecision =
+  | { success: true; data: OpportunityApprovalRecord }
+  | { success: false; code: string; message: string };
+
+export type OpportunityApprovalRejection =
+  { success: true } | { success: false; code: string; message: string };
+
 export interface OpportunityApprovalPort {
   /** Register the approval request with the EXISTING Brain authority. */
   requestApproval(input: { userId: string; opportunityId: string }): OpportunityApprovalResult;
@@ -44,22 +51,20 @@ export interface OpportunityApprovalPort {
     userId: string;
     taskId: string;
     opportunityId: string;
-  }):
-    | { success: true; data: OpportunityApprovalRecord }
-    | { success: false; code: string; message: string };
+  }): OpportunityApprovalDecision;
   /** Ask the authority to refuse. */
   reject(input: {
     userId: string;
     taskId: string;
     opportunityId: string;
-  }): { success: true } | { success: false; code: string; message: string };
+  }): OpportunityApprovalRejection;
 }
 
 export function createOpportunityApprovalPort(
   brain: BrainApplicationService,
 ): OpportunityApprovalPort {
   return {
-    requestApproval: (input) => {
+    requestApproval: (input): OpportunityApprovalResult => {
       // The Brain is the only way a sensitive action is registered; the action
       // becomes the task objective, then is registered for approval.
       const task = brain.createTask(input.userId, OPPORTUNITY_APPROVAL_ACTION);
@@ -85,7 +90,7 @@ export function createOpportunityApprovalPort(
       return { success: true, data: { taskId: task.data.id } };
     },
 
-    approve: (input) => {
+    approve: (input): OpportunityApprovalDecision => {
       // The authority decides. A refusal here is an honest refusal — never a
       // fallback to a self-asserted record.
       const result = brain.approve(input.userId, input.taskId, OPPORTUNITY_APPROVAL_ACTION);
@@ -109,7 +114,7 @@ export function createOpportunityApprovalPort(
       };
     },
 
-    reject: (input) => {
+    reject: (input): OpportunityApprovalRejection => {
       const result = brain.reject(input.userId, input.taskId, OPPORTUNITY_APPROVAL_ACTION);
       if (!result.success) {
         return {

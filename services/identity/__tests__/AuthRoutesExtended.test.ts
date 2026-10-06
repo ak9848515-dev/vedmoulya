@@ -18,6 +18,10 @@ function createMockService() {
     getGoogleAuthUrl: vi
       .fn()
       .mockReturnValue('https://accounts.google.com/o/oauth2/v2/auth?client_id=test'),
+    beginGoogleAuth: vi.fn().mockResolvedValue({
+      url: 'https://accounts.google.com/o/oauth2/v2/auth?client_id=test',
+      state: 'server-minted-state',
+    }),
     verifySession: vi.fn().mockResolvedValue({ sub: 'user-1', email: 'a@b.com', role: 'user' }),
     signOut: vi.fn().mockResolvedValue(undefined),
     refreshSession: vi
@@ -96,6 +100,34 @@ describe('AuthRoutes — Google OAuth browser navigation', () => {
     expect(body.error.code).toBe('MISSING_CODE');
   });
 
+  it('GET /google/callback with a code but NO state is rejected (server-side fail closed)', async () => {
+    const res = await router.request('/google/callback?code=abc123def456', {
+      headers: { accept: 'application/json' },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe('MISSING_STATE');
+    // The code is never exchanged without a server-issued state.
+    expect(service.signInWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it('GET /google/callback browser navigation without a state redirects to missing_state', async () => {
+    const res = await router.request('/google/callback?code=abc123def456', {
+      headers: { accept: 'text/html' },
+    });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain('missing_state');
+  });
+
+  it('GET /google/callback forwards the state to the service for server-side verification', async () => {
+    const res = await router.request('/google/callback?code=abc123def456&state=s1', {
+      headers: { accept: 'application/json' },
+    });
+    expect(res.status).toBe(200);
+    expect(service.signInWithGoogle).toHaveBeenCalledWith('abc123def456', 's1', expect.any(String));
+  });
+
   it('GET /google/callback with JSON Accept and Google auth failure returns 401', async () => {
     service.signInWithGoogle.mockResolvedValue({ success: false, error: 'Google auth failed' });
     const res = await router.request('/google/callback?code=badcode&state=s1', {
@@ -106,13 +138,29 @@ describe('AuthRoutes — Google OAuth browser navigation', () => {
     expect(body.error.code).toBe('GOOGLE_AUTH_FAILED');
   });
 
-  it('GET /google/url returns auth URL with origin', async () => {
+  it('GET /google/callback surfaces the specific OAUTH_STATE_INVALID code', async () => {
+    service.signInWithGoogle.mockResolvedValue({
+      success: false,
+      code: 'OAUTH_STATE_INVALID',
+      error: 'This sign-in attempt is invalid or has expired. Please try again.',
+    });
+    const res = await router.request('/google/callback?code=badcode&state=not-issued', {
+      headers: { accept: 'application/json' },
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe('OAUTH_STATE_INVALID');
+  });
+
+  it('GET /google/url returns the SERVER-minted state', async () => {
     const res = await router.request('/google/url');
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.url).toContain('google.com');
-    expect(body.data.state).toBeTruthy();
-    expect(service.getGoogleAuthUrl).toHaveBeenCalled();
+    expect(body.data.state).toBe('server-minted-state');
+    expect(service.beginGoogleAuth).toHaveBeenCalled();
+    // The route no longer generates the state itself.
+    expect(service.getGoogleAuthUrl).not.toHaveBeenCalled();
   });
 });
 

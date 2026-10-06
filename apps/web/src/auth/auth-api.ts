@@ -10,7 +10,9 @@
 //   POST /auth/verify-email                → { data: { verified } } (SPRINT-045)
 //   POST /auth/resend-verification         → { data: { sent } } (SPRINT-045)
 //   GET  /auth/google/url                  → { data: { url, state } }
-//   GET  /auth/google/callback?code=...    → { data: AuthSession }
+//   GET  /auth/google/callback?code=&state= → { data: AuthSession }
+//     The state the server issued in google/url MUST be echoed back: the
+//     identity service verifies it server-side before exchanging the code.
 //   POST /auth/refresh                     → { data: TokenPair }
 //   GET  /auth/session                     → { data: { userId, email, role } }
 //   POST /auth/sign-out                    → { data: { message } }
@@ -214,9 +216,13 @@ export function fetchGoogleAuthUrl(): Promise<GoogleAuthUrlResult> {
   return request<GoogleAuthUrlResult>('google/url');
 }
 
-/** Exchange the OAuth code returned by Google for an auth session. */
-export function exchangeGoogleCode(code: string): Promise<AuthSession> {
-  return request<AuthSession>(`google/callback?code=${encodeURIComponent(code)}`);
+/** Exchange the OAuth code returned by Google for an auth session. The
+ *  server-issued `state` is sent alongside the code so the identity service
+ *  can verify it (single-use, server-side) before the exchange happens. */
+export function exchangeGoogleCode(code: string, state: string): Promise<AuthSession> {
+  return request<AuthSession>(
+    `google/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
+  );
 }
 
 /** Refresh an expired access token; returns a new token pair. */

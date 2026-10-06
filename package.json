@@ -41,7 +41,7 @@
     "test:a11y": "bash scripts/run-a11y.sh",
     "test:performance": "bash scripts/check-bundle-size.sh",
     "audit": "npm audit --audit-level=critical",
-    "quality": "npm run typecheck && npm run lint && npm run test && npm run benchmarks && npm run audit",
+    "quality": "npm run deps:cycles && npm run typecheck && npm run lint && npm run test && npm run benchmarks && npm run audit",
     "quality:all": "npm run quality && npm run format",
     "prepare": "husky || true",
     "commit": "cz",
@@ -94,7 +94,8 @@
     "planning:benchmark": "npx tsx scripts/planning-benchmark.ts",
     "config:inventory": "node scripts/config-inventory.mjs config-inventory.json",
     "config:classify": "node scripts/config-classify.mjs config-inventory.json",
-    "config:contract": "node scripts/check-config-contract.mjs"
+    "config:contract": "node scripts/check-config-contract.mjs",
+    "deps:cycles": "node scripts/check-dependency-cycles.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

@@ -61,10 +61,11 @@ export class InMemoryControlStores implements ControlStores {
         linkMap.set(key, link);
         return link;
       },
-      getByOpportunity: (userId, opportunityId) => linkMap.get(`${userId}:${opportunityId}`),
-      getByMission: (userId, missionId) =>
+      getByOpportunity: (userId, opportunityId): OpportunityMissionAssociation | undefined =>
+        linkMap.get(`${userId}:${opportunityId}`),
+      getByMission: (userId, missionId): OpportunityMissionAssociation | undefined =>
         [...linkMap.values()].find((l) => l.userId === userId && l.missionId === missionId),
-      list: (userId) =>
+      list: (userId): OpportunityMissionAssociation[] =>
         [...linkMap.values()]
           .filter((l) => l.userId === userId)
           .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),

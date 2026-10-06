@@ -397,7 +397,10 @@ export async function completeGoogleSignIn(
   }
 
   try {
-    const session = await exchangeGoogleCode(code);
+    // The state is sent back to the SERVER as well: the identity service
+    // verifies it server-side (single-use) before exchanging the code. The
+    // sessionStorage comparison above remains defence in depth.
+    const session = await exchangeGoogleCode(code, state);
     applySession(session);
     return { ok: true, next: pending.next };
   } catch (error) {

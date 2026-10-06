@@ -21,6 +21,8 @@
 // Run:  npm run quality:gates:verify
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { QualityEvaluator } from '@vedmoulya/experience';
 import type { VisualCriticReport } from '@vedmoulya/experience';
 import { LoopBudget } from '@vedmoulya/loop-engine';
@@ -337,6 +339,40 @@ function main(): void {
     'token budget enforced independently of iterations',
     tinyTerminated === 'BUDGET_EXCEEDED',
     tinyTerminated || 'never gated',
+  );
+
+  // ── 7. Workspace architecture: no internal dependency cycles ──────────────
+  section('7. Workspace dependency cycles (architecture gate)');
+  // A cycle between workspaces (apps/*, packages/*, services/*) makes build
+  // order ambiguous and breaks package layering. The check is manifest-derived
+  // and deterministic — it reuses the SAME gate CI runs (deps:cycles), never a
+  // second implementation.
+  const cycleCheck = spawnSync(
+    process.execPath,
+    [join(import.meta.dirname, 'check-dependency-cycles.mjs'), '--json'],
+    { encoding: 'utf8' },
+  );
+  let cycleReport: { workspaces?: number; cycles?: string[][] } | undefined;
+  try {
+    cycleReport = JSON.parse(cycleCheck.stdout || '{}') as {
+      workspaces?: number;
+      cycles?: string[][];
+    };
+  } catch {
+    cycleReport = undefined;
+  }
+  const cycleCount = cycleReport?.cycles?.length ?? -1;
+  check(
+    'no internal dependency cycles',
+    cycleCheck.status === 0 && cycleCount === 0,
+    cycleReport === undefined
+      ? `cycle checker did not report (status=${String(cycleCheck.status)})`
+      : `${String(cycleCount)} cycle(s): ${(cycleReport.cycles ?? []).map((c) => c.join(' → ')).join(' | ')}`,
+  );
+  check(
+    'dependency graph was actually scanned',
+    (cycleReport?.workspaces ?? 0) > 0,
+    `workspaces=${String(cycleReport?.workspaces ?? 0)}`,
   );
 
   section('RESULT');

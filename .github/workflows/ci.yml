@@ -62,6 +62,11 @@ jobs:
       # Gate 2: Code Quality — Formatting
       - name: Format check (Prettier)
         run: npm run format
+      # Gate 1: Architecture — internal dependency graph must be acyclic.
+      # Deterministic, manifest-derived (no build): a cycle between
+      # workspaces makes build order ambiguous and breaks package layering.
+      - name: Dependency cycle check
+        run: npm run deps:cycles
       # Gate 1: Architecture — TypeScript compilation
       - name: Type check
         run: npm run typecheck

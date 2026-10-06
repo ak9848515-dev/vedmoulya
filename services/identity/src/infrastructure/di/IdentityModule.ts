@@ -23,6 +23,7 @@ import {
   type VerificationTokenStore,
   createVerificationTokenStore,
 } from '../persistence/VerificationTokenStore.js';
+import { type OAuthStateStore, createOAuthStateStore } from '../persistence/OAuthStateStore.js';
 
 /** Register all identity infrastructure services with the DI container */
 export function registerIdentityServices(): void {
@@ -77,13 +78,29 @@ export function registerIdentityServices(): void {
     return store;
   });
 
+  container.register<OAuthStateStore>('identity.oauth-state-store', () => {
+    const store = createOAuthStateStore();
+    // Idempotent bootstrap of the OAuth state table (estate convention).
+    // Fire-and-forget: production/staging uses the Postgres store; dev/test
+    // uses the in-memory store where ensureTable is an optional no-op.
+    const withEnsure = store as OAuthStateStore & { ensureTable?(): Promise<void> };
+    void withEnsure.ensureTable?.().catch((error: unknown) => {
+      console.warn('OAuth state table creation failed', error);
+    });
+    return store;
+  });
+
   container.register<AuthService>('identity.auth-service', () => {
     const repository = container.resolve('identity.repository') as IdentityRepository;
     const eventPublisher = container.resolve('identity.event-publisher') as IdentityEventPublisher;
     const verificationTokenStore = container.resolve(
       'identity.verification-token-store',
     ) as VerificationTokenStore;
-    return new AuthService(repository, eventPublisher, { verificationTokenStore });
+    const oauthStateStore = container.resolve('identity.oauth-state-store') as OAuthStateStore;
+    return new AuthService(repository, eventPublisher, {
+      verificationTokenStore,
+      oauthStateStore,
+    });
   });
 
   // Authorization Services

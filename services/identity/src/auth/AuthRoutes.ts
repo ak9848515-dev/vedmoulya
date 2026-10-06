@@ -225,11 +225,12 @@ export function createAuthRouter(authService: AuthService): Hono {
   });
 
   // ── Google OAuth ─────────────────────────────────────────────────────
-  router.get('/google/url', (c) => {
+  // The SERVED state is minted and persisted server-side (single-use, hashed,
+  // time-bounded). The callback verifies it before any code is exchanged.
+  router.get('/google/url', async (c) => {
     try {
-      const state = crypto.randomUUID();
       const origin = new URL(c.req.url).origin;
-      const url = authService.getGoogleAuthUrl(state, origin);
+      const { url, state } = await authService.beginGoogleAuth(origin);
       return c.json({ success: true, data: { url, state } }, 200);
     } catch (error) {
       return mapErrorToResponse(error, c);
@@ -262,11 +263,30 @@ export function createAuthRouter(authService: AuthService): Hono {
       );
     }
 
+    // A callback with no server-issued state can never be trusted: reject it
+    // before any code is exchanged (fail closed).
+    if (!state) {
+      if (isBrowserNavigation) {
+        return c.html(
+          '<html><body><script>window.location.replace("/login?error=missing_state")</script></body></html>',
+          400,
+        );
+      }
+      return c.json(
+        {
+          success: false,
+          error: { code: 'MISSING_STATE', message: 'No OAuth state provided' },
+        },
+        400,
+      );
+    }
+
     if (isBrowserNavigation) {
       // Serve an HTML page that completes the OAuth exchange client-side
       // so the session is stored in the browser and the user lands on /.
       const escapedCode = code.replace(/[&<>"']/g, '');
-      const escapedState = (state ?? '').replace(/[&<>"']/g, '');
+      // `state` is guaranteed non-empty by the MISSING_STATE guard above.
+      const escapedState = state.replace(/[&<>"']/g, '');
       return c.html(
         `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Signing in…</title></head><body>` +
           `<script>` +
@@ -297,14 +317,24 @@ export function createAuthRouter(authService: AuthService): Hono {
       );
     }
 
-    // Programmatic (fetch / JSON) — existing behavior for client-side exchangeGoogleCode
+    // Programmatic (fetch / JSON) — the client-side exchangeGoogleCode path.
+    // The server-issued state is verified inside signInWithGoogle.
     try {
       const origin = new URL(c.req.url).origin;
-      const result = await authService.signInWithGoogle(code, origin);
+      const result = await authService.signInWithGoogle(code, state, origin);
 
       if (!result.success) {
         return c.json(
-          { success: false, error: { code: 'GOOGLE_AUTH_FAILED', message: result.error } },
+          {
+            success: false,
+            error: {
+              code:
+                result.code === 'OAUTH_STATE_INVALID'
+                  ? 'OAUTH_STATE_INVALID'
+                  : 'GOOGLE_AUTH_FAILED',
+              message: result.error,
+            },
+          },
           401,
         );
       }

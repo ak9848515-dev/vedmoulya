@@ -48,6 +48,13 @@ export {
   buildVerificationLink,
 } from './auth/VerificationToken.js';
 export {
+  createOAuthState,
+  hashOAuthState,
+  OAUTH_STATE_BYTES,
+  OAUTH_STATE_TTL_MS,
+} from './auth/OAuthState.js';
+export type { OAuthStateValue } from './auth/OAuthState.js';
+export {
   LogVerificationEmailSender,
   SmtpVerificationEmailSender,
   UnavailableVerificationEmailSender,
@@ -65,6 +72,12 @@ export {
   createVerificationTokenStore,
 } from './infrastructure/persistence/VerificationTokenStore.js';
 export type { VerificationTokenStore } from './infrastructure/persistence/VerificationTokenStore.js';
+export {
+  PostgresOAuthStateStore,
+  InMemoryOAuthStateStore,
+  createOAuthStateStore,
+} from './infrastructure/persistence/OAuthStateStore.js';
+export type { OAuthStateStore } from './infrastructure/persistence/OAuthStateStore.js';
 
 // ── Authorization ─────────────────────────────────────────────────────────
 export { AuthorizationService } from './authorization/AuthorizationService.js';

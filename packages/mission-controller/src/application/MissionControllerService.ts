@@ -280,7 +280,7 @@ export class MissionControllerService {
       const dependent = initialObjectives[declaration.objectiveIndex];
       if (!dependent) continue;
       dependent.dependencies = declaration.dependsOn
-        .map((index) => initialObjectives[index]?.objectiveId)
+        .map((index) => initialObjectives.at(index)?.objectiveId)
         .filter((id): id is string => typeof id === 'string' && id.length > 0);
     }
 

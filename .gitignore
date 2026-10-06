@@ -97,8 +97,18 @@ test.txt
 /_*.txt
 /_*.log
 /_*.json
+/_*.diff
 /.dev.txt
 /.dev.err.txt
+# Live acceptance workspaces — the scripts/live-*.ts harnesses mkdir and
+# populate these roots themselves on every run, so they are generated
+# evidence, never source. Root-anchored like the scratch patterns above.
+/_live*/
+/_real08/
+/_s3*/
+# One-off root-level command capture output.
+/format_output.txt
+/lint_output.txt
 # Ad-hoc debug scripts under scripts/. Only .ts scratch is covered — the two
 # intentionally tracked probe scripts (`scripts/_e2e-token-probe.mjs`,
 # `scripts/_probe-factory.mjs`) and every real `scripts/live-*.ts` harness

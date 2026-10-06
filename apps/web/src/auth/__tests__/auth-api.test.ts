@@ -199,12 +199,14 @@ describe('fetchGoogleAuthUrl', () => {
 });
 
 describe('exchangeGoogleCode', () => {
-  it('calls the callback endpoint with the code and returns the session', async () => {
+  it('echoes code AND the server-issued state to the callback endpoint', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ success: true, data: SESSION_BODY }));
-    const session = await exchangeGoogleCode('auth-code-123');
+    const session = await exchangeGoogleCode('auth-code-123', 'server-state-9');
     expect(session.userId).toBe('user-1');
     const [url] = fetchMock.mock.calls[0] as [string];
+    // The server verifies the state it minted, so it MUST travel with the code.
     expect(url).toContain('/google/callback?code=auth-code-123');
+    expect(url).toContain('state=server-state-9');
   });
 });
 

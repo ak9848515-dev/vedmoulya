@@ -100,13 +100,15 @@ export function buildReadinessOverrides(
   read: (providerId: string) => RuntimeExecutionHealth | undefined,
   options: ReadinessEvidenceOptions = {},
 ): Record<string, { lastExecution: { ok: boolean; failureKind?: string; at: number } }> {
-  const out: Record<string, { lastExecution: { ok: boolean; failureKind?: string; at: number } }> =
-    {};
+  const out = new Map<
+    string,
+    { lastExecution: { ok: boolean; failureKind?: string; at: number } }
+  >();
   for (const id of providerIds) {
     const evidence = toReadinessEvidence(read(id), options);
-    if (evidence !== undefined) out[id] = { lastExecution: evidence };
+    if (evidence !== undefined) out.set(id, { lastExecution: evidence });
   }
-  return out;
+  return Object.fromEntries(out);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
