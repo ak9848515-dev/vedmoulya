@@ -85,12 +85,36 @@ export class OpportunityLifecycle {
     /** Capabilities the source stated the work needs — qualification input. */
     requiredCapabilities?: string[];
   }): OpportunityLifecycleRecord {
+    return this.discoverWithResult(input).record;
+  }
+
+  /** S7.0 — the SAME canonical discovery, but ALSO reports whether this call
+   *  CREATED a new canonical record or resolved to an EXISTING one. The
+   *  idempotency rule is unchanged: an existing record is returned untouched,
+   *  so a rediscovery can never reset lifecycle state. `discover()` delegates
+   *  here, so there is exactly ONE discovery implementation. */
+  discoverWithResult(input: {
+    ownerId: string;
+    title: string;
+    description: string;
+    category: string;
+    evidence: Array<{ label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' }>;
+    confidence?: number;
+    estimatedValue?: { label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' };
+    estimatedCost?: { label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' };
+    estimatedEffort?: { label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' };
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
+    automationPotential: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+    recommendedWorkflow?: string[];
+    sourceRef?: OpportunitySourceRef;
+    requiredCapabilities?: string[];
+  }): { record: OpportunityLifecycleRecord; created: boolean } {
     const stableKey =
       input.sourceRef !== undefined
         ? `${input.ownerId}:${input.sourceRef.source.toLowerCase()}:${input.sourceRef.sourceReference.toLowerCase()}`
         : `${input.ownerId}:${input.title.trim().toLowerCase()}`;
     const existing = this.store.getByKey(input.ownerId, stableKey);
-    if (existing) return existing;
+    if (existing) return { record: existing, created: false };
 
     const ts = this.now();
     const record: OpportunityLifecycleRecord = {
@@ -119,7 +143,7 @@ export class OpportunityLifecycle {
       updatedAt: ts,
     };
     this.store.save(record);
-    return record;
+    return { record, created: true };
   }
 
   get(ownerId: string, id: string): OpportunityLifecycleRecord | undefined {

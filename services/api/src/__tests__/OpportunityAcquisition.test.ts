@@ -7,8 +7,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, expect, it, beforeEach } from 'vitest';
-import { OpportunityLifecycle, type OpportunityStore } from '@vedmoulya/control-plane';
+import {
+  ActiveIntelligenceControlPlane,
+  InMemoryControlStores,
+  OpportunityLifecycle,
+  type OpportunityStore,
+} from '@vedmoulya/control-plane';
 import type { OpportunityLifecycleRecord } from '@vedmoulya/control-plane';
+import { createControlRouter } from '../routers/ControlRouter.js';
 import {
   normalizeExternalOpportunity,
   collectCandidates,
@@ -39,21 +45,25 @@ function importOpportunity(
   lifecycle: OpportunityLifecycle,
   ownerId: string,
   raw: unknown,
-): { success: true; record: OpportunityLifecycleRecord } | { success: false; code: string } {
+):
+  | { success: true; record: OpportunityLifecycleRecord; created: boolean }
+  | { success: false; code: string } {
   const normalized = normalizeExternalOpportunity(raw);
   if (!normalized.success) return { success: false, code: normalized.code };
+  const discovery = lifecycle.discoverWithResult({
+    ownerId,
+    title: normalized.data.title,
+    description: normalized.data.description,
+    category: normalized.data.category,
+    evidence: normalized.data.evidence,
+    riskLevel: normalized.data.riskLevel,
+    automationPotential: normalized.data.automationPotential,
+    sourceRef: normalized.data.sourceRef,
+  });
   return {
     success: true,
-    record: lifecycle.discover({
-      ownerId,
-      title: normalized.data.title,
-      description: normalized.data.description,
-      category: normalized.data.category,
-      evidence: normalized.data.evidence,
-      riskLevel: normalized.data.riskLevel,
-      automationPotential: normalized.data.automationPotential,
-      sourceRef: normalized.data.sourceRef,
-    }),
+    record: discovery.record,
+    created: discovery.created,
   };
 }
 
@@ -78,6 +88,7 @@ describe('S5 — opportunity acquisition foundation', () => {
     const result = importOpportunity(lifecycle, 'user-1', POSTING);
     expect(result.success).toBe(true);
     if (!result.success) return;
+    expect(result.created).toBe(true);
     expect(result.record.ownerId).toBe('user-1');
     expect(result.record.status).toBe('DISCOVERED');
     expect(result.record.sourceRef).toEqual({
@@ -135,6 +146,17 @@ describe('S5 — opportunity acquisition foundation', () => {
     expect(bad.code).toBe('MALFORMED_SOURCE_URL');
   });
 
+  it('retains a valid URL in normalized provenance without storing the raw payload', () => {
+    const result = normalizeExternalOpportunity({
+      ...POSTING,
+      url: 'https://board.example/jobs/42',
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.url).toBe('https://board.example/jobs/42');
+    expect(Object.keys(result.data)).not.toContain('raw');
+  });
+
   // ── 4. secret-bearing input rejected ───────────────────────────────────────
   it('rejects secret-bearing external input across every text field', () => {
     const secrets: Array<[string, unknown]> = [
@@ -167,8 +189,29 @@ describe('S5 — opportunity acquisition foundation', () => {
     const second = importOpportunity(lifecycle, 'user-1', { ...POSTING });
     expect(first.success && second.success).toBe(true);
     if (!first.success || !second.success) return;
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
     expect(second.record.id).toBe(first.record.id);
     expect(lifecycle.list('user-1')).toHaveLength(1);
+  });
+
+  it('returns the existing lifecycle record unchanged on rediscovery', () => {
+    const first = importOpportunity(lifecycle, 'user-1', POSTING);
+    if (!first.success) throw new Error('expected success');
+    const transitioned = lifecycle.transition({
+      ownerId: 'user-1',
+      id: first.record.id,
+      to: 'ASSESSED',
+      note: 'qualification completed',
+    });
+    expect(transitioned.success).toBe(true);
+
+    const rediscovered = importOpportunity(lifecycle, 'user-1', POSTING);
+    if (!rediscovered.success) throw new Error('expected success');
+    expect(rediscovered.created).toBe(false);
+    expect(rediscovered.record).toEqual(transitioned.success ? transitioned.record : undefined);
+    expect(rediscovered.record.status).toBe('ASSESSED');
+    expect(rediscovered.record.transitions).toHaveLength(1);
   });
 
   it('keeps a different source + sourceReference as a separate opportunity', () => {
@@ -201,10 +244,13 @@ describe('S5 — opportunity acquisition foundation', () => {
   // ── 6. user isolation ──────────────────────────────────────────────────────
   it('isolates opportunities between users', () => {
     const a = importOpportunity(lifecycle, 'user-1', POSTING);
-    importOpportunity(lifecycle, 'user-2', POSTING);
+    const b = importOpportunity(lifecycle, 'user-2', POSTING);
     expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
     expect(lifecycle.list('user-1')).toHaveLength(1);
     expect(lifecycle.list('user-2')).toHaveLength(1);
+    expect(a.created).toBe(true);
+    expect(b.success && b.created).toBe(true);
     // Same external posting, two owners, two independent records.
     expect(lifecycle.list('user-1')[0].id).not.toBe(lifecycle.list('user-2')[0].id);
   });
@@ -286,6 +332,39 @@ describe('S5 — opportunity acquisition foundation', () => {
     // The normalized form carries no status/approval/decision of any kind.
     expect(Object.keys(result.data)).not.toContain('status');
     expect(Object.keys(result.data)).not.toContain('approval');
+  });
+});
+
+describe('S7.0 — acquisition response observability', () => {
+  it('adds created to the canonical response without changing the record contract', async () => {
+    const plane = new ActiveIntelligenceControlPlane({
+      brain: { listTasksWithApprovals: () => [], outcomeCount: () => 0 },
+      proactive: { refresh: async () => ({ success: true }), listRecommendations: () => [] },
+      fabric: {} as never,
+      stores: new InMemoryControlStores(),
+      now: () => '2026-10-05T00:00:00.000Z',
+    });
+    const control = createControlRouter(plane);
+    const ctx = { userId: 'user-1' } as never;
+    const input = { userId: 'user-1', opportunity: POSTING };
+
+    const first = await control.importOpportunity(input, ctx);
+    const second = await control.importOpportunity(input, ctx);
+    expect(first.success && second.success).toBe(true);
+    if (!first.success || !second.success) return;
+
+    const created = first.data as OpportunityLifecycleRecord & { created: boolean };
+    const existing = second.data as OpportunityLifecycleRecord & { created: boolean };
+    expect(created.created).toBe(true);
+    expect(existing.created).toBe(false);
+    expect(existing.id).toBe(created.id);
+    expect(created).toMatchObject({
+      ownerId: 'user-1',
+      status: 'DISCOVERED',
+      sourceRef: { source: 'rss-feed', sourceReference: POSTING.sourceReference },
+      createdAt: '2026-10-05T00:00:00.000Z',
+    });
+    expect(plane.listOpportunities('user-1')).toHaveLength(1);
   });
 });
 

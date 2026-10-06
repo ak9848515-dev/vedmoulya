@@ -55,6 +55,43 @@ function makeServices(): ApiApplicationService {
 const ctx = (userId: string) => ({ userId, email: `${userId}@vm.local`, role: 'user' });
 
 describe('control.* (SPRINT-031)', () => {
+  it('importOpportunity reports creation vs deduplication and enforces the session owner', async () => {
+    const router = createAppRouter(makeServices());
+    const owner = router.createCaller(ctx('c-1'));
+    const other = router.createCaller(ctx('c-2'));
+    const opportunity = {
+      source: 'test-feed',
+      sourceReference: 'posting-1',
+      title: 'Build a TypeScript SDK',
+      description: 'Client needs a typed SDK for its public API.',
+    };
+
+    const first = await owner.control.importOpportunity({ userId: 'c-1', opportunity });
+    const second = await owner.control.importOpportunity({ userId: 'c-1', opportunity });
+    expect(first.success && second.success).toBe(true);
+    if (!first.success || !second.success) return;
+
+    const created = first.data as { id: string; ownerId: string; status: string; created: boolean };
+    const existing = second.data as { id: string; created: boolean };
+    expect(created).toMatchObject({ ownerId: 'c-1', status: 'DISCOVERED', created: true });
+    expect(existing.created).toBe(false);
+    expect(existing.id).toBe(created.id);
+
+    const otherList = await other.control.listOpportunities({ userId: 'c-2' });
+    expect(otherList.data).toEqual([]);
+    await expect(other.control.listOpportunities({ userId: 'c-1' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    await expect(
+      other.control.transitionOpportunity({
+        userId: 'c-1',
+        id: created.id,
+        to: 'ASSESSED',
+        note: 'cross-owner attempt',
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it('getSettings returns null by default (no autonomy granted without explicit confirmation)', async () => {
     const router = createAppRouter(makeServices());
     const caller = router.createCaller(ctx('c-1'));

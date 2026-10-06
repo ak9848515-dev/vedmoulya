@@ -364,7 +364,7 @@ export function createControlRouter(
       if (!normalized.success) {
         return Promise.resolve(acquisitionError(normalized.code, normalized.message, 400));
       }
-      const record = plane.discoverOpportunity({
+      const { record, created } = plane.discoverOpportunityWithResult({
         ownerId,
         title: normalized.data.title,
         description: normalized.data.description,
@@ -383,7 +383,12 @@ export function createControlRouter(
           ? { requiredCapabilities: normalized.data.requiredCapabilities }
           : {}),
       });
-      return Promise.resolve(successResponse(record));
+      // S7.0 — surface whether this acquisition CREATED a canonical opportunity
+      // or resolved (idempotently) to an EXISTING one. This is advisory
+      // reporting only: the record, its owner scope and its DISCOVERED state
+      // are the canonical lifecycle's. Acquisition never approves, qualifies or
+      // launches anything.
+      return Promise.resolve(successResponse({ ...record, created }));
     },
 
     // ── S5.1 — qualification ────────────────────────────────────────────────

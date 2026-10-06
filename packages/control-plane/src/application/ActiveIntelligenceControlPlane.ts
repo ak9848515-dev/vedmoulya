@@ -276,6 +276,28 @@ export class ActiveIntelligenceControlPlane {
     return this.opportunities.discover(input);
   }
 
+  /** S7.0 — the SAME canonical discovery, reporting whether a record was
+   *  CREATED or already EXISTED. Owner isolation and idempotency are the
+   *  canonical lifecycle's; this only surfaces the outcome of that one call. */
+  discoverOpportunityWithResult(input: {
+    ownerId: string;
+    title: string;
+    description: string;
+    category: string;
+    evidence: Array<{ label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' }>;
+    confidence?: number;
+    estimatedValue?: { label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' };
+    estimatedCost?: { label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' };
+    estimatedEffort?: { label: string; status: 'VERIFIED' | 'ESTIMATED' | 'UNKNOWN' };
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
+    automationPotential: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+    recommendedWorkflow?: string[];
+    sourceRef?: OpportunitySourceRef;
+    requiredCapabilities?: string[];
+  }): { record: OpportunityLifecycleRecord; created: boolean } {
+    return this.opportunities.discoverWithResult(input);
+  }
+
   // ── S5.1 · Opportunity ↔ Mission association ───────────────────────────────
   // The association is ONLY ever written after the opportunity reaches
   // APPROVED and the canonical Mission creation path has already succeeded.
