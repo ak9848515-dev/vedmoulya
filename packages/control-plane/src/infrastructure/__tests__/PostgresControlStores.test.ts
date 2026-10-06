@@ -19,6 +19,11 @@ import {
   PostgresEmergencyStopStore,
   PostgresOpportunityStore,
 } from '../PostgresControlStores.js';
+import {
+  InMemoryCommercialOutcomeStore,
+  PostgresCommercialOutcomeStore,
+} from '../CommercialOutcomeStores.js';
+import type { CommercialOutcomeRecord } from '../types/commercial-outcome-types.js';
 
 function createFakeSql(): postgres.Sql {
   const run = (first: unknown, ..._values: unknown[]): unknown => {
@@ -131,6 +136,65 @@ describe('PostgresEmergencyStopStore', () => {
     await store.flush();
   });
 });
+
+function commercialOutcome(
+  userId: string,
+  outcomeId: string,
+  createdAt = '2026-08-14T08:00:00.000Z',
+): CommercialOutcomeRecord {
+  return {
+    outcomeId,
+    userId,
+    missionId: `m-${outcomeId}`,
+    objectiveId: `o-${outcomeId}`,
+    clientId: 'client-1',
+    documentId: `doc-${outcomeId}`,
+    status: 'COMMERCIAL_PENDING',
+    recordedBy: userId,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+/** Drain a write-through store when it has one (in-memory has no backend). */
+async function maybeFlush(store: { flush?: () => Promise<void> }): Promise<void> {
+  if (typeof store.flush === 'function') await store.flush();
+}
+
+for (const [name, make] of [
+  ['PostgresCommercialOutcomeStore', () => new PostgresCommercialOutcomeStore(createFakeSql())],
+  ['InMemoryCommercialOutcomeStore', () => new InMemoryCommercialOutcomeStore()],
+] as const) {
+  describe(name, () => {
+    it('saves, reads and lists owner-scoped commercial outcomes', async () => {
+      const store = make();
+      store.save(commercialOutcome('u1', 'a'));
+      store.save(commercialOutcome('u2', 'b'));
+      expect(store.get('u1', 'a')?.outcomeId).toBe('a');
+      expect(store.get('u1', 'b')).toBeUndefined(); // IDOR
+      expect(store.list('u1')).toHaveLength(1);
+      expect(store.list('u2')).toHaveLength(1);
+      await maybeFlush(store);
+    });
+
+    it('is idempotent — a repeated save returns the EXISTING record, never a duplicate', async () => {
+      const store = make();
+      const first = store.save(commercialOutcome('u1', 'a'));
+      const second = store.save(commercialOutcome('u1', 'a', '2026-08-15T00:00:00.000Z'));
+      expect(second).toEqual(first);
+      expect(store.list('u1')).toHaveLength(1);
+      await maybeFlush(store);
+    });
+
+    it('lists newest first', async () => {
+      const store = make();
+      store.save(commercialOutcome('u1', 'old', '2026-08-14T07:00:00.000Z'));
+      store.save(commercialOutcome('u1', 'new', '2026-08-14T10:00:00.000Z'));
+      expect(store.list('u1').map((r) => r.outcomeId)).toEqual(['new', 'old']);
+      await maybeFlush(store);
+    });
+  });
+}
 
 describe('PostgresOpportunityStore', () => {
   it('saves, reads and lists owner-scoped lifecycle records', async () => {

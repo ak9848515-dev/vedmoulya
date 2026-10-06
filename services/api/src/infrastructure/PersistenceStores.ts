@@ -96,9 +96,11 @@ import { InMemoryDiscoveryStore, PostgresDiscoveryStore } from '@vedmoulya/ai-wo
 import type { ConversationStore } from '@vedmoulya/voice';
 import type { ProactiveRecommendationStore } from '@vedmoulya/proactive';
 import { InMemoryProactiveStore, PostgresProactiveStore } from '@vedmoulya/proactive';
-import type { ControlStores } from '@vedmoulya/control-plane';
+import type { ControlStores, CommercialOutcomeStore } from '@vedmoulya/control-plane';
 import {
+  InMemoryCommercialOutcomeStore,
   InMemoryControlStores,
+  PostgresCommercialOutcomeStore,
   PostgresSettingsStore as PostgresControlSettingsStore,
   PostgresEmergencyStopStore as PostgresControlEmergencyStopStore,
   PostgresOpportunityStore as PostgresControlOpportunityStore,
@@ -171,6 +173,10 @@ export interface PersistenceStores {
   /** SPRINT-031 — owner-scoped control-plane stores (autonomy settings,
    *  emergency stop, opportunity lifecycle). */
   control: ControlStores;
+  /** S6.0 — owner-scoped post-delivery commercial-outcome boundary store.
+   *  Idempotent by (owner, outcomeId); references only, never commercial
+   *  payloads. Reuses the shared write-through base, never a second store. */
+  commercialOutcomes: CommercialOutcomeStore;
   /** SPRINT-032 — owner-scoped world-model stores (bounded typed graph,
    *  business units, AI workforce roles, business workflows).
    *  SPRINT-033 (Part F) — revenue streams (evidence-carrying).
@@ -238,6 +244,7 @@ function createInMemoryStores(): PersistenceStores {
     },
     proactive: new InMemoryProactiveStore(),
     control: new InMemoryControlStores(),
+    commercialOutcomes: new InMemoryCommercialOutcomeStore(),
     world: new InMemoryWorldStores(),
   };
 }
@@ -277,6 +284,7 @@ function createPostgresStores(): PersistenceBundle {
   const controlStops = new PostgresControlEmergencyStopStore(sql);
   const controlOpportunities = new PostgresControlOpportunityStore(sql);
   const controlOpportunityMissionLinks = new PostgresControlOpportunityMissionLinkStore(sql);
+  const commercialOutcomes = new PostgresCommercialOutcomeStore(sql);
   const worldEntities = new PostgresWorldEntityStore(sql);
   const worldRelations = new PostgresWorldRelationStore(sql);
   const worldUnits = new PostgresWorldBusinessUnitStore(sql);
@@ -311,6 +319,7 @@ function createPostgresStores(): PersistenceBundle {
       opportunities: controlOpportunities,
       opportunityMissionLinks: controlOpportunityMissionLinks,
     },
+    commercialOutcomes,
     world: {
       entities: worldEntities,
       relations: worldRelations,
@@ -353,6 +362,7 @@ function createPostgresStores(): PersistenceBundle {
     controlStops,
     controlOpportunities,
     controlOpportunityMissionLinks,
+    commercialOutcomes,
     worldEntities,
     worldRelations,
     worldUnits,
@@ -524,6 +534,7 @@ export function resolvePersistenceBundle(
       opportunityMissionLinks:
         overrides.control?.opportunityMissionLinks ?? base.control.opportunityMissionLinks,
     },
+    commercialOutcomes: overrides.commercialOutcomes ?? base.commercialOutcomes,
     world: overrides.world ?? base.world,
   };
 }

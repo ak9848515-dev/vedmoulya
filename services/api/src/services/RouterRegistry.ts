@@ -6817,6 +6817,53 @@ export function createAppRouter(services: ApiApplicationService) {
           };
         }),
 
+      // S6.0 — governed POST-DELIVERY commercial outcome. Records the ONE fact
+      // the platform may assert after a verified delivery: a commercial outcome
+      // is PENDING HUMAN ACTION. It never sends an invoice/proposal, charges a
+      // payment, transfers money, contacts a client or advances the outcome.
+      // `userId` is NOT an input — identity comes from the authenticated
+      // session, and every referenced record (mission, objective, deliverable)
+      // is read through an owner-scoped store, so cross-user access fails closed.
+      recordCommercialOutcome: standardProcedure
+        .input(
+          z.object({
+            missionId: z.string().min(1).max(128),
+            objectiveId: z.string().min(1).max(128),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          const result = await services.commercialOutcome.recordCommercialOutcome({
+            ...input,
+            // Identity comes from the authenticated session, never the client.
+            userId: ctx.userId,
+          });
+          if (!result.ok) {
+            throw new TRPCError({
+              code:
+                result.reason === 'NOT_OWNER' || result.reason === 'MISSION_NOT_FOUND'
+                  ? 'FORBIDDEN'
+                  : result.reason === 'STORE_FAILURE' || result.reason === 'CLIENTOPS_FAILURE'
+                    ? 'INTERNAL_SERVER_ERROR'
+                    : 'BAD_REQUEST',
+              message: result.message,
+            });
+          }
+          return {
+            ok: true as const,
+            outcomeId: result.outcomeId,
+            created: result.created,
+            status: result.status,
+            // Commercial action is never taken here — a human remains required.
+            pendingHumanAction: result.pendingHumanAction,
+          };
+        }),
+
+      // S6.0 — owner-scoped read of recorded commercial outcomes. Never
+      // fabricates a status: whatever the record holds is returned verbatim.
+      commercialOutcomes: standardProcedure
+        .input(z.object({}).optional())
+        .query(({ ctx }) => services.commercialOutcome.listCommercialOutcomes(ctx.userId)),
+
       pause: standardProcedure
         .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
         .mutation(({ input }) => createMissionRouter(services.mission).pause(input)),

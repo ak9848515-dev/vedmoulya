@@ -1,4 +1,5 @@
 export * from './types/control-types.js';
+export * from './types/commercial-outcome-types.js';
 export * from './contracts/control-ports.js';
 export * from './domain/AutonomySettingsValidator.js';
 export * from './domain/EmergencyStop.js';
@@ -7,3 +8,4 @@ export * from './domain/ControlGate.js';
 export * from './application/ActiveIntelligenceControlPlane.js';
 export * from './infrastructure/InMemoryControlStores.js';
 export * from './infrastructure/PostgresControlStores.js';
+export * from './infrastructure/CommercialOutcomeStores.js';

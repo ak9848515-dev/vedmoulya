@@ -234,8 +234,10 @@ import { MissionService } from './MissionService.js';
 import {
   MissionClientOpsHandoffService,
   type HandoffMissionView,
+  type MissionLookup,
 } from './MissionClientOpsHandoff.js';
 import { DeliveryOutcomeMemory } from './DeliveryOutcomeMemory.js';
+import { CommercialOutcomeService } from './CommercialOutcomeService.js';
 import { MemoryIntelligenceStoreAdapter } from '@vedmoulya/execution-memory';
 import { PostgresMemoryRepository } from '@vedmoulya/memory-intelligence';
 import {
@@ -846,6 +848,12 @@ export class ApiApplicationService {
    * externally. External submission remains under the existing approval policy.
    */
   readonly missionClientOpsHandoff: MissionClientOpsHandoffService;
+  /**
+   * S6.0 — governed POST-DELIVERY commercial-outcome boundary. Composition
+   * only: it records "this VERIFIED delivery has a commercial outcome pending
+   * human action" and never sends, charges, contacts or advances anything.
+   */
+  readonly commercialOutcome: CommercialOutcomeService;
 
   // ── Infrastructure Health (PH-002/T3 follow-up) ────────────────────────────
   readonly infrastructureHealth: InfrastructureHealthProbe;
@@ -1132,35 +1140,38 @@ export class ApiApplicationService {
     //    no loop and no planning — and it never sends anything externally.
     //    The Mission lookup reads the EXISTING owner-scoped status view, so
     //    user isolation is enforced by Mission itself, not re-implemented.
-    this.missionClientOpsHandoff = new MissionClientOpsHandoffService({
-      missions: {
-        get: async (missionId: string, userId: string): Promise<HandoffMissionView | undefined> => {
-          const view = await this.mission.getStatus(userId, missionId);
-          return {
-            missionId: view.missionId,
-            userId: view.userId,
-            title: view.title,
-            objectives: view.objectives.map((objective) => ({
-              objectiveId: objective.objectiveId,
-              state: objective.state,
-              title: objective.title,
-              // A verified outcome exists exactly when the objective was
-              // verified; `verifiedAt` is the projection's own truth marker.
-              verifiedOutcome:
-                objective.verifiedAt === undefined
-                  ? null
-                  : {
-                      outcome: objective.title,
-                      ...(objective.verificationMethod !== undefined
-                        ? { method: objective.verificationMethod }
-                        : {}),
-                      evidence: objective.evidence,
-                      verifiedAt: objective.verifiedAt,
-                    },
-            })),
-          };
-        },
+    //    S6.0 reuses the SAME owner-scoped projection below — one Mission view,
+    //    never a second implementation.
+    const missionLookup: MissionLookup = {
+      get: async (missionId: string, userId: string): Promise<HandoffMissionView | undefined> => {
+        const view = await this.mission.getStatus(userId, missionId);
+        return {
+          missionId: view.missionId,
+          userId: view.userId,
+          title: view.title,
+          objectives: view.objectives.map((objective) => ({
+            objectiveId: objective.objectiveId,
+            state: objective.state,
+            title: objective.title,
+            // A verified outcome exists exactly when the objective was
+            // verified; `verifiedAt` is the projection's own truth marker.
+            verifiedOutcome:
+              objective.verifiedAt === undefined
+                ? null
+                : {
+                    outcome: objective.title,
+                    ...(objective.verificationMethod !== undefined
+                      ? { method: objective.verificationMethod }
+                      : {}),
+                    evidence: objective.evidence,
+                    verifiedAt: objective.verifiedAt,
+                  },
+          })),
+        };
       },
+    };
+    this.missionClientOpsHandoff = new MissionClientOpsHandoffService({
+      missions: missionLookup,
       clientOps: clientOpsRepository,
       // S4.1 — persist the delivery outcome through the EXISTING memory
       // architecture (PostgresMemoryRepository → MemoryIntelligenceStoreAdapter
@@ -1895,6 +1906,20 @@ export class ApiApplicationService {
     // Brain approval authority and mints the grant server-side, so a client can
     // never satisfy the lifecycle's approval guard with a record it wrote.
     this.opportunityApproval = createOpportunityApprovalPort(this.brain);
+
+    // ── S6.0 · governed post-delivery commercial outcome ────────────────────
+    //    A BOUNDARY, not an engine. Once the EXISTING S4 handoff has produced a
+    //    VERIFIED deliverable, this records the ONE next fact the platform may
+    //    assert: a commercial outcome is PENDING HUMAN ACTION. It never sends an
+    //    invoice, charges a payment, contacts a client or advances the outcome —
+    //    the existing human-controlled ClientOps/content-agency invoice & payment
+    //    flows remain the only way it moves. The store is the durable,
+    //    owner-scoped commercial-outcome backend (idempotent by key).
+    this.commercialOutcome = new CommercialOutcomeService({
+      missions: missionLookup,
+      clientOps: clientOpsRepository,
+      outcomes: persistence.commercialOutcomes,
+    });
 
     // ── S5.1 · qualification + Mission handoff ──────────────────────────────
     // Qualification reuses the EXISTING canonical assessor and relevance
