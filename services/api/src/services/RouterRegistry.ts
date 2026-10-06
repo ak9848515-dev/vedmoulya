@@ -6219,6 +6219,18 @@ export function createAppRouter(services: ApiApplicationService) {
             ctx,
           ),
         ),
+      // ── S6.4 — read-only value intelligence. A QUERY (never a transition)
+      //    so the human workspace can read an opportunity's qualification +
+      //    S6.3 evidence on any lifecycle state. Identity comes from the
+      //    session, so it can never read another account's opportunity.
+      getValueIntelligence: standardProcedure
+        .input(controlInputs.opportunityValueIntelligence)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).getValueIntelligence(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
       startMissionForOpportunity: standardProcedure
         .input(controlInputs.opportunityStartMission)
         .mutation(({ input, ctx }) =>

@@ -45,6 +45,7 @@ import {
 import { api } from '../lib/trpc.js';
 import { useAuthStore } from '../stores/auth-store.js';
 import { EvidenceEntryPanel } from './EvidenceEntryPanel.js';
+import { OpportunityValueIntelligencePanel } from './OpportunityValueIntelligencePanel.js';
 import { DigitalTwinSpatial } from './spatial/DigitalTwinSpatial.js';
 import { OpportunityRadarSpatial } from './spatial/OpportunityRadarSpatial.js';
 import { IntelligenceGraph } from './spatial/IntelligenceGraph.js';
@@ -960,6 +961,16 @@ export function CommandCenter(): React.JSX.Element {
                           <p className="text-[9px] text-[#94A3B8]">
                             Advisory score — never a promise, never a launch.
                           </p>
+                          {/* S6.4 — the human decision workspace. Read-only
+                              evidence from the EXISTING qualification + S6.3
+                              value intelligence, then the EXISTING
+                              authority-backed approval request. Mounted only
+                              while this opportunity is expanded (one read per
+                              expansion — no N+1). */}
+                          <OpportunityValueIntelligencePanel
+                            opportunityId={opportunity.opportunityId}
+                            lifecycleStatus={opportunity.status}
+                          />
                         </div>
                       )}
                     </li>

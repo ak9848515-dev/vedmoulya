@@ -102,6 +102,16 @@ vi.mock('../../lib/trpc.js', () => ({
         useMutation: () => ({ mutateAsync: mocks.prospectAdvanceMutate }),
       },
     },
+    // S6.4 — the value-intelligence read + the existing approval-request
+    // mutation, called by the mounted OpportunityValueIntelligencePanel.
+    control: {
+      getValueIntelligence: {
+        useQuery: () => ({ data: undefined, isLoading: false, isError: false }),
+      },
+      requestOpportunityApproval: {
+        useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+      },
+    },
   },
 }));
 

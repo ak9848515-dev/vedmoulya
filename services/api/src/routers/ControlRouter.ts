@@ -154,6 +154,9 @@ export const controlInputs = {
   // field: these procedures read identity from the session, so a client
   // cannot qualify, approve or launch against another account.
   opportunityQualify: z.object({ id: z.string().min(1).max(128) }),
+  // S6.4 — read-only value intelligence. Same key as qualification, but a
+  // QUERY that never transitions the record (safe on any lifecycle state).
+  opportunityValueIntelligence: z.object({ id: z.string().min(1).max(128) }),
   opportunityStartMission: z.object({ id: z.string().min(1).max(128) }),
   opportunityMissionLookup: z.object({ opportunityId: z.string().min(1).max(128) }),
   missionOpportunityLookup: z.object({ missionId: z.string().min(1).max(128) }),
@@ -191,6 +194,7 @@ export interface ControlHandlers {
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;
   qualifyOpportunity: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
+  getValueIntelligence: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
   startMissionForOpportunity: (
     input: Record<string, unknown>,
     ctx: TRPCContext,
@@ -426,6 +430,40 @@ export function createControlRouter(
           // The stored state is returned so the caller sees ASSESSED, not
           // APPROVED, and can never infer an approval from the score.
           status: updated?.status ?? 'ASSESSED',
+        }),
+      );
+    },
+
+    // ── S6.4 — read-only value intelligence for an existing opportunity ──────
+    // The S5.1 `qualifyOpportunity` mutation is a state-change (DISCOVERED →
+    // ASSESSED) and refuses a moved-on record, so it cannot be used to READ an
+    // opportunity's qualification. This procedure runs the SAME canonical
+    // qualifier (no second scoring engine, no second economics engine) and
+    // returns exactly the SAME result shape — but performs NO transition, holds
+    // no approval power and is safe to call on an already-ASSESSED (or later)
+    // opportunity. It is the read counterpart of the existing mutation.
+    getValueIntelligence: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const id = input.id as string;
+      // Loaded with the SESSION user, so another user's opportunity is simply
+      // not found (owner isolation is structural, not a client assertion).
+      const record = plane.listOpportunities(ownerId).find((o) => o.id === id);
+      if (record === undefined) {
+        return Promise.resolve(acquisitionError('NOT_FOUND', 'Opportunity not found.', 404));
+      }
+      if (acquisition === undefined) {
+        return Promise.resolve(
+          acquisitionError('QUALIFICATION_UNAVAILABLE', 'Qualification is not configured.', 503),
+        );
+      }
+      // Pure: the qualifier reads evidence and returns a verdict. Nothing is
+      // written and the lifecycle is left exactly as it was.
+      const result = acquisition.qualify(record);
+      return Promise.resolve(
+        successResponse({
+          ...result,
+          // The CURRENT stored state (never a manufactured ASSESSED).
+          status: record.status,
         }),
       );
     },

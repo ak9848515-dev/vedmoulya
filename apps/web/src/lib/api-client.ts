@@ -4463,3 +4463,98 @@ export function useMissionReject() {
     mutateAsync: guardMutation(mutation.mutateAsync),
   };
 }
+
+// ── S6.4 — Human Commercial Decision Workspace ──────────────────────────────
+// The ONE workspace read for an existing opportunity: the canonical S5.1
+// qualification (assessment + inputs used) together with the S6.3 value
+// intelligence. It is a QUERY (never a lifecycle transition) and is
+// owner-scoped server-side through the authenticated session.
+//
+// These shapes MIRROR services/api/src/services/OpportunityQualification.ts and
+// OpportunityValueIntelligence.ts — the web bundle must not import from the API
+// service. Every field is a backend semantic state rendered verbatim; the UI
+// must never invent a score, a percentage or a revenue figure.
+
+export type ValueEvidenceLevel = 'INSUFFICIENT' | 'LOW' | 'MEDIUM' | 'HIGH';
+
+export type ValueAssessment =
+  'INSUFFICIENT_EVIDENCE' | 'PROMISING' | 'STRONG_CANDIDATE' | 'HIGH_RISK';
+
+export interface DeliveryValueEvidenceView {
+  level: ValueEvidenceLevel;
+  successCount: number;
+  failureCount: number;
+  sampleCount: number;
+}
+
+export interface CommercialValueEvidenceView {
+  level: ValueEvidenceLevel;
+  paidCount: number;
+  pendingCount: number;
+  cancelledCount: number;
+  sampleCount: number;
+}
+
+export interface OpportunityValueIntelligenceView {
+  deliveryEvidence: DeliveryValueEvidenceView;
+  commercialEvidence: CommercialValueEvidenceView;
+  overallAssessment: ValueAssessment;
+  confidence: ValueEvidenceLevel;
+  evidenceCount: number;
+  reasons: string[];
+  generatedAt: string;
+}
+
+/**
+ * The S5.1 assessment as returned by the canonical assessor. Only the fields the
+ * workspace renders are typed; the object is passed through untouched.
+ */
+export interface OpportunityAssessmentView {
+  score: number;
+  businessCase: string[];
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
+  evidence: string[];
+  authorizationRequired: true;
+  status: string;
+}
+
+export interface OpportunityValueIntelligenceResultView {
+  assessment: OpportunityAssessmentView;
+  inputsUsed: {
+    requiredCapabilities: number;
+    availableCapabilities: number;
+    relatedWork: number;
+    marketSignals: number;
+  };
+  authorizationRequired: true;
+  approved: false;
+  /** Present only when the backend has an evidence source wired. */
+  valueIntelligence?: OpportunityValueIntelligenceView;
+  /** The CURRENT stored lifecycle status (never a manufactured ASSESSED). */
+  status: string;
+}
+
+/**
+ * Read the value intelligence for ONE existing opportunity.
+ *
+ * `opportunityId` is the only input the client supplies; the owner is the
+ * authenticated session, so a foreign opportunity resolves as NOT_FOUND. This
+ * performs NO transition — it is safe on any lifecycle state.
+ */
+export function useOpportunityValueIntelligence(userId: string, opportunityId: string) {
+  const q = api.control.getValueIntelligence.useQuery(
+    { id: opportunityId },
+    { enabled: Boolean(userId) && Boolean(opportunityId), refetchOnWindowFocus: false },
+  );
+  return { ...q, data: unwrap<OpportunityValueIntelligenceResultView>(q.data) };
+}
+
+/**
+ * Ask the EXISTING approval authority to register an approval request for an
+ * opportunity. This does NOT approve: it returns the approval task id the human
+ * then decides on. The browser can never manufacture an approval.
+ */
+export function useRequestOpportunityApproval() {
+  const mutation = api.control.requestOpportunityApproval.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
