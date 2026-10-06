@@ -42,6 +42,11 @@ export class InMemoryCommercialOutcomeStore implements CommercialOutcomeStore {
     return record;
   }
 
+  update(record: CommercialOutcomeRecord): CommercialOutcomeRecord {
+    this.records.set(mapKey(record.userId, record.outcomeId), record);
+    return record;
+  }
+
   get(userId: string, outcomeId: string): CommercialOutcomeRecord | undefined {
     return this.records.get(mapKey(userId, outcomeId));
   }
@@ -65,6 +70,12 @@ export class PostgresCommercialOutcomeStore
   save(record: CommercialOutcomeRecord): CommercialOutcomeRecord {
     const existing = this.read(record.userId, keyOf(record));
     if (existing) return existing;
+    return this.write(record.userId, keyOf(record), record);
+  }
+
+  update(record: CommercialOutcomeRecord): CommercialOutcomeRecord {
+    // Upsert at the SAME (owner, key): PRIMARY KEY (owner, key) means a
+    // concurrent update converges on one row — never a duplicate outcome.
     return this.write(record.userId, keyOf(record), record);
   }
 

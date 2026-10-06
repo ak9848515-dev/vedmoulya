@@ -237,7 +237,11 @@ import {
   type MissionLookup,
 } from './MissionClientOpsHandoff.js';
 import { DeliveryOutcomeMemory } from './DeliveryOutcomeMemory.js';
-import { CommercialOutcomeService } from './CommercialOutcomeService.js';
+import {
+  CommercialOutcomeService,
+  type CommercialInvoiceView,
+  type CommercialPaymentView,
+} from './CommercialOutcomeService.js';
 import { MemoryIntelligenceStoreAdapter } from '@vedmoulya/execution-memory';
 import { PostgresMemoryRepository } from '@vedmoulya/memory-intelligence';
 import {
@@ -1919,6 +1923,31 @@ export class ApiApplicationService {
       missions: missionLookup,
       clientOps: clientOpsRepository,
       outcomes: persistence.commercialOutcomes,
+      // S6.1 — reconciliation reads the EXISTING canonical commercial records
+      // owner-scoped: the content-agency invoice store and the ClientOps payment
+      // store. Nothing is duplicated and nothing is created here.
+      invoices: {
+        getInvoice: async (
+          userId: string,
+          invoiceId: string,
+        ): Promise<CommercialInvoiceView | undefined> => {
+          const result = await this.contentAgency.getInvoice(userId, invoiceId);
+          if (!result.success || !result.data) return undefined;
+          return { id: result.data.id, clientId: result.data.clientId, status: result.data.status };
+        },
+      },
+      payments: {
+        getPayment: async (
+          userId: string,
+          paymentId: string,
+        ): Promise<CommercialPaymentView | undefined> => {
+          const payments = await clientOpsRepository.listPayments(userId);
+          const payment = payments.find((row) => row.id === paymentId);
+          return payment === undefined
+            ? undefined
+            : { id: payment.id, invoiceId: payment.invoiceId };
+        },
+      },
     });
 
     // ── S5.1 · qualification + Mission handoff ──────────────────────────────

@@ -6864,6 +6864,49 @@ export function createAppRouter(services: ApiApplicationService) {
         .input(z.object({}).optional())
         .query(({ ctx }) => services.commercialOutcome.listCommercialOutcomes(ctx.userId)),
 
+      // S6.1 — associate a CANONICAL, owner-scoped invoice (and optionally a
+      // recorded payment) with the outcome and reconcile status from the
+      // canonical invoice status. The human performs the commercial action
+      // through the EXISTING contentAgency/clientOps flows; this only LINKS the
+      // result. It never creates an invoice/payment, sets an amount, marks paid
+      // or moves money. `userId` is NOT an input — identity is the session, and
+      // the referenced invoice/payment are read through owner-scoped stores.
+      reconcileCommercialOutcome: standardProcedure
+        .input(
+          z.object({
+            outcomeId: z.string().min(1).max(128),
+            invoiceId: z.string().min(1).max(128).optional(),
+            paymentId: z.string().min(1).max(128).optional(),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          const result = await services.commercialOutcome.reconcileCommercialOutcome({
+            ...input,
+            // Identity comes from the authenticated session, never the client.
+            userId: ctx.userId,
+          });
+          if (!result.ok) {
+            throw new TRPCError({
+              code:
+                result.reason === 'STORE_FAILURE' ||
+                result.reason === 'INVOICE_LOOKUP_UNAVAILABLE' ||
+                result.reason === 'PAYMENT_LOOKUP_UNAVAILABLE'
+                  ? 'INTERNAL_SERVER_ERROR'
+                  : result.reason.endsWith('_NOT_FOUND')
+                    ? 'NOT_FOUND'
+                    : 'BAD_REQUEST',
+              message: result.message,
+            });
+          }
+          return {
+            ok: true as const,
+            outcomeId: result.outcomeId,
+            reconciled: result.reconciled,
+            status: result.status,
+            invoiceId: result.invoiceId,
+          };
+        }),
+
       pause: standardProcedure
         .input(z.object({ userId: z.string().min(1), missionId: z.string().min(1) }))
         .mutation(({ input }) => createMissionRouter(services.mission).pause(input)),

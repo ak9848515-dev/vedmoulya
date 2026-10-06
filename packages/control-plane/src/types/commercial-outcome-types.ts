@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// VedMoulya — S6.0 · Post-delivery Commercial Outcome (BOUNDARY, not an engine)
+// VedMoulya — S6.0/S6.1 · Post-delivery Commercial Outcome (BOUNDARY, not an
+// engine)
 //
 // After a Mission produces a VERIFIED deliverable and the existing S4
 // `mission.deliver` flow has created the ClientOps draft, this record states
@@ -34,6 +35,35 @@ export type CommercialOutcomeStatus =
 export const COMMERCIAL_OUTCOME_INITIAL_STATUS = 'COMMERCIAL_PENDING' as const;
 
 /**
+ * The canonical content-agency invoice status, mirrored here ONLY as an input to
+ * reconciliation. The `InvoiceRecord` in `@vedmoulya/domain` remains the single
+ * source of truth for an invoice's status; this union never duplicates it.
+ */
+export type CanonicalInvoiceStatus = 'draft' | 'sent' | 'paid';
+
+/**
+ * S6.1 — derive the commercial outcome status from the CANONICAL invoice status.
+ *
+ * Deterministic and honest by construction: it never infers "an invoice exists"
+ * as paid. Only the canonical `paid` status (set by a human through the existing
+ * invoice flow) maps to PAID. `draft` still needs human review before it is even
+ * sent; `sent` is awaiting payment. Payment records never appear here — a
+ * manually recorded payment does NOT by itself prove money was received.
+ */
+export function reconcileCommercialOutcomeStatus(
+  invoiceStatus: CanonicalInvoiceStatus,
+): CommercialOutcomeStatus {
+  switch (invoiceStatus) {
+    case 'paid':
+      return 'PAID';
+    case 'sent':
+      return 'INVOICE_PENDING';
+    case 'draft':
+      return 'MANUAL_REVIEW';
+  }
+}
+
+/**
  * One commercial outcome derived from a VERIFIED Mission deliverable.
  *
  * `outcomeId` is deterministic — `(userId, missionId, objectiveId)` — so a
@@ -54,8 +84,13 @@ export interface CommercialOutcomeRecord {
   /** The ClientOps deliverable document produced by the S4 verified handoff. */
   documentId: string;
   status: CommercialOutcomeStatus;
-  /** A canonical ClientOps/content-agency invoice id, ONLY once a human made one. */
+  /** A canonical content-agency invoice id, ONLY once a human made one. */
   invoiceId?: string;
+  /** A canonical ClientOps payment id (a MANUALLY recorded payment reference —
+   *  never treated as proof of receipt unless the canonical invoice is `paid`). */
+  paymentId?: string;
+  /** WHEN the outcome was last reconciled against a canonical commercial record. */
+  reconciledAt?: string;
   /** WHO recorded the boundary (the authenticated owner). Auditability only. */
   recordedBy: string;
   createdAt: string;
@@ -71,6 +106,10 @@ export interface CommercialOutcomeStore {
    *  already present, so a repeated call never creates a second commercial
    *  record. */
   save(record: CommercialOutcomeRecord): CommercialOutcomeRecord;
+  /** S6.1 — overwrite the record at its stable key (used to reconcile status /
+   *  commercial references). Idempotent because the key is unchanged; a
+   *  concurrent update can never create a second row (PRIMARY KEY (owner, key)). */
+  update(record: CommercialOutcomeRecord): CommercialOutcomeRecord;
   get(userId: string, outcomeId: string): CommercialOutcomeRecord | undefined;
   list(userId: string): CommercialOutcomeRecord[];
 }

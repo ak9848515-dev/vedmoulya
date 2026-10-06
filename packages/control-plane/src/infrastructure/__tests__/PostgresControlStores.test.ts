@@ -193,6 +193,16 @@ for (const [name, make] of [
       expect(store.list('u1').map((r) => r.outcomeId)).toEqual(['new', 'old']);
       await maybeFlush(store);
     });
+
+    it('update() overwrites at the stable key without duplicating', async () => {
+      const store = make();
+      store.save(commercialOutcome('u1', 'a'));
+      store.update({ ...commercialOutcome('u1', 'a'), status: 'PAID', invoiceId: 'inv-1' });
+      expect(store.list('u1')).toHaveLength(1);
+      expect(store.get('u1', 'a')!.status).toBe('PAID');
+      expect(store.get('u1', 'a')!.invoiceId).toBe('inv-1');
+      await maybeFlush(store);
+    });
   });
 }
 

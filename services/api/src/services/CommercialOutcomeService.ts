@@ -40,7 +40,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createHash } from 'node:crypto';
+import { reconcileCommercialOutcomeStatus } from '@vedmoulya/control-plane';
 import type {
+  CanonicalInvoiceStatus,
   CommercialOutcomeRecord,
   CommercialOutcomeStatus,
   CommercialOutcomeStore,
@@ -106,10 +108,80 @@ export interface CommercialOutcomeRejected {
 
 export type CommercialOutcomeResult = CommercialOutcomeAccepted | CommercialOutcomeRejected;
 
+/** S6.1 — why a human-driven reconciliation was refused. Never fabricates state. */
+export type CommercialOutcomeReconciliationReason =
+  | 'OUTCOME_NOT_FOUND'
+  | 'INVOICE_REQUIRED'
+  | 'INVOICE_NOT_FOUND'
+  | 'INVOICE_LOOKUP_UNAVAILABLE'
+  | 'CLIENT_MISMATCH'
+  | 'PAYMENT_NOT_FOUND'
+  | 'PAYMENT_LOOKUP_UNAVAILABLE'
+  | 'PAYMENT_MISMATCH'
+  | 'STORE_FAILURE';
+
+/** A structural, owner-scoped view of the canonical invoice this layer needs. */
+export interface CommercialInvoiceView {
+  id: string;
+  clientId: string;
+  status: CanonicalInvoiceStatus;
+}
+
+/** Owner-scoped canonical invoice read (the content-agency invoice store). */
+export interface CommercialInvoiceLookup {
+  getInvoice(userId: string, invoiceId: string): Promise<CommercialInvoiceView | undefined>;
+}
+
+/** A structural, owner-scoped view of a manually recorded canonical payment. */
+export interface CommercialPaymentView {
+  id: string;
+  invoiceId: string;
+}
+
+/** Owner-scoped canonical payment read (the ClientOps payment store). */
+export interface CommercialPaymentLookup {
+  getPayment(userId: string, paymentId: string): Promise<CommercialPaymentView | undefined>;
+}
+
+/** Associate a canonical invoice (and optionally a recorded payment) and
+ *  reconcile the outcome status from the CANONICAL invoice status. */
+export interface ReconcileCommercialOutcomeInput {
+  userId: string;
+  outcomeId: string;
+  /** Canonical content-agency invoice to attach. Optional only when the
+   *  outcome is ALREADY linked to one. */
+  invoiceId?: string;
+  /** A manually recorded canonical payment reference (never proof of receipt). */
+  paymentId?: string;
+}
+
+export interface CommercialOutcomeReconciled {
+  ok: true;
+  outcomeId: string;
+  /** False when the outcome was already in this exact reconciled state. */
+  reconciled: boolean;
+  status: CommercialOutcomeStatus;
+  invoiceId: string;
+}
+
+export interface CommercialOutcomeReconcileRejected {
+  ok: false;
+  reason: CommercialOutcomeReconciliationReason;
+  message: string;
+}
+
+export type CommercialOutcomeReconcileResult =
+  CommercialOutcomeReconciled | CommercialOutcomeReconcileRejected;
+
 export interface CommercialOutcomeServiceOptions {
   missions: MissionLookup;
   clientOps: ClientOpsDocumentStore;
   outcomes: CommercialOutcomeStore;
+  /** S6.1 — canonical invoice lookup (content-agency). Optional so S6.0 callers
+   *  stay valid; reconciliation reports UNAVAILABLE when absent. */
+  invoices?: CommercialInvoiceLookup;
+  /** S6.1 — canonical payment lookup (ClientOps). Optional, same rationale. */
+  payments?: CommercialPaymentLookup;
   now?: () => Date;
 }
 
@@ -226,6 +298,118 @@ export class CommercialOutcomeService {
       created: true,
       status: saved.status,
       pendingHumanAction: true,
+    };
+  }
+
+  /**
+   * S6.1 — associate a CANONICAL, owner-scoped invoice (and optionally a
+   * recorded payment) with the outcome and reconcile its status from the
+   * canonical invoice status.
+   *
+   * The human performs the commercial action through the EXISTING
+   * `contentAgency.createInvoice` / `updateInvoiceStatus` / `clientOps.addPayment`
+   * flows; this method only LINKS the result and mirrors the canonical status.
+   * It never creates an invoice/payment, never sets an amount, never marks paid
+   * and never moves money. Idempotent: repeating the same association returns
+   * the existing state without a write.
+   */
+  async reconcileCommercialOutcome(
+    input: ReconcileCommercialOutcomeInput,
+  ): Promise<CommercialOutcomeReconcileResult> {
+    const rejected = (
+      reason: CommercialOutcomeReconciliationReason,
+      message: string,
+    ): CommercialOutcomeReconcileRejected => ({ ok: false, reason, message });
+
+    // Owner-scoped read: another user's outcome id is simply not visible.
+    const existing = this.options.outcomes.get(input.userId, input.outcomeId);
+    if (existing === undefined || existing.userId !== input.userId) {
+      return rejected('OUTCOME_NOT_FOUND', 'commercial outcome not found');
+    }
+
+    const invoiceId = input.invoiceId ?? existing.invoiceId;
+    if (invoiceId === undefined || invoiceId.trim().length === 0) {
+      return rejected('INVOICE_REQUIRED', 'a canonical invoice is required to reconcile');
+    }
+    if (this.options.invoices === undefined) {
+      return rejected('INVOICE_LOOKUP_UNAVAILABLE', 'invoice lookup is not available');
+    }
+
+    let invoice: CommercialInvoiceView | undefined;
+    try {
+      invoice = await this.options.invoices.getInvoice(input.userId, invoiceId);
+    } catch {
+      return rejected('INVOICE_NOT_FOUND', 'invoice not found');
+    }
+    if (invoice === undefined) {
+      return rejected('INVOICE_NOT_FOUND', 'invoice not found');
+    }
+    // The invoice must belong to the SAME client as the delivered outcome — this
+    // prevents attaching an unrelated invoice that merely happens to be owned.
+    if (invoice.clientId !== existing.clientId) {
+      return rejected('CLIENT_MISMATCH', 'invoice client does not match the delivered client');
+    }
+
+    const paymentId = input.paymentId ?? existing.paymentId;
+    if (paymentId !== undefined) {
+      if (this.options.payments === undefined) {
+        return rejected('PAYMENT_LOOKUP_UNAVAILABLE', 'payment lookup is not available');
+      }
+      let payment: CommercialPaymentView | undefined;
+      try {
+        payment = await this.options.payments.getPayment(input.userId, paymentId);
+      } catch {
+        return rejected('PAYMENT_NOT_FOUND', 'payment not found');
+      }
+      if (payment === undefined) {
+        return rejected('PAYMENT_NOT_FOUND', 'payment not found');
+      }
+      // A payment may only reference the invoice it belongs to.
+      if (payment.invoiceId !== invoiceId) {
+        return rejected('PAYMENT_MISMATCH', 'payment does not belong to the associated invoice');
+      }
+    }
+
+    // Honest reconciliation: ONLY the canonical invoice status decides. A
+    // recorded payment never becomes proof of receipt on its own.
+    const status = reconcileCommercialOutcomeStatus(invoice.status);
+    const unchanged =
+      existing.invoiceId === invoiceId &&
+      existing.paymentId === paymentId &&
+      existing.status === status;
+    if (unchanged) {
+      return {
+        ok: true,
+        outcomeId: existing.outcomeId,
+        reconciled: false,
+        status: existing.status,
+        invoiceId,
+      };
+    }
+
+    const timestamp = this.now().toISOString();
+    const updated: CommercialOutcomeRecord = {
+      ...existing,
+      invoiceId,
+      ...(paymentId !== undefined ? { paymentId } : {}),
+      status,
+      reconciledAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    let saved: CommercialOutcomeRecord;
+    try {
+      saved = this.options.outcomes.update(updated);
+    } catch {
+      return rejected('STORE_FAILURE', 'the reconciliation could not be recorded');
+    }
+
+    return {
+      ok: true,
+      outcomeId: saved.outcomeId,
+      reconciled: true,
+      status: saved.status,
+      invoiceId,
     };
   }
 
