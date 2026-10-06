@@ -1973,6 +1973,13 @@ export class ApiApplicationService {
     // the EXISTING `mission.createAndRun` — no Mission engine is duplicated.
     this.opportunityQualifier = createOpportunityQualifier({
       brain: this.brain,
+      // S6.3 — evidence-only value intelligence reads the owner-scoped
+      // canonical commercial outcomes through the EXISTING S6.2 service.
+      // Owner identity is the canonical record's ownerId; nothing is
+      // client-supplied and no cross-user read is possible.
+      valueEvidence: {
+        listCommercialOutcomes: (userId) => this.commercialOutcome.listCommercialOutcomes(userId),
+      },
       now: () => new Date().toISOString(),
     });
     this.opportunityMissionLaunch = createMissionLaunchPort({

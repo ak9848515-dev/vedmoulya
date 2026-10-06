@@ -20,6 +20,14 @@
 // Every input is evidence the system actually holds. Nothing is invented, and
 // the assessor is explicitly designed to report no fit rather than fabricate
 // when evidence is absent.
+//
+// S6.3 — VALUE INTELLIGENCE (additive, optional). When a canonical evidence
+// port is wired, the result also carries `valueIntelligence`: an evidence-only
+// reading of the owner's REAL verified deliveries and commercial outcomes for
+// this opportunity. It does NOT replace or recompute the EXISTING
+// `OpportunityEconomics` (SPRINT-032) 18-factor score — it is a separate,
+// advisory historical-evidence layer, and it stays off the record entirely when
+// no port is configured (S5.1 behaviour is unchanged).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { BusinessOpportunityAssessor } from '@vedmoulya/proactive';
@@ -27,6 +35,11 @@ import type { BrainApplicationService } from '@vedmoulya/brain';
 import { RelevanceScorer } from '@vedmoulya/ai-world';
 import type { RawDiscoveryItem } from '@vedmoulya/ai-world';
 import type { OpportunityLifecycleRecord } from '@vedmoulya/control-plane';
+import {
+  computeOpportunityValueIntelligence,
+  type OpportunityValueEvidencePort,
+  type OpportunityValueIntelligence,
+} from './OpportunityValueIntelligence.js';
 
 /** The canonical assessment type, taken from the existing assessor's own
  *  signature — no new result type, no OpportunityQualificationV2. */
@@ -46,12 +59,25 @@ export interface OpportunityQualification {
   authorizationRequired: true;
   /** False by construction: qualification never approves. */
   approved: false;
+  /**
+   * S6.3 — optional, advisory evidence from the owner's REAL delivery +
+   * commercial history. Present ONLY when an evidence port is wired; absent
+   * otherwise, so the S5.1 contract stays backwards compatible. It never
+   * carries or replaces the EXISTING OpportunityEconomics score.
+   */
+  valueIntelligence?: OpportunityValueIntelligence;
 }
 
 export interface OpportunityQualificationDeps {
   brain: BrainApplicationService;
   /** Optional market evidence. Absent → no market signal, never a guess. */
   rawDiscoveryItems?: () => RawDiscoveryItem[];
+  /**
+   * S6.3 — optional canonical, owner-scoped commercial-outcome evidence. Absent
+   * ⇒ `valueIntelligence` is omitted entirely (backwards compatible), never a
+   * fabricated empty verdict.
+   */
+  valueEvidence?: OpportunityValueEvidencePort;
   now: () => string;
 }
 
@@ -114,6 +140,15 @@ export function createOpportunityQualifier(deps: OpportunityQualificationDeps): 
         now: deps.now,
       });
 
+      // S6.3 — evidence-only value intelligence over the owner's canonical
+      // delivery + commercial history. It CONSUMES the existing assessment as
+      // context but never replaces or mutates the OpportunityEconomics score.
+      // Owner is the canonical record's owner, never a client-supplied value.
+      const valueIntelligence = computeOpportunityValueIntelligence(
+        { ownerId: record.ownerId, opportunityId: record.id },
+        { evidence: deps.valueEvidence, now: deps.now },
+      );
+
       return {
         assessment,
         inputsUsed: {
@@ -125,6 +160,8 @@ export function createOpportunityQualifier(deps: OpportunityQualificationDeps): 
         // Structural, not advisory: this type cannot express approval.
         authorizationRequired: true,
         approved: false,
+        // Optional: omitted unless an evidence port is wired (S5.1 unchanged).
+        ...(valueIntelligence !== undefined ? { valueIntelligence } : {}),
       };
     },
   };
