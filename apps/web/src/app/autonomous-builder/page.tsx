@@ -31,6 +31,7 @@ import {
   type MissionHistoryEntry,
 } from '../../lib/api-client.js';
 import { MissionDetailTabs } from '../missions/_components/MissionDetailTabs.js';
+import { MissionDeliveryPanel } from '../../components/MissionDeliveryPanel.js';
 
 function AutonomousBuilderInner(): React.JSX.Element {
   const { user } = useAuthStore();
@@ -279,6 +280,19 @@ function AutonomousBuilderInner(): React.JSX.Element {
             onReject={() => runCommand(reject)}
             loopPending={loopPending}
           />
+          {/* REVENUE-001 — READY TO SUBMIT. A VERIFIED objective can become a
+              ClientOps DRAFT deliverable and a COMMERCIAL_PENDING record. The
+              human still reviews, submits externally and collects payment. */}
+          {statusView.objectives.some((objective) => objective.state === 'VERIFIED') ? (
+            <Card padding="lg" data-testid="revenue-delivery">
+              <h2 className="text-base font-semibold">Ready to submit</h2>
+              <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+                A verified objective is ready. Prepare a draft deliverable and record the pending
+                commercial outcome — a human still submits externally and collects payment.
+              </p>
+              <MissionDeliveryPanel mission={statusView} />
+            </Card>
+          ) : null}
         </ErrorBoundary>
       ) : null}
       {missionId && status.isLoading && !statusView ? (

@@ -35,8 +35,9 @@ import {
 
 export interface MissionDeliveryPanelProps {
   mission: MissionStatusView;
-  /** The ClientOps client the deliverable belongs to (human-selected). */
-  clientId: string;
+  /** The ClientOps client the deliverable belongs to (human-selected). When
+   *  omitted, the user supplies it in the panel — it is never invented. */
+  clientId?: string;
   /** Only when the mission was launched from an opportunity; never invented. */
   opportunityId?: string;
 }
@@ -50,6 +51,7 @@ export function MissionDeliveryPanel({
   const deliver = useMissionDeliver();
   const recordOutcome = useRecordCommercialOutcome();
 
+  const [client, setClient] = useState(clientId ?? '');
   const [name, setName] = useState(draft?.name ?? '');
   const [content, setContent] = useState(draft?.content ?? '');
   const [documentId, setDocumentId] = useState('');
@@ -73,7 +75,7 @@ export function MissionDeliveryPanel({
       const result = await deliver.mutateAsync({
         missionId: mission.missionId,
         objectiveId: draft.objectiveId,
-        clientId,
+        clientId: client.trim(),
         deliverableName: name.trim().length > 0 ? name.trim() : draft.name,
         deliverableContent: content,
         ...(opportunityId !== undefined ? { opportunityId } : {}),
@@ -124,6 +126,18 @@ export function MissionDeliveryPanel({
       {documentId === '' ? (
         <>
           <label className="block text-[10px] text-[#64748B]">
+            Client
+            <input
+              type="text"
+              value={client}
+              onChange={(event) => {
+                setClient(event.target.value);
+              }}
+              aria-label="deliverable-client"
+              className="mt-0.5 w-full rounded-md border border-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#1F2937]"
+            />
+          </label>
+          <label className="block text-[10px] text-[#64748B]">
             Deliverable name
             <input
               type="text"
@@ -153,7 +167,7 @@ export function MissionDeliveryPanel({
               void prepare();
             }}
             disabled={
-              deliver.isPending || content.trim().length === 0 || clientId.trim().length === 0
+              deliver.isPending || content.trim().length === 0 || client.trim().length === 0
             }
             className="w-full rounded-lg bg-[#2B5FD9] text-white text-[10px] font-medium py-1 hover:bg-[#1E4AA8] transition-colors disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]"
             aria-label="prepare-deliverable"
