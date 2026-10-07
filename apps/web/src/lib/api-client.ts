@@ -4558,3 +4558,164 @@ export function useRequestOpportunityApproval() {
   const mutation = api.control.requestOpportunityApproval.useMutation();
   return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
 }
+
+// ── REVENUE-001 · Opportunity → Mission → Deliverable UI bridge ─────────────
+//
+// COMPOSITION ONLY. These hooks expose EXISTING, already-guarded gateway
+// procedures to the product UI. They add NO new procedure, NO new engine and
+// NO new authority:
+//   • import          → control.importOpportunity  (untrusted payload is
+//                       normalized server-side; identity is the session)
+//   • approve         → control.transitionOpportunity(→APPROVED) through the
+//                       EXISTING Brain authority (the record is minted by the
+//                       authority, never by the browser)
+//   • start mission   → control.startMissionForOpportunity (the guarded
+//                       APPROVED → PLANNED claim + idempotent linkage)
+//   • deliver         → mission.deliver (prepares a DRAFT deliverable;
+//                       pendingApproval stays true and nothing is sent)
+//   • commercial      → mission.recordCommercialOutcome (records only
+//                       COMMERCIAL_PENDING; no payment, no external action)
+//
+// Every mutation is wrapped in `guardMutation` so the gateway's HTTP-200
+// `{ success: false }` envelope surfaces as a real error instead of an
+// optimistic success. None of these hooks can auto-approve or auto-submit:
+// each one is an explicit human action.
+
+export interface ImportOpportunityInput {
+  userId: string;
+  /** Untrusted external payload — validated field-by-field by the server. */
+  opportunity: unknown;
+}
+
+/** Import (acquire + normalize) ONE external opportunity. */
+export function useImportOpportunity() {
+  const mutation = api.control.importOpportunity.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
+
+export interface ApproveOpportunityInput {
+  userId: string;
+  /** The canonical opportunity id. */
+  id: string;
+  /** The approval task id returned by `useRequestOpportunityApproval`. */
+  approvalTaskId: string;
+  note?: string;
+}
+
+/**
+ * Approve ONE opportunity. `to: 'APPROVED'` is fixed here so a caller can never
+ * name another transition; the approval record is minted by the EXISTING Brain
+ * authority from the supplied task id. This is a HUMAN action — nothing in the
+ * panel calls it automatically.
+ */
+export function useOpportunityApprove() {
+  const mutation = api.control.transitionOpportunity.useMutation();
+  return {
+    ...mutation,
+    mutateAsync: guardMutation((input: ApproveOpportunityInput) =>
+      mutation.mutateAsync({
+        userId: input.userId,
+        id: input.id,
+        to: 'APPROVED' as const,
+        note: input.note ?? 'human approved the opportunity',
+        approvalTaskId: input.approvalTaskId,
+      }),
+    ),
+  };
+}
+
+/**
+ * Start the canonical Mission for an APPROVED opportunity. The gateway derives
+ * identity from the session; the guarded backend refuses any non-APPROVED
+ * opportunity, launches exactly one Mission and persists the association.
+ */
+export function useStartMissionForOpportunity() {
+  const mutation = api.control.startMissionForOpportunity.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
+
+export interface MissionDeliverInput {
+  missionId: string;
+  objectiveId: string;
+  clientId: string;
+  deliverableName: string;
+  deliverableContent: string;
+  deliverableMime?: string;
+  opportunityId?: string;
+}
+
+/**
+ * Hand a VERIFIED mission objective to ClientOps as a DRAFT deliverable. This
+ * never sends, publishes, emails or charges anything: `pendingApproval` is true
+ * on every success and a human remains responsible for external submission.
+ */
+export function useMissionDeliver() {
+  const mutation = api.mission.deliver.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
+
+export interface RecordCommercialOutcomeInput {
+  missionId: string;
+  objectiveId: string;
+}
+
+/**
+ * Record that a VERIFIED, delivered objective awaits a HUMAN commercial action.
+ * The only status minted is `COMMERCIAL_PENDING` — no invoice, no payment, no
+ * client contact and no external action ever happens here.
+ */
+export function useRecordCommercialOutcome() {
+  const mutation = api.mission.recordCommercialOutcome.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
+
+/**
+ * REVENUE-001 artifact → delivery bridge (web-side, deterministic).
+ *
+ * Derives a DRAFT deliverable from a Mission's REAL, already-VERIFIED
+ * objective — the same fields the frozen S4 handoff persists as provenance
+ * (objective title, verified outcome/evidence, verification method, timestamp).
+ * It introduces NO second artifact system and NO new contract: the produced
+ * value is exactly the `deliverableContent` string the EXISTING
+ * `mission.deliver` procedure already accepts.
+ *
+ * The result is a DRAFT the human reviews and may edit before submitting. When
+ * no objective is VERIFIED it returns `undefined` — never a fabricated
+ * deliverable.
+ */
+export interface DerivedDeliverable {
+  objectiveId: string;
+  name: string;
+  content: string;
+}
+
+export function deriveDeliverableContent(
+  mission: Pick<MissionStatusView, 'title' | 'objectives'>,
+): DerivedDeliverable | undefined {
+  const verified = mission.objectives.find((objective) => objective.state === 'VERIFIED');
+  if (verified === undefined) return undefined;
+
+  const lines: string[] = [];
+  lines.push(`# ${verified.title}`);
+  lines.push('');
+  lines.push('## Objective');
+  lines.push(mission.title);
+  lines.push('');
+  lines.push('## Verified outcome');
+  lines.push(verified.reason.length > 0 ? verified.reason : 'Objective verified.');
+  if (verified.evidence.length > 0) {
+    lines.push('');
+    lines.push('## Evidence');
+    for (const item of verified.evidence) lines.push(`- ${item}`);
+  }
+  lines.push('');
+  lines.push('## Verification');
+  lines.push(`Method: ${verified.verificationMethod ?? 'unknown'}`);
+  if (verified.verifiedAt !== undefined) lines.push(`Verified at: ${verified.verifiedAt}`);
+
+  return {
+    objectiveId: verified.objectiveId,
+    name: verified.title.slice(0, 200),
+    content: lines.join('\n'),
+  };
+}

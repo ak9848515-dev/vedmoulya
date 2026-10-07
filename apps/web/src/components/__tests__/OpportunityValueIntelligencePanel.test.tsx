@@ -21,6 +21,8 @@ import { OpportunityValueIntelligencePanel } from '../OpportunityValueIntelligen
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
   requestApproval: vi.fn(),
+  approve: vi.fn(),
+  startMission: vi.fn(),
   authUserId: 'user-1',
 }));
 
@@ -28,6 +30,14 @@ vi.mock('../../lib/api-client.js', () => ({
   useOpportunityValueIntelligence: (...args: unknown[]) => mocks.useQuery(...args),
   useRequestOpportunityApproval: () => ({
     mutateAsync: mocks.requestApproval,
+    isPending: false,
+  }),
+  useOpportunityApprove: () => ({
+    mutateAsync: mocks.approve,
+    isPending: false,
+  }),
+  useStartMissionForOpportunity: () => ({
+    mutateAsync: mocks.startMission,
     isPending: false,
   }),
 }));
@@ -82,6 +92,8 @@ function queryState(data: unknown, overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   mocks.useQuery.mockReset();
   mocks.requestApproval.mockReset();
+  mocks.approve.mockReset();
+  mocks.startMission.mockReset();
   mocks.authUserId = 'user-1';
 });
 
@@ -275,5 +287,70 @@ describe('S6.4 — OpportunityValueIntelligencePanel', () => {
       ).toBeDefined();
     });
     expect(screen.queryByTestId('value-intelligence-body')).toBeNull();
+  });
+
+  // ── REVENUE-001 — approval is explicit and human-controlled ──────────────
+
+  it('16. approval is an explicit human action — never automatic', async () => {
+    mocks.useQuery.mockReturnValue(queryState(baseValue()));
+    mocks.requestApproval.mockResolvedValue({ success: true, data: { taskId: 'task-9' } });
+    render(<OpportunityValueIntelligencePanel opportunityId="opp-1" />);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Request approval for opp-1')).toBeDefined();
+    });
+    // Merely rendering the panel never approves anything.
+    expect(mocks.approve).not.toHaveBeenCalled();
+    expect(mocks.startMission).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText('Request approval for opp-1'));
+    // The approval task id is surfaced for the human.
+    await waitFor(() => {
+      expect(screen.getByText(/task task-9/)).toBeDefined();
+    });
+    // Registering the request still does not approve.
+    expect(mocks.approve).not.toHaveBeenCalled();
+    expect(screen.queryByText(/This opportunity is approved/)).toBeNull();
+  });
+
+  it('17. the human approves through the authority, then explicitly starts the mission', async () => {
+    mocks.useQuery.mockReturnValue(queryState(baseValue()));
+    mocks.requestApproval.mockResolvedValue({ success: true, data: { taskId: 'task-9' } });
+    mocks.approve.mockResolvedValue({ success: true, data: { id: 'opp-1', status: 'APPROVED' } });
+    mocks.startMission.mockResolvedValue({
+      success: true,
+      data: { opportunityId: 'opp-1', missionId: 'm-1', created: true },
+    });
+    render(<OpportunityValueIntelligencePanel opportunityId="opp-1" />);
+    fireEvent.click(await screen.findByLabelText('Request approval for opp-1'));
+    fireEvent.click(await screen.findByLabelText('Approve opportunity opp-1'));
+    await waitFor(() => {
+      expect(mocks.approve).toHaveBeenCalledWith({
+        userId: 'user-1',
+        id: 'opp-1',
+        approvalTaskId: 'task-9',
+      });
+    });
+    // Approval does NOT auto-start the mission.
+    expect(mocks.startMission).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByLabelText('Start mission for opp-1'));
+    await waitFor(() => {
+      expect(mocks.startMission).toHaveBeenCalledWith({ id: 'opp-1' });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('mission-started')).toBeDefined();
+    });
+  });
+
+  it('18. a discovery-sourced (non-lifecycle) opportunity is handled honestly', async () => {
+    mocks.useQuery.mockReturnValue(
+      queryState(undefined, { isError: true, error: { message: 'Opportunity not found.' } }),
+    );
+    render(<OpportunityValueIntelligencePanel opportunityId="brain-opp-1" />);
+    await waitFor(() => {
+      expect(screen.getByTestId('value-intelligence-non-control')).toBeDefined();
+    });
+    // No fabricated verdict and no generic failure message either.
+    expect(screen.queryByTestId('value-intelligence-body')).toBeNull();
+    expect(screen.queryByText(/Value intelligence is unavailable right now/)).toBeNull();
   });
 });

@@ -961,15 +961,19 @@ export function CommandCenter(): React.JSX.Element {
                           <p className="text-[9px] text-[#94A3B8]">
                             Advisory score — never a promise, never a launch.
                           </p>
-                          {/* S6.4 — the human decision workspace. Read-only
+                          {/* REVENUE-001 — the human decision workspace. Read-only
                               evidence from the EXISTING qualification + S6.3
                               value intelligence, then the EXISTING
-                              authority-backed approval request. Mounted only
-                              while this opportunity is expanded (one read per
-                              expansion — no N+1). */}
+                              authority-backed approval request, the explicit
+                              human approval, and the guarded mission launch.
+                              Mounted only while this opportunity is expanded
+                              (one read per expansion — no N+1). The panel
+                              handles control-plane and discovery-sourced
+                              opportunities honestly. */}
                           <OpportunityValueIntelligencePanel
                             opportunityId={opportunity.opportunityId}
                             lifecycleStatus={opportunity.status}
+                            onApprovalRequested={() => void load()}
                           />
                         </div>
                       )}

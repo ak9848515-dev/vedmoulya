@@ -32,6 +32,8 @@ import { AlertTriangle, CheckCircle2, ShieldCheck, TrendingUp, XCircle } from 'l
 import {
   useOpportunityValueIntelligence,
   useRequestOpportunityApproval,
+  useOpportunityApprove,
+  useStartMissionForOpportunity,
   type OpportunityValueIntelligenceView,
   type ValueAssessment,
   type ValueEvidenceLevel,
@@ -102,14 +104,35 @@ export function OpportunityValueIntelligencePanel({
   onApprovalRequested,
 }: OpportunityValueIntelligencePanelProps): React.JSX.Element {
   const [requested, setRequested] = useState(false);
+  const [taskId, setTaskId] = useState('');
+  const [approvedStatus, setApprovedStatus] = useState('');
+  const [missionId, setMissionId] = useState('');
   const [error, setError] = useState('');
+  const [missionError, setMissionError] = useState('');
   const userId = useAuthStore((s) => s.user?.userId ?? '');
   const query = useOpportunityValueIntelligence(userId, opportunityId);
   const requestApproval = useRequestOpportunityApproval();
+  const approve = useOpportunityApprove();
+  const startMission = useStartMissionForOpportunity();
 
   const data = query.data;
   const value: OpportunityValueIntelligenceView | undefined = data?.valueIntelligence;
-  const status = data?.status ?? lifecycleStatus;
+  // Once the human approves, the local state is authoritative until the parent
+  // refreshes — the panel never re-derives an approval from the score.
+  const status = approvedStatus !== '' ? approvedStatus : (data?.status ?? lifecycleStatus);
+
+  /**
+   * Honest two-source handling: the world pipeline surfaces control-plane
+   * lifecycle records AND discovery-sourced (Brain) opportunities. Only the
+   * former has a control-plane qualification, so a NOT_FOUND read is reported
+   * as "not a lifecycle record" — never as a fabricated verdict and never as a
+   * generic failure.
+   */
+  const readError =
+    (query as { error?: { message?: string } }).error?.message !== undefined
+      ? ((query as { error?: { message?: string } }).error?.message ?? '')
+      : '';
+  const isNonControlRecord = /not found|NOT_FOUND/i.test(readError);
 
   const requestDecision = async (): Promise<void> => {
     setError('');
@@ -125,10 +148,65 @@ export function OpportunityValueIntelligencePanel({
         );
         return;
       }
+      // The returned task id is the human decision reference. It is DISPLAYED,
+      // never auto-decided.
+      const returnedTaskId = (result as { data?: { taskId?: string } }).data?.taskId ?? '';
+      setTaskId(returnedTaskId);
       setRequested(true);
       onApprovalRequested?.();
     } catch {
       setError('Could not reach the approval authority.');
+    }
+  };
+
+  /**
+   * HUMAN approval. `to: 'APPROVED'` is fixed in the hook and the record is
+   * minted by the EXISTING Brain authority from the requested task id. Nothing
+   * in this component calls it automatically — it is an explicit click.
+   */
+  const approveDecision = async (): Promise<void> => {
+    setError('');
+    try {
+      const result = await approve.mutateAsync({
+        userId,
+        id: opportunityId,
+        approvalTaskId: taskId,
+      });
+      if ((result as { success?: boolean }).success === false) {
+        setError(
+          (result as { error?: { message?: string } }).error?.message ??
+            'The approval authority refused the approval.',
+        );
+        return;
+      }
+      setApprovedStatus('APPROVED');
+      onApprovalRequested?.();
+    } catch {
+      setError('Could not approve the opportunity through the authority.');
+    }
+  };
+
+  /**
+   * HUMAN launch. Uses the EXISTING guarded `startMissionForOpportunity`
+   * procedure — it launches exactly one Mission for an APPROVED opportunity and
+   * never auto-runs on approval.
+   */
+  const startMissionForOpportunity = async (): Promise<void> => {
+    setMissionError('');
+    try {
+      const result = await startMission.mutateAsync({ id: opportunityId });
+      if ((result as { success?: boolean }).success === false) {
+        setMissionError(
+          (result as { error?: { message?: string } }).error?.message ??
+            'The mission could not be started.',
+        );
+        return;
+      }
+      const returnedMissionId = (result as { data?: { missionId?: string } }).data?.missionId ?? '';
+      setMissionId(returnedMissionId);
+      onApprovalRequested?.();
+    } catch {
+      setMissionError('Could not start the mission.');
     }
   };
 
@@ -137,6 +215,25 @@ export function OpportunityValueIntelligencePanel({
     return (
       <div className="mt-1.5 rounded-lg border border-[#E2E8F0] bg-[#F1F5F9] p-2" role="status">
         <p className="text-[10px] text-[#64748B]">Loading value intelligence…</p>
+      </div>
+    );
+  }
+
+  // ── Honest two-source state: a discovery-sourced (Brain) opportunity has no
+  //    control-plane qualification. It is stated plainly, never rendered as a
+  //    verdict and never as a generic failure. ──────────────────────────────
+  if (isNonControlRecord) {
+    return (
+      <div
+        className="mt-1.5 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2"
+        role="status"
+        data-testid="value-intelligence-non-control"
+      >
+        <p className="text-[10px] text-[#64748B]">
+          This opportunity is not a control-plane lifecycle record (for example, a discovery-sourced
+          opportunity). Qualification and value intelligence are available only for a real lifecycle
+          record — no verdict is fabricated.
+        </p>
       </div>
     );
   }
@@ -264,18 +361,74 @@ export function OpportunityValueIntelligencePanel({
         </div>
       )}
 
-      {/* ── HUMAN DECISION — the EXISTING authority-backed request ───────── */}
+      {/* ── HUMAN DECISION — the EXISTING authority-backed request, the
+          explicit human approval, and the guarded mission launch. ───────── */}
       <div className="pt-1 border-t border-[#E2E8F0]">
         {status === 'APPROVED' ? (
-          <p className="flex items-center gap-1 text-[10px] text-[#15803D]">
-            <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-            This opportunity is approved. {value?.reasons[0] ?? ''}
-          </p>
+          <div className="space-y-1">
+            <p className="flex items-center gap-1 text-[10px] text-[#15803D]">
+              <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+              This opportunity is approved. {value?.reasons[0] ?? ''}
+            </p>
+            {missionId !== '' ? (
+              <p className="text-[10px] text-[#7C3AED]" role="status" data-testid="mission-started">
+                Mission started: {missionId}
+              </p>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void startMissionForOpportunity();
+                  }}
+                  disabled={startMission.isPending}
+                  className="w-full rounded-lg bg-[#2B5FD9] text-white text-[10px] font-medium py-1 hover:bg-[#1E4AA8] transition-colors disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]"
+                  aria-label={`Start mission for ${opportunityId}`}
+                >
+                  {startMission.isPending ? 'Starting…' : 'Start mission'}
+                </button>
+                {missionError !== '' && (
+                  <p className="flex items-center gap-1 text-[10px] text-[#B91C1C]" role="alert">
+                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                    {missionError}
+                  </p>
+                )}
+                <p className="text-[9px] text-[#94A3B8]">
+                  Starting runs the EXISTING autonomous mission loop. A human still verifies and
+                  submits the result externally.
+                </p>
+              </>
+            )}
+          </div>
         ) : requested ? (
-          <p className="flex items-center gap-1 text-[10px] text-[#7C3AED]" role="status">
-            <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-            Approval requested — a human decision is pending with the approval authority.
-          </p>
+          <div className="space-y-1">
+            <p className="flex items-center gap-1 text-[10px] text-[#7C3AED]" role="status">
+              <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+              Approval requested
+              {taskId !== '' ? ` — task ${taskId}` : ''} — a human decision is pending with the
+              approval authority.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                void approveDecision();
+              }}
+              disabled={approve.isPending || taskId === ''}
+              className="w-full rounded-lg bg-[#15803D] text-white text-[10px] font-medium py-1 hover:bg-[#166534] transition-colors disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]"
+              aria-label={`Approve opportunity ${opportunityId}`}
+            >
+              {approve.isPending ? 'Approving…' : 'Approve opportunity'}
+            </button>
+            {error !== '' && (
+              <p className="flex items-center gap-1 text-[10px] text-[#B91C1C]" role="alert">
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                {error}
+              </p>
+            )}
+            <p className="text-[9px] text-[#94A3B8]">
+              Approval is an explicit human action. It is never granted automatically.
+            </p>
+          </div>
         ) : (
           <>
             <button
