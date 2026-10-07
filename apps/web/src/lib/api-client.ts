@@ -4719,3 +4719,120 @@ export function deriveDeliverableContent(
     content: lines.join('\n'),
   };
 }
+
+// ── S7.1 · External opportunity monitoring ──────────────────────────────────
+//
+// COMPOSITION ONLY. These hooks expose EXISTING, already-guarded gateway
+// procedures to the product UI. They add NO new procedure, NO new engine and
+// NO new authority:
+//   • monitor         → control.monitorOpportunities  (ONE bounded pass:
+//                       normalize → dedup → DISCOVERED; identity is the
+//                       session, so a client can never monitor another account)
+//   • ranked read     → control.getRankedOpportunities (pure; the EXISTING
+//                       qualifier runs and NO state changes)
+//   • proposal draft  → control.generateProposalDraft (a DRAFT from the
+//                       EXISTING AI orchestration; it has no submission path)
+//
+// These shapes MIRROR services/api/src/services/OpportunityMonitoring.ts and
+// OpportunityRecommendation.ts — the web bundle must not import from the API
+// service. Every field is a backend semantic state rendered verbatim: the UI
+// must never invent a score, a count or a bid amount.
+
+export type ExternalSourceFailureCode =
+  | 'SOURCE_NOT_CONFIGURED'
+  | 'SOURCE_AUTH_FAILED'
+  | 'SOURCE_RATE_LIMITED'
+  | 'SOURCE_TIMEOUT'
+  | 'MALFORMED_SOURCE_RESPONSE'
+  | 'SOURCE_UNAVAILABLE'
+  | 'UNSUPPORTED_SOURCE_CAPABILITY'
+  | 'SOURCE_REQUEST_FAILED';
+
+export interface OpportunityMonitoringView {
+  source: string;
+  sourceConfigured: boolean;
+  startedAt: string;
+  finishedAt: string;
+  candidatesFetched: number;
+  normalized: number;
+  created: number;
+  existing: number;
+  filtered: number;
+  rejected: number;
+  rejectedSample: Array<{ code: string; message: string }>;
+  createdIds: string[];
+  truncated: boolean;
+  usedCachedCandidates: boolean;
+  /** Present ONLY on an honest external-source failure — nothing was ingested. */
+  failure?: { code: ExternalSourceFailureCode; message: string; status?: number };
+}
+
+export interface OpportunityRecommendationView {
+  opportunityId: string;
+  source?: string;
+  sourceReference?: string;
+  title: string;
+  category: string;
+  status: string;
+  /** The EXISTING assessor's 0..1 score, unmodified. */
+  score: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
+  recommended: boolean;
+  /** The EXISTING evidence lines, verbatim. */
+  reasons: string[];
+  valueAssessment?: string;
+  authorizationRequired: true;
+  approved: false;
+}
+
+export interface RankedOpportunitiesView {
+  recommendations: OpportunityRecommendationView[];
+  authorizationRequired: true;
+}
+
+export interface ProposalDraftView {
+  document: string;
+  provider?: string;
+  model?: string;
+  generatedAt: string;
+  authorizationRequired: true;
+  /** Always false — this layer cannot submit. */
+  submitted: false;
+  /** The opportunity's CURRENT stored lifecycle status. */
+  status: string;
+}
+
+/**
+ * Run ONE bounded external monitoring pass for the authenticated session owner.
+ * The gateway derives identity from the session, so a client can never monitor
+ * another account. A source failure surfaces as a real error (the gateway
+ * returns `{ success: false }` with the honest source code).
+ */
+export function useMonitorOpportunities() {
+  const mutation = api.control.monitorOpportunities.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
+
+/**
+ * Read the session owner's ranked/recommended opportunities. A QUERY (never a
+ * transition) built on the EXISTING qualification; it performs no state change
+ * and can never approve or launch anything.
+ */
+export function useRankedOpportunities(userId: string) {
+  const q = api.control.getRankedOpportunities.useQuery(
+    {},
+    { enabled: Boolean(userId), refetchOnWindowFocus: false },
+  );
+  return { ...q, data: unwrap<RankedOpportunitiesView>(q.data) };
+}
+
+/**
+ * Generate a reviewable proposal DRAFT for ONE opportunity. The result is for
+ * HUMAN review and editing: `submitted` is always false and there is no
+ * procedure anywhere that sends it. `opportunityId` is the only input the
+ * client supplies — the owner is the authenticated session.
+ */
+export function useOpportunityProposalDraft() {
+  const mutation = api.control.generateProposalDraft.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}

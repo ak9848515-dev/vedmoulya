@@ -183,6 +183,7 @@ function startEagerHydration(api: ApiModule): void {
             maxUsersPerTick: 0,
             refreshIntelligenceEnabled: false,
             proactiveRefreshEnabled: false,
+            externalOpportunityMonitorEnabled: false,
           },
       );
     },

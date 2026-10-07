@@ -118,6 +118,16 @@ vi.mock('../../lib/trpc.js', () => ({
       startMissionForOpportunity: {
         useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
       },
+      // S7.1 — external opportunity monitoring (mounted in the pipeline panel).
+      monitorOpportunities: {
+        useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+      },
+      getRankedOpportunities: {
+        useQuery: () => ({ data: undefined, isLoading: false, isError: false }),
+      },
+      generateProposalDraft: {
+        useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+      },
     },
   },
 }));

@@ -266,6 +266,16 @@ import {
   type MissionLaunchPort,
 } from '../infrastructure/OpportunityMissionPorts.js';
 import { createOpportunityQualifier } from './OpportunityQualification.js';
+// ── S7.1 — opportunity monitoring (bounded discovery pass + draft port) ──
+import type { OpportunityMonitor } from './OpportunityMonitoring.js';
+import { createOpportunityMonitor } from './OpportunityMonitoring.js';
+import {
+  createFreelancerOpportunitySource,
+  resolveFreelancerToken,
+} from './FreelancerOpportunitySource.js';
+import { createOpportunityDiscoveryPort } from '../infrastructure/OpportunityMonitoringPorts.js';
+import type { OpportunityProposalPort } from '../infrastructure/OpportunityProposalPorts.js';
+import { createOpportunityProposalPort } from '../infrastructure/OpportunityProposalPorts.js';
 import {
   createCommandCenterPresentationPort,
   createWorldActionPort,
@@ -739,6 +749,13 @@ export class ApiApplicationService {
   readonly opportunityQualifier: ReturnType<typeof createOpportunityQualifier>;
   /** S5.1 — seam over the EXISTING canonical Mission creation path. */
   readonly opportunityMissionLaunch: MissionLaunchPort;
+  /** S7.1 — the bounded external monitoring pass. It owns no scheduler and no
+   *  store: it drives the EXISTING canonical discovery (dedup + owner
+   *  isolation) and can only ever produce DISCOVERED records. */
+  readonly opportunityMonitor: OpportunityMonitor;
+  /** S7.1 — the proposal DRAFT port. Preparation only: it has NO submission
+   *  method, so no code path can send anything to a client. */
+  readonly opportunityProposal: OpportunityProposalPort;
 
   // ── SPRINT-032 — World Model & Business Operating System (composition seam) ──
   /** The minimum useful world representation for better decisions: a bounded
@@ -1991,6 +2008,37 @@ export class ApiApplicationService {
           return { error: error instanceof Error ? error.message : 'Mission creation failed.' };
         }
       },
+    });
+
+    // ── S7.1 · external opportunity monitoring ──────────────────────────────
+    //    The ONE external source is the OFFICIAL, DOCUMENTED Freelancer.com
+    //    public API and it is DISCOVERY ONLY — it implements no bidding,
+    //    submission or client-contact action, and Freelancer.com has not been
+    //    established as authorizing API submission here. No scraping, no
+    //    browser automation, no undocumented endpoint.
+    //
+    //    The credential is read from the process environment (the platform's
+    //    existing env-credential convention); it is never hard-coded, never
+    //    logged and never exposed to a browser. With no credential the adapter
+    //    makes NO request and the pass reports SOURCE_NOT_CONFIGURED honestly.
+    //
+    //    Monitoring reuses the EXISTING canonical discovery (dedup + owner
+    //    isolation) and the owner's EXISTING autonomy settings as the relevance
+    //    policy, so repeated runs are idempotent and no store, scheduler or
+    //    engine is added.
+    this.opportunityMonitor = createOpportunityMonitor({
+      source: createFreelancerOpportunitySource({
+        token: () => resolveFreelancerToken(process.env),
+      }),
+      discovery: createOpportunityDiscoveryPort(this.controlPlane),
+      settings: (ownerId) => this.controlPlane.getSettings(ownerId),
+      now: () => new Date().toISOString(),
+    });
+    //    The draft is produced by the EXISTING AI orchestration service — the
+    //    SAME one the EXISTING ClientOps proposal flow uses. The port can only
+    //    DRAFT; the human reviews, edits and submits.
+    this.opportunityProposal = createOpportunityProposalPort({
+      orchestrate: (request) => this.ai.orchestrate(request),
     });
 
     // ── SPRINT-032 — World Model & Business Operating System ─────────

@@ -46,6 +46,7 @@ import { api } from '../lib/trpc.js';
 import { useAuthStore } from '../stores/auth-store.js';
 import { EvidenceEntryPanel } from './EvidenceEntryPanel.js';
 import { OpportunityValueIntelligencePanel } from './OpportunityValueIntelligencePanel.js';
+import { OpportunityMonitoringPanel } from './OpportunityMonitoringPanel.js';
 import { DigitalTwinSpatial } from './spatial/DigitalTwinSpatial.js';
 import { OpportunityRadarSpatial } from './spatial/OpportunityRadarSpatial.js';
 import { IntelligenceGraph } from './spatial/IntelligenceGraph.js';
@@ -897,6 +898,13 @@ export function CommandCenter(): React.JSX.Element {
               Signal health is honest — a source is AVAILABLE only after a real observation.
             </p>
           </div>
+          {/* S7.1 — external opportunity monitoring. Presentation/composition
+              ONLY: it runs the EXISTING bounded monitoring pass (normalize →
+              dedup → DISCOVERED), shows the EXISTING qualification's ranking
+              verbatim, and prepares a proposal DRAFT for human review. It never
+              bids, contacts the client or submits anything — there is no
+              submission capability anywhere on this path. */}
+          <OpportunityMonitoringPanel onOpportunitiesChanged={() => void load()} />
           {pipeline.length > 0 && (
             <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
               <p className="text-[12px] font-medium text-[#1F2937] mb-1">Opportunity pipeline</p>

@@ -32,6 +32,10 @@ import type { OpportunityApprovalPort } from '../infrastructure/OpportunityAppro
 import { normalizeExternalOpportunity } from '../services/OpportunitySourceAdapter.js';
 import type { OpportunityQualification } from '../services/OpportunityQualification.js';
 import type { MissionLaunchPort } from '../infrastructure/OpportunityMissionPorts.js';
+import type { ExternalSourceFailureCode } from '../infrastructure/OpportunityMonitoringPorts.js';
+import type { OpportunityMonitor } from '../services/OpportunityMonitoring.js';
+import { rankOpportunities } from '../services/OpportunityRecommendation.js';
+import type { OpportunityProposalPort } from '../infrastructure/OpportunityProposalPorts.js';
 
 /** S5 — the acquisition dependencies a router needs. Deliberately narrow: the
  *  approval authority and nothing else. The normalizer is a pure import. No
@@ -43,6 +47,13 @@ export interface OpportunityAcquisitionDeps {
   /** S5.1 — the EXISTING canonical Mission creation path. Injected so the
    *  acquisition layer can never reach a Mission engine directly. */
   mission: MissionLaunchPort;
+  /** S7.1 — the bounded external monitoring pass (optional; absent = not
+   *  configured, reported honestly rather than silently). It ingests only
+   *  DISCOVERED records through the canonical lifecycle. */
+  monitor?: OpportunityMonitor;
+  /** S7.1 — the proposal DRAFT port. Preparation only: it has no submission
+   *  method, so this router cannot send anything to anyone. */
+  proposal?: OpportunityProposalPort;
 }
 
 // S5.2 — in-process launch collapse. Concurrent startMission calls for the
@@ -60,20 +71,53 @@ const acquisitionError = (
   opportunityCode: string,
   message: string,
   statusCode: number,
+  /** S7.1 — optional extra operator detail (e.g. the full monitoring pass). */
+  extraDetails?: Record<string, unknown>,
 ): ApiResponse => {
   const code: ErrorCode =
     statusCode === 403
       ? 'AUTHORIZATION_ERROR'
       : statusCode === 503
         ? 'SERVICE_UNAVAILABLE'
-        : opportunityCode === 'SECRET_REJECTED'
-          ? 'VALIDATION_ERROR'
-          : 'VALIDATION_ERROR';
+        : statusCode === 429
+          ? 'RATE_LIMITED'
+          : statusCode === 502
+            ? 'DEPENDENCY_FAILURE'
+            : opportunityCode === 'SECRET_REJECTED'
+              ? 'VALIDATION_ERROR'
+              : 'VALIDATION_ERROR';
   return {
     success: false,
-    error: { code, message, statusCode, details: { opportunityCode } },
+    error: {
+      code,
+      message,
+      statusCode,
+      details: { opportunityCode, ...(extraDetails ?? {}) },
+    },
     meta: { timestamp: new Date().toISOString(), duration: 0, version: '1.0.0' },
   };
+};
+
+/** S7.1 — map an honest external-source failure onto an HTTP status. A source
+ *  failure is NEVER reported as a successful pass and never becomes a
+ *  candidate. */
+const sourceFailureStatus = (code: ExternalSourceFailureCode): number => {
+  switch (code) {
+    case 'SOURCE_RATE_LIMITED':
+      return 429;
+    case 'SOURCE_NOT_CONFIGURED':
+    case 'SOURCE_TIMEOUT':
+    case 'SOURCE_UNAVAILABLE':
+      return 503;
+    case 'SOURCE_AUTH_FAILED':
+    case 'MALFORMED_SOURCE_RESPONSE':
+    case 'SOURCE_REQUEST_FAILED':
+      return 502;
+    case 'UNSUPPORTED_SOURCE_CAPABILITY':
+      return 400;
+    default:
+      return 503;
+  }
 };
 
 const userIdInput = z.object({ userId: z.string().min(1) });
@@ -157,6 +201,14 @@ export const controlInputs = {
   // S6.4 — read-only value intelligence. Same key as qualification, but a
   // QUERY that never transitions the record (safe on any lifecycle state).
   opportunityValueIntelligence: z.object({ id: z.string().min(1).max(128) }),
+  // S7.1 — monitoring. `userId` is never an input: the monitored owner is the
+  // authenticated session, so a client cannot monitor another account.
+  opportunityMonitor: z.object({}),
+  // S7.1 — ranked/recommended read for the session owner (pure, no transition).
+  opportunityRanked: z.object({}),
+  // S7.1 — proposal DRAFT for ONE opportunity. A mutation because it may spend
+  // a provider call; it never submits anything externally.
+  opportunityProposalDraft: z.object({ id: z.string().min(1).max(128) }),
   opportunityStartMission: z.object({ id: z.string().min(1).max(128) }),
   opportunityMissionLookup: z.object({ opportunityId: z.string().min(1).max(128) }),
   missionOpportunityLookup: z.object({ missionId: z.string().min(1).max(128) }),
@@ -207,6 +259,15 @@ export interface ControlHandlers {
     input: Record<string, unknown>,
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;
+  /** S7.1 — run ONE bounded external monitoring pass for the session owner. */
+  monitorOpportunities: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
+  /** S7.1 — rank the session owner's opportunities on the EXISTING verdicts. */
+  getRankedOpportunities: (
+    input: Record<string, unknown>,
+    ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
+  /** S7.1 — generate a reviewable proposal DRAFT. Never submits. */
+  generateProposalDraft: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
   gateAction: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
 }
 
@@ -683,6 +744,115 @@ export function createControlRouter(
       return result.success
         ? Promise.resolve(successResponse(result.data))
         : Promise.resolve(acquisitionError(result.code, result.message, 403));
+    },
+
+    // ── S7.1 — bounded external opportunity monitoring ──────────────────────
+    //    Runs ONE bounded pass for the SESSION owner through the EXISTING
+    //    canonical discovery (dedup + owner isolation). A source failure is
+    //    reported AS a failure and ingests nothing — never a synthetic
+    //    success, never a fabricated opportunity.
+    monitorOpportunities: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      if (acquisition?.monitor === undefined) {
+        return Promise.resolve(
+          acquisitionError(
+            'MONITORING_UNAVAILABLE',
+            'External opportunity monitoring is not configured.',
+            503,
+          ),
+        );
+      }
+      const result = await acquisition.monitor.monitor(ownerId);
+      if (result.failure !== undefined) {
+        // The pass ran; the SOURCE failed. Reported AS a failure, with the full
+        // pass outcome carried in details so nothing is hidden and nothing is
+        // mistaken for a successful (empty) pass.
+        return Promise.resolve(
+          acquisitionError(
+            result.failure.code,
+            result.failure.message,
+            sourceFailureStatus(result.failure.code),
+            { monitoring: result },
+          ),
+        );
+      }
+      return Promise.resolve(successResponse(result));
+    },
+
+    // ── S7.1 — ranking over the EXISTING verdicts ───────────────────────────
+    //    Pure: it runs the SAME canonical qualifier the value-intelligence read
+    //    uses, performs NO transition and holds no approval power.
+    getRankedOpportunities: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      if (acquisition === undefined) {
+        return Promise.resolve(
+          acquisitionError('QUALIFICATION_UNAVAILABLE', 'Qualification is not configured.', 503),
+        );
+      }
+      const recommendations = rankOpportunities(
+        plane.listOpportunities(ownerId),
+        acquisition.qualify,
+      );
+      return Promise.resolve(
+        successResponse({
+          recommendations,
+          // Always true — ranking is advisory and can never approve or launch.
+          authorizationRequired: true,
+        }),
+      );
+    },
+
+    // ── S7.1 — proposal DRAFT (preparation only) ────────────────────────────
+    //    Loads the canonical record with the SESSION owner (a foreign
+    //    opportunity is simply NOT_FOUND), asks the EXISTING AI orchestration
+    //    for a draft through the narrow proposal port, and returns it for HUMAN
+    //    review/edit. There is no submission method anywhere on this path.
+    generateProposalDraft: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const id = input.id as string;
+      const record = plane.listOpportunities(ownerId).find((o) => o.id === id);
+      if (record === undefined) {
+        return Promise.resolve(acquisitionError('NOT_FOUND', 'Opportunity not found.', 404));
+      }
+      if (acquisition?.proposal === undefined) {
+        return Promise.resolve(
+          acquisitionError(
+            'PROPOSAL_DRAFT_UNAVAILABLE',
+            'Proposal drafting is not configured.',
+            503,
+          ),
+        );
+      }
+      const evidence = record.evidence.map((e) => `${e.label} (${e.status})`);
+      const result = await acquisition.proposal.draft({
+        userId: ownerId,
+        opportunity: {
+          opportunityId: record.id,
+          title: record.title,
+          description: record.description,
+          category: record.category,
+          ...(record.requiredCapabilities !== undefined
+            ? { requiredCapabilities: record.requiredCapabilities }
+            : {}),
+          ...(evidence.length > 0 ? { evidence } : {}),
+          ...(record.estimatedValue !== undefined ? { estimatedValue: record.estimatedValue } : {}),
+          ...(record.estimatedEffort !== undefined
+            ? { estimatedEffort: record.estimatedEffort }
+            : {}),
+          riskLevel: record.riskLevel,
+        },
+      });
+      if (!result.success) {
+        return Promise.resolve(
+          acquisitionError(
+            result.code,
+            result.message,
+            result.code === 'PROPOSAL_DRAFT_UNAVAILABLE' ? 503 : 502,
+          ),
+        );
+      }
+      // The draft is returned for HUMAN review and editing. Nothing was sent.
+      return Promise.resolve(successResponse({ ...result.data, status: record.status }));
     },
 
     gateAction: async (input): Promise<ApiResponse> => {

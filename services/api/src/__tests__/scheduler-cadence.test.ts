@@ -599,3 +599,175 @@ describe('startSchedulerCadenceDriver (EPIC-018 runtime closure)', () => {
     expect(getSchedulerCadenceDriver()?.lastTick?.errorSample.length).toBeLessThanOrEqual(5);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S7.1 — external opportunity monitoring rides the SAME heartbeat
+//
+// Proves the monitoring bridge is a HEARTBEAT CONSUMER, not a second scheduler:
+// it is invoked once per user on the existing cadence, its created count is
+// aggregated, an HONEST source failure is counted as a failure (never as
+// discovery and never as a thrown error), and a throwing monitor is isolated
+// exactly like every other per-user bridge. The default bridge is never used
+// here — the port is injected, so no gateway singleton is touched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S7.1 — external opportunity monitoring on the cadence heartbeat', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    stopSchedulerCadenceDriver();
+    delete process.env.AI_WORLD_CADENCE_ENABLED;
+    delete process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE;
+    delete process.env.AI_WORLD_CADENCE_PROACTIVE;
+    delete process.env.AI_WORLD_CADENCE_EXTERNAL_OPPORTUNITIES;
+  });
+
+  afterEach(() => {
+    stopSchedulerCadenceDriver();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('S7.1 — monitors each user on the SAME cadence and aggregates discovery', async () => {
+    const h = makeHarness();
+    const monitor = vi.fn().mockResolvedValue({ created: 2, existing: 1 });
+    startSchedulerCadenceDriver({
+      getScheduler: h.makeScheduler,
+      userSource: h.users,
+      log: h.log,
+      refreshIntelligenceEnabled: false,
+      proactiveRefreshEnabled: false,
+      externalMonitor: { monitor },
+      intervalMs: 60_000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    // One monitoring pass per user — on the existing heartbeat only.
+    expect(monitor).toHaveBeenCalledTimes(2);
+    expect(monitor).toHaveBeenCalledWith('user-a');
+    expect(monitor).toHaveBeenCalledWith('user-b');
+    expect(getSchedulerCadenceDriver()?.lastTick).toMatchObject({
+      externalOpportunitiesDiscovered: 4, // 2 new per user
+      externalOpportunityFailures: 0,
+      errors: 0,
+    });
+    expect(getSchedulerCadenceDriver()?.status().externalOpportunityMonitorEnabled).toBe(true);
+  });
+
+  it('S7.1 — an honest SOURCE failure is counted, never converted into discovery', async () => {
+    const h = makeHarness();
+    const monitor = vi
+      .fn()
+      .mockResolvedValueOnce({
+        created: 0,
+        existing: 0,
+        failure: { code: 'SOURCE_RATE_LIMITED', message: 'slow down' },
+      })
+      .mockResolvedValue({ created: 1, existing: 0 });
+    startSchedulerCadenceDriver({
+      getScheduler: h.makeScheduler,
+      userSource: h.users,
+      log: h.log,
+      refreshIntelligenceEnabled: false,
+      proactiveRefreshEnabled: false,
+      externalMonitor: { monitor },
+      intervalMs: 60_000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(getSchedulerCadenceDriver()?.lastTick).toMatchObject({
+      externalOpportunitiesDiscovered: 1, // only the successful user
+      externalOpportunityFailures: 1, // counted, not discovered
+      errors: 0, // a reported failure is NOT a thrown error
+    });
+  });
+
+  it('S7.1 — isolates a throwing monitor per user (one failure never breaks the pass)', async () => {
+    const h = makeHarness();
+    const monitor = vi.fn().mockImplementation(async (userId: string) => {
+      if (userId === 'user-a') throw new Error('monitor outage for user-a');
+      return { created: 1, existing: 0 };
+    });
+    startSchedulerCadenceDriver({
+      getScheduler: h.makeScheduler,
+      userSource: h.users,
+      log: h.log,
+      refreshIntelligenceEnabled: false,
+      proactiveRefreshEnabled: false,
+      externalMonitor: { monitor },
+      intervalMs: 60_000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.scheduler.tick).toHaveBeenCalledTimes(2);
+    expect(monitor).toHaveBeenCalledTimes(2);
+    expect(getSchedulerCadenceDriver()?.lastTick).toMatchObject({
+      usersProcessed: 2,
+      externalOpportunitiesDiscovered: 1,
+      errors: 1,
+    });
+  });
+
+  it('S7.1 — externalMonitorEnabled=false skips monitoring (no second scheduler started)', async () => {
+    const h = makeHarness();
+    const monitor = vi.fn().mockResolvedValue({ created: 1, existing: 0 });
+    startSchedulerCadenceDriver({
+      getScheduler: h.makeScheduler,
+      userSource: h.users,
+      log: h.log,
+      refreshIntelligenceEnabled: false,
+      proactiveRefreshEnabled: false,
+      externalMonitorEnabled: false,
+      externalMonitor: { monitor },
+      intervalMs: 60_000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.scheduler.tick).toHaveBeenCalledTimes(2); // the ONE heartbeat still runs
+    expect(monitor).not.toHaveBeenCalled();
+    expect(getSchedulerCadenceDriver()?.status().externalOpportunityMonitorEnabled).toBe(false);
+    expect(getSchedulerCadenceDriver()?.lastTick?.externalOpportunitiesDiscovered).toBe(0);
+  });
+
+  it('S7.1 — honours AI_WORLD_CADENCE_EXTERNAL_OPPORTUNITIES=0 (and false-y spellings)', async () => {
+    for (const value of ['0', 'false', 'no', 'off', 'OFF']) {
+      stopSchedulerCadenceDriver();
+      process.env.AI_WORLD_CADENCE_EXTERNAL_OPPORTUNITIES = value;
+      const h = makeHarness();
+      const monitor = vi.fn().mockResolvedValue({ created: 1, existing: 0 });
+      startSchedulerCadenceDriver({
+        getScheduler: h.makeScheduler,
+        userSource: h.users,
+        log: h.log,
+        refreshIntelligenceEnabled: false,
+        proactiveRefreshEnabled: false,
+        externalMonitor: { monitor },
+        intervalMs: 60_000,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(monitor).not.toHaveBeenCalled();
+      expect(getSchedulerCadenceDriver()?.status().externalOpportunityMonitorEnabled).toBe(false);
+    }
+    delete process.env.AI_WORLD_CADENCE_EXTERNAL_OPPORTUNITIES;
+  });
+
+  it('S7.1 — the tick result always carries the new counters (no silent omission)', async () => {
+    const h = makeHarness();
+    // Injected on purpose: the DEFAULT bridge is the real gateway singleton,
+    // which this hermetic suite must never construct.
+    const monitor = vi.fn().mockResolvedValue({ created: 0, existing: 0 });
+    startSchedulerCadenceDriver({
+      getScheduler: h.makeScheduler,
+      userSource: h.users,
+      log: h.log,
+      refreshIntelligenceEnabled: false,
+      proactiveRefreshEnabled: false,
+      externalMonitor: { monitor },
+      intervalMs: 60_000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getSchedulerCadenceDriver()?.lastTick).toMatchObject({
+      externalOpportunitiesDiscovered: 0,
+      externalOpportunityFailures: 0,
+    });
+  });
+});

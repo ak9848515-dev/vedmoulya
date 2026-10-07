@@ -2586,6 +2586,11 @@ export function createAppRouter(services: ApiApplicationService) {
     approval: services.opportunityApproval,
     qualify: (record) => services.opportunityQualifier.qualify(record),
     mission: services.opportunityMissionLaunch,
+    // S7.1 — monitoring owns no scheduler and no store: it drives the EXISTING
+    // canonical discovery through the bounded pass, and the proposal port can
+    // only DRAFT (it has no submission method to reach).
+    monitor: services.opportunityMonitor,
+    proposal: services.opportunityProposal,
   };
 
   return router({
@@ -6235,6 +6240,41 @@ export function createAppRouter(services: ApiApplicationService) {
         .input(controlInputs.opportunityValueIntelligence)
         .query(({ input, ctx }) =>
           createControlRouter(services.controlPlane, acquisitionDeps).getValueIntelligence(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      // ── S7.1 — external opportunity monitoring. Runs ONE bounded pass for
+      //    the SESSION owner: normalize → dedup → DISCOVERED. A source failure
+      //    is reported as a failure and ingests nothing (never a synthetic
+      //    success, never a fabricated opportunity). `userId` is spread AFTER
+      //    the input so the session identity always wins, and it is never an
+      //    input field — a client cannot monitor another account.
+      monitorOpportunities: heavyProcedure
+        .input(controlInputs.opportunityMonitor)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).monitorOpportunities(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      // ── S7.1 — ranked/recommended read. Pure: the EXISTING qualifier runs and
+      //    no state changes. Identity comes from the session.
+      getRankedOpportunities: standardProcedure
+        .input(controlInputs.opportunityRanked)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).getRankedOpportunities(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      // ── S7.1 — proposal DRAFT. Preparation only: the port has no submission
+      //    method, so nothing can be sent to anyone from this path. `userId` is
+      //    the session identity (a foreign opportunity resolves as NOT_FOUND).
+      generateProposalDraft: heavyProcedure
+        .input(controlInputs.opportunityProposalDraft)
+        .mutation(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).generateProposalDraft(
             { ...(input as Record<string, unknown>), userId: ctx.userId },
             ctx,
           ),

@@ -83,6 +83,13 @@ export interface SchedulerCadenceTickResult {
    *  recommend only — NO autonomous action; idempotent stable keys mean a
    *  repeat refresh proposes nothing new). */
   proactiveRefreshes: number;
+  /** S7.1 — NEW canonical opportunities created by the external monitoring
+   *  pass (idempotent: a repeat pass creates nothing). Aggregate only. */
+  externalOpportunitiesDiscovered: number;
+  /** S7.1 — external source FAILURES (auth/rate-limit/timeout/malformed/
+   *  unavailable). Reported honestly — a failure never becomes a candidate and
+   *  never counts as discovery. */
+  externalOpportunityFailures: number;
   /** Users whose scheduler tick or intelligence refresh failed (isolated —
    *  never aborts the pass; the two share one per-user failure counter). */
   errors: number;
@@ -105,6 +112,9 @@ export interface SchedulerRuntimeStatus {
   /** SPRINT-030 — whether the proactive recommendation refresh runs on this
    *  heartbeat (research/recommend only — never autonomous action). */
   proactiveRefreshEnabled: boolean;
+  /** S7.1 — whether the external opportunity monitoring pass rides this
+   *  heartbeat. Optional so existing status literals stay valid. */
+  externalOpportunityMonitorEnabled?: boolean;
   startedAt?: number;
   lastTickAt?: number;
   lastTick?: SchedulerCadenceTickResult;
@@ -131,6 +141,23 @@ export interface SchedulerIntelligenceRefreshPort {
  *  idempotency means a repeat refresh proposes nothing new. */
 export interface SchedulerProactiveRefreshPort {
   refresh(userId: string): Promise<{ recommendationsRefreshed: number }>;
+}
+
+/** S7.1 — external opportunity monitoring on the SAME heartbeat. The driver
+ *  stays a heartbeat: it counts outcomes and isolates failures. Normalization,
+ *  deduplication, owner isolation and the DISCOVERED lifecycle stay in the
+ *  EXISTING acquisition machinery — this port implements no monitoring logic
+ *  and owns no scheduler. A source failure is REPORTED (not thrown) and
+ *  ingests nothing. */
+export interface SchedulerExternalOpportunityMonitorPort {
+  monitor(userId: string): Promise<{
+    /** NEW canonical opportunities this pass (0 on a repeat — idempotent). */
+    created: number;
+    /** Already-known canonical opportunities this pass. */
+    existing: number;
+    /** Present ONLY on an honest external-source failure. */
+    failure?: { code: string; message: string };
+  }>;
 }
 
 /** Minimal logger seam (defaults to the platform logger — no secrets). */
@@ -168,6 +195,14 @@ export interface SchedulerCadenceDriverOptions {
    *  (proactive.refresh with runDiscovery:false — discovery already ran on
    *  the same heartbeat). */
   proactiveRefresh?: SchedulerProactiveRefreshPort;
+  /** S7.1 — external opportunity monitoring on this heartbeat. Default true;
+   *  env `AI_WORLD_CADENCE_EXTERNAL_OPPORTUNITIES=0|false|no|off` disables
+   *  (case-insensitive). With no source credential configured the pass makes
+   *  NO request and reports the honest SOURCE_NOT_CONFIGURED failure. */
+  externalMonitorEnabled?: boolean;
+  /** S7.1 — the monitoring bridge. Defaults to the gateway singleton
+   *  (opportunityMonitor.monitor). It owns no scheduler of its own. */
+  externalMonitor?: SchedulerExternalOpportunityMonitorPort;
   /** Scheduler accessor. Defaults to the gateway singleton (getServices()). */
   getScheduler?: () => SchedulerApplicationService;
   /** User source. Defaults to the identity directory (registered users). */
@@ -304,6 +339,14 @@ const defaultProactiveRefresh: SchedulerProactiveRefreshPort = {
   },
 };
 
+/** S7.1 — default external opportunity monitoring bridge wired to the gateway
+ *  singleton (lazy — never constructed at module scope). It calls the EXISTING
+ *  bounded monitoring pass and implements NO monitoring logic itself: no second
+ *  scheduler, no second discovery, no store. */
+const defaultExternalOpportunityMonitor: SchedulerExternalOpportunityMonitorPort = {
+  monitor: (userId) => getServices().opportunityMonitor.monitor(userId),
+};
+
 /**
  * Start the AI World discovery cadence. Idempotent — subsequent calls return
  * the existing driver. Each tick asks the EXISTING SchedulerApplicationService
@@ -353,6 +396,14 @@ export function startSchedulerCadenceDriver(
   const proactiveRefreshEnabled =
     options.proactiveRefreshEnabled ?? envFlagEnabled(process.env.AI_WORLD_CADENCE_PROACTIVE);
   const proactiveRefresh = options.proactiveRefresh ?? defaultProactiveRefresh;
+  // S7.1 — external opportunity monitoring on the SAME heartbeat. It reuses the
+  // EXISTING acquisition machinery (normalize → canonical dedup → DISCOVERED)
+  // and the owner's EXISTING settings as the relevance policy. It adds no
+  // scheduler: this driver is the only heartbeat.
+  const externalMonitorEnabled =
+    options.externalMonitorEnabled ??
+    envFlagEnabled(process.env.AI_WORLD_CADENCE_EXTERNAL_OPPORTUNITIES);
+  const externalMonitor = options.externalMonitor ?? defaultExternalOpportunityMonitor;
   const now = options.now ?? ((): number => Date.now());
   const log = options.log ?? logger;
 
@@ -374,6 +425,8 @@ export function startSchedulerCadenceDriver(
       opportunitiesFound: 0,
       notificationsEmitted: 0,
       proactiveRefreshes: 0,
+      externalOpportunitiesDiscovered: 0,
+      externalOpportunityFailures: 0,
       errors: 0,
       errorSample: [],
       truncated: false,
@@ -447,6 +500,22 @@ export function startSchedulerCadenceDriver(
             }
           }
         }
+        // S7.1 — external opportunity monitoring on the SAME heartbeat, exactly
+        // like the two bridges above. The pass is bounded and idempotent; an
+        // honest SOURCE failure is COUNTED (never converted into discovery) and
+        // one owner's failure never breaks the pass.
+        if (externalMonitorEnabled) {
+          try {
+            const monitored = await externalMonitor.monitor(userId);
+            result.externalOpportunitiesDiscovered += monitored.created;
+            if (monitored.failure !== undefined) result.externalOpportunityFailures += 1;
+          } catch (error) {
+            result.errors += 1;
+            if (result.errorSample.length < ERROR_SAMPLE_LIMIT) {
+              result.errorSample.push(error instanceof Error ? error.message : String(error));
+            }
+          }
+        }
       }
     } catch (error) {
       // The pass itself failed (defensive — the loop above already isolates
@@ -465,6 +534,8 @@ export function startSchedulerCadenceDriver(
       result.runsStarted > 0 ||
       result.opportunitiesFound > 0 ||
       result.proactiveRefreshes > 0 ||
+      result.externalOpportunitiesDiscovered > 0 ||
+      result.externalOpportunityFailures > 0 ||
       result.errors > 0 ||
       result.userDirectoryError
     ) {
@@ -475,6 +546,8 @@ export function startSchedulerCadenceDriver(
         opportunitiesFound: result.opportunitiesFound,
         notificationsEmitted: result.notificationsEmitted,
         proactiveRefreshes: result.proactiveRefreshes,
+        externalOpportunitiesDiscovered: result.externalOpportunitiesDiscovered,
+        externalOpportunityFailures: result.externalOpportunityFailures,
         errors: result.errors,
         truncated: result.truncated,
         userDirectoryError: result.userDirectoryError,
@@ -515,6 +588,7 @@ export function startSchedulerCadenceDriver(
         maxUsersPerTick,
         refreshIntelligenceEnabled,
         proactiveRefreshEnabled,
+        externalOpportunityMonitorEnabled: externalMonitorEnabled,
         startedAt,
         lastTickAt: lastTick?.finishedAt,
         lastTick,
