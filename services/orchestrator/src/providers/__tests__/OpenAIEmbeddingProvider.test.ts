@@ -6,21 +6,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const embedManyMock = vi.fn();
+const createOpenAIMock = vi.fn();
 
 vi.mock('ai', () => ({
   embedMany: (...args: unknown[]) => embedManyMock(...args),
 }));
 
 vi.mock('@ai-sdk/openai', () => ({
-  openai: Object.assign((model: string) => ({ provider: 'openai', modelId: model }), {
-    embedding: (model: string) => ({ provider: 'openai', modelId: `embedding:${model}` }),
-  }),
+  createOpenAI: (...args: unknown[]) => createOpenAIMock(...args),
 }));
 
 import { OpenAIEmbeddingProvider } from '../OpenAIEmbeddingProvider.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  createOpenAIMock.mockReturnValue(
+    Object.assign((model: string) => ({ provider: 'openai', modelId: model }), {
+      embedding: (model: string) => ({ provider: 'openai', modelId: `embedding:${model}` }),
+    }),
+  );
   embedManyMock.mockResolvedValue({
     embeddings: [
       [0.1, 0.2],
@@ -30,6 +34,14 @@ beforeEach(() => {
 });
 
 describe('OpenAIEmbeddingProvider', () => {
+  it('AI-WIRING-001: binds the injected credential to the embedding client', async () => {
+    const provider = new OpenAIEmbeddingProvider('sk-test');
+    await provider.embed(['x']);
+    // The bare `openai.embedding(...)` export ignored this key and read
+    // process.env.OPENAI_API_KEY, so a canonical-only deployment could not embed.
+    expect(createOpenAIMock).toHaveBeenCalledWith({ apiKey: 'sk-test' });
+  });
+
   it('embeds texts through the SDK and reports the vector dimension', async () => {
     const provider = new OpenAIEmbeddingProvider('sk-test');
     expect(provider.dimension).toBe(1536);

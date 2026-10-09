@@ -10,6 +10,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const generateTextMock = vi.fn();
 const streamTextMock = vi.fn();
 const createOpenAIMock = vi.fn();
+// AI-WIRING-001 — the SDK provider exposes BOTH the default model function
+// (which targets the Responses API and must NOT be used for an OpenAI-compatible
+// endpoint) and `.chat()` (Chat Completions, the endpoint these providers serve).
+const defaultModelMock = vi.fn((model: string) => ({ provider: 'custom.default', modelId: model }));
+const chatMock = vi.fn((model: string) => ({ provider: 'custom', modelId: model }));
 
 vi.mock('ai', () => ({
   generateText: (...args: unknown[]) => generateTextMock(...args),
@@ -41,10 +46,7 @@ beforeEach(() => {
     usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
     finalStep: { response: { modelId: 'custom-model' } },
   });
-  createOpenAIMock.mockReturnValue((model: string) => ({
-    provider: 'custom',
-    modelId: model,
-  }));
+  createOpenAIMock.mockReturnValue(Object.assign(defaultModelMock, { chat: chatMock }));
 });
 
 describe('OpenAICompatibleProvider', () => {
@@ -55,6 +57,18 @@ describe('OpenAICompatibleProvider', () => {
     expect(provider.capabilities).toContain('reasoning');
     expect(provider.capabilities).toContain('coding');
     expect(provider.capabilities).toContain('general_conversation');
+  });
+
+  it('AI-WIRING-001: executes through the Chat Completions API (provider.chat), never the Responses API', async () => {
+    const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom', {
+      modelId: 'custom-model',
+    });
+    await provider.execute({ messages: MESSAGES, model: 'custom-model' });
+    // OpenRouter and user-configured OpenAI-compatible endpoints serve
+    // /chat/completions only; the default provider function targets /responses.
+    expect(chatMock).toHaveBeenCalledTimes(1);
+    expect(chatMock).toHaveBeenCalledWith('custom-model');
+    expect(defaultModelMock).not.toHaveBeenCalled();
   });
 
   it('executes text generation through the SDK with the custom endpoint', async () => {

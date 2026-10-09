@@ -135,6 +135,20 @@ export class DeepSeekProvider implements ProviderAdapter {
     });
   }
 
+  /**
+   * AI-WIRING-001 — resolve a Chat Completions model.
+   *
+   * The `createOpenAI` provider's DEFAULT model function (`client(modelId)`)
+   * targets the OpenAI RESPONSES API (`{baseURL}/responses`) in @ai-sdk/openai
+   * v4. DeepSeek's OpenAI-compatible API serves the CHAT COMPLETIONS API
+   * (`/chat/completions`) only, so the default function requested a route
+   * DeepSeek does not implement. `.chat()` binds the adapter to the endpoint
+   * DeepSeek actually exposes.
+   */
+  private chatModel(modelId: string): ReturnType<ReturnType<typeof createOpenAI>['chat']> {
+    return this.client().chat(modelId);
+  }
+
   async execute(request: {
     messages: Array<{ role: string; content: string }>;
     model: string;
@@ -149,7 +163,7 @@ export class DeepSeekProvider implements ProviderAdapter {
       // Phase B — execute the advisor-selected model when supplied; otherwise
       // fall back to this adapter's configured default.
       const result = await generateText({
-        model: this.client()(request.modelId ?? this.modelId),
+        model: this.chatModel(request.modelId ?? this.modelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
@@ -220,7 +234,7 @@ export class DeepSeekProvider implements ProviderAdapter {
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
       const result = await generateText({
-        model: this.client()(request.modelId ?? this.structuredModelId),
+        model: this.chatModel(request.modelId ?? this.structuredModelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
@@ -290,7 +304,7 @@ export class DeepSeekProvider implements ProviderAdapter {
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
       const result = streamText({
-        model: this.client()(request.modelId ?? this.modelId),
+        model: this.chatModel(request.modelId ?? this.modelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,

@@ -143,7 +143,22 @@ describe('provider catalog — Gemini model compatibility (S3.1B.2)', () => {
     // Embeddings are still served by the dedicated embedding model, not by the
     // generative one.
     expect(google().supportsCapability('embeddings')).toBe(true);
-    expect(google().models.find((m) => m.embeddings)?.id).toBe('text-embedding-004');
+    // S3.1B.2 (embedding) — the configured credential no longer returns
+    // text-embedding-004; the catalog must expose the embedding model that
+    // credential actually serves, with its provider-reported limit.
+    const embeddingModel = google().models.find((m) => m.embeddings);
+    expect(embeddingModel?.id).toBe('gemini-embedding-001');
+    expect(embeddingModel?.contextLength).toBe(2048);
+    expect(embeddingModel?.embeddings).toBe(true);
+  });
+
+  it('no longer advertises the retired Gemini embedding model id (S3.1B.2)', () => {
+    // Guards the invariant the repair exists for: the embedding model a google
+    // candidate can be selected against is one the configured credential
+    // actually serves — verified live against v1beta/models.
+    expect(google().models.map((m) => m.id)).not.toContain('text-embedding-004');
+    expect(google().models.find((m) => m.embeddings)?.id).toBe('gemini-embedding-001');
+    expect(google().supportsCapability('embeddings')).toBe(true);
   });
 
   it('no unrelated provider model set was disturbed', () => {

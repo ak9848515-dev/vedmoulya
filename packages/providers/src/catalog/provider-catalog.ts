@@ -383,8 +383,16 @@ const CATALOG: readonly CatalogEntry[] = [
         ],
       },
       {
-        id: 'text-embedding-004',
-        name: 'text-embedding-004',
+        // S3.1B.2 (embedding) — the same configured production credential that
+        // no longer serves the retired 2.5 generative generation also no longer
+        // returns text-embedding-004 from v1beta/models (verified live: the
+        // credential serves only gemini-embedding-001 / gemini-embedding-2 /
+        // gemini-embedding-2-preview). text-embedding-004 is replaced by the
+        // GA embedding model that credential actually serves. The limit below
+        // is the provider's OWN reported value (models/gemini-embedding-001:
+        // inputTokenLimit 2048) — identical to the entry it replaces.
+        id: 'gemini-embedding-001',
+        name: 'gemini-embedding-001',
         contextLength: 2048,
         maxOutputTokens: 0,
         streaming: false,

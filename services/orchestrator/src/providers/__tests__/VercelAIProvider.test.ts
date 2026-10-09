@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const generateTextMock = vi.fn();
 const streamTextMock = vi.fn();
+const createOpenAIMock = vi.fn();
 
 vi.mock('ai', () => ({
   generateText: (...args: unknown[]) => generateTextMock(...args),
@@ -21,7 +22,7 @@ vi.mock('ai', () => ({
 }));
 
 vi.mock('@ai-sdk/openai', () => ({
-  openai: (model: string) => ({ provider: 'openai', modelId: model }),
+  createOpenAI: (...args: unknown[]) => createOpenAIMock(...args),
 }));
 
 import { VercelAIProvider } from '../VercelAIProvider.js';
@@ -33,6 +34,7 @@ const MESSAGES = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  createOpenAIMock.mockReturnValue((model: string) => ({ provider: 'openai', modelId: model }));
   generateTextMock.mockResolvedValue({
     text: 'The workflow has three stages.',
     usage: { inputTokens: 12, outputTokens: 9, totalTokens: 21 },
@@ -41,6 +43,15 @@ beforeEach(() => {
 });
 
 describe('VercelAIProvider', () => {
+  it('AI-WIRING-001: binds the injected credential to the SDK client (never the bare env-only export)', async () => {
+    const provider = new VercelAIProvider('sk-test');
+    await provider.execute({ messages: MESSAGES, model: 'openai' });
+    // The canonical production variable is AI_OPENAI_API_KEY, which the registry
+    // resolves and passes here; the bare `openai` export ignored it and read
+    // process.env.OPENAI_API_KEY instead, failing with "API key is missing".
+    expect(createOpenAIMock).toHaveBeenCalledWith({ apiKey: 'sk-test' });
+  });
+
   it('executes text generation through the SDK with usage accounting', async () => {
     const provider = new VercelAIProvider('sk-test');
     const response = await provider.execute({ messages: MESSAGES, model: 'openai', maxTokens: 64 });

@@ -132,6 +132,24 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     });
   }
 
+  /**
+   * AI-WIRING-001 — resolve a Chat Completions model for an OpenAI-compatible
+   * endpoint.
+   *
+   * The `createOpenAI` provider's DEFAULT model function (`client(modelId)`)
+   * targets the OpenAI RESPONSES API (`{baseURL}/responses`) in @ai-sdk/openai
+   * v4. DeepSeek, OpenRouter and every user-configured "OpenAI-compatible"
+   * endpoint serve the CHAT COMPLETIONS API (`/chat/completions`) only, so the
+   * default function requested a route the provider does not implement. The
+   * connection tester validates setup against `/chat/completions` (raw fetch),
+   * so a provider could report "connected" while every runtime generation hit
+   * the wrong path and failed. `.chat()` binds the adapter to Chat Completions
+   * — the exact contract "OpenAI-compatible" denotes.
+   */
+  private chatModel(modelId: string): ReturnType<ReturnType<typeof createOpenAI>['chat']> {
+    return this.client().chat(modelId);
+  }
+
   async execute(request: {
     messages: Array<{ role: string; content: string }>;
     model: string;
@@ -146,7 +164,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       // Phase B — execute the advisor-selected model when supplied; otherwise
       // fall back to this adapter's configured default.
       const result = await generateText({
-        model: this.client()(request.modelId ?? this.modelId),
+        model: this.chatModel(request.modelId ?? this.modelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
@@ -216,7 +234,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
       const result = await generateText({
-        model: this.client()(request.modelId ?? this.structuredModelId),
+        model: this.chatModel(request.modelId ?? this.structuredModelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
@@ -285,7 +303,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
       const result = streamText({
-        model: this.client()(request.modelId ?? this.modelId),
+        model: this.chatModel(request.modelId ?? this.modelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,

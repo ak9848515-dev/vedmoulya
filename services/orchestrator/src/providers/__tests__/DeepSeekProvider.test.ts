@@ -11,6 +11,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const generateTextMock = vi.fn();
 const streamTextMock = vi.fn();
 const createOpenAIMock = vi.fn();
+// AI-WIRING-001 — the SDK provider exposes BOTH the default model function
+// (which targets the Responses API and must NOT be used for DeepSeek) and
+// `.chat()` (Chat Completions, the endpoint DeepSeek actually serves).
+const defaultModelMock = vi.fn((model: string) => ({
+  provider: 'deepseek.default',
+  modelId: model,
+}));
+const chatMock = vi.fn((model: string) => ({ provider: 'deepseek', modelId: model }));
 
 vi.mock('ai', () => ({
   generateText: (...args: unknown[]) => generateTextMock(...args),
@@ -39,8 +47,9 @@ beforeEach(() => {
     usage: { inputTokens: 12, outputTokens: 9, totalTokens: 21 },
     finalStep: { response: { modelId: 'deepseek-chat' } },
   });
-  // Default mock client: a callable that returns the model descriptor.
-  createOpenAIMock.mockReturnValue((model: string) => ({ provider: 'deepseek', modelId: model }));
+  // Mock client: callable (Responses-API model function) AND `.chat()`
+  // (Chat-Completions model function). The adapter must use `.chat()`.
+  createOpenAIMock.mockReturnValue(Object.assign(defaultModelMock, { chat: chatMock }));
 });
 
 describe('DeepSeekProvider', () => {
@@ -54,6 +63,16 @@ describe('DeepSeekProvider', () => {
     expect(provider.capabilities).not.toContain('vision');
     expect(provider.capabilities).not.toContain('embeddings');
     expect(provider.capabilities).not.toContain('speech');
+  });
+
+  it('AI-WIRING-001: executes through the Chat Completions API (provider.chat), never the Responses API', async () => {
+    const provider = new DeepSeekProvider('sk-test');
+    await provider.execute({ messages: MESSAGES, model: 'deepseek' });
+    // DeepSeek serves /chat/completions only; the default provider function
+    // targets /responses, which DeepSeek does not implement.
+    expect(chatMock).toHaveBeenCalledTimes(1);
+    expect(chatMock).toHaveBeenCalledWith('deepseek-chat');
+    expect(defaultModelMock).not.toHaveBeenCalled();
   });
 
   it('executes text generation through the SDK with usage accounting', async () => {

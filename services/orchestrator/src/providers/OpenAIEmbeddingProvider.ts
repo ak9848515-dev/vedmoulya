@@ -8,7 +8,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { embedMany } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import type { EmbeddingProvider } from '@vedmoulya/rag';
 
 export interface OpenAIEmbeddingProviderOptions {
@@ -38,8 +38,11 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     }, this.timeoutMs);
 
     try {
+      // AI-WIRING-001 — the client MUST carry the injected credential.
+      // `openai.embedding(...)` (the bare export) reads process.env.OPENAI_API_KEY
+      // and ignored the key this adapter resolved.
       const result = await embedMany({
-        model: openai.embedding(this.model),
+        model: createOpenAI({ apiKey: this.apiKey }).embedding(this.model),
         values: [...texts],
         abortSignal: controller.signal,
       });

@@ -13,7 +13,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { Output, generateText, jsonSchema, streamText } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import type { AIResponse, CapabilityType, ProviderHealth } from '@vedmoulya/ai';
 import type { ProviderAdapter } from '@vedmoulya/services';
 
@@ -95,6 +95,21 @@ export class VercelAIProvider implements ProviderAdapter {
     this.outputPer1K = options.outputPer1K ?? 0.6;
   }
 
+  /**
+   * AI-WIRING-001 — build the OpenAI client WITH the injected credential.
+   *
+   * The bare `openai` export from `@ai-sdk/openai` is `createOpenAI()` with no
+   * options, so it reads `process.env.OPENAI_API_KEY` — NOT the key this
+   * adapter resolved (canonical `AI_OPENAI_API_KEY`, or an explicit config
+   * key). A deployment that configures only the canonical production variable
+   * therefore registered a provider whose every call failed with "OpenAI API
+   * key is missing" before any network request. `createOpenAI({ apiKey })`
+   * binds the SAME credential the registry resolved to the actual call.
+   */
+  private client(): ReturnType<typeof createOpenAI> {
+    return createOpenAI({ apiKey: this.apiKey });
+  }
+
   /** Model configuration is treated as readiness (no network call in health). */
   isHealthy(): Promise<boolean> {
     return Promise.resolve(this.apiKey.length > 0);
@@ -128,7 +143,7 @@ export class VercelAIProvider implements ProviderAdapter {
       // fall back to this adapter's configured default. An unknown model id
       // makes the SDK throw → runtime classifies + falls back.
       const result = await generateText({
-        model: openai(request.modelId ?? this.modelId),
+        model: this.client()(request.modelId ?? this.modelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
@@ -199,7 +214,7 @@ export class VercelAIProvider implements ProviderAdapter {
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
       const result = await generateText({
-        model: openai(request.modelId ?? this.structuredModelId),
+        model: this.client()(request.modelId ?? this.structuredModelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
@@ -269,7 +284,7 @@ export class VercelAIProvider implements ProviderAdapter {
     try {
       const { instructions, chatMessages } = splitInstructions(request.messages);
       const result = streamText({
-        model: openai(request.modelId ?? this.modelId),
+        model: this.client()(request.modelId ?? this.modelId),
         ...(instructions ? { instructions } : {}),
         messages: chatMessages,
         maxOutputTokens: request.maxTokens ?? 1024,
