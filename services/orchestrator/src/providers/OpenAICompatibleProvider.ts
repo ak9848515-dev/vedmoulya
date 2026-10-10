@@ -112,12 +112,22 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     return Promise.resolve(this.apiKey.length > 0 && this.baseURL.length > 0);
   }
 
+  /**
+   * Health mirrors `isHealthy()`: model configuration is readiness, so a
+   * provider missing its API key or endpoint reports 'down' (the existing
+   * `ProviderStatus` member for "cannot serve") instead of advertising itself
+   * as healthy to monitoring.
+   *
+   * SECURITY: the status is the ONLY signal emitted — the API key and endpoint
+   * URL are never included in the returned object.
+   */
   getHealth(): Promise<ProviderHealth> {
+    const configured = this.apiKey.length > 0 && this.baseURL.length > 0;
     return Promise.resolve({
       providerId: this.name,
-      status: 'healthy',
+      status: configured ? 'healthy' : 'down',
       latency: 0,
-      errorRate: 0,
+      errorRate: configured ? 0 : 1,
       lastChecked: new Date(),
       isRateLimited: false,
       rateLimitRemaining: 0,

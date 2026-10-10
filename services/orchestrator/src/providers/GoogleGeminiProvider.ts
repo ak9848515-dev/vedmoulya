@@ -134,12 +134,21 @@ export class GoogleGeminiProvider implements ProviderAdapter {
     return Promise.resolve(this.apiKey.length > 0);
   }
 
+  /**
+   * F-3: mirror `isHealthy()` — a keyless adapter is 'down', not 'healthy'.
+   *
+   * The predicate is evaluated SYNCHRONOUSLY: `isHealthy()` returns a
+   * `Promise<boolean>`, so testing it directly would test the (always-truthy)
+   * Promise object and report a keyless adapter as 'healthy'. No network probe
+   * is performed — model configuration is the readiness signal.
+   */
   getHealth(): Promise<ProviderHealth> {
+    const configured = this.apiKey.length > 0;
     return Promise.resolve({
       providerId: 'google',
-      status: 'healthy',
+      status: configured ? 'healthy' : 'down',
       latency: 0,
-      errorRate: 0,
+      errorRate: configured ? 0 : 1,
       lastChecked: new Date(),
       isRateLimited: false,
       rateLimitRemaining: 0,

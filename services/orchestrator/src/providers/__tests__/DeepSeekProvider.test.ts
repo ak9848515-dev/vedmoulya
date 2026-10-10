@@ -246,6 +246,25 @@ describe('DeepSeekProvider', () => {
     expect(health.isRateLimited).toBe(false);
   });
 
+  // F-3 regression: a keyless adapter cannot serve and must report 'down'.
+  // `isHealthy()` returns a Promise, so the health predicate must be evaluated
+  // synchronously — testing the Promise itself always reads as 'healthy'.
+  it('reports down for a keyless adapter (F-3)', async () => {
+    const provider = new DeepSeekProvider('');
+    await expect(provider.isHealthy()).resolves.toBe(false);
+    const health = await provider.getHealth();
+    expect(health.status).toBe('down');
+    expect(health.errorRate).toBe(1);
+  });
+
+  it('never reports a Promise (rather than a resolved boolean) as healthy (F-3)', async () => {
+    const keyless = new DeepSeekProvider('');
+    const health = await keyless.getHealth();
+    // A Promise object is always truthy; health must not be derived from it.
+    expect(health.status).not.toBe('healthy');
+    expect(health.status).toBe('down');
+  });
+
   it('honours explicit input/output per-1K pricing options', async () => {
     const provider = new DeepSeekProvider('sk-test', {
       inputPer1K: 0.01,

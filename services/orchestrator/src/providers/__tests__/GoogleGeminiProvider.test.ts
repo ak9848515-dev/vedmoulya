@@ -240,6 +240,24 @@ describe('GoogleGeminiProvider', () => {
     await expect(provider.isHealthy()).resolves.toBe(false);
   });
 
+  // F-3 regression: a keyless adapter cannot serve and must report 'down'.
+  // `isHealthy()` returns a Promise, so the health predicate must be evaluated
+  // synchronously — testing the Promise itself always reads as 'healthy'.
+  it('reports down for a keyless adapter (F-3)', async () => {
+    const provider = new GoogleGeminiProvider('');
+    const health = await provider.getHealth();
+    expect(health.status).toBe('down');
+    expect(health.errorRate).toBe(1);
+  });
+
+  it('never reports a Promise (rather than a resolved boolean) as healthy (F-3)', async () => {
+    const keyless = new GoogleGeminiProvider('');
+    const health = await keyless.getHealth();
+    // A Promise object is always truthy; health must not be derived from it.
+    expect(health.status).not.toBe('healthy');
+    expect(health.status).toBe('down');
+  });
+
   it('honours explicit input/output per-1K pricing options', async () => {
     const provider = new GoogleGeminiProvider(FAKE_API_KEY, {
       inputPer1K: 0.01,

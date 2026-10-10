@@ -125,6 +125,46 @@ describe('OpenAICompatibleProvider', () => {
     await expect(provider.isHealthy()).resolves.toBe(false);
   });
 
+  it('reports status down from getHealth when unconfigured, without leaking secrets', async () => {
+    const provider = new OpenAICompatibleProvider('', '', 'my-custom');
+    const health = await provider.getHealth();
+    expect(health.providerId).toBe('my-custom');
+    expect(health.status).toBe('down');
+    const serialized = JSON.stringify(health);
+    expect(serialized).not.toContain(FAKE_API_KEY);
+    expect(serialized).not.toContain(FAKE_ENDPOINT);
+  });
+
+  it('reports status down when only the endpoint is missing', async () => {
+    const provider = new OpenAICompatibleProvider(FAKE_API_KEY, '', 'my-custom');
+    await expect(provider.getHealth()).resolves.toMatchObject({ status: 'down', errorRate: 1 });
+  });
+
+  // G-01 regression: `getHealth()` must return a status that is a member of the
+  // `ProviderStatus` union (`packages/ai/src/types/index.ts`). The fix for G-01
+  // replaced the out-of-union literal 'unhealthy' with the existing 'down'; a
+  // future value that is not in the union would fail the repo-wide typecheck and
+  // this runtime membership assertion.
+  it('returns a status that is a member of the ProviderStatus union (G-01 regression)', async () => {
+    const PROVIDER_STATUSES = ['healthy', 'degraded', 'unstable', 'down'] as const;
+    const configured = await new OpenAICompatibleProvider(
+      FAKE_API_KEY,
+      FAKE_ENDPOINT,
+      'my-custom',
+    ).getHealth();
+    const unconfigured = await new OpenAICompatibleProvider('', '', 'my-custom').getHealth();
+    expect(PROVIDER_STATUSES).toContain(configured.status);
+    expect(PROVIDER_STATUSES).toContain(unconfigured.status);
+    expect(configured.status).toBe('healthy');
+    expect(unconfigured.status).toBe('down');
+  });
+
+  it('getHealth agrees with isHealthy for a fully configured provider', async () => {
+    const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom');
+    await expect(provider.isHealthy()).resolves.toBe(true);
+    await expect(provider.getHealth()).resolves.toMatchObject({ status: 'healthy', errorRate: 0 });
+  });
+
   it('normalises a 429 SDK error into a rate-limit error', async () => {
     generateTextMock.mockRejectedValue({ statusCode: 429, message: 'rate limited' });
     const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom');
@@ -151,6 +191,110 @@ describe('OpenAICompatibleProvider', () => {
     );
   });
 
+  it('aborts the in-flight request when the timeout elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      generateTextMock.mockImplementation((call: { abortSignal: AbortSignal }) => {
+        return new Promise((_resolve, reject) => {
+          call.abortSignal?.addEventListener('abort', () => {
+            reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+          });
+        });
+      });
+      const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom', {
+        timeoutMs: 100,
+      });
+      const promise = provider.execute({ messages: MESSAGES, model: 'custom' });
+      const expectation = expect(promise).rejects.toThrow('timed out after 100ms');
+      await vi.advanceTimersByTimeAsync(200);
+      await expectation;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('normalises 401 and 403 SDK errors as authentication failures without leaking the key', async () => {
+    const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom');
+
+    generateTextMock.mockRejectedValue({ statusCode: 401, message: 'unauthorized' });
+    await expect(provider.execute({ messages: MESSAGES, model: 'custom' })).rejects.toThrow(
+      'authentication failed (401/403)',
+    );
+
+    generateTextMock.mockRejectedValue({ statusCode: 403, message: 'forbidden' });
+    const rejection = provider.execute({ messages: MESSAGES, model: 'custom' });
+    await expect(rejection).rejects.toThrow('authentication failed (401/403)');
+    await expect(rejection).rejects.not.toThrow(FAKE_API_KEY);
+  });
+
+  it('produces schema-validated structured output via Output.object', async () => {
+    generateTextMock.mockResolvedValue({
+      output: Promise.resolve({ summary: 'ok', score: 9 }),
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      finalStep: { response: { modelId: 'custom-model' } },
+    });
+    const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom', {
+      modelId: 'custom-model',
+    });
+    const response = await provider.generateStructured({
+      messages: MESSAGES,
+      model: 'custom',
+      schema: { type: 'object' },
+    });
+    const call = generateTextMock.mock.calls[0][0] as {
+      output: { kind: string; options: unknown };
+      instructions?: string;
+      messages: Array<{ role: string }>;
+      model: { modelId: string };
+    };
+    expect(call.output).toMatchObject({ kind: 'object' });
+    expect(call.instructions).toBe('You are helpful.');
+    expect(call.messages).toHaveLength(1);
+    expect(call.messages[0].role).toBe('user');
+    // The structured path resolves the configured structuredModelId.
+    expect(call.model.modelId).toBe('custom-model');
+    expect(JSON.parse(response.content)).toEqual({ summary: 'ok', score: 9 });
+    expect(response.tokenUsage.total).toBe(15);
+  });
+
+  it('uses the explicit structuredModelId for structured output', async () => {
+    generateTextMock.mockResolvedValue({
+      output: Promise.resolve({ ok: true }),
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      finalStep: { response: { modelId: 'custom-mini' } },
+    });
+    const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom', {
+      modelId: 'custom-large',
+      structuredModelId: 'custom-mini',
+    });
+    await provider.generateStructured({
+      messages: MESSAGES,
+      model: 'custom',
+      schema: { type: 'object' },
+    });
+    expect(chatMock).toHaveBeenCalledWith('custom-mini');
+  });
+
+  it('falls back to the requested model when the SDK omits a modelId while streaming', async () => {
+    async function* textStream(): AsyncGenerator<string> {
+      yield 'x';
+    }
+    streamTextMock.mockReturnValue({
+      textStream: textStream(),
+      usage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+      finalStep: Promise.resolve({ response: { modelId: '   ' } }),
+    });
+    const provider = new OpenAICompatibleProvider(FAKE_API_KEY, FAKE_ENDPOINT, 'my-custom', {
+      modelId: 'custom-model',
+    });
+    const events: Array<Record<string, unknown>> = [];
+    for await (const event of provider.stream({ messages: MESSAGES, model: 'custom' })) {
+      events.push(event as Record<string, unknown>);
+    }
+    const done = events[events.length - 1].data as { modelId: string };
+    expect(done.modelId).toBe('custom-model');
+  });
+
   it('streams content and done events', async () => {
     async function* textStream(): AsyncGenerator<string> {
       yield 'Hello ';
@@ -171,6 +315,13 @@ describe('OpenAICompatibleProvider', () => {
     expect(events[0]).toMatchObject({ type: 'content' });
     expect((events[0].data as { text: string }).text).toBe('Hello ');
     expect(events[events.length - 1].type).toBe('done');
+    const done = events[events.length - 1].data as {
+      modelId: string;
+      tokenUsage: { total: number };
+      cost: number;
+    };
+    expect(done.modelId).toBe('gpt-4o-mini');
+    expect(done.tokenUsage.total).toBe(7);
   });
 
   it('never exposes the API key in output or metadata', async () => {

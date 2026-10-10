@@ -109,12 +109,24 @@ export class DeepSeekProvider implements ProviderAdapter {
     return Promise.resolve(this.apiKey.length > 0);
   }
 
+  /**
+   * F-3: mirror `isHealthy()` — the health status must agree with the adapter's
+   * own readiness predicate. A provider that cannot serve (`apiKey` empty) is
+   * 'down', not 'healthy'. This is the same contract `OpenAICompatibleProvider`
+   * established and `AIMapper`/`AIOrchestrationService` consume.
+   *
+   * The predicate is evaluated SYNCHRONOUSLY here: `isHealthy()` returns a
+   * `Promise<boolean>`, so testing it directly would test the (always-truthy)
+   * Promise object and report a keyless adapter as 'healthy'. No network probe
+   * is performed — model configuration is the readiness signal.
+   */
   getHealth(): Promise<ProviderHealth> {
+    const configured = this.apiKey.length > 0;
     return Promise.resolve({
       providerId: 'deepseek',
-      status: 'healthy',
+      status: configured ? 'healthy' : 'down',
       latency: 0,
-      errorRate: 0,
+      errorRate: configured ? 0 : 1,
       lastChecked: new Date(),
       isRateLimited: false,
       rateLimitRemaining: 0,

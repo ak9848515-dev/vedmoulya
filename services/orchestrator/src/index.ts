@@ -25,8 +25,13 @@ export interface OrchestratorConfig {
     deepseek?: { apiKey: string };
     /** OpenRouter — OpenAI-compatible endpoint (shared adapter, no special path). */
     openrouter?: { apiKey: string; defaultModelId?: string };
-    /** BLD-022 — Ollama local provider (same ProviderAdapter contract). */
-    ollama?: { baseUrl: string; model?: string };
+    /**
+     * BLD-022 — Ollama local provider (same ProviderAdapter contract).
+     * `timeoutMs` is an OPTIONAL per-deployment bound for slow local
+     * hardware; when omitted the adapter's own default (120s) applies, so a
+     * configuration that does not set it is byte-for-byte unchanged.
+     */
+    ollama?: { baseUrl: string; model?: string; timeoutMs?: number };
     /** SPRINT-049 — custom (user-defined) providers to register dynamically. */
     custom?: Array<{
       id: string;
@@ -147,6 +152,21 @@ export function resolveOllamaBaseUrl(): string | undefined {
   return process.env.AI_OLLAMA_BASE_URL?.trim() || undefined;
 }
 
+/**
+ * BLD-022 — resolve an optional, explicitly-bounded Ollama request timeout
+ * (`AI_OLLAMA_TIMEOUT_MS`, positive integer milliseconds). Undefined when no
+ * bound is configured, so the adapter keeps its own default and existing
+ * deployments are unchanged. An unparseable or non-positive value is ignored
+ * (never coerced into a zero/negative timeout).
+ */
+export function resolveOllamaTimeoutMs(explicit?: number): number | undefined {
+  if (explicit !== undefined && Number.isFinite(explicit) && explicit > 0) return explicit;
+  const raw = process.env.AI_OLLAMA_TIMEOUT_MS?.trim();
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function registerPlatformProviders(
   orchestrator: AIOrchestrationService,
   config?: Partial<OrchestratorConfig>,
@@ -217,10 +237,15 @@ export function registerPlatformProviders(
   // provider through the shared AIOrchestrationService — no special path.
   const ollamaBaseUrl = providers?.ollama?.baseUrl ?? resolveOllamaBaseUrl();
   if (ollamaBaseUrl) {
+    // Optional, explicitly-bounded timeout for local hardware. Precedence:
+    // explicit config → AI_OLLAMA_TIMEOUT_MS → the adapter's own default.
+    // A deployment that sets neither keeps the frozen 120s behaviour.
+    const ollamaTimeoutMs = resolveOllamaTimeoutMs(providers?.ollama?.timeoutMs);
     orchestrator.registerProvider(
       new OllamaProvider({
         baseUrl: ollamaBaseUrl,
         model: providers?.ollama?.model ?? (process.env.AI_OLLAMA_MODEL?.trim() || undefined),
+        ...(ollamaTimeoutMs !== undefined ? { timeoutMs: ollamaTimeoutMs } : {}),
         // BLD-023 — the DEPLOYMENT explicitly opts into installed-model fallback
         // so local AI stays usable when the configured model was never pulled.
         // A per-request `modelId` still refuses with a typed MODEL_NOT_FOUND;
