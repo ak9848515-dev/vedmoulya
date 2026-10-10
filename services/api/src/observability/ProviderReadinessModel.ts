@@ -265,6 +265,9 @@ export function deriveProviderReadiness(input: ReadinessInput): ProviderReadines
     );
   }
 
+  // Health is a SEPARATE fact from readiness: it can only DOWNGRADE the view,
+  // never upgrade it. The provider registry reports the canonical `@vedmoulya/ai`
+  // `ProviderStatus` vocabulary ('healthy' | 'degraded' | 'unstable' | 'down').
   if (input.healthStatus === 'down' || input.healthStatus === 'unstable') {
     return build('UNAVAILABLE', false, false, quotaReported ? true : null, 'Reported unhealthy.');
   }
@@ -275,6 +278,20 @@ export function deriveProviderReadiness(input: ReadinessInput): ProviderReadines
       true,
       quotaReported ? true : null,
       'Running in a degraded state.',
+    );
+  }
+  // FAIL-CLOSED (F-U1). This seam accepts a plain string, so an unrecognized
+  // value — a future vocabulary member, a cross-vocabulary literal such as
+  // 'unhealthy', or a typo — must never fall through to READY. Only an explicit
+  // 'healthy' (or NO report at all, which is the absence of evidence rather than
+  // evidence of trouble) may continue to the ready path below.
+  if (input.healthStatus !== undefined && input.healthStatus !== 'healthy') {
+    return build(
+      'UNAVAILABLE',
+      false,
+      false,
+      quotaReported ? true : null,
+      `Unrecognized health status '${input.healthStatus}' — readiness cannot be confirmed.`,
     );
   }
   if (input.mock === true) {

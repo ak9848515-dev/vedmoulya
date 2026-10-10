@@ -3,6 +3,10 @@ import { ProviderApplicationService } from '../ProviderApplicationService.js';
 import { InMemoryProviderRepository } from '../../infrastructure/InMemoryProviderRepository.js';
 import { createCatalogProviders, CATALOG_SIZE } from '../../catalog/provider-catalog.js';
 import type { CreateProviderDTO } from '../ProviderDTO.js';
+import { Provider } from '../../domain/entities/Provider.js';
+import type { ProviderHealth } from '../../domain/entities/Provider.js';
+import { createProviderId } from '../../domain/value-objects/ProviderId.js';
+import { ProviderLifecycleStatus } from '../../domain/value-objects/ProviderLifecycleStatus.js';
 
 function createService(): ProviderApplicationService {
   return new ProviderApplicationService(new InMemoryProviderRepository(createCatalogProviders()));
@@ -317,6 +321,54 @@ describe('ProviderApplicationService', () => {
     expect(tier.success).toBe(true);
     expect(tier.data?.tier).toBe('ready');
     expect((await svc.getAvailabilityTier('nope')).success).toBe(false);
+  });
+
+  it('never renders an unrecognized provider status as healthy or ready (F-R2)', async () => {
+    const repo = new InMemoryProviderRepository([]);
+    // Health hydrated from unvalidated storage — the Postgres provider
+    // repository casts the stored JSONB column, so a stale / cross-vocabulary
+    // status can reach the service despite the canonical union type.
+    const storedHealth = JSON.parse(
+      JSON.stringify({
+        status: 'unhealthy',
+        healthScore: 0.95,
+        latencyMs: 10,
+        successCount: 95,
+        failureCount: 5,
+        quotaUsedPercent: 0,
+        rateLimitRemaining: 0,
+        rateLimitResetAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastCheckedAt: '2026-08-03T00:00:00.000Z',
+      }),
+    ) as ProviderHealth;
+    await repo.save(
+      Provider.create({
+        id: createProviderId('mystery'),
+        family: 'mock',
+        name: 'mystery',
+        description: 'provider with an unrecognized persisted status',
+        owner: 'test',
+        capabilities: ['content_generation'],
+        lifecycleStatus: ProviderLifecycleStatus.fromStatus('active'),
+        health: storedHealth,
+      }),
+    );
+
+    const svc = new ProviderApplicationService(repo);
+
+    // The API-facing fleet DTO must not report it as healthy.
+    const fleet = await svc.getFleetHealth();
+    expect(fleet.success).toBe(true);
+    expect(fleet.data?.totalCount).toBe(1);
+    expect(fleet.data?.healthyCount).toBe(0);
+    expect(fleet.data?.unstableCount).toBe(1);
+
+    // …and the API-facing availability tier must not report it as ready.
+    const tier = await svc.getAvailabilityTier('mystery');
+    expect(tier.success).toBe(true);
+    expect(tier.data?.tier).toBe('risk');
   });
 
   it('lists by family and capability', async () => {

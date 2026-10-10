@@ -657,15 +657,49 @@ describe('createCapabilitySourcePort', () => {
     expect(facts).toHaveLength(2);
     expect(facts[0]?.quality).toBe(0.9);
     expect(facts[1]?.quality).toBeUndefined(); // bestQuality 0 → no fabricated quality
-    expect(facts[0]?.configured).toBe(true); // healthy + active
+    expect(facts[0]?.configured).toBe(true); // active lifecycle; health NOT consulted (F-1)
     expect(facts[0]?.modelId).toBe('gpt-4');
     expect(facts[0]?.evidence[0]?.source).toBe('provider-registry');
   });
 
-  it('marks providers as unconfigured when health/lifecycle are not healthy/active', async () => {
+  it('marks providers as unconfigured when lifecycle is inactive (F-1: lifecycle only, not health)', async () => {
     const providers = {
       listByCapability: vi.fn(async () => ({
-        data: [provider({ health: { status: 'down' }, lifecycleStatus: 'retired' })],
+        data: [provider({ lifecycleStatus: 'retired' })],
+      })),
+    };
+    const port = createCapabilitySourcePort({
+      providers: providers as never,
+      aiWorld: {} as never,
+      localModelDiscovery: {
+        discover: vi.fn(async () => ({ discovered: false, models: [] })),
+      } as never,
+    });
+    const facts = await port.providerCandidates('CODING');
+    expect(facts[0]?.configured).toBe(false);
+  });
+
+  it('keeps a provider configured even when health is not healthy (F-1: health does not decide configured)', async () => {
+    const providers = {
+      listByCapability: vi.fn(async () => ({
+        data: [provider({ health: { status: 'down' }, lifecycleStatus: 'active' })],
+      })),
+    };
+    const port = createCapabilitySourcePort({
+      providers: providers as never,
+      aiWorld: {} as never,
+      localModelDiscovery: {
+        discover: vi.fn(async () => ({ discovered: false, models: [] })),
+      } as never,
+    });
+    const facts = await port.providerCandidates('CODING');
+    expect(facts[0]?.configured).toBe(true);
+  });
+
+  it('keeps a provider unconfigured when lifecycle is inactive even with healthy health (F-1: no health shortcut)', async () => {
+    const providers = {
+      listByCapability: vi.fn(async () => ({
+        data: [provider({ health: { status: 'healthy' }, lifecycleStatus: 'deprecated' })],
       })),
     };
     const port = createCapabilitySourcePort({

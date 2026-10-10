@@ -110,4 +110,52 @@ describe('deriveProviderReadiness', () => {
     expect(view.state).toBe('READY');
     expect(view.reason).toMatch(/mock/i);
   });
+
+  // ── F-U1 regression: the health seam must be fail-closed ─────────────────
+  // `healthStatus` is a plain string seam. Before the fix, any value other than
+  // 'down'/'unstable'/'degraded' — including a cross-vocabulary literal like
+  // 'unhealthy' or a future value like 'unknown' — fell through to READY.
+
+  it('does NOT report READY for a cross-vocabulary health value (F-U1)', () => {
+    const view = deriveProviderReadiness(base({ healthStatus: 'unhealthy' }));
+    expect(view.state).not.toBe('READY');
+    expect(view.ready).toBe(false);
+    expect(view.executable).toBe(false);
+  });
+
+  it('does NOT report READY for an unknown/future health value (F-U1)', () => {
+    const view = deriveProviderReadiness(base({ healthStatus: 'unknown' }));
+    expect(view.state).not.toBe('READY');
+    expect(view.ready).toBe(false);
+    expect(view.executable).toBe(false);
+  });
+
+  it('does NOT report READY for an invalid empty health value (F-U1)', () => {
+    const view = deriveProviderReadiness(base({ healthStatus: '' }));
+    expect(view.state).not.toBe('READY');
+    expect(view.ready).toBe(false);
+  });
+
+  it('recognizes every canonical health value explicitly', () => {
+    expect(deriveProviderReadiness(base({ healthStatus: 'healthy' })).state).toBe('READY');
+    expect(deriveProviderReadiness(base({ healthStatus: 'degraded' })).state).toBe('DEGRADED');
+    expect(deriveProviderReadiness(base({ healthStatus: 'unstable' })).state).toBe('UNAVAILABLE');
+    expect(deriveProviderReadiness(base({ healthStatus: 'down' })).state).toBe('UNAVAILABLE');
+  });
+
+  it('keeps READY when health is simply not reported (absence of evidence)', () => {
+    const view = deriveProviderReadiness(base());
+    expect(view.state).toBe('READY');
+    expect(view.ready).toBe(true);
+    expect(view.executable).toBe(true);
+  });
+
+  it('never lets an unrecognized health value reach READY via the quota path (F-U1)', () => {
+    // Quota evidence is evaluated before health (existing precedence). An
+    // unrecognized health value must still not upgrade the view to READY.
+    const view = deriveProviderReadiness(base({ quotaUsedPercent: 95, healthStatus: 'unhealthy' }));
+    expect(view.state).not.toBe('READY');
+    expect(view.state).toBe('DEGRADED');
+    expect(view.reason).toMatch(/quota/i);
+  });
 });

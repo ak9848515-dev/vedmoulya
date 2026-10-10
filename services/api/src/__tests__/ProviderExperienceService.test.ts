@@ -328,6 +328,95 @@ describe('ProviderExperienceService — view model', () => {
     expect(byId.get('unknown')).toBe('UNKNOWN');
   });
 
+  // G-05M / F-2 — unknown-status fail-closed regression: any health.status
+  // outside the canonical `@vedmoulya/ai` ProviderStatus vocabulary must map
+  // to UNKNOWN, never to AVAILABLE/LIMITED. The invalid literals below cannot
+  // be expressed in ProviderDTO without a cast, so the cast stays local here.
+  describe('F-2 unknown-status fail-closed', () => {
+    async function availabilityById(providers: ProviderDTO[]) {
+      const { service } = createService({
+        marketplace: { success: true, data: { providers } },
+      });
+      const result = await service.getOverview('u1');
+      expect(result.success).toBe(true);
+      return new Map(result.data?.providers.map((p) => [p.providerId, p.availability]));
+    }
+
+    it('maps the unrecognized legacy value `unhealthy` to UNKNOWN', async () => {
+      const base = providerDTO().health;
+      const providers = [
+        providerDTO({
+          id: 'legacy-unhealthy',
+          health: { ...base, status: 'unhealthy' as unknown as typeof base.status },
+          models: [],
+        }),
+      ];
+      const byId = await availabilityById(providers);
+      expect(byId.get('legacy-unhealthy')).toBe('UNKNOWN');
+    });
+
+    it('maps an arbitrary future value such as `critical` to UNKNOWN', async () => {
+      const base = providerDTO().health;
+      const providers = [
+        providerDTO({
+          id: 'future-critical',
+          health: { ...base, status: 'critical' as unknown as typeof base.status },
+          models: [],
+        }),
+      ];
+      const byId = await availabilityById(providers);
+      expect(byId.get('future-critical')).toBe('UNKNOWN');
+    });
+
+    it('retains documented behavior for recognized states', async () => {
+      const base = providerDTO().health;
+      const providers = [
+        providerDTO({ id: 'healthy', health: { ...base, status: 'healthy' }, models: [] }),
+        providerDTO({
+          id: 'unstable',
+          health: { ...base, status: 'unstable' },
+          models: [],
+        }),
+      ];
+      const byId = await availabilityById(providers);
+      expect(byId.get('healthy')).toBe('AVAILABLE');
+      expect(byId.get('unstable')).toBe('UNAVAILABLE');
+    });
+
+    it('keeps LOCAL-family and lifecycle precedence ahead of the unknown-status rule', async () => {
+      const base = providerDTO().health;
+      const providers = [
+        providerDTO({
+          id: 'local-unknown-status',
+          family: 'ollama',
+          health: { ...base, status: 'critical' as unknown as typeof base.status },
+          models: [],
+        }),
+        providerDTO({
+          id: 'deprecated-unknown-status',
+          lifecycleStatus: 'deprecated',
+          health: { ...base, status: 'critical' as unknown as typeof base.status },
+          models: [],
+        }),
+      ];
+      const byId = await availabilityById(providers);
+      expect(byId.get('local-unknown-status')).toBe('LOCAL');
+      expect(byId.get('deprecated-unknown-status')).toBe('UNAVAILABLE');
+    });
+
+    it('keeps the health-score/empty-last-checked UNKNOWN fallback intact', async () => {
+      const providers = [
+        providerDTO({
+          id: 'no-evidence',
+          health: { ...providerDTO().health, healthScore: 0, lastCheckedAt: '' },
+          models: [],
+        }),
+      ];
+      const byId = await availabilityById(providers);
+      expect(byId.get('no-evidence')).toBe('UNKNOWN');
+    });
+  });
+
   it('honors the preferred model when it belongs to the preferred provider', async () => {
     const { service } = createService({
       getPreferences: {

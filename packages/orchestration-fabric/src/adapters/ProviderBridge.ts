@@ -15,8 +15,36 @@
 // can make informed routing decisions.
 // ──────────────────────────────────────────────────────────────────
 
+import type { ProviderStatus } from '@vedmoulya/ai';
 import type { ProviderHealthStatus } from '../types/provider-router.js';
 import type { ProviderHealthBridge } from './index.js';
+
+/**
+ * Does a canonical provider health status (`@vedmoulya/ai` `ProviderStatus`)
+ * represent a provider that can actually serve work?
+ *
+ * G-05A / F-R1 — the sync used to test `status !== 'unhealthy'`. The canonical
+ * vocabulary is `'healthy' | 'degraded' | 'unstable' | 'down'`, which NEVER
+ * contains `'unhealthy'`, so a provider the registry reported as `'down'` or
+ * `'unstable'` was recorded as a SUCCESS. That synthetic success raised the
+ * fabric ledger's success rate, so the router (`ProviderRouter.findCandidates`)
+ * could treat a down provider as available and route work to it.
+ *
+ * HONESTY: only `'healthy'` and `'degraded'` count as successes — `'degraded'`
+ * is still usable. `'unstable'` and `'down'` are failures. The switch is
+ * exhaustive over `ProviderStatus`, so adding a vocabulary member is a compile
+ * error here rather than a silent default.
+ */
+function isProviderHealthSuccess(status: ProviderStatus): boolean {
+  switch (status) {
+    case 'healthy':
+    case 'degraded':
+      return true;
+    case 'unstable':
+    case 'down':
+      return false;
+  }
+}
 
 /**
  * Interface for the existing provider system that the bridge wraps.
@@ -27,7 +55,12 @@ export interface ExistingProviderPort {
   listProviderHealth(): Promise<
     Array<{
       providerName: string;
-      status: string;
+      /**
+       * Canonical provider health (`@vedmoulya/ai` `ProviderStatus`). Typed —
+       * NOT a bare `string` — so a cross-vocabulary literal (e.g. `'unhealthy'`)
+       * is a compile error at the port rather than being silently mis-mapped.
+       */
+      status: ProviderStatus;
       score: number;
       lastLatencyMs: number;
       errorRate: number;
@@ -100,7 +133,8 @@ export class ProviderBridge {
     for (const provider of healthData) {
       this.healthBridge.recordObservation(provider.providerName, {
         latencyMs: provider.lastLatencyMs,
-        success: provider.status !== 'unhealthy',
+        // F-R1: 'down'/'unstable' must NOT be observed as successes.
+        success: isProviderHealthSuccess(provider.status),
       });
     }
   }

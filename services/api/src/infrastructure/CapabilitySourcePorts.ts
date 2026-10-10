@@ -111,8 +111,16 @@ export function createCapabilitySourcePort(
             quality: provider.bestQuality > 0 ? provider.bestQuality : undefined,
             costTier: provider.costTier,
             availability: provider.availability,
-            configured:
-              provider.health.status === 'healthy' || provider.lifecycleStatus === 'active',
+            // F-1: `configured` is a CONNECTION/enablement flag (per
+            // `CapabilitySourcePort.ProviderCandidateFact`), not a health verdict.
+            // The only registry input that legitimately carries "configured for this
+            // user / can serve now" is lifecycle + user preference; health is a
+            // SEPARATE measured-reliability axis and must not decide it. Keep the
+            // registry-frozen proxy as today's best enablement signal, and stop
+            // contradicting the providers screen (`deriveAvailability`) and the
+            // routing-eligibility gate (`RuntimePorts.registryHealthy`, both on
+            // `status === 'healthy' && lifecycle === 'active'`).
+            configured: provider.lifecycleStatus === 'active',
             evidence: [
               {
                 claim: `Registry provider ${provider.name} supports the required AI features`,

@@ -116,6 +116,36 @@ function createMockExistingProviders(): ExistingProviderPort {
   };
 }
 
+/**
+ * Existing-provider port whose reported health is supplied per test. The
+ * `status` values are the canonical `@vedmoulya/ai` `ProviderStatus` members
+ * ('healthy' | 'degraded' | 'unstable' | 'down') — the SAME vocabulary the
+ * orchestrator adapters emit — so this helper exercises the real boundary.
+ */
+function createExistingProvidersWith(
+  health: Array<{
+    providerName: string;
+    status: 'healthy' | 'degraded' | 'unstable' | 'down';
+    score: number;
+    lastLatencyMs: number;
+    errorRate: number;
+    successRate: number;
+    totalRequests: number;
+    failedRequests: number;
+  }>,
+): ExistingProviderPort {
+  return {
+    listProviderHealth: async () => health,
+    getProviderCapabilities: async () =>
+      health.map((h) => ({
+        providerName: h.providerName,
+        capabilities: ['text_generation'],
+        costPer1kTokens: 0.01,
+        averageLatencyMs: h.lastLatencyMs,
+      })),
+  };
+}
+
 function createMockAIExecution(): AIExecutionPort {
   return {
     orchestrate: async (request) => ({
@@ -301,6 +331,101 @@ describe('TEST 3: ProviderBridge syncs health and delegates AI calls', () => {
     expect(openai).toBeDefined();
     expect(openai!.health).toBeDefined();
     expect(openai!.health!.status).toBe('healthy');
+  });
+
+  // ── F-R1 regression: status → observation mapping ────────────────────────
+  // The old bridge tested `provider.status !== 'unhealthy'`. The canonical
+  // `@vedmoulya/ai` `ProviderStatus` never contains 'unhealthy', so a provider
+  // the registry reported as 'down' or 'unstable' was recorded as a SUCCESS —
+  // a synthetic success that made the fabric router treat it as available.
+
+  it('records a registry-down provider as a failure, never a success (F-R1)', async () => {
+    const healthBridge = new ProviderHealthBridge();
+    const bridge = new ProviderBridge({
+      healthBridge,
+      existingProviders: createExistingProvidersWith([
+        {
+          providerName: 'down-provider',
+          status: 'down',
+          score: 0,
+          lastLatencyMs: 0,
+          errorRate: 1,
+          successRate: 0,
+          totalRequests: 100,
+          failedRequests: 100,
+        },
+      ]),
+      aiExecution: createMockAIExecution(),
+    });
+
+    await bridge.syncProviderHealth();
+
+    const health = healthBridge.getHealth('down-provider');
+    expect(health).toBeDefined();
+    // A 'down' provider must be observed as a failure, not a synthetic success.
+    expect(health!.failedRequests).toBe(1);
+    expect(health!.successRate).toBe(0);
+    expect(health!.status).not.toBe('healthy');
+  });
+
+  it('records a registry-unstable provider as a failure (F-R1)', async () => {
+    const healthBridge = new ProviderHealthBridge();
+    const bridge = new ProviderBridge({
+      healthBridge,
+      existingProviders: createExistingProvidersWith([
+        {
+          providerName: 'unstable-provider',
+          status: 'unstable',
+          score: 0.3,
+          lastLatencyMs: 50,
+          errorRate: 0.7,
+          successRate: 0.3,
+          totalRequests: 100,
+          failedRequests: 70,
+        },
+      ]),
+      aiExecution: createMockAIExecution(),
+    });
+
+    await bridge.syncProviderHealth();
+
+    expect(healthBridge.getHealth('unstable-provider')!.failedRequests).toBe(1);
+  });
+
+  it('still records healthy and degraded providers as successes (F-R1)', async () => {
+    const healthBridge = new ProviderHealthBridge();
+    const bridge = new ProviderBridge({
+      healthBridge,
+      existingProviders: createExistingProvidersWith([
+        {
+          providerName: 'healthy-provider',
+          status: 'healthy',
+          score: 0.95,
+          lastLatencyMs: 120,
+          errorRate: 0.01,
+          successRate: 0.99,
+          totalRequests: 100,
+          failedRequests: 1,
+        },
+        {
+          providerName: 'degraded-provider',
+          status: 'degraded',
+          score: 0.6,
+          lastLatencyMs: 900,
+          errorRate: 0.3,
+          successRate: 0.7,
+          totalRequests: 100,
+          failedRequests: 30,
+        },
+      ]),
+      aiExecution: createMockAIExecution(),
+    });
+
+    await bridge.syncProviderHealth();
+
+    // 'degraded' is still usable — it must count as a success.
+    expect(healthBridge.getHealth('healthy-provider')!.failedRequests).toBe(0);
+    expect(healthBridge.getHealth('degraded-provider')!.failedRequests).toBe(0);
   });
 });
 

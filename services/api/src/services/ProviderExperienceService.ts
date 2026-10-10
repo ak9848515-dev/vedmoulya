@@ -21,14 +21,52 @@ import type { ProviderPreferencesService } from '@vedmoulya/providers';
 import type { ProviderPreferences } from '@vedmoulya/providers';
 import type { ProviderDTO, ProviderModelDTO } from '@vedmoulya/providers';
 import { defaultProviderPreferences } from '@vedmoulya/providers';
+import type { ProviderStatus } from '@vedmoulya/ai';
 import { ModelSelectionIntelligence } from '@vedmoulya/services';
 import type { CostLedger, CostLedgerSnapshot } from '../observability/CostLedger.js';
 import type { TraceStore } from '@vedmoulya/core';
 import { openaiOrgUsageProbe, openaiOrgWindow } from './ProviderUsageIngestor.js';
 import type { OpenAIOrgModelUsage, OpenAIOrgPeriod } from './ProviderUsageIngestor.js';
 
-// ── View model types ────────────────────────────────────────────────────────
+// F-2: the canonical health vocabulary, single-sourced from the `@vedmoulya/ai`
+// `ProviderStatus` union so `deriveAvailability` (and any future reader of the
+// row's `health.status`) validates against the contract instead of inline strings.
+// Typed as a readonly `ProviderStatus[]` so a divergence from the canonical union
+// is a compile error here rather than a silent drift.
+export const CANONICAL_PROVIDER_HEALTH_VALUES: readonly ProviderStatus[] = [
+  'healthy',
+  'degraded',
+  'unstable',
+  'down',
+] as const;
 
+export interface ProviderModelExperience {
+  id: string;
+  name: string;
+  /** Short capability labels for the model dropdown (e.g. Reasoning · Coding). */
+  capabilities: string[];
+}
+
+export interface ProviderExperienceRow {
+  providerId: string;
+  name: string;
+  family: string;
+  /**
+   * PROVIDER-01 — WHICH credential can authenticate this provider for THIS
+   * user: their OWN stored (verified) credential ('USER'), this deployment's
+   * ('PLATFORM'), or none ('NONE'). Never the secret itself. The overview uses
+   * it so a user-supplied key that the runtime registry cannot see still reads
+   * as connected once the user has enabled the AI.
+   */
+  credentialSource: 'USER' | 'PLATFORM' | 'NONE';
+  /** Selected/default model for this user (preferred model or best fit). */
+  selectedModel: { id: string; name: string } | null;
+  /** Every model the registry knows for this provider (never hardcoded). */
+  models: ProviderModelExperience[];
+  availability: ProviderAvailability;
+}
+
+// ── View model types ────────────────────────────────────────────────────────
 export type ProviderAvailability = 'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE' | 'LOCAL' | 'UNKNOWN';
 
 export interface ProviderModelExperience {
@@ -165,12 +203,31 @@ function deriveAvailability(
   const lifecycle = provider.lifecycleStatus;
   const health = provider.health.status;
   if (lifecycle === 'deprecated' || lifecycle === 'archived') return 'UNAVAILABLE';
+
+  // Fail-closed (F-2): the registry reports the canonical `@vedmoulya/ai`
+  // `ProviderStatus` vocabulary (`healthy` | `degraded` | `unstable` | `down`).
+  // Any other value — a future vocabulary member, a cross-vocabulary literal
+  // such as `\`unhealthy\`` (the same value that F-U1 blocks from reaching READY),
+  // or a typo — must never fall through to `AVAILABLE`/`LIMITED`. An unrecognized
+  // status is the absence of a trustworthy health signal and is treated as
+  // `UNKNOWN` (honest), never as `AVAILABLE`.
+  if (!CANONICAL_PROVIDER_HEALTH_VALUES.includes(health)) {
+    return 'UNKNOWN';
+  }
+
   if (health === 'down' || health === 'unstable') return 'UNAVAILABLE';
   if (health === 'degraded' || provider.health.quotaUsedPercent >= 80) return 'LIMITED';
   if (prefs.disabledProviderIds.includes(provider.id)) return 'UNAVAILABLE';
+  // Honest absence of evidence: a provider that has never produced a health
+  // sample is not known to be usable — keep the pre-F-2 UNKNOWN rule.
   if (provider.health.healthScore <= 0 && provider.health.lastCheckedAt === '') return 'UNKNOWN';
   return 'AVAILABLE';
 }
+
+// F-2: `CANONICAL_PROVIDER_HEALTH_VALUES` above is the single place the
+// provider-screen health-vocabulary contract lives. When the upstream
+// `@vedmoulya/ai` `ProviderStatus` union changes, update it first so the
+// provider screen cannot silently diverge from the canonical union.
 
 /** OpenAI org usage view (surfaced in the usage details view). */
 export interface OpenAIOrgUsageViewPayload {
@@ -282,7 +339,7 @@ export class ProviderExperienceService {
         credentialSource: credentialSources.get(provider.family) ?? 'NONE',
         selectedModel,
         models,
-        availability: deriveAvailability(provider, prefs),
+        availability: deriveAvailability(provider, prefs), // canonical `@vedmoulya/ai` `ProviderStatus` (F-2)
         enabled: !disabled.has(provider.id),
         switchDisabledReason: describeProviderSwitch(prefs, catalogIds, provider.id),
         resourceType: classification.resourceType,

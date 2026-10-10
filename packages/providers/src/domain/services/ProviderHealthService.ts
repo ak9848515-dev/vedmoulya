@@ -63,10 +63,20 @@ export class ProviderHealthService {
     let totalFailures = 0;
 
     for (const s of snapshots) {
-      if (s.status === 'down') downCount += 1;
-      else if (s.status === 'unstable') unstableCount += 1;
-      else if (s.status === 'degraded') degradedCount += 1;
-      else healthyCount += 1;
+      // The declared type is the canonical `ProviderStatus` union, but this
+      // value is persisted/hydrated from storage that is NOT validated on read
+      // (the Postgres repository casts the JSONB column), so at runtime it may
+      // be any string. Treat it as such — never as a type-guaranteed literal.
+      const status: string = s.status;
+      if (status === 'down') downCount += 1;
+      else if (status === 'unstable') unstableCount += 1;
+      else if (status === 'degraded') degradedCount += 1;
+      else if (status === 'healthy') healthyCount += 1;
+      // F-R2 — FAIL CLOSED: a status outside the canonical vocabulary must
+      // never be silently counted as healthy. This contract has no 'unknown'
+      // member, so it is reported as `unstable` — "present but not confirmed
+      // usable" — rather than inventing a new status value.
+      else unstableCount += 1;
       scoreSum += s.healthScore;
       latencySum += s.latencyMs;
       totalFailures += s.failureCount;
@@ -95,17 +105,26 @@ export class ProviderHealthService {
   availabilityTier(provider: Provider): 'ready' | 'caution' | 'risk' {
     const lifecycle = provider.lifecycleStatus.value;
     const health = provider.health;
+    // Runtime truth, not the declared union — see `fleetHealth`. Persisted
+    // health is hydrated without validation, so an unrecognized value must be
+    // treated as "not confirmed usable" rather than defaulting to ready.
+    const status: string = health.status;
     if (
-      health.status === 'down' ||
-      health.status === 'unstable' ||
+      status === 'down' ||
+      status === 'unstable' ||
       lifecycle === 'deprecated' ||
       lifecycle === 'archived'
     ) {
       return 'risk';
     }
-    if (health.status === 'degraded' || lifecycle === 'maintenance') {
+    if (status === 'degraded' || lifecycle === 'maintenance') {
       return 'caution';
     }
-    return 'ready';
+    // F-R2 — FAIL CLOSED: only an explicitly healthy provider is 'ready'. An
+    // unrecognized status previously fell through to 'ready' and is now 'risk'.
+    if (status === 'healthy') {
+      return 'ready';
+    }
+    return 'risk';
   }
 }
