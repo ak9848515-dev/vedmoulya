@@ -22,7 +22,9 @@ const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
   requestApproval: vi.fn(),
   approve: vi.fn(),
+  reject: vi.fn(),
   startMission: vi.fn(),
+  missionStatus: vi.fn(),
   authUserId: 'user-1',
 }));
 
@@ -36,10 +38,15 @@ vi.mock('../../lib/api-client.js', () => ({
     mutateAsync: mocks.approve,
     isPending: false,
   }),
+  useOpportunityReject: () => ({
+    mutateAsync: mocks.reject,
+    isPending: false,
+  }),
   useStartMissionForOpportunity: () => ({
     mutateAsync: mocks.startMission,
     isPending: false,
   }),
+  useMissionStatus: (...args: unknown[]) => mocks.missionStatus(...args),
 }));
 
 vi.mock('../../stores/auth-store.js', () => ({
@@ -93,7 +100,11 @@ beforeEach(() => {
   mocks.useQuery.mockReset();
   mocks.requestApproval.mockReset();
   mocks.approve.mockReset();
+  mocks.reject.mockReset();
   mocks.startMission.mockReset();
+  mocks.missionStatus.mockReset();
+  // Default: no Mission yet (the panel only polls once a missionId is known).
+  mocks.missionStatus.mockReturnValue({ data: undefined, isLoading: false, isError: false });
   mocks.authUserId = 'user-1';
 });
 
@@ -352,5 +363,129 @@ describe('S6.4 — OpportunityValueIntelligencePanel', () => {
     // No fabricated verdict and no generic failure message either.
     expect(screen.queryByTestId('value-intelligence-body')).toBeNull();
     expect(screen.queryByText(/Value intelligence is unavailable right now/)).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S7.2 — APPROVED opportunity → Mission UI surface
+//
+// Proves the human can SEE enough to decide, APPROVE explicitly, REJECT
+// explicitly, START the Mission explicitly, and that the EXISTING Mission state
+// is reflected (created → running → verified / failed). Approval never
+// auto-starts a Mission.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('S7.2 — opportunity decision + Mission UI', () => {
+  it('19. shows the opportunity facts needed for an informed decision', async () => {
+    mocks.useQuery.mockReturnValue(
+      queryState(
+        baseValue({
+          title: 'Build a TypeScript SDK',
+          description: 'Client needs a typed SDK for their public API.',
+          category: 'software',
+          riskLevel: 'MEDIUM',
+          sourceRef: { source: 'manual-import', sourceReference: 'https://board.example/1' },
+          requiredCapabilities: ['typescript', 'api design'],
+        }),
+      ),
+    );
+    render(<OpportunityValueIntelligencePanel opportunityId="opp-1" />);
+    await waitFor(() => {
+      expect(screen.getByTestId('opportunity-decision-facts')).toBeDefined();
+    });
+    expect(screen.getByText('Build a TypeScript SDK')).toBeDefined();
+    expect(screen.getByText('Client needs a typed SDK for their public API.')).toBeDefined();
+    expect(screen.getByTestId('opportunity-capabilities').textContent).toContain(
+      'typescript, api design',
+    );
+    expect(screen.getByText(/source: manual-import/)).toBeDefined();
+  });
+
+  it('20. REJECT is an explicit human action bound to the REJECTED transition', async () => {
+    mocks.useQuery.mockReturnValue(queryState(baseValue()));
+    mocks.requestApproval.mockResolvedValue({ success: true, data: { taskId: 'task-1' } });
+    mocks.reject.mockResolvedValue({ success: true, data: { id: 'opp-1', status: 'REJECTED' } });
+    render(<OpportunityValueIntelligencePanel opportunityId="opp-1" />);
+    fireEvent.click(await screen.findByLabelText('Request approval for opp-1'));
+    const rejectButton = await screen.findByLabelText('Reject opportunity opp-1');
+    expect(mocks.reject).not.toHaveBeenCalled();
+    fireEvent.click(rejectButton);
+    await waitFor(() => {
+      expect(mocks.reject).toHaveBeenCalledWith({ userId: 'user-1', id: 'opp-1' });
+    });
+    // Rejection never starts a Mission.
+    expect(mocks.startMission).not.toHaveBeenCalled();
+  });
+
+  it('21. an already-REJECTED opportunity shows the rejected state', async () => {
+    mocks.useQuery.mockReturnValue(queryState(baseValue({ status: 'REJECTED' })));
+    render(<OpportunityValueIntelligencePanel opportunityId="opp-1" />);
+    await waitFor(() => {
+      expect(screen.getByText(/This opportunity was rejected/)).toBeDefined();
+    });
+    expect(screen.queryByLabelText('Start mission for opp-1')).toBeNull();
+  });
+
+  it('22. starting a Mission does NOT claim VERIFIED — status comes from the Mission', async () => {
+    mocks.useQuery.mockReturnValue(queryState(baseValue({ status: 'APPROVED' })));
+    mocks.startMission.mockResolvedValue({
+      success: true,
+      data: { opportunityId: 'opp-1', missionId: 'm-1', created: true },
+    });
+    // Mission is created + RUNNING but NOT yet verified.
+    mocks.missionStatus.mockReturnValue({
+      data: { missionId: 'm-1', state: 'RUNNING', objectives: [] },
+      isLoading: false,
+      isError: false,
+    });
+    render(<OpportunityValueIntelligencePanel opportunityId="opp-1" />);
+    fireEvent.click(await screen.findByLabelText('Start mission for opp-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mission-started')).toBeDefined();
+    });
+    // The status reflects the REAL Mission state.
+    expect(screen.getByTestId('mission-status').textContent).toContain('RUNNING');
+    // No success is fabricated while the Mission is still running.
+    expect(screen.queryByTestId('mission-verified')).toBeNull();
+  });
+
+  it('23. a VERIFIED Mission is reflected in the UI', async () => {
+    mocks.useQuery.mockReturnValue(queryState(baseValue({ status: 'APPROVED' })));
+    mocks.startMission.mockResolvedValue({
+      success: true,
+      data: { opportunityId: 'opp-1', missionId: 'm-1', created: true },
+    });
+    mocks.missionStatus.mockReturnValue({
+      data: {
+        missionId: 'm-1',
+        state: 'COMPLETED',
+        objectives: [{ objectiveId: 'o-1', state: 'VERIFIED', title: 'T', reason: 'ok' }],
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(<OpportunityValueIntelligencePanel opportunityId="opp-1" />);
+    fireEvent.click(await screen.findByLabelText('Start mission for opp-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mission-verified')).toBeDefined();
+    });
+  });
+
+  it('24. a FAILED Mission is honest — no success claimed', async () => {
+    mocks.useQuery.mockReturnValue(queryState(baseValue({ status: 'APPROVED' })));
+    mocks.startMission.mockResolvedValue({
+      success: true,
+      data: { opportunityId: 'opp-1', missionId: 'm-1', created: true },
+    });
+    mocks.missionStatus.mockReturnValue({
+      data: { missionId: 'm-1', state: 'FAILED', objectives: [] },
+      isLoading: false,
+      isError: false,
+    });
+    render(<OpportunityValueIntelligencePanel opportunityId="opp-1" />);
+    fireEvent.click(await screen.findByLabelText('Start mission for opp-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mission-failed')).toBeDefined();
+    });
+    expect(screen.queryByTestId('mission-verified')).toBeNull();
   });
 });

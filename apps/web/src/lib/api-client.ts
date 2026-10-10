@@ -392,6 +392,33 @@ function guardMutation<A extends unknown[], R>(
   };
 }
 
+/**
+ * Wrap a mutation that returns an `{ success, error, data }` envelope and
+ * resolve to the unwrapped `data` payload. Business failures
+ * (`success: false`) throw with the gateway's message; a success envelope that
+ * carries no `data` throws the caller's not-found message. This is the shared
+ * shape used by the provider setup/connect contracts, whose `mutateAsync`
+ * returns the typed result directly instead of the envelope.
+ */
+function guardEnvelopeMutation<A extends unknown[], T>(
+  mutate: (...args: A) => Promise<unknown>,
+  messages: { failure: string; missingData: string },
+): (...args: A) => Promise<T> {
+  return async (...args: A): Promise<T> => {
+    const envelope = (await mutate(...args)) as {
+      success?: boolean;
+      error?: { message?: string } | null;
+      data?: unknown;
+    };
+    if (envelope.success === false) {
+      throw new Error(envelope.error?.message ?? messages.failure);
+    }
+    const result = unwrap<T>(envelope);
+    if (!result) throw new Error(messages.missingData);
+    return result;
+  };
+}
+
 // ── Life OS Hooks ───────────────────────────────────────────────────────────
 
 /**
@@ -840,25 +867,18 @@ export function useSetupProvider() {
   return {
     ...mutation,
     data: unwrap<ProviderSetupResultDTO>(mutation.data),
-    mutateAsync: async (input: {
-      userId: string;
-      family: ConnectProviderFamily;
-      apiKey?: string;
-      endpointUrl?: string;
-      oauthCompleted?: boolean;
-    }): Promise<ProviderSetupResultDTO> => {
-      const envelope = (await mutation.mutateAsync(input)) as {
-        success?: boolean;
-        error?: { message?: string } | null;
-        data?: unknown;
-      };
-      if (envelope.success === false) {
-        throw new Error(envelope.error?.message ?? 'Setup failed');
-      }
-      const result = unwrap<ProviderSetupResultDTO>(envelope);
-      if (!result) throw new Error('Setup failed');
-      return result;
-    },
+    mutateAsync: guardEnvelopeMutation<
+      [
+        {
+          userId: string;
+          family: ConnectProviderFamily;
+          apiKey?: string;
+          endpointUrl?: string;
+          oauthCompleted?: boolean;
+        },
+      ],
+      ProviderSetupResultDTO
+    >(mutation.mutateAsync, { failure: 'Setup failed', missingData: 'Setup failed' }),
   };
 }
 
@@ -883,26 +903,15 @@ export function useConnectProvider() {
   return {
     ...mutation,
     data: unwrap<ProviderConnectionResultDTO>(mutation.data),
-    mutateAsync: async (input: {
-      userId: string;
-      family: ConnectProviderFamily;
-      endpointUrl?: string;
-      apiKey?: string;
-    }): Promise<ProviderConnectionResultDTO> => {
-      // guardMutation throws on the gateway's `{ success: false }` envelope;
-      // on success the envelope's `data` IS the connection result.
-      const envelope = (await mutation.mutateAsync(input)) as {
-        success?: boolean;
-        error?: { message?: string } | null;
-        data?: unknown;
-      };
-      if (envelope.success === false) {
-        throw new Error(envelope.error?.message ?? 'Connection test failed');
-      }
-      const result = unwrap<ProviderConnectionResultDTO>(envelope);
-      if (!result) throw new Error('Connection test failed');
-      return result;
-    },
+    // guardEnvelopeMutation throws on the gateway's `{ success: false }`
+    // envelope; on success the envelope's `data` IS the connection result.
+    mutateAsync: guardEnvelopeMutation<
+      [{ userId: string; family: ConnectProviderFamily; endpointUrl?: string; apiKey?: string }],
+      ProviderConnectionResultDTO
+    >(mutation.mutateAsync, {
+      failure: 'Connection test failed',
+      missingData: 'Connection test failed',
+    }),
   };
 }
 
@@ -4532,6 +4541,16 @@ export interface OpportunityValueIntelligenceResultView {
   valueIntelligence?: OpportunityValueIntelligenceView;
   /** The CURRENT stored lifecycle status (never a manufactured ASSESSED). */
   status: string;
+  // S7.2 — opportunity facts read verbatim for an informed human decision.
+  // Absent fields are omitted (never fabricated).
+  title?: string;
+  description?: string;
+  category?: string;
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
+  sourceRef?: { source: string; sourceReference: string };
+  requiredCapabilities?: string[];
+  estimatedValue?: { label: string; status: string };
+  estimatedEffort?: { label: string; status: string };
 }
 
 /**
@@ -4625,6 +4644,33 @@ export function useOpportunityApprove() {
 }
 
 /**
+ * Reject ONE opportunity. `to: 'REJECTED'` is fixed here so a caller can never
+ * name another transition; the lifecycle itself refuses an illegal jump. This is
+ * a HUMAN action — nothing calls it automatically, and it never launches work.
+ */
+export function useOpportunityReject() {
+  const mutation = api.control.transitionOpportunity.useMutation();
+  return {
+    ...mutation,
+    mutateAsync: guardMutation((input: RejectOpportunityInput) =>
+      mutation.mutateAsync({
+        userId: input.userId,
+        id: input.id,
+        to: 'REJECTED' as const,
+        note: input.note ?? 'human rejected the opportunity',
+      }),
+    ),
+  };
+}
+
+export interface RejectOpportunityInput {
+  userId: string;
+  /** The canonical opportunity id. */
+  id: string;
+  note?: string;
+}
+
+/**
  * Start the canonical Mission for an APPROVED opportunity. The gateway derives
  * identity from the session; the guarded backend refuses any non-APPROVED
  * opportunity, launches exactly one Mission and persists the association.
@@ -4632,6 +4678,23 @@ export function useOpportunityApprove() {
 export function useStartMissionForOpportunity() {
   const mutation = api.control.startMissionForOpportunity.useMutation();
   return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
+
+/**
+ * S7.2 — read the Mission already associated with an opportunity (owner-scoped).
+ * A QUERY: it never launches anything, so the UI can reflect the EXISTING
+ * Mission state (APPROVED → STARTING → CREATED/RUNNING → VERIFIED/FAILED)
+ * without a second state machine.
+ */
+export function useMissionForOpportunity(userId: string, opportunityId: string) {
+  const q = api.control.getMissionForOpportunity.useQuery(
+    { opportunityId },
+    { enabled: Boolean(userId) && Boolean(opportunityId), refetchOnWindowFocus: false },
+  );
+  return {
+    ...q,
+    data: unwrap<{ opportunityId: string; missionId: string; createdAt?: string } | null>(q.data),
+  };
 }
 
 export interface MissionDeliverInput {

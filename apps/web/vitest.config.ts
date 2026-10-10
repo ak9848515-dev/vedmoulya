@@ -17,7 +17,7 @@ export default defineConfig({
     // `@vitest-environment jsdom` pragma.
     environment: 'node',
     globals: true,
-    setupFiles: ['../../tests/vitest.setup.ts'],
+    setupFiles: ['../../tests/vitest.setup.ts', '../../packages/ui/src/vitest.setup.ts'],
     include: [
       'src/auth/**/*.test.ts',
       'src/auth/**/*.test.tsx',

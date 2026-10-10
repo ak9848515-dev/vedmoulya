@@ -1,0 +1,30 @@
+M2 DELIVERY VERIFICATION
+========================
+verified at              : 2026-10-08T13:38:33.284Z
+
+DELIVERY DRAFT
+delivery record exists   : true
+document id              : doc_9c26aa045706195dcdceaeb3e2ac3bd4
+artifact reference exists: true
+stored source            : mission-verified-handoff
+stored name              : M2 Personal Task Manager — acceptance artifact
+stored mime              : text/markdown
+stored size              : 7440 bytes
+artifact bytes           : 7488
+
+APPROVAL / SUBMISSION
+pendingApproval          : true
+submitted                : false
+external action occurred : false
+external submission      : NONE
+client contact           : NONE
+payment                  : NONE
+
+MISSION EVIDENCE
+mission id               : mission_muzl0aj8_1
+objective id             : obj_muzl0aj8_2
+objective state          : VERIFIED
+
+DELIVERY DRAFT           : PASS
+
+VEDMOULYA_M2_DELIVERY_OK

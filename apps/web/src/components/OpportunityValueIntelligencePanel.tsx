@@ -33,7 +33,9 @@ import {
   useOpportunityValueIntelligence,
   useRequestOpportunityApproval,
   useOpportunityApprove,
+  useOpportunityReject,
   useStartMissionForOpportunity,
+  useMissionStatus,
   type OpportunityValueIntelligenceView,
   type ValueAssessment,
   type ValueEvidenceLevel,
@@ -113,6 +115,7 @@ export function OpportunityValueIntelligencePanel({
   const query = useOpportunityValueIntelligence(userId, opportunityId);
   const requestApproval = useRequestOpportunityApproval();
   const approve = useOpportunityApprove();
+  const reject = useOpportunityReject();
   const startMission = useStartMissionForOpportunity();
 
   const data = query.data;
@@ -120,6 +123,15 @@ export function OpportunityValueIntelligencePanel({
   // Once the human approves, the local state is authoritative until the parent
   // refreshes — the panel never re-derives an approval from the score.
   const status = approvedStatus !== '' ? approvedStatus : (data?.status ?? lifecycleStatus);
+
+  // S7.2 — reflect the EXISTING Mission state (no second state machine). The
+  // status is only polled once a Mission id is known for this opportunity.
+  const missionStatus = useMissionStatus(userId, missionId !== '' ? missionId : null);
+  const missionState = missionStatus.data?.state ?? '';
+  const missionSucceeded =
+    missionState === 'COMPLETED' ||
+    (missionStatus.data?.objectives ?? []).some((o) => o.state === 'VERIFIED');
+  const missionFailed = missionState === 'FAILED' || missionState === 'CANCELLED';
 
   /**
    * Honest two-source handling: the world pipeline surfaces control-plane
@@ -210,6 +222,28 @@ export function OpportunityValueIntelligencePanel({
     }
   };
 
+  /**
+   * HUMAN rejection. `to: 'REJECTED'` is fixed in the hook; this never launches
+   * work and never auto-runs.
+   */
+  const rejectDecision = async (): Promise<void> => {
+    setError('');
+    try {
+      const result = await reject.mutateAsync({ userId, id: opportunityId });
+      if ((result as { success?: boolean }).success === false) {
+        setError(
+          (result as { error?: { message?: string } }).error?.message ??
+            'The opportunity could not be rejected.',
+        );
+        return;
+      }
+      setApprovedStatus('REJECTED');
+      onApprovalRequested?.();
+    } catch {
+      setError('Could not reject the opportunity.');
+    }
+  };
+
   // ── Honest loading state ────────────────────────────────────────────────
   if (query.isLoading) {
     return (
@@ -241,7 +275,11 @@ export function OpportunityValueIntelligencePanel({
   // ── Honest failure state (never a fabricated empty verdict) ──────────────
   if (query.isError || (query.data !== undefined && data === undefined)) {
     return (
-      <div className="mt-1.5 rounded-lg border border-[#FECACA] bg-[#FEF2F2] p-2" role="alert">
+      <div
+        className="mt-1.5 rounded-lg border border-[#FECACA] bg-[#FEF2F2] p-2"
+        role="alert"
+        data-testid="value-intelligence-error"
+      >
         <p className="text-[10px] text-[#B91C1C]">
           Value intelligence is unavailable right now. No verdict is shown because none was
           received.
@@ -259,6 +297,35 @@ export function OpportunityValueIntelligencePanel({
         <TrendingUp className="h-3 w-3 text-[#7C3AED]" aria-hidden="true" />
         Value intelligence
       </span>
+
+      {/* S7.2 — the opportunity facts a human needs for an informed DECISION,
+          read VERBATIM from the canonical record (nothing invented). */}
+      {data !== undefined &&
+        (data.title !== undefined ||
+          data.description !== undefined ||
+          data.sourceRef !== undefined ||
+          (data.requiredCapabilities ?? []).length > 0) && (
+          <div className="space-y-0.5" data-testid="opportunity-decision-facts">
+            {data.title !== undefined && (
+              <p className="text-[10px] font-medium text-[#1F2937]">{data.title}</p>
+            )}
+            {data.sourceRef !== undefined && (
+              <p className="text-[9px] text-[#94A3B8]">
+                source: {data.sourceRef.source} · {data.sourceRef.sourceReference}
+              </p>
+            )}
+            {data.description !== undefined && data.description !== '' && (
+              <p className="text-[10px] text-[#64748B]" data-testid="opportunity-description">
+                {data.description}
+              </p>
+            )}
+            {(data.requiredCapabilities ?? []).length > 0 && (
+              <p className="text-[10px] text-[#64748B]" data-testid="opportunity-capabilities">
+                Required skills/capabilities: {data.requiredCapabilities?.join(', ')}
+              </p>
+            )}
+          </div>
+        )}
 
       {/* Qualification (the EXISTING assessor's evidence-based verdict) */}
       {data !== undefined && (
@@ -362,7 +429,7 @@ export function OpportunityValueIntelligencePanel({
       )}
 
       {/* ── HUMAN DECISION — the EXISTING authority-backed request, the
-          explicit human approval, and the guarded mission launch. ───────── */}
+          explicit human approval/rejection, and the guarded mission launch. ── */}
       <div className="pt-1 border-t border-[#E2E8F0]">
         {status === 'APPROVED' ? (
           <div className="space-y-1">
@@ -371,9 +438,35 @@ export function OpportunityValueIntelligencePanel({
               This opportunity is approved. {value?.reasons[0] ?? ''}
             </p>
             {missionId !== '' ? (
-              <p className="text-[10px] text-[#7C3AED]" role="status" data-testid="mission-started">
-                Mission started: {missionId}
-              </p>
+              <div className="space-y-0.5" data-testid="mission-status">
+                <p
+                  className="text-[10px] text-[#7C3AED]"
+                  role="status"
+                  data-testid="mission-started"
+                >
+                  Mission created: {missionId}
+                  {missionState !== '' ? ` · ${missionState}` : ''}
+                </p>
+                {missionSucceeded && (
+                  <p
+                    className="flex items-center gap-1 text-[10px] text-[#15803D]"
+                    data-testid="mission-verified"
+                  >
+                    <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                    Mission VERIFIED. Delivery and external submission remain your explicit action.
+                  </p>
+                )}
+                {missionFailed && (
+                  <p
+                    className="flex items-center gap-1 text-[10px] text-[#B91C1C]"
+                    role="alert"
+                    data-testid="mission-failed"
+                  >
+                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                    Mission {missionState}. No success is claimed — see the Mission for details.
+                  </p>
+                )}
+              </div>
             ) : (
               <>
                 <button
@@ -400,6 +493,11 @@ export function OpportunityValueIntelligencePanel({
               </>
             )}
           </div>
+        ) : status === 'REJECTED' ? (
+          <p className="flex items-center gap-1 text-[10px] text-[#64748B]" role="status">
+            <XCircle className="h-3 w-3" aria-hidden="true" />
+            This opportunity was rejected. No work will run for it.
+          </p>
         ) : requested ? (
           <div className="space-y-1">
             <p className="flex items-center gap-1 text-[10px] text-[#7C3AED]" role="status">
@@ -418,6 +516,17 @@ export function OpportunityValueIntelligencePanel({
               aria-label={`Approve opportunity ${opportunityId}`}
             >
               {approve.isPending ? 'Approving…' : 'Approve opportunity'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void rejectDecision();
+              }}
+              disabled={reject.isPending}
+              className="w-full rounded-lg bg-[#F1F5F9] text-[#B91C1C] text-[10px] font-medium py-1 hover:bg-[#E2E8F0] transition-colors disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]"
+              aria-label={`Reject opportunity ${opportunityId}`}
+            >
+              {reject.isPending ? 'Rejecting…' : 'Reject opportunity'}
             </button>
             {error !== '' && (
               <p className="flex items-center gap-1 text-[10px] text-[#B91C1C]" role="alert">
