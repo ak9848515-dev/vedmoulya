@@ -2002,7 +2002,21 @@ export class ApiApplicationService {
     this.opportunityMissionLaunch = createMissionLaunchPort({
       createAndRun: async (userId, input) => {
         try {
-          const mission = await this.mission.createAndRun(userId, input as never);
+          const mission = await this.mission.createAndRun(userId, {
+            // The derived objective is what the Mission engine actually runs.
+            // `description`/`objective` are both supplied by the launch port; the
+            // MissionService requires `objective`, so fall back to the title (a
+            // non-empty objective is structurally required) — never undefined.
+            title: input.title,
+            objective: input.objective ?? input.description,
+            ...(input.initialObjectives !== undefined && input.initialObjectives.length > 0
+              ? { initialObjectives: input.initialObjectives }
+              : {}),
+            ...(input.autonomyLevel !== undefined
+              ? { autonomyLevel: input.autonomyLevel as never }
+              : {}),
+            ...(input.maxCostUsd !== undefined ? { maxCostUsd: input.maxCostUsd } : {}),
+          });
           return { missionId: mission.missionId };
         } catch (error) {
           return { error: error instanceof Error ? error.message : 'Mission creation failed.' };

@@ -32,6 +32,7 @@ import type { OpportunityApprovalPort } from '../infrastructure/OpportunityAppro
 import { normalizeExternalOpportunity } from '../services/OpportunitySourceAdapter.js';
 import type { OpportunityQualification } from '../services/OpportunityQualification.js';
 import type { MissionLaunchPort } from '../infrastructure/OpportunityMissionPorts.js';
+import { deriveOpportunityMissionObjective } from '../infrastructure/OpportunityMissionPorts.js';
 import type { ExternalSourceFailureCode } from '../infrastructure/OpportunityMonitoringPorts.js';
 import type { OpportunityMonitor } from '../services/OpportunityMonitoring.js';
 import { rankOpportunities } from '../services/OpportunityRecommendation.js';
@@ -530,6 +531,22 @@ export function createControlRouter(
           ...result,
           // The CURRENT stored state (never a manufactured ASSESSED).
           status: record.status,
+          // S7.2 — the opportunity facts a human needs for an informed DECISION
+          // (approve / reject / start mission). These are read VERBATIM from the
+          // canonical record — no score, no estimate, nothing invented. Absent
+          // fields are omitted rather than fabricated.
+          title: record.title,
+          description: record.description,
+          category: record.category,
+          riskLevel: record.riskLevel,
+          ...(record.sourceRef !== undefined ? { sourceRef: record.sourceRef } : {}),
+          ...(record.requiredCapabilities !== undefined
+            ? { requiredCapabilities: record.requiredCapabilities }
+            : {}),
+          ...(record.estimatedValue !== undefined ? { estimatedValue: record.estimatedValue } : {}),
+          ...(record.estimatedEffort !== undefined
+            ? { estimatedEffort: record.estimatedEffort }
+            : {}),
         }),
       );
     },
@@ -636,6 +653,24 @@ export function createControlRouter(
           userId: ownerId,
           title: record.title,
           description: record.description,
+          // S7.2 — derive a BOUNDED, verifiable Mission objective from the
+          // approved opportunity: title, description, stated required
+          // capabilities, provenance, qualification evidence and the human
+          // approval. Missing information is represented honestly — nothing is
+          // invented. This is the ONLY place the opportunity→Mission request is
+          // shaped; the Mission engine and its state machine are untouched.
+          ...deriveOpportunityMissionObjective({
+            title: record.title,
+            description: record.description,
+            ...(record.requiredCapabilities !== undefined
+              ? { requiredCapabilities: record.requiredCapabilities }
+              : {}),
+            ...(record.sourceRef !== undefined ? { sourceRef: record.sourceRef } : {}),
+            evidence: record.evidence,
+            category: record.category,
+            ...(record.confidence !== undefined ? { qualificationScore: record.confidence } : {}),
+            ...(record.approval !== undefined ? { approvalScope: record.approval.scope } : {}),
+          }),
         });
         if (!launched.success) {
           // The launch failed AFTER the claim was taken. The

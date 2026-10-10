@@ -44,6 +44,7 @@ export class ToolRegistryAgentPort implements AgentToolExecutionPort, AgentToolR
       ok: result.ok,
       denied: result.denied,
       outcome: result.outcome,
+      ...(result.data !== undefined ? { data: result.data } : {}),
       error: result.error,
       latencyMs: result.latencyMs,
     };

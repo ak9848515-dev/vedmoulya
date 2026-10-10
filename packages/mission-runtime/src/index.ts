@@ -118,6 +118,45 @@ export {
 } from './adapters/TestVerificationTemplate.js';
 export type { TestVerifiedFileTarget } from './adapters/TestVerificationTemplate.js';
 
+// REVENUE-002A — read→analyse→write data-report template (governed read of a
+// source data file → one real AI execution authoring the deliverable →
+// governed write verified by exact read-back)
+export {
+  createDataReportTemplate,
+  extractDataReportTarget,
+} from './adapters/DataReportTemplate.js';
+export type { DataReportPlanInput } from './adapters/DataReportTemplate.js';
+
+// REVENUE-002A — governed deterministic CSV aggregation tool (figures come
+// from a real computation, never from a model's arithmetic)
+export {
+  DATA_AGGREGATE_TOOL,
+  createDataAggregateTool,
+  parseCsv,
+  computeAggregates,
+} from './adapters/DataAggregateTool.js';
+export type {
+  AggregateGroup,
+  AggregateResult,
+  AggregateOptions,
+} from './adapters/DataAggregateTool.js';
+
+// REVENUE-004A — deterministic narrative-consistency check (factual ranking
+// and total claims in a report are compared against the recomputed
+// aggregates; unsupported claims are flagged for human review, never blessed)
+export {
+  DATA_NARRATIVE_CHECK_TOOL,
+  createDataNarrativeCheckTool,
+  verifyReportNarrative,
+} from './adapters/DataNarrativeCheck.js';
+export type {
+  NarrativeCheckResult,
+  NarrativeCheckToolArgs,
+  NarrativeContradiction,
+  NarrativeFinding,
+  RankedEntry,
+} from './adapters/DataNarrativeCheck.js';
+
 // Durable mission persistence (existing WriteThroughDocumentStore infra)
 export {
   CHECKPOINTS_TABLE,

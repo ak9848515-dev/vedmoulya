@@ -132,6 +132,8 @@ export class FakeAiPort implements AgentAiExecutionPort {
 export interface FakeToolBehavior {
   /** Per-tool results (Map avoids computed member access). */
   results: Map<string, AgentToolActionResult>;
+  /** Per-tool REAL payloads (e.g. a workspace_read body) surfaced as `data`. */
+  data: Map<string, unknown>;
   /** Tool execution latency. */
   latencyMs?: number;
 }
@@ -140,8 +142,11 @@ export class FakeToolPort implements AgentToolExecutionPort {
   readonly calls: Array<{ toolName: string; arguments: Record<string, unknown> }> = [];
   private readonly results: Map<string, AgentToolActionResult>;
 
+  private readonly dataByTool: Map<string, unknown>;
+
   constructor(behavior: Partial<FakeToolBehavior> = {}) {
     this.results = behavior.results ?? new Map();
+    this.dataByTool = behavior.data ?? new Map();
   }
 
   execute(input: {
@@ -150,9 +155,10 @@ export class FakeToolPort implements AgentToolExecutionPort {
     userId?: string;
   }): Promise<AgentToolActionResult> {
     this.calls.push({ toolName: input.toolName, arguments: input.arguments });
+    const data = this.dataByTool.get(input.toolName);
     const override = this.results.get(input.toolName);
     if (override) {
-      return Promise.resolve(override);
+      return Promise.resolve(data !== undefined ? { ...override, data } : override);
     }
     return Promise.resolve({
       ok: true,

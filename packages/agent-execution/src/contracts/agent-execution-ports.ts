@@ -93,6 +93,16 @@ export interface AgentToolActionResult {
   /** True when the tool security chain denied the call — never bypassed. */
   denied: boolean;
   outcome: string;
+  /**
+   * The tool's bounded, already-schema-validated payload (e.g. the read-back
+   * content of `workspace_read`). Optional and additive: an adapter that does
+   * not surface it leaves the step output as `outcome` alone, exactly as
+   * before. When present the engine publishes it as the step's observation
+   * output, so a LATER governed step can consume a real tool observation
+   * through `{outputOf:step-N}` — the model still never chooses a path or a
+   * tool, and every value passes the same security chain.
+   */
+  data?: unknown;
   artifacts?: Array<{ name: string; type: string }>;
   error?: string;
   latencyMs?: number;

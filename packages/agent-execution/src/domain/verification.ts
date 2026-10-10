@@ -40,6 +40,15 @@ export interface VerificationContext {
 export interface VerificationDeps {
   tools?: AgentToolExecutionPort;
   modelVerifier?: AgentModelVerifierPort;
+  /**
+   * Bounded argument resolver applied to a command-verification tool call
+   * before dispatch. The engine uses it to substitute plan-declared
+   * `{outputOf:step-N}` references with the REAL completed output of that
+   * step (e.g. assert that a written file really equals the model-produced
+   * content). The tool name and the schema are still the plan's — a resolver
+   * can never choose a different tool, and never widens the path jail.
+   */
+  resolveArguments?: (args: Record<string, unknown>) => Record<string, unknown>;
 }
 
 const PASS = (name: string, detail: string): AgentVerificationCheck => ({
@@ -211,9 +220,10 @@ export async function verifyAgainstPolicy(
         UNKNOWN('command', 'command verification requires a tool port, which is not available'),
       );
     } else {
+      const rawArguments = policy.command.arguments ?? {};
       const result = await tools.execute({
         toolName: policy.command.toolName,
-        arguments: policy.command.arguments ?? {},
+        arguments: deps.resolveArguments ? deps.resolveArguments(rawArguments) : rawArguments,
       });
       if (result.denied) {
         return {

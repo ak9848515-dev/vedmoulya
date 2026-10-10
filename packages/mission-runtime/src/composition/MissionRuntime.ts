@@ -88,6 +88,7 @@ import {
 } from '../adapters/MemoryOptimizationPorts.js';
 import { createWorkspaceFileTemplate } from '../adapters/WorkspaceDevTemplate.js';
 import { createTestVerifiedTemplate } from '../adapters/TestVerificationTemplate.js';
+import { createDataReportTemplate } from '../adapters/DataReportTemplate.js';
 import { createOrchestratorRoutingPorts } from '../adapters/OrchestratorRoutingPorts.js';
 import { MissionFailureClassifierAdapter } from '../adapters/MissionFailureClassifierAdapter.js';
 import { MissionDiagnosisAdapter } from '../adapters/DiagnosisRepairAdapter.js';
@@ -361,6 +362,13 @@ export function buildMissionRuntimeComponents(
       // of the fixed COMMAND_CATALOG (never a model-chosen shell string).
       createTestVerifiedTemplate(),
       createWorkspaceFileTemplate(),
+      // REVENUE-002A — the read→analyse→write data-report template. It is
+      // registered AFTER the two narrow workspace-file templates (which match
+      // their own literal-content goals) and BEFORE the generic planning
+      // templates, so a data-analysis goal that names both a source data file
+      // and an output deliverable gets the real read→analyse→write plan rather
+      // than the AI-only analysis plan that can never touch the workspace.
+      createDataReportTemplate(),
       ...PLAN_TEMPLATES,
       ...(options.extraPlannerTemplates ?? []),
     ],

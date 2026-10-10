@@ -33,10 +33,19 @@ import {
   createCommandExecutionTool,
   type CommandExecutionToolOptions,
 } from './CommandExecutionTool.js';
+import { DATA_AGGREGATE_TOOL, createDataAggregateTool } from './DataAggregateTool.js';
+import { DATA_NARRATIVE_CHECK_TOOL, createDataNarrativeCheckTool } from './DataNarrativeCheck.js';
 
 const TOOL_PERMISSION_CLASSES_BY_TOOL: Record<string, ToolPermissionClass> = {
   [WORKSPACE_WRITE_TOOL]: 'WRITE',
   [WORKSPACE_READ_TOOL]: 'READ',
+  // Read-only deterministic computation inside the path jail — no write, no
+  // process, no network: the honest class is READ.
+  [DATA_AGGREGATE_TOOL]: 'READ',
+  // REVENUE-004A — same posture: a read-only, path-jailed consistency check
+  // of a report's factual claims against the recomputed aggregates. It can
+  // only deny (throw), never write or execute.
+  [DATA_NARRATIVE_CHECK_TOOL]: 'READ',
   // An allowlisted, path-jailed, bounded command family is an EXECUTE risk:
   // it runs a subprocess inside the mission workspace. It is NOT in
   // HIGH_RISK_PERMISSION_CLASSES (DELETE/SECRETS/DEPLOYMENT), so a
@@ -119,6 +128,14 @@ export function createGovernedToolRegistry(options: {
     const tools = createWorkspaceTools(workspace.binding, workspace.toolOptions);
     registry.register(tools.read);
     registry.register(tools.write);
+    // REVENUE-002A — deterministic aggregation over a source data file in
+    // the SAME authorized workspace, so deliverable figures never depend on
+    // a model's arithmetic. Read-only and path-jailed like the other tools.
+    registry.register(createDataAggregateTool(workspace.binding));
+    // REVENUE-004A — deterministic narrative-consistency check over the SAME
+    // workspace: a report's ranking/total claims are compared against the
+    // aggregates recomputed from the source CSV. Read-only like the others.
+    registry.register(createDataNarrativeCheckTool(workspace.binding));
     if (options.command !== undefined) {
       registry.register(createCommandExecutionTool(workspace.binding, options.command.toolOptions));
     }
@@ -155,6 +172,11 @@ export class ClassifyingToolRegistryPort implements AgentToolExecutionPort, Agen
       ok: result.ok,
       denied: result.denied,
       outcome: result.outcome,
+      // The bounded, schema-validated payload travels with the result so a
+      // governed step may consume a real observation (e.g. the read-back
+      // content of `workspace_read`) as its output. The security chain has
+      // already enforced capability → schema → timeout → rate limit → audit.
+      ...(result.data !== undefined ? { data: result.data } : {}),
       error: result.error,
       latencyMs: result.latencyMs,
     };

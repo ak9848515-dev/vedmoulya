@@ -293,6 +293,10 @@ export class AgentExecutionEngine {
         const verification = await verifyAgainstPolicy(step.verificationPolicy, context, {
           tools: this.ports.tools,
           modelVerifier: this.ports.modelVerifier,
+          // Plan-declared {outputOf:step-N} references in a command-verification
+          // call resolve against the REAL completed step outputs (e.g. the
+          // model-produced content that was just written).
+          resolveArguments: (args) => this.resolveOutputRefs(run, args),
         });
         sr.verification = verification;
         sr.verdict = verification.verdict;
@@ -614,9 +618,16 @@ export class AgentExecutionEngine {
     const startMs = this.ports.clock.timestampMs();
     let result;
     try {
+      // Plan-declared {outputOf:step-N} references (and any nested occurrence)
+      // are substituted with the REAL completed output of that step BEFORE the
+      // governed tool call. The tool NAME and the path arguments stay the
+      // plan's literals — only a declared content reference can be filled, and
+      // the call still passes the full security chain (allowlist, path jail,
+      // schema, timeout, rate limit, audit).
+      const resolvedArguments = this.resolveOutputRefs(run, action.arguments ?? {});
       result = await tools.execute({
         toolName: action.toolName,
-        arguments: action.arguments ?? {},
+        arguments: resolvedArguments,
         userId: run.userId,
       });
     } catch (error) {
@@ -696,7 +707,18 @@ export class AgentExecutionEngine {
     });
     attemptState.artifacts.push(...artifacts);
     if (result.ok) {
-      attemptState.outputs.push(result.outcome);
+      const output = this.toolOutputText(result);
+      attemptState.outputs.push(output);
+      // Publish the output as the observation summary too, so it is the SAME
+      // real value a later {outputOf:step-N} reference consumes: an exact
+      // read-back must compare against what the tool actually read/wrote, not
+      // against the bare outcome enum. Keep the machine-readable outcome line
+      // so existing "the tool succeeded" rule checks keep matching.
+      const summary = sanitizeTraceText(output, { maxLength: 1_200 });
+      const latest = attemptState.observations[attemptState.observations.length - 1];
+      if (latest !== undefined && latest.actionId === action.actionId) {
+        latest.resultSummary = summary;
+      }
     }
 
     if (result.denied) {
@@ -751,6 +773,180 @@ export class AgentExecutionEngine {
       instruction = `${instruction}\n\n[Revision ${String(revision)} — change your approach based on the previous verification failure. Do not repeat the same output.]`;
     }
     return instruction;
+  }
+
+  /**
+   * The step output a governed tool action contributes: the real tool payload
+   * when the adapter surfaced one (e.g. workspace_read content), otherwise the
+   * machine-readable outcome exactly as before. Bounded so a large payload can
+   * never bloat the run trace.
+   */
+  private toolOutputText(result: { data?: unknown; outcome: string }): string {
+    if (result.data === undefined) return result.outcome;
+    // Keep the machine-readable outcome alongside the payload: existing
+    // rule checks that assert the tool "succeeded" keep working unchanged,
+    // while a later governed step can still read the real data.
+    const payload =
+      typeof result.data === 'string' ? result.data : (this.safeJson(result.data) ?? '');
+    return payload.length > 0 ? `${result.outcome}\n${payload}` : result.outcome;
+  }
+
+  private safeJson(value: unknown): string | undefined {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Substitute plan-declared `{outputOf:step-N}` references inside a governed
+   * tool action's arguments with the REAL completed output of that step. Only
+   * declared references are touched: the plan builder writes the tool name and
+   * every literal argument, so a substituted value can never choose a tool or
+   * escape the path jail — the call still runs the full security chain.
+   */
+  private resolveOutputRefs(
+    run: AgentExecutionRun,
+    args: Record<string, unknown>,
+    seen: Set<string> = new Set(),
+  ): Record<string, unknown> {
+    const resolved: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(args)) {
+      resolved[key] = this.resolveValueRefs(run, value, seen);
+    }
+    return resolved;
+  }
+
+  private resolveValueRefs(
+    run: AgentExecutionRun,
+    value: unknown,
+    seen: Set<string> = new Set(),
+  ): unknown {
+    if (typeof value === 'string') return this.substituteOutputRefs(run, value, seen);
+    if (Array.isArray(value)) return value.map((entry) => this.resolveValueRefs(run, entry, seen));
+    if (value !== null && typeof value === 'object') {
+      return this.resolveOutputRefs(run, value as Record<string, unknown>, seen);
+    }
+    return value;
+  }
+
+  private substituteOutputRefs(
+    run: AgentExecutionRun,
+    text: string,
+    seen: Set<string> = new Set(),
+  ): string {
+    let resolved = text;
+    for (const step of run.plan.steps) {
+      if (seen.has(step.stepId)) continue;
+      const output = this.consumableStepOutput(run, step, seen);
+      if (output !== undefined) {
+        resolved = resolved.replaceAll(`{outputOf:${step.stepId}}`, output);
+      }
+    }
+    return resolved;
+  }
+
+  /**
+   * The REAL value a later step consumes for `{outputOf:<stepId>}`.
+   *
+   * A step result's `output` is its VERIFICATION context — the concatenated
+   * action outputs. For a TOOL step that text reads
+   * "success\n{...tool payload...}" (the machine-readable outcome plus the
+   * real data the tool produced), which is trace text, NOT the artifact.
+   *
+   * Therefore the consumed value is payload-aware:
+   * - a WRITE-like step (workspace_write content/body/text/input) resolves to
+   *   the content it WROTE (recursively resolved, cycle-guarded), so an exact
+   *   read-back compares the real file against the authored bytes — not
+   *   against tool metadata (outcome + result json);
+   * - a READ-like tool step whose adapter surfaced `data` resolves to the real
+   *   payload alone (outcome line stripped), so a downstream write carries
+   *   the file body, not "success\n<body>";
+   * - an AI step resolves to the FULL model content (the step result's bounded
+   *   output), never the 1 200-char observation summary, so an authored
+   *   deliverable is never silently truncated;
+   * - anything else falls back to the last succeeded observation summary.
+   * Rule checks keep matching the full trace (outcome line preserved there).
+   */
+  private consumableStepOutput(
+    run: AgentExecutionRun,
+    step: AgentPlanStep,
+    seen: Set<string> = new Set(),
+  ): string | undefined {
+    const result = this.resultFor(run, step);
+    if (result.status !== 'completed') return undefined;
+
+    const written = this.writtenStepContent(run, step, seen);
+    if (written !== undefined) return written;
+
+    for (const observation of [...result.observations].reverse()) {
+      const action = step.actions.find((spec) => spec.actionId === observation.actionId);
+      if (action === undefined || observation.status !== 'succeeded') continue;
+      if (action.kind !== 'tool') {
+        // AI content VERBATIM — the step result's bounded output, NOT the
+        // observation summary. That summary is a TRACE excerpt capped at
+        // 1 200 chars, so consuming it silently wrote a TRUNCATED deliverable
+        // (a longer authored report was cut at 1 200 chars + '…').
+        return result.output;
+      }
+      // Tool step with a real payload: consume the payload alone, not the
+      // "outcome\npayload" trace line kept for rule checks. The execution path
+      // publishes `toolOutputText` as the summary, so the payload is the text
+      // after the first newline; a bare outcome has no newline and is kept.
+      const newline = observation.resultSummary.indexOf('\n');
+      if (newline >= 0) return observation.resultSummary.slice(newline + 1);
+      // The observation summary is the real consumed value: for a tool action
+      // the execution path publishes that tool's `toolOutputText`
+      // (outcome + real payload).
+      return observation.resultSummary;
+    }
+    return result.output;
+  }
+
+  /**
+   * The content a WRITE-like tool step wrote: the resolved `content`-family
+   * argument of its last succeeded tool action. Cycle-guarded so a chain of
+   * write→write references terminates (a self-reference resolves to whatever
+   * literal text remains).
+   */
+  private writtenStepContent(
+    run: AgentExecutionRun,
+    step: AgentPlanStep,
+    seen: Set<string>,
+  ): string | undefined {
+    if (seen.has(step.stepId)) return undefined;
+    const result = this.resultFor(run, step);
+    for (const observation of [...result.observations].reverse()) {
+      if (observation.status !== 'succeeded') continue;
+      const action = step.actions.find((spec) => spec.actionId === observation.actionId);
+      if (action === undefined || action.kind !== 'tool') continue;
+      const candidate = this.writeContentArgument(action.arguments);
+      if (candidate === undefined) continue;
+      if (typeof candidate !== 'string') {
+        return typeof candidate === 'number' || typeof candidate === 'boolean'
+          ? String(candidate)
+          : this.safeJson(candidate);
+      }
+      // Resolve nested references (e.g. a write of {outputOf:step-0}) without
+      // recursing back into this step.
+      seen.add(step.stepId);
+      try {
+        return this.substituteOutputRefs(run, candidate, seen);
+      } finally {
+        seen.delete(step.stepId);
+      }
+    }
+    return undefined;
+  }
+
+  /** The `content`-family argument of a WRITE-like tool call, if present. */
+  private writeContentArgument(args: Record<string, unknown> | undefined): unknown {
+    if (!args) return undefined;
+    for (const key of ['content', 'body', 'text', 'input', 'data']) {
+      if (args[key] !== undefined) return args[key];
+    }
+    return undefined;
   }
 
   private previousCompletedOutput(run: AgentExecutionRun, step: AgentPlanStep): string | undefined {
@@ -972,7 +1168,11 @@ export class AgentExecutionEngine {
     return verifyAgainstPolicy(
       policy,
       { output: safeSlice(outputs.join('\n\n'), 16_000), artifacts, observations },
-      { tools: this.ports.tools, modelVerifier: this.ports.modelVerifier },
+      {
+        tools: this.ports.tools,
+        modelVerifier: this.ports.modelVerifier,
+        resolveArguments: (args) => this.resolveOutputRefs(run, args),
+      },
     );
   }
 }

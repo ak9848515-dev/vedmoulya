@@ -21,6 +21,8 @@
 
 import {
   COMMAND_EXECUTION_TOOL,
+  DATA_AGGREGATE_TOOL,
+  DATA_NARRATIVE_CHECK_TOOL,
   REPOSITORY_MISSION_PERMISSION_CLASSES,
   WORKSPACE_READ_TOOL,
   WORKSPACE_WRITE_TOOL,
@@ -607,8 +609,20 @@ export class MissionService {
             grantedPermissionClasses: [...REPOSITORY_MISSION_PERMISSION_CLASSES],
           }
         : {
-            // Non-repository missions keep the read/write-only default.
-            allowedTools: [WORKSPACE_READ_TOOL, WORKSPACE_WRITE_TOOL],
+            // Non-repository missions get the read/write default PLUS the
+            // REVENUE-002A governed deterministic aggregation tool, plus the
+            // REVENUE-004A narrative-consistency check, so a data-analysis
+            // deliverable's figures AND its ranking claims come from a real
+            // computation in the workspace rather than a model's arithmetic.
+            // Both are READ-class, path-jailed, read-only tools — no write,
+            // no process, no network — so they widen neither the write nor
+            // the execute surface.
+            allowedTools: [
+              WORKSPACE_READ_TOOL,
+              WORKSPACE_WRITE_TOOL,
+              DATA_AGGREGATE_TOOL,
+              DATA_NARRATIVE_CHECK_TOOL,
+            ],
             grantedPermissionClasses: ['READ', 'WRITE'],
           },
       initialObjectives: input.initialObjectives,
