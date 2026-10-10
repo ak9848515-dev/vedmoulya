@@ -66,7 +66,7 @@ describe('PostgresRagRepository', () => {
     // params carry collection, chunk fields, jsonb metadata and the vector
     expect(calls[0][1]).toContain('org:a');
     expect(calls[0][1]).toContain('{"category":"playbook"}');
-    expect(String(calls[0][1][7])).toMatch(/^'\[0\.1/);
+    expect(String(calls[0][1][7])).toMatch(/^\[0\.1/);
   });
 
   it('skips upsert when no chunks are provided', async () => {
@@ -102,7 +102,9 @@ describe('PostgresRagRepository', () => {
     const call = String((sql.unsafe as ReturnType<typeof vi.fn>).mock.calls[0][0]);
     expect(call).toContain('<=>');
     expect(call).toContain('ORDER BY embedding <=>');
-    expect(call).toContain('LIMIT $3');
+    expect(call).toContain('LIMIT $4');
+    expect(call).toContain('<=> $2::vector');
+    expect((sql.unsafe as ReturnType<typeof vi.fn>).mock.calls[0][1][1]).toMatch(/^\[1\.000000/);
   });
 
   it('combines metadata filter + minScore in the similarity statement', async () => {
@@ -115,12 +117,13 @@ describe('PostgresRagRepository', () => {
     });
     const calls = (sql.unsafe as ReturnType<typeof vi.fn>).mock.calls;
     const call = String(calls[0][0]);
-    expect(call).toContain('metadata @> $2::jsonb');
-    expect(call).toContain('>= $3');
-    expect(call).toContain('LIMIT $4');
-    // params: collection, metadata jsonb, vector literal
+    expect(call).toContain('metadata @> $3::jsonb');
+    expect(call).toContain('>= $4');
+    expect(call).toContain('LIMIT $5');
+    // params: collection, vector, metadata jsonb, minimum score, limit
     expect(calls[0][1][0]).toBe('org:a');
-    expect(calls[0][1][1]).toContain('category');
+    expect(calls[0][1][1]).toMatch(/^\[1\.000000/);
+    expect(calls[0][1][2]).toContain('category');
   });
 
   it('omits the score filter when minScore is not supplied', async () => {
@@ -131,9 +134,9 @@ describe('PostgresRagRepository', () => {
       metadataFilter: { category: 'playbook' },
     });
     const call = String((sql.unsafe as ReturnType<typeof vi.fn>).mock.calls[0][0]);
-    expect(call).toContain('metadata @> $2::jsonb');
-    expect(call).not.toContain('>= $3');
-    expect(call).toContain('LIMIT $2');
+    expect(call).toContain('metadata @> $3::jsonb');
+    expect(call).not.toContain('>= $4');
+    expect(call).toContain('LIMIT $4');
   });
 
   it('builds the plain similarity statement with no filter and no minScore', async () => {
@@ -145,9 +148,10 @@ describe('PostgresRagRepository', () => {
     expect(call).toContain('WHERE collection = $1');
     expect(call).not.toContain('metadata @>');
     expect(call).not.toContain('>=');
-    expect(call).toContain('LIMIT $1');
-    // Only the collection parameter is passed.
-    expect(calls[0][1]).toEqual(['org:a']);
+    expect(call).toContain('LIMIT $3');
+    expect(calls[0][1][0]).toBe('org:a');
+    expect(calls[0][1][1]).toMatch(/^\[1\.000000/);
+    expect(calls[0][1][2]).toBe(2);
   });
 
   it('builds the similarity statement with only a minScore floor', async () => {
@@ -155,10 +159,33 @@ describe('PostgresRagRepository', () => {
     const repo = new PostgresRagRepository(sql, 8);
     await repo.searchSimilar('org:a', [1, 0, 0, 0, 0, 0, 0, 0], { topK: 2, minScore: 0.4 });
     const call = String((sql.unsafe as ReturnType<typeof vi.fn>).mock.calls[0][0]);
-    expect(call).toContain('>= $2');
-    expect(call).toContain('LIMIT $3');
-    // No metadata filter → only collection passed.
-    expect((sql.unsafe as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual(['org:a']);
+    expect(call).toContain('>= $3');
+    expect(call).toContain('LIMIT $4');
+    const params = (sql.unsafe as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(params[0]).toBe('org:a');
+    expect(params[1]).toMatch(/^\[1\.000000/);
+    expect(params[2]).toBe(0.4);
+    expect(params[3]).toBe(2);
+  });
+
+  it('rejects embeddings with incorrect dimensions or non-finite values', async () => {
+    const sql = makeFakeSql([]);
+    const repo = new PostgresRagRepository(sql, 8);
+
+    await expect(repo.searchSimilar('org:a', [1], { topK: 2 })).rejects.toThrow(/dimension 8/);
+    await expect(
+      repo.searchSimilar('org:a', [Number.NaN, 0, 0, 0, 0, 0, 0, 0], { topK: 2 }),
+    ).rejects.toThrow(/finite numbers/);
+    expect(sql.unsafe).not.toHaveBeenCalled();
+  });
+
+  it('rejects an incomplete embedding batch before writing', async () => {
+    const sql = makeFakeSql([]);
+    const repo = new PostgresRagRepository(sql, 8);
+    await expect(repo.upsertChunks('org:a', [chunk()], [])).rejects.toThrow(
+      /Expected 1 embeddings/,
+    );
+    expect(sql.unsafe).not.toHaveBeenCalled();
   });
 
   it('applies the metadata filter in keyword fallback search', async () => {

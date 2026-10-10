@@ -42,6 +42,11 @@ vi.mock('../../stores/auth-store.js', () => ({
 
 vi.mock('../../lib/trpc.js', () => ({
   api: {
+    mission: {
+      status: {
+        useQuery: () => ({ data: undefined, isLoading: false, isError: false, error: null }),
+      },
+    },
     world: {
       commandCenter: {
         useQuery: () => ({ refetch: mocks.commandRefetch }),

@@ -27,6 +27,18 @@ const MAX_FILE_BYTES = 256 * 1024;
 const MAX_ROWS = 20_000;
 const MAX_GROUPS = 200;
 
+/**
+ * Prototype-safe group key: CSV cell values are data-influenced strings and
+ * must never become `__proto__`/`constructor`/`prototype` keys on a plain
+ * object. Map lookups are safe already; this keeps the emitted JSON keys
+ * honest too.
+ */
+function safeGroupKey(raw: string): string {
+  const key = raw.trim() || '(blank)';
+  if (key === '__proto__' || key === 'constructor' || key === 'prototype') return `(unsafe:${key})`;
+  return key;
+}
+
 /** Minimal RFC4180-ish CSV parse (quoted fields, CRLF) bounded by MAX_ROWS. */
 export function parseCsv(text: string): { header: string[]; rows: string[][] } {
   const records: string[][] = [];
@@ -102,6 +114,15 @@ export interface AggregateOptions {
   quantityColumn?: string;
 }
 
+/** Schema-validated input for the `data_aggregate` tool handler (fixed keys). */
+interface DataAggregateToolInput {
+  relativePath: unknown;
+  amountColumn: unknown;
+  groupBy?: unknown;
+  monthOf?: unknown;
+  quantityColumn?: unknown;
+}
+
 /**
  * Pure, deterministic aggregation over parsed CSV records. Throws a typed
  * error when a referenced column is absent or the amount column holds a
@@ -158,14 +179,14 @@ export function computeAggregates(
     const quantity =
       quantityIndex >= 0 ? Number((row[quantityIndex] ?? '0').replace(/[,$\s]/g, '')) || 0 : 0;
     groupIndexes.forEach((group, position) => {
-      const key = (row[group.index] ?? '').trim() || '(blank)';
+      const key = safeGroupKey(row[group.index] ?? '');
       const entry = maps[position]?.get(key) ?? { total: 0, quantity: 0 };
       entry.total += amount;
       entry.quantity += quantity;
       maps[position]?.set(key, entry);
     });
     if (monthIndex >= 0) {
-      const key = monthKey(row[monthIndex] ?? '');
+      const key = safeGroupKey(monthKey(row[monthIndex] ?? ''));
       const monthMap = maps[maps.length - 1];
       const entry = monthMap?.get(key) ?? { total: 0, quantity: 0 };
       entry.total += amount;
@@ -189,7 +210,9 @@ export function computeAggregates(
   return { relativePath, recordCount: rows.length, amountColumn, total, groups };
 }
 
-export function createDataAggregateTool(binding: WorkspaceRootBinding): ToolDefinition {
+export function createDataAggregateTool(
+  binding: WorkspaceRootBinding,
+): ToolDefinition<DataAggregateToolInput, AggregateResult> {
   return {
     name: DATA_AGGREGATE_TOOL,
     description:
@@ -211,18 +234,22 @@ export function createDataAggregateTool(binding: WorkspaceRootBinding): ToolDefi
     timeoutMs: 5_000,
     rateLimit: { max: 120, windowMs: 60_000 },
     handler: (args): AggregateResult => {
-      const relativePath = String(args['relativePath']);
+      // Fixed schema keys only — the ToolRuntime schema already rejects
+      // additional properties, so never index by a caller-controlled string.
+      const relativePath = String(args.relativePath);
+      // Path is resolved through the operator-held WorkspaceRootBinding (path
+      // jail: no absolute paths, no '..') — never a raw fs path from the caller.
       const resolved = binding.resolveInside(relativePath);
       if (fs.statSync(resolved).size > MAX_FILE_BYTES) {
         throw new Error(`file exceeds the bounded aggregation size: ${relativePath}`);
       }
       const { header, rows } = parseCsv(fs.readFileSync(resolved, 'utf8'));
-      const groupByRaw = args['groupBy'];
-      const monthOf = args['monthOf'];
-      const quantityColumn = args['quantityColumn'];
+      const groupByRaw = args.groupBy;
+      const monthOf = args.monthOf;
+      const quantityColumn = args.quantityColumn;
       return computeAggregates(header, rows, {
         relativePath,
-        amountColumn: String(args['amountColumn']),
+        amountColumn: String(args.amountColumn),
         ...(Array.isArray(groupByRaw) ? { groupBy: groupByRaw.map((value) => String(value)) } : {}),
         ...(typeof monthOf === 'string' ? { monthOf } : {}),
         ...(typeof quantityColumn === 'string' ? { quantityColumn } : {}),

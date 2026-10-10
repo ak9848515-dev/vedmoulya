@@ -183,7 +183,7 @@ function walkFiles(dir: string): string[] {
   return out;
 }
 
-main().catch((e) => {
+main().catch((e: unknown) => {
   console.error(e);
   process.exit(1);
 });

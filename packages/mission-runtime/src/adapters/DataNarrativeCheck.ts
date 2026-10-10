@@ -98,7 +98,9 @@ export function monthVariants(key: string): string[] {
   const m = /^(\d{4})-(\d{2})$/.exec(key.trim());
   if (!m) return [key];
   const idx = Number.parseInt(m[2] ?? '0', 10) - 1;
-  const nm = MONTHS[idx] ?? '';
+  // Bounds-checked: the regex guarantees 00-99 but only 01-12 is a real month.
+  if (!Number.isInteger(idx) || idx < 0 || idx >= MONTHS.length) return [key];
+  const nm = MONTHS[idx] as string;
   if (!nm) return [key];
   const year = m[1] ?? '';
   return [key, `${nm} ${year}`, `${nm.slice(0, 3)} ${year}`];
@@ -454,7 +456,10 @@ export interface NarrativeCheckToolArgs {
  */
 export function createDataNarrativeCheckTool(binding: {
   resolveInside: (relativePath: string) => string;
-}): ToolDefinition {
+}): ToolDefinition<
+  Record<string, unknown>,
+  { ok: true; checks: number; findings: NarrativeFinding[] }
+> {
   return {
     name: DATA_NARRATIVE_CHECK_TOOL,
     description:
@@ -475,22 +480,35 @@ export function createDataNarrativeCheckTool(binding: {
     timeoutMs: 5_000,
     rateLimit: { max: 120, windowMs: 60_000 },
     handler: (args): { ok: true; checks: number; findings: NarrativeFinding[] } => {
-      const sourceRelativePath = String(args['sourceRelativePath']);
-      const reportRelativePath = String(args['reportRelativePath']);
+      // Fixed schema keys only — the ToolRuntime schema already rejects
+      // additional properties, so read each known field with a type guard
+      // instead of indexing by a variable string.
+      const sourceRaw = args['sourceRelativePath'];
+      const reportRaw = args['reportRelativePath'];
+      const amountRaw = args['amountColumn'];
+      const groupByRaw = args['groupBy'];
+      const monthOfRaw = args['monthOf'];
+      const quantityRaw = args['quantityColumn'];
+      if (
+        typeof sourceRaw !== 'string' ||
+        typeof reportRaw !== 'string' ||
+        typeof amountRaw !== 'string'
+      ) {
+        throw new Error('data_narrative_check requires source, report, and amount column paths.');
+      }
+      const sourceRelativePath = sourceRaw;
+      const reportRelativePath = reportRaw;
       const sourceResolved = binding.resolveInside(sourceRelativePath);
       if (fs.statSync(sourceResolved).size > MAX_SOURCE_BYTES) {
         throw new Error(`file exceeds the bounded aggregation size: ${sourceRelativePath}`);
       }
       const { header, rows } = parseCsv(fs.readFileSync(sourceResolved, 'utf8'));
-      const groupByRaw = args['groupBy'];
       const aggregate = computeAggregates(header, rows, {
         relativePath: sourceRelativePath,
-        amountColumn: String(args['amountColumn']),
+        amountColumn: amountRaw,
         ...(Array.isArray(groupByRaw) ? { groupBy: groupByRaw.map((v) => String(v)) } : {}),
-        ...(typeof args['monthOf'] === 'string' ? { monthOf: args['monthOf'] } : {}),
-        ...(typeof args['quantityColumn'] === 'string'
-          ? { quantityColumn: args['quantityColumn'] }
-          : {}),
+        ...(typeof monthOfRaw === 'string' ? { monthOf: monthOfRaw } : {}),
+        ...(typeof quantityRaw === 'string' ? { quantityColumn: quantityRaw } : {}),
       });
       const reportResolved = binding.resolveInside(reportRelativePath);
       if (fs.statSync(reportResolved).size > MAX_REPORT_BYTES) {

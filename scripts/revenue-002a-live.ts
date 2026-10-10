@@ -224,6 +224,7 @@ function hardenForPrivatePractice(): void {
     'MEMORY_DATABASE_URL',
     'OTEL_EXPORTER_OTLP_ENDPOINT',
   ]) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- live-harness env isolation: external/cloud endpoints must be absent for this LOCAL-provider proof.
     delete process.env[key];
   }
 }
@@ -1068,7 +1069,7 @@ async function main(): Promise<number> {
   console.log('payment requested             : NO');
 
   const draftOk =
-    delivery.pendingApproval === true &&
+    delivery.pendingApproval &&
     stored !== undefined &&
     stored.metadata.source === 'mission-verified-handoff';
 
@@ -1147,7 +1148,7 @@ async function summarizeUsage(store: UsageStoreLike, missionId: string): Promise
   if (events.length > 0 && !models.some((m) => m.includes('qwen'))) {
     problems.push(`the recorded model is not the pinned local model: ${models.join(', ')}`);
   }
-  if (events.length > 0 && !events.every((e) => e.local === true)) {
+  if (events.length > 0 && !events.every((e) => e.local)) {
     problems.push('a usage event is not marked local');
   }
   if (events.length > 0 && !statuses.includes('success')) {
@@ -1180,7 +1181,7 @@ async function summarizeUsage(store: UsageStoreLike, missionId: string): Promise
     events: events.length,
     providers,
     models,
-    local: events.length > 0 && events.every((e) => e.local === true),
+    local: events.length > 0 && events.every((e) => e.local),
     statuses,
     totalTokens,
     cloudTokens,

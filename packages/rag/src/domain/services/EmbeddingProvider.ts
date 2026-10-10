@@ -31,8 +31,12 @@ export interface EmbeddingProvider {
  * retrieval tests meaningful. Never used in production.
  */
 export class MockEmbeddingProvider implements EmbeddingProvider {
-  readonly dimension = 512;
+  readonly dimension: number;
   readonly model = 'mock-embedding';
+
+  constructor(dimension: number = 512) {
+    this.dimension = dimension;
+  }
 
   async embed(texts: readonly string[]): Promise<number[][]> {
     const vectors = texts.map((text) => this.embedOne(text));

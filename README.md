@@ -136,8 +136,10 @@ deterministic mock provider; production requires Docker Postgres/Redis, a web
 build (`npm run build -w apps/web`), `AUTH_JWT_SECRET` and real AI configuration
 (OpenAI/DeepSeek key, or an explicit `AI_ENABLE_MOCK=true`) — production never
 silently falls back to mock. Provider state is truthful everywhere: OpenAI and
-DeepSeek are runtime-executable; Anthropic, Google, OpenRouter and Ollama are
-catalog-only (`UNSUPPORTED_RUNTIME` — see
+DeepSeek, Google and OpenRouter have conditional runtime adapters when their
+provider keys are configured; Ollama is registered when its local base URL is
+configured. Registration does not establish reachability or successful generation.
+Anthropic is catalog-only (`UNSUPPORTED_RUNTIME` — see
 [EPIC-019 PROVIDER RUNTIME MATRIX](./09_Documents/EPIC_019_PROVIDER_RUNTIME_MATRIX.md)).
 
 ## Development

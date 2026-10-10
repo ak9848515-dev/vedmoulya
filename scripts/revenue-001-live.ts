@@ -49,6 +49,7 @@ for (const key of [
   'AI_OPENROUTER_API_KEY',
   'OPENAI_API_KEY',
 ]) {
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- live-harness env isolation: cloud keys must be absent for this LOCAL-provider proof.
   delete process.env[key];
 }
 
@@ -103,7 +104,11 @@ if (verified.length === 0) {
   console.error(`REVENUE-001: no VERIFIED objective on ${MISSION_ID} — refusing handoff.`);
   process.exit(1);
 }
-const objective = verified[0]!;
+const objective = verified[0];
+if (objective === undefined) {
+  console.error(`REVENUE-001: no VERIFIED objective on ${MISSION_ID} — refusing handoff.`);
+  process.exit(1);
+}
 console.log(`handoff mission   : ${status.missionId}`);
 console.log(`handoff objective : ${objective.objectiveId} (${objective.state})`);
 
@@ -159,4 +164,4 @@ if (delivery.ok) {
 console.log('external submission performed: NO');
 console.log('client contacted             : NO');
 console.log('payment performed            : NO');
-process.exit(delivery.ok && delivery.pendingApproval === true ? 0 : 1);
+process.exit(delivery.ok && delivery.pendingApproval ? 0 : 1);

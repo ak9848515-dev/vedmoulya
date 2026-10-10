@@ -40,9 +40,15 @@ export async function ensureRagSchema(sql: Sql, dimension: number): Promise<void
   `);
 }
 
-/** Vector literal for pgvector, e.g. '[0.1,0.2,...]'. */
-function vectorLiteral(values: number[]): string {
-  return `'[${values.map((v) => v.toFixed(6)).join(',')}]'`;
+/** Vector string without quotes for parameterized pgvector, e.g. '[0.1,0.2,...]'. */
+function vectorString(values: number[], dimension: number): string {
+  if (values.length !== dimension) {
+    throw new RangeError(`Expected embedding dimension ${dimension}, received ${values.length}`);
+  }
+  if (values.some((value) => !Number.isFinite(value))) {
+    throw new TypeError('Embedding vectors must contain only finite numbers');
+  }
+  return `[${values.map((v) => v.toFixed(6)).join(',')}]`;
 }
 
 export class PostgresRagRepository implements RagRepository {
@@ -53,6 +59,9 @@ export class PostgresRagRepository implements RagRepository {
 
   async upsertChunks(collection: string, chunks: RagChunk[], vectors: number[][]): Promise<number> {
     if (chunks.length === 0) return 0;
+    if (vectors.length !== chunks.length) {
+      throw new RangeError(`Expected ${chunks.length} embeddings, received ${vectors.length}`);
+    }
     const rows: unknown[][] = [];
     chunks.forEach((chunk, index) => {
       rows.push([
@@ -63,7 +72,7 @@ export class PostgresRagRepository implements RagRepository {
         chunk.content,
         chunk.index,
         JSON.stringify(chunk.metadata),
-        vectorLiteral(vectors[index] ?? []),
+        vectorString(vectors[index] ?? [], this.dimension),
         chunk.createdAt,
         chunk.updatedAt,
       ]);
@@ -94,16 +103,35 @@ export class PostgresRagRepository implements RagRepository {
     queryVector: number[],
     options: { topK: number; minScore?: number; metadataFilter?: Record<string, unknown> },
   ): Promise<RagSearchResult[]> {
+    const params: unknown[] = [collection];
+    params.push(vectorString(queryVector, this.dimension));
+    const queryVectorParameter = `$${params.length}::vector`;
+
+    let metadataClause = '';
+    if (options.metadataFilter) {
+      params.push(JSON.stringify(options.metadataFilter));
+      metadataClause = `AND metadata @> $${params.length}::jsonb`;
+    }
+
+    let minScoreClause = '';
+    if (options.minScore !== undefined) {
+      params.push(options.minScore);
+      minScoreClause = `AND 1 - (embedding <=> ${queryVectorParameter}) >= $${params.length}`;
+    }
+
+    params.push(options.topK);
+    const limitClause = `LIMIT $${params.length}`;
+
     const rows = (await this.sql.unsafe(
       `SELECT chunk_id, source_id, title, content, chunk_index, metadata, created_at,
-              1 - (embedding <=> ${vectorLiteral(queryVector)}::vector) AS score
+              1 - (embedding <=> ${queryVectorParameter}) AS score
        FROM ${TABLE}
        WHERE collection = $1
-         ${options.metadataFilter ? `AND metadata @> $2::jsonb` : ''}
-         ${options.minScore !== undefined ? `AND 1 - (embedding <=> ${vectorLiteral(queryVector)}::vector) >= $${options.metadataFilter ? 3 : 2}` : ''}
-       ORDER BY embedding <=> ${vectorLiteral(queryVector)}::vector
-       LIMIT $${options.metadataFilter ? (options.minScore !== undefined ? 4 : 2) : options.minScore !== undefined ? 3 : 1}`,
-      options.metadataFilter ? [collection, JSON.stringify(options.metadataFilter)] : [collection],
+         ${metadataClause}
+         ${minScoreClause}
+       ORDER BY embedding <=> ${queryVectorParameter}
+       ${limitClause}`,
+      params as Parameters<typeof this.sql.unsafe>[1],
     )) as Array<Record<string, unknown>>;
 
     return rows.map((row) => ({
@@ -129,16 +157,28 @@ export class PostgresRagRepository implements RagRepository {
       .filter((t) => t.length > 0);
     if (terms.length === 0) return [];
 
-    const conditions = terms.map((_, i) => `content ILIKE '%' || $${i + 2} || '%'`);
+    const params: unknown[] = [collection];
+    const conditions = terms.map((term) => {
+      params.push(`%${term}%`);
+      return `content ILIKE $${params.length}`;
+    });
+
+    let metadataClause = '';
+    if (options.metadataFilter) {
+      params.push(JSON.stringify(options.metadataFilter));
+      metadataClause = `AND metadata @> $${params.length}::jsonb`;
+    }
+
+    params.push(options.topK);
+    const limitClause = `LIMIT $${params.length}`;
+
     const rows = (await this.sql.unsafe(
       `SELECT chunk_id, source_id, title, content, chunk_index, metadata, created_at
        FROM ${TABLE}
        WHERE collection = $1 AND ${conditions.join(' AND ')}
-         ${options.metadataFilter ? `AND metadata @> $${terms.length + 2}::jsonb` : ''}
-       LIMIT $${options.metadataFilter ? terms.length + 3 : terms.length + 2}`,
-      options.metadataFilter
-        ? [collection, ...terms.map((t) => `%${t}%`), JSON.stringify(options.metadataFilter)]
-        : [collection, ...terms.map((t) => `%${t}%`)],
+         ${metadataClause}
+       ${limitClause}`,
+      params as Parameters<typeof this.sql.unsafe>[1],
     )) as Array<Record<string, unknown>>;
 
     return rows.map((row) => ({

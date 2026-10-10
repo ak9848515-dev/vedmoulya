@@ -132,7 +132,7 @@ async function main(): Promise<void> {
     const repo = new PostgresRagRepository(sql, DIMENSION);
     const rag = new RagApplicationService({
       repository: repo,
-      embeddingProvider: new MockEmbeddingProvider(),
+      embeddingProvider: new MockEmbeddingProvider(DIMENSION),
     });
 
     const collection = 'tenant-verify:user-verify';

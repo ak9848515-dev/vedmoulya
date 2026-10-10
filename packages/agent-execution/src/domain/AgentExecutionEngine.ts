@@ -813,6 +813,9 @@ export class AgentExecutionEngine {
   ): Record<string, unknown> {
     const resolved: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(args)) {
+      // Prototype-safe: never allow a plan-declared key to touch Object.prototype.
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      // eslint-disable-next-line security/detect-object-injection -- key comes from Object.entries (own enumerable string keys) and prototype keys are skipped above.
       resolved[key] = this.resolveValueRefs(run, value, seen);
     }
     return resolved;
@@ -943,8 +946,11 @@ export class AgentExecutionEngine {
   /** The `content`-family argument of a WRITE-like tool call, if present. */
   private writeContentArgument(args: Record<string, unknown> | undefined): unknown {
     if (!args) return undefined;
-    for (const key of ['content', 'body', 'text', 'input', 'data']) {
-      if (args[key] !== undefined) return args[key];
+    // Fixed allowlist — never a caller-controlled key into the arguments object.
+    const CONTENT_KEYS = ['content', 'body', 'text', 'input', 'data'] as const;
+    for (const key of CONTENT_KEYS) {
+      const value: unknown = Object.getOwnPropertyDescriptor(args, key)?.value;
+      if (value !== undefined) return value;
     }
     return undefined;
   }

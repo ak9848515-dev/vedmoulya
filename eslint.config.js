@@ -180,7 +180,8 @@ export default tseslint.config(
     },
   },
   // BLD-022 mission-runtime filesystem adapters (FsRepositoryInspector,
-  // RuntimeGitSafetyAdapter, WorkspaceTools) perform bounded, read-only
+  // RuntimeGitSafetyAdapter, WorkspaceTools, DataAggregateTool,
+  // DataNarrativeCheck) perform bounded, read-only
   // or workspace-jailed filesystem operations. Every path is resolved
   // against the operator-configured workspace root and jail-checked before
   // any fs call — the `detect-non-literal-fs-filename` heuristic cannot
@@ -195,6 +196,8 @@ export default tseslint.config(
       'packages/mission-runtime/src/adapters/FsRepositoryInspector.ts',
       'packages/mission-runtime/src/adapters/RuntimeGitSafetyAdapter.ts',
       'packages/mission-runtime/src/adapters/WorkspaceTools.ts',
+      'packages/mission-runtime/src/adapters/DataAggregateTool.ts',
+      'packages/mission-runtime/src/adapters/DataNarrativeCheck.ts',
       'packages/mission-runtime/src/adapters/GovernedToolRegistry.ts',
       'packages/mission-runtime/src/adapters/MissionFailureClassifierAdapter.ts',
     ],
@@ -487,6 +490,23 @@ export default tseslint.config(
       'apps/web/out/**', // Next.js static export
       'apps/web/android/**', // Capacitor wrapper incl. copied web assets
       'apps/web/storybook-static/**', // Storybook build output (EI-008 stories)
+      // Local-only probing and e2e harness artifacts (not part of the source
+      // tree): hidden dotfiles created by local test drivers, JWT/PGP probes,
+      // and smoke harnesses. These are never committed and are outside the
+      // TypeScript project service's allowDefaultProject list.
+      '.rev004a-gate.mjs',
+      '.rev004a-gate.ts',
+      '**/.rev004a-probe.ts',
+      '.tmp-flow.mjs',
+      '.tmp-probe.mjs',
+      '.tmp-qa-providers.mjs',
+      '.tmp-session.err',
+      '.tmp-session.json',
+      '.tmp-token.txt',
+      '.tmp-trpc.mjs',
+      // Build artifacts (generated via tsc --build, never authored):
+      'packages/mission-runtime/compiled/**',
+      'packages/mission-runtime/.out/**',
     ],
   },
 );

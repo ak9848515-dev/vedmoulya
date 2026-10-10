@@ -84,7 +84,16 @@ function runScope(scope, fix) {
   // flat config ignores (e.g. untracked audit dirs) would otherwise each emit a
   // "File ignored because of a matching ignore pattern" warning that is not
   // actionable lint output.
-  const cmdArgs = [eslintBin, ...scope.args, '--no-warn-ignored', '--cache', '--cache-location', cacheLocation];
+  const cmdArgs = [
+    eslintBin,
+    ...scope.args,
+    '--no-warn-ignored',
+    '--max-warnings',
+    '0',
+    '--cache',
+    '--cache-location',
+    cacheLocation,
+  ];
   if (fix) cmdArgs.push('--fix');
   const child = spawn(process.execPath, cmdArgs, {
     cwd: root,
