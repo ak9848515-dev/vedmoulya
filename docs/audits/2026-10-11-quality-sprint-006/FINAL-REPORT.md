@@ -41,23 +41,31 @@ Executed:
   `TOOL_RELIABILITY` entry for a verified tool run; unverified and missing-run
   negative cases write nothing. The repository double is in-memory, so this is
   a contract/regression test, not a durable PostgreSQL acceptance.
-- Existing live artifact `.sprint6-live/mission-ws-local/mission-acceptance.txt`
-  and `.sprint6-live` logs record a local Ollama mission completed and its file
-  verified byte-for-byte. The operator harness then failed its final Control
-  Center check with `relation "provider_preferences" does not exist`. It does
-  not provide an independent durable learning-row readback; fresh runtime
-  learning persistence remains **unverified**.
+- The original local artifact is still valid mission evidence, but its first
+  harness attempt failed the final Control Center check because
+  `provider_preferences` had not been bootstrapped. The standalone harness now
+  awaits the application's idempotent engine-table bootstrap and uses a unique
+  owner by default. A fresh run completed with a verified objective and
+  byte-exact artifact. A direct read-only PostgreSQL query then found current
+  execution-memory aggregates (8 rows across six categories, 56 verified
+  citations). This is a durable readback, although some evidence merged into
+  existing aggregates rather than creating new rows.
+- The fresh run used Google `gemini-3.8-flash`, not Ollama: the attempted
+  environment override did not prevent provider selection from the loaded
+  environment. Two live mission runs together consumed 878 tokens, with
+  reported cost `$0.0063475`. No further paid runs were made.
 
 ## 3. Managed PostgreSQL / Neon reliability
 
 Sprint 005 recorded application error `getaddrinfo ENOTFOUND` for the Neon
 pooler hostname. The hostname is recorded here without any connection string or
-credentials. On 2026-10-11, `Resolve-DnsName` against the host returned
-`DNS operation refused` (resolver RCODE_REFUSED). This is evidence of a DNS
-resolution-path failure from this machine, not evidence of authentication,
-schema, transaction, or pool failure, and it does not establish whether Neon
-itself is healthy. A local listener was present on port 5432; no managed Neon
-database acceptance could be performed.
+credentials. On 2026-10-11 the machine's default resolver returned
+`DNS operation refused` (resolver RCODE_REFUSED), while queries to public
+resolvers resolved the hostname and TCP port 5432 connected to all returned
+addresses. The configured application PostgreSQL driver also completed a
+read-only `SELECT 1` against Neon. This establishes that the earlier resolver
+failure was path-specific or transient; it does not constitute managed-database
+write acceptance or a durability drill.
 
 Commit `51ff25af` extends the hermetic write-through store tests. Executed:
 
@@ -69,8 +77,8 @@ Commit `51ff25af` extends the hermetic write-through store tests. Executed:
   bounded background retry/backoff policy; it retains a bounded queue and
   retries through subsequent drain/flush activity.
 
-The Neon root cause is therefore **characterized as DNS-layer from this host**;
-automatic recovery and fresh managed-database acceptance remain unverified.
+Automatic retry/backoff, managed-database writes, and recovery acceptance remain
+unverified.
 
 ## 4. Mission and Brain browser evidence
 
@@ -85,29 +93,37 @@ automatic recovery and fresh managed-database acceptance remain unverified.
   browser/product journey failure, not a provider-credit skip. Provider in the
   local mission evidence was Ollama; the browser test log does not establish a
   successful provider/model journey. No cloud success is claimed.
-- The browser assertions for result rendering and approval remain unmet. The
-  current test expects an approval UI transition that did not enable Publish;
-  the cause is not yet isolated, so the test was not weakened.
+- A fresh deterministic browser run with `AI_ENABLE_MOCK=true` passed the
+  `e2e/brain.spec.ts` journey (1 test): task flow, terminal state, decision
+  records, approval request, Approve/Reject controls, and recent task. This is
+  mock-provider browser evidence, not an Ollama or live-provider browser run.
+- The prior live-mode browser failure remains relevant: its approval flow left
+  Publish disabled and timed out. That live journey defect is unresolved.
 
 ## 5. Recovery, migration, and lifecycle integrity
 
-No staging environment was established for backup/restore, interrupted-mission
-restart, or migration compatibility drills. The observed missing
-`provider_preferences` relation blocks the local harness's final read path.
-Approval and external submission were not exercised in a fresh browser run.
-These gates remain **unverified**; no production or destructive drill was run.
+No staging environment was established for backup/restore or migration
+compatibility drills. The missing `provider_preferences` prerequisite was fixed
+in the acceptance harness by awaiting normal schema bootstrap. The mock browser
+journey exercised request approval and Approve/Reject controls; no external
+submission was performed. Staging recovery gates remain **unverified**.
 
 ## 6. Quality gates run in this sprint
 
-| Command                                                    | Result                                            |
-| ---------------------------------------------------------- | ------------------------------------------------- |
-| `npm run deps:cycles`                                      | exit 0; 57 workspaces scanned, no internal cycles |
-| `npm run typecheck`                                        | exit 0 (`tsc -b && tsc --noEmit -p services/api`) |
-| Focused execution-learning Vitest command above            | exit 0; 1 file, 3 tests passed                    |
-| Focused write-through Vitest command above                 | exit 0; 1 file, 13 tests passed                   |
-| `npm run lint`, `npm run test`, `npm run format`, full E2E | not run this sprint                               |
+| Command                                             | Result                                                                  |
+| --------------------------------------------------- | ----------------------------------------------------------------------- |
+| `npm run deps:cycles`                               | exit 0; 57 workspaces scanned, no internal cycles                       |
+| `npm run typecheck`                                 | exit 0 (`tsc -b && tsc --noEmit -p services/api`)                       |
+| Focused execution-learning Vitest command above     | exit 0; 1 file, 3 tests passed                                          |
+| Focused write-through Vitest command above          | exit 0; 1 file, 13 tests passed                                         |
+| `npm run lint`                                      | exit 0 across 58 workspaces                                             |
+| `npm test -- --maxWorkers=4 --reporter=dot`         | exit 0; 972 files, 12,910 tests passed                                  |
+| `npm run format`                                    | exit 1; only four pre-existing untracked Sprint 3 evidence files failed |
+| Targeted Prettier check for changed code            | exit 0                                                                  |
+| `npx playwright test e2e/brain.spec.ts --workers=1` | exit 0; deterministic mock browser flow, 1 passed                       |
 
-No full-suite, repo-wide lint, formatting, or secret-scan success is claimed.
+No repository-wide secret-scan success is claimed. The four untracked files
+were preserved and not reformatted.
 
 ## 7. Commits and worktree
 
@@ -117,19 +133,23 @@ Sprint 006 implementation already present in branch history:
   adds verified-success and negative regression cases.
 - `51ff25af` — test same-store recovery after a transient write outage.
 
-This report is a separate documentation change. No push was performed. All
+Additional continuation commits: `dee87de0` fixes schema bootstrap and unique
+ownership in the live acceptance harness; `a6407d92` rejects `START` while a
+mission is on hold, even while its prior loop is still exiting. Regression
+tests cover rejection during and after that loop, plus explicit `RESUME`.
+Full-suite and lint gates passed after these fixes. No push was performed. All
 pre-existing untracked evidence and stashes remain preserved.
 
 ## 8. Remaining defects and next actions
 
-| ID    | Severity | Status     | Next action                                                                                                                                       |
-| ----- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-08a | P2       | Open       | Diagnose why the Brain approval UI leaves Publish disabled; rerun local Ollama browser journey after correction.                                  |
-| D-11a | P2       | Open       | Resolve the Neon hostname from a functioning DNS path; then perform an authorized fresh managed-Postgres durability check.                        |
-| D-11b | P2       | Open       | Decide whether bounded timed retry/backoff is needed for queued idempotent writes; add safe operation-specific tests before implementation.       |
-| D-11c | P2       | Unverified | Run a fresh mission and independently read back its learning row from PostgreSQL; resolve the missing `provider_preferences` schema prerequisite. |
-| D-09  | P2       | Blocked    | Staging recovery and migration drills require a staging database/environment.                                                                     |
-| D-02  | P2       | Open       | RouterRegistry scale-down remains deferred by sprint constraint.                                                                                  |
+| ID    | Severity | Status  | Next action                                                                                                                                     |
+| ----- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-08a | P2       | Open    | Diagnose why the live Brain approval UI leaves Publish disabled; run a browser journey with the intended local provider.                        |
+| D-11a | P2       | Partial | Read-only Neon connection succeeds; perform an appropriate managed-Postgres durability check before claiming write/recovery acceptance.         |
+| D-11b | P2       | Open    | Decide whether bounded timed retry/backoff is needed for queued idempotent writes; add safe operation-specific tests before implementation.     |
+| D-11c | P2       | Partial | Fresh verified mission and durable aggregate readback passed; repeat with the intended local provider when environment selection is controlled. |
+| D-09  | P2       | Blocked | Staging recovery and migration drills require a staging database/environment.                                                                   |
+| D-02  | P2       | Open    | RouterRegistry scale-down remains deferred by sprint constraint.                                                                                |
 
 ## 9. Scores (Sprint 005 weights unchanged)
 
@@ -138,15 +158,16 @@ pre-existing untracked evidence and stashes remain preserved.
 | Architecture               |      15% |                 6.8 |                 6.8 |
 | End-to-end functionality   |      15% |                 8.0 |                 8.0 |
 | AI intelligence            |      12% |                 7.5 |                 7.5 |
-| Runtime / recovery         |      12% |                 7.0 |                 7.0 |
-| Tests                      |      10% |                 8.2 |                 8.2 |
+| Runtime / recovery         |      12% |                 7.0 |                 7.1 |
+| Tests                      |      10% |                 8.2 |                 8.3 |
 | Security                   |      10% |                 7.5 |                 7.5 |
-| Persistence                |       8% |                 6.8 |                 6.8 |
+| Persistence                |       8% |                 6.8 |                 7.0 |
 | UX / accessibility         |       8% |                 7.0 |                 7.0 |
 | Performance                |       5% |                 5.5 |                 5.5 |
 | Documentation / operations |       5% |                 7.4 |                 7.4 |
-| **Weighted total**         | **100%** | **7.28 → 7.3 / 10** | **7.28 → 7.3 / 10** |
+| **Weighted total**         | **100%** | **7.28 → 7.3 / 10** | **7.32 → 7.3 / 10** |
 
-The implementation and regression coverage improve confidence in learning
-eligibility and queued-write recovery, but no fresh PostgreSQL learning readback,
-managed-Neon recovery, or passing browser journey supports a score increase.
+The small increases reflect fresh durable learning readback, deterministic
+browser acceptance, the held-state lifecycle fix, and full-suite coverage.
+Managed-Neon write recovery and a live-provider browser journey remain
+unverified, keeping the weighted score at 7.3 / 10.
