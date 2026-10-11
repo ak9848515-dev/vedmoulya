@@ -1,0 +1,10 @@
+{
+  "resolvedVia": "public DNS for this process; TLS hostname validation retained",
+  "collection": "vm_sprint007_persistence_probe",
+  "id": "brain-ojaggymg",
+  "userId": "e2e-user",
+  "ownerId": "e2e-user",
+  "missionId": "brain-ojaggymg",
+  "status": "browser-run-incomplete",
+  "independentReadback": true
+}
