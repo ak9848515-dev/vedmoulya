@@ -404,10 +404,9 @@ const REPOSITORY_FIX_TEMPLATE: PlanTemplate = {
 // target the template does not match at all, and the goal falls through to
 // the previous behaviour unchanged.
 //
-// Verification is deterministic. step-1 is verified by the REAL read-back
-// tool outcome (kind:'command'); step-2 is verified by deterministic text
-// rules over the read-back observation (kind:'rule') requiring the literal
-// content marker. Model prose alone can never mark this step verified.
+// Verification is deterministic. Both steps are verified by the REAL
+// read-back tool outcome (kind:'command'); model prose cannot make a correct
+// artifact fail merely because it omits the filename or uses different wording.
 
 const FILE_TARGET_PATTERN =
   /(?:file|named)\s+(?:called\s+)?["'`]?([A-Za-z0-9][A-Za-z0-9._\-/]{0,80}\.[A-Za-z0-9]{1,10})["'`]?/i;
@@ -486,16 +485,11 @@ const FILE_ARTIFACT_TEMPLATE: PlanTemplate = {
         }),
         // One real AI call that must reason over the ACTUAL read-back text.
         //
-        // Its verification deliberately does NOT require the model to echo
-        // the literal content token. Echoing is a property of the model's
-        // verbosity, not of the artifact: a correct mission failed here
-        // because a perfectly good confirmation phrased the conclusion
-        // without repeating the string. Asserting the CONTENT is the job of
-        // the deterministic guarantees above — the plan writes literal args,
-        // and step-1's `kind:'command'` verification is the real read-back
-        // through the governed tool. What this step must genuinely prove is
-        // that the model was grounded in the observed read-back and named
-        // the file it is talking about.
+        // The AI call remains part of the live execution path, but its wording
+        // is not evidence that the requested artifact is correct. Verify the
+        // artifact itself again through the governed read tool; requiring the
+        // model to repeat the filename introduced a false negative even when
+        // the exact requested bytes had already been written and read back.
         aiStep(
           'step-2',
           'Confirm the created artifact holds the exact required content',
@@ -507,13 +501,15 @@ const FILE_ARTIFACT_TEMPLATE: PlanTemplate = {
             `content: ${content}. ` +
             'Do not invent or assume any content you did not observe; if the ' +
             'observed content does not match, say so explicitly.',
-          rulePolicy(
-            [
-              { name: 'mentions-file', kind: 'includes', text: relativePath },
-              { name: 'confirmation-length', kind: 'minLength', length: 20 },
-            ],
-            `the confirmation must be grounded in the observed read-back of ${relativePath} and must name that file`,
-          ),
+          {
+            kind: 'command',
+            description: `the artifact ${relativePath} must really hold the exact required content`,
+            command: {
+              toolName: 'workspace_read',
+              arguments: { relativePath, expectedContent: content },
+              expect: 'ok',
+            },
+          },
           ['step-1'],
         ),
       ],

@@ -192,16 +192,20 @@ describe('deterministic template catalog', () => {
       });
     });
 
-    it('the confirmation step is verified by grounding, not by model echo', () => {
+    it('the confirmation step is verified against the actual artifact, not model wording', () => {
       const { plan } = buildPlan(ACCEPTANCE_GOAL);
       const step = plan.steps.find((s) => s.stepId === 'step-2');
-      expect(step?.verificationPolicy).toMatchObject({ kind: 'rule' });
-      const checks = (step?.verificationPolicy as { checks: { text?: string }[] }).checks;
-      // Grounded in the real read-back: the step must name the actual file.
-      expect(checks.map((c) => c.text)).toContain('mission-acceptance.txt');
-      // It must NOT gate success on the model echoing the literal token —
-      // verbosity is not evidence of artifact content (see the template note).
-      expect(checks.map((c) => c.text)).not.toContain('VEDMOULYA_MISSION_ACCEPTANCE_OK');
+      expect(step?.verificationPolicy).toMatchObject({
+        kind: 'command',
+        command: {
+          toolName: 'workspace_read',
+          arguments: {
+            relativePath: 'mission-acceptance.txt',
+            expectedContent: 'VEDMOULYA_MISSION_ACCEPTANCE_OK',
+          },
+          expect: 'ok',
+        },
+      });
     });
 
     it('exact content is guaranteed deterministically, not by the model', () => {

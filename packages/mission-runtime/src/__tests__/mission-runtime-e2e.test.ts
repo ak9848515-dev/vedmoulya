@@ -129,7 +129,7 @@ const workspaceAuditWrites = (runtime: MissionRuntime): number =>
  * which is the anti-fabrication guarantee this suite must respect.
 
  */
-function realAlternateProvider(): ProviderAdapter {
+function realAlternateProvider(responseContent?: string): ProviderAdapter {
   return {
     name: 'real-alternate',
     family: 'flaky-test',
@@ -148,7 +148,7 @@ function realAlternateProvider(): ProviderAdapter {
     async execute(request: Parameters<ProviderAdapter['execute']>[0]): Promise<AIResponse> {
       const prompt = JSON.stringify(request.messages ?? []);
       return {
-        content: `Confirmed against the observed request. ${prompt}`,
+        content: responseContent ?? `Confirmed against the observed request. ${prompt}`,
         provider: 'real-alternate',
         model: 'real-alternate-deterministic',
         confidence: 0.9,
@@ -231,6 +231,46 @@ describe('file-artifact objective reaches the real workspace tools', () => {
     expect(completed.objectives[0]?.verifiedOutcome?.achieved).toBe(true);
     expect(completed.objectives[0]?.verifiedOutcome?.evidence.length).toBeGreaterThan(0);
     expect(completed.checkpoints.length).toBeGreaterThan(0);
+    expect(completed.state).toBe('COMPLETED');
+  });
+
+  it('verifies the artifact from the governed read-back when provider wording omits the filename', async () => {
+    const workspace = newWorkspace();
+    const runtime = makeRuntime(workspace, {
+      workspaceTools: true,
+      providers: (orchestrator) => {
+        orchestrator.registerProvider(
+          realAlternateProvider('The artifact contains the requested exact content.'),
+        );
+      },
+    });
+    const objective =
+      'Create a file named mission-acceptance.txt with exact contents VEDMOULYA_MISSION_ACCEPTANCE_OK';
+
+    const mission = await runtime.controller.createMission({
+      userId: 'acceptance-brief-confirmation',
+      title: 'Brief artifact confirmation',
+      objective,
+      mode: 'DEVELOPMENT',
+      workspace,
+      constraints: devConstraints(),
+      initialObjectives: [objective],
+    });
+    await runtime.controller.startMission(mission.missionId);
+    const completed = await runtime.controller.runAutonomousLoop(mission.missionId);
+
+    expect(readFileSync(path.join(workspace, 'mission-acceptance.txt'), 'utf8')).toBe(
+      'VEDMOULYA_MISSION_ACCEPTANCE_OK',
+    );
+    const run = runtime.runs.forObjective(mission.missionId, completed.objectives[0]!.objectiveId);
+    expect(
+      run?.stepResults.find((step) => step.stepId === 'step-2')?.observations[0]?.resultSummary,
+    ).toBe('The artifact contains the requested exact content.');
+    expect(run?.stepResults.find((step) => step.stepId === 'step-2')?.verification?.verdict).toBe(
+      'VERIFIED',
+    );
+    expect(completed.objectives[0]?.state).toBe('VERIFIED');
+    expect(completed.objectives[0]?.verifiedOutcome?.evidence.length).toBeGreaterThan(0);
     expect(completed.state).toBe('COMPLETED');
   });
 
