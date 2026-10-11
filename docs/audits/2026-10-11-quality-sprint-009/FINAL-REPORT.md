@@ -59,7 +59,7 @@ No paid cloud AI credits were used. No live provider acceptance was run. No exte
 
 ## 5. Pre-commit workflow investigation
 
-The configured hook is `.husky/pre-commit` → `npx lint-staged --allow-empty`; staged TypeScript runs `eslint --fix` then Prettier. Both normal commit attempts completed those tasks successfully on the two changed TypeScript files. The first was stopped by the separate `commit-msg` hook because `opportunities` is not an allowed scope; retrying with allowed scope `api` passed and created `22fce3d3`. The earlier apparent lint-staged stall was not reproducible on this exact staged scope. Full-repository `npm run lint` takes about 208 seconds across 58 scopes, so a broad lint operation may be mistaken for a hung hook; the exact cause of the older unlogged stall cannot be proven. No hook bypass or configuration rewrite was used.
+The configured hook is `.husky/pre-commit` → `npx lint-staged --allow-empty`; staged TypeScript runs `eslint --fix` then Prettier. The staged-file tasks completed successfully on each source and documentation commit attempt. The commit-message hook rejected the first source message (`opportunities`) and first documentation message (`audit`) because neither is an allowed scope; retrying with allowed scopes `api` and `docs` passed. The earlier apparent lint-staged stall was not reproducible on these staged scopes. Full-repository `npm run lint` takes about 208 seconds across 58 scopes, so a broad lint operation may be mistaken for a hung hook; the exact cause of the older unlogged stall cannot be proven. No hook bypass or configuration rewrite was used.
 
 ## 6. Commits and score
 
