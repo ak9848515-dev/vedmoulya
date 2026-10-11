@@ -7,6 +7,7 @@
 
 import { container, databaseManager, logger } from '@vedmoulya/core';
 import postgres from 'postgres';
+import { describeErrorChain } from './errorChain.js';
 import type {
   ProviderCredentialStore,
   ProviderPreferencesStore,
@@ -293,8 +294,14 @@ export async function awaitAllEngineEnsureTables(): Promise<void> {
         await repo.ensureTable();
         if (seed) await seed();
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error(`${label} table initialization failed`, { error: message });
+        // SPRINT-005 — log the FULL cause chain, not just the outer drizzle
+        // wrapper ("Failed query: CREATE TABLE ..."), so a connection/config
+        // fault (ECONNREFUSED), a permission fault (42501) and a schema fault
+        // (42P01) are distinguishable instead of surfacing as one opaque
+        // "table initialization failed" blocker.
+        logger.error(`${label} table initialization failed`, {
+          error: describeErrorChain(error),
+        });
       }
     }
     ddlInProgress = false;
