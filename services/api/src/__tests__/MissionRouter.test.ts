@@ -47,6 +47,44 @@ function makeServices(): ApiApplicationService {
   return { mission: missionService } as unknown as ApiApplicationService;
 }
 
+/** Keeps the detached loop in flight long enough for pause tests to reach it. */
+class DelayedMockProvider extends MockProvider {
+  private markFirstExecutionStarted!: () => void;
+  readonly firstExecutionStarted = new Promise<void>((resolve) => {
+    this.markFirstExecutionStarted = resolve;
+  });
+  private started = false;
+
+  override async execute(request: Parameters<MockProvider['execute']>[0]) {
+    if (!this.started) {
+      this.started = true;
+      this.markFirstExecutionStarted();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return super.execute(request);
+  }
+}
+
+function makeDelayedCaller(userId: string): {
+  caller: ReturnType<typeof router.createCaller>;
+  provider: DelayedMockProvider;
+} {
+  const provider = new DelayedMockProvider();
+  const missionService = new MissionService({
+    workspaceRoot: workspace,
+    runtimeOptions: {
+      registerProviders: (orchestrator) => {
+        orchestrator.registerProvider(provider);
+      },
+      orchestratorOptions: { retryBaseDelayMs: 1 },
+    },
+  });
+  const slowRouter = createAppRouter({
+    mission: missionService,
+  } as unknown as ApiApplicationService);
+  return { caller: slowRouter.createCaller(ctx(userId)), provider };
+}
+
 const router = createAppRouter(makeServices());
 const ctx = (userId: string) => ({ userId, email: `${userId}@vm.local`, role: 'user' });
 
@@ -100,6 +138,22 @@ async function pollUntilSettled(
       throw new Error(`mission did not settle within ${timeoutMs}ms (last state: ${last})`);
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function pollUntilPausedLoopStops(
+  caller: ReturnType<typeof router.createCaller>,
+  userId: string,
+  missionId: string,
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    const view = await unwrap<{ state: string; loopRunning: boolean }>(
+      caller.mission.status({ userId, missionId }),
+    );
+    if (view.state === 'PAUSED' && !view.loopRunning) return;
+    if (Date.now() >= deadline) throw new Error('paused mission loop did not stop within 5s');
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
 
@@ -258,7 +312,7 @@ describe('mission namespace — BLD-024 Mission Control API', () => {
   });
 
   it('PAUSE during an in-flight detached loop reaches a safe persisted PAUSED state without killing the request', async () => {
-    const caller = router.createCaller(ctx('pause-user'));
+    const { caller, provider } = makeDelayedCaller('pause-user');
     const created = await unwrap<MissionView>(
       caller.mission.createAndRun({
         userId: 'pause-user',
@@ -271,6 +325,7 @@ describe('mission namespace — BLD-024 Mission Control API', () => {
       }),
     );
     expect(created.state).toBe('RUNNING');
+    await provider.firstExecutionStarted;
 
     // Pause WHILE the loop is running — the operator request returns the
     // safe persisted state; the loop stops at the next controller boundary.
@@ -278,11 +333,17 @@ describe('mission namespace — BLD-024 Mission Control API', () => {
       caller.mission.pause({ userId: 'pause-user', missionId: created.missionId }),
     );
     expect(paused.state).toBe('PAUSED');
+    const startWhilePaused = await caller.mission.start({
+      userId: 'pause-user',
+      missionId: created.missionId,
+    });
+    expect(startWhilePaused.success).toBe(false);
 
     // The mission settles in PAUSED (hold) with progress preserved, and
     // verified objectives are never re-run after resume.
     const settled = await pollUntilSettled(caller, 'pause-user', created.missionId);
     expect(settled.state).toBe('PAUSED');
+    await pollUntilPausedLoopStops(caller, 'pause-user', created.missionId);
 
     // RESUME continues from persisted state.
     const resumed = await unwrap<MissionView>(
@@ -294,7 +355,7 @@ describe('mission namespace — BLD-024 Mission Control API', () => {
   });
 
   it('invalid state transitions: START on a PAUSED mission is refused (explicit RESUME is required)', async () => {
-    const caller = router.createCaller(ctx('trans-user'));
+    const { caller, provider } = makeDelayedCaller('trans-user');
     const created = await unwrap<MissionView>(
       caller.mission.createAndRun({
         userId: 'trans-user',
@@ -303,11 +364,18 @@ describe('mission namespace — BLD-024 Mission Control API', () => {
         initialObjectives: ['Create the workspace file transition.md with the content'],
       }),
     );
+    await provider.firstExecutionStarted;
     await unwrap<MissionView>(
       caller.mission.pause({ userId: 'trans-user', missionId: created.missionId }),
     );
+    const startWhileLoopStillExits = await caller.mission.start({
+      userId: 'trans-user',
+      missionId: created.missionId,
+    });
+    expect(startWhileLoopStillExits.success).toBe(false);
     const settled = await pollUntilSettled(caller, 'trans-user', created.missionId);
     expect(settled.state).toBe('PAUSED');
+    await pollUntilPausedLoopStops(caller, 'trans-user', created.missionId);
 
     const startAttempt = await caller.mission.start({
       userId: 'trans-user',

@@ -666,23 +666,24 @@ export class MissionService {
   async startAutonomousLoop(userId: string, missionId: string): Promise<Mission> {
     const runtime = await this.getRuntime();
 
-    if (this.loopsInFlight.has(missionId)) {
-      // A loop is already driving this mission — observe, don't duplicate.
-      return this.getMissionOwned(missionId, userId);
-    }
-
     const before = await this.getMissionOwned(missionId, userId);
     if (this.isTerminalState(before.state)) {
       // Honest idempotency: a terminal mission cannot start again.
       throw new Error(`Illegal mission transition: ${before.state} -> START`);
     }
+    if (before.state !== 'CREATED' && before.state !== 'RUNNING') {
+      // A running loop never turns an operator hold into an accepted START.
+      // Check the state before the in-flight dedupe so PAUSED/BLOCKED/WAITING
+      // missions still require the explicit resume/approval path.
+      throw new Error(`Illegal mission transition: ${before.state} -> START`);
+    }
+    if (this.loopsInFlight.has(missionId)) {
+      // A loop is already driving this RUNNING mission — observe, don't duplicate.
+      return before;
+    }
     if (before.state === 'CREATED') {
       const started = await runtime.api.start(missionId, userId);
       this.record(started, 'MISSION_STARTED', `Mission started: ${started.title}`);
-    } else if (before.state !== 'RUNNING') {
-      // PAUSED/BLOCKED/WAITING_* are operator-driven holds: START must not
-      // implicitly resume them — the operator resumes explicitly.
-      throw new Error(`Illegal mission transition: ${before.state} -> START`);
     }
     // RUNNING (e.g. after a process restart) continues from persisted state;
     // verified objectives are never repeated (controller checkpoint rules).
