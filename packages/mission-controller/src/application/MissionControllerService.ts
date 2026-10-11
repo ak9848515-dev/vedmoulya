@@ -248,7 +248,7 @@ export class MissionControllerService {
   async createMission(input: CreateMissionInput): Promise<Mission> {
     const { clock, idGenerator, store } = this.options;
     const now = clock.now();
-    const missionId = idGenerator.generateId('mission');
+    const missionId = input.missionId ?? idGenerator.generateId('mission');
 
     // Initial objectives are created here (the create path previously always
     // produced `dependencies: []`). Explicit `objectiveDependencies` are
@@ -316,6 +316,12 @@ export class MissionControllerService {
     // document itself carries the creation event, so the trail survives a
     // process restart (no second log system).
     this.recordActivity(mission, 'MISSION_CREATED', `Mission created: ${mission.title}`);
+    if (input.missionId && store.createIfAbsent) {
+      const existingOrCreated = await store.createIfAbsent(mission);
+      if (existingOrCreated.userId !== input.userId)
+        throw new Error('Mission ID belongs to another owner.');
+      return existingOrCreated;
+    }
     await store.save(mission);
     return mission;
   }

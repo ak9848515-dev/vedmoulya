@@ -16,6 +16,7 @@
 
 export interface MissionLaunchInput {
   userId: string;
+  missionId?: string;
   title: string;
   description: string;
   /**
@@ -163,6 +164,7 @@ export function createMissionLaunchPort(launcher: MissionLauncher): MissionLaunc
       try {
         const result = await launcher.createAndRun(input.userId, {
           title: input.title,
+          ...(input.missionId !== undefined ? { missionId: input.missionId } : {}),
           description: input.description,
           // S7.2 — forward the DERIVED bounded objective. When the caller did not
           // supply one (older callers), fall back to the description so the

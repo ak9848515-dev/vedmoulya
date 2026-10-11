@@ -54,6 +54,8 @@ function harness(
     missionThrows?: boolean;
     sharePlane?: ActiveIntelligenceControlPlane;
     shareStores?: InMemoryControlStores;
+    missionCatalog?: Map<string, string>;
+    missionCreations?: string[];
   } = {},
 ) {
   const brain = createBrain();
@@ -68,13 +70,22 @@ function harness(
       now: () => '2026-10-05T00:00:00.000Z',
     });
   const launched: Array<{ userId: string; title: string }> = [];
+  const missionCatalog = opts.missionCatalog ?? new Map<string, string>();
+  const missionCreations = opts.missionCreations ?? [];
   let n = 0;
   const mission = createMissionLaunchPort({
     createAndRun: async (userId, input) => {
+      const requestedMissionId = (input as typeof input & { missionId?: string }).missionId;
+      if (requestedMissionId !== undefined && missionCatalog.has(requestedMissionId)) {
+        return { missionId: missionCatalog.get(requestedMissionId)! };
+      }
       launched.push({ userId, title: input.title });
       if (opts.missionThrows) throw new Error('engine exploded');
       if (opts.missionFails) return { error: 'budget exhausted' };
-      return { missionId: `mission-${++n}` };
+      missionCreations.push(requestedMissionId ?? `unkeyed-attempt-${missionCreations.length + 1}`);
+      const missionId = requestedMissionId ?? `mission-${++n}`;
+      if (requestedMissionId !== undefined) missionCatalog.set(requestedMissionId, missionId);
+      return { missionId };
     },
   });
   const router = createControlRouter(plane, {
@@ -83,7 +94,16 @@ function harness(
     mission,
   });
   const ctx = { userId: OWNER } as never;
-  return { router, plane, stores, launched, ctx, otherCtx: { userId: OTHER } as never };
+  return {
+    router,
+    plane,
+    stores,
+    launched,
+    missionCatalog,
+    missionCreations,
+    ctx,
+    otherCtx: { userId: OTHER } as never,
+  };
 }
 
 /** Import + walk the lifecycle to APPROVED, using only real transitions. */
@@ -292,7 +312,7 @@ describe('S5.1 — approved opportunity → Mission', () => {
     const id = await approvedOpportunity(h);
     // Break the store AFTER approval, so the Mission is created but the link
     // cannot be written. The response must say exactly that.
-    Object.defineProperty(h.stores.opportunityMissionLinks, 'save', {
+    Object.defineProperty(h.stores.opportunityMissionLinks, 'completeLaunch', {
       value: () => {
         throw new Error('store offline');
       },
@@ -312,8 +332,10 @@ describe('S5.1 — approved opportunity → Mission', () => {
     const h = harness();
     const id = await approvedOpportunity(h);
     let saveCalls = 0;
-    const realSave = h.stores.opportunityMissionLinks.save.bind(h.stores.opportunityMissionLinks);
-    Object.defineProperty(h.stores.opportunityMissionLinks, 'save', {
+    const realSave = h.stores.opportunityMissionLinks.completeLaunch.bind(
+      h.stores.opportunityMissionLinks,
+    );
+    Object.defineProperty(h.stores.opportunityMissionLinks, 'completeLaunch', {
       value: (link: {
         userId: string;
         opportunityId: string;
@@ -337,6 +359,64 @@ describe('S5.1 — approved opportunity → Mission', () => {
     // Exactly one association exists, bound to the launched Mission.
     expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(1);
     expect(h.plane.getMissionForOpportunity(OWNER, id)?.missionId).toBe(data.missionId);
+  });
+
+  it('15. restart after Mission creation and link failure recovers one Mission', async () => {
+    const h = harness();
+    const id = await approvedOpportunity(h);
+    const originalComplete = h.stores.opportunityMissionLinks.completeLaunch.bind(
+      h.stores.opportunityMissionLinks,
+    );
+    Object.defineProperty(h.stores.opportunityMissionLinks, 'completeLaunch', {
+      value: async () => {
+        throw new Error('link store offline');
+      },
+    });
+
+    const interrupted = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+    expect(interrupted.success).toBe(false);
+    expect(h.launched).toHaveLength(1);
+
+    // A fresh router represents a process restart. Persisted stores and the
+    // canonical Mission catalog survive, while request-local state is new.
+    Object.defineProperty(h.stores.opportunityMissionLinks, 'completeLaunch', {
+      value: originalComplete,
+    });
+    const restarted = harness({
+      sharePlane: h.plane,
+      shareStores: h.stores,
+      missionCatalog: h.missionCatalog,
+      missionCreations: h.missionCreations,
+    });
+    const recovered = await restarted.router.startMissionForOpportunity(
+      { id, userId: OWNER },
+      restarted.ctx,
+    );
+
+    expect(recovered.success).toBe(true);
+    expect((recovered.data as { missionId: string }).missionId).toBe(h.missionCreations[0]);
+    expect(h.launched).toHaveLength(1);
+    expect(h.missionCreations).toHaveLength(1);
+    expect(h.plane.getMissionForOpportunity(OWNER, id)?.missionId).toBe(h.missionCreations[0]);
+  });
+
+  it('16. concurrent routers claim one stable Mission identity', async () => {
+    const h = harness();
+    const id = await approvedOpportunity(h);
+    const second = harness({
+      sharePlane: h.plane,
+      shareStores: h.stores,
+      missionCatalog: h.missionCatalog,
+      missionCreations: h.missionCreations,
+    });
+    const results = await Promise.all([
+      h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx),
+      second.router.startMissionForOpportunity({ id, userId: OWNER }, second.ctx),
+    ]);
+    expect(results.some((result) => result.success)).toBe(true);
+    expect(h.missionCreations).toHaveLength(1);
+    expect(h.plane.listOpportunityMissionLinks(OWNER)).toHaveLength(1);
+    expect(h.plane.getMissionForOpportunity(OWNER, id)?.missionId).toBe(h.missionCreations[0]);
   });
 }); // end S5.1 — association is idempotent, user-isolated, honest
 
@@ -382,8 +462,10 @@ describe('S5.2 — Opportunity → Mission reliability hardening', () => {
     const h = harness();
     const id = await approvedOpportunity(h);
     let calls = 0;
-    const realSave = h.stores.opportunityMissionLinks.save.bind(h.stores.opportunityMissionLinks);
-    Object.defineProperty(h.stores.opportunityMissionLinks, 'save', {
+    const realSave = h.stores.opportunityMissionLinks.completeLaunch.bind(
+      h.stores.opportunityMissionLinks,
+    );
+    Object.defineProperty(h.stores.opportunityMissionLinks, 'completeLaunch', {
       value: (link: {
         userId: string;
         opportunityId: string;

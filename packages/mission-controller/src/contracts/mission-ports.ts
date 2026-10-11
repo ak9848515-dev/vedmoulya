@@ -39,6 +39,7 @@ export type {
 // -- Mission Persistence -------------------------------------------
 export interface MissionStore {
   save(mission: Mission): Promise<void>;
+  createIfAbsent?(mission: Mission): Promise<Mission>;
   get(missionId: string): Promise<Mission | undefined>;
   getSync?(missionId: string): Mission | undefined;
   listByUserId(userId: string): Promise<Mission[]>;

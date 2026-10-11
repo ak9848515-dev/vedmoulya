@@ -475,6 +475,8 @@ export interface GitSafetyClassification {
 }
 
 export interface CreateMissionInput {
+  /** Optional stable idempotency identity used by authorized handoff flows. */
+  missionId?: string;
   userId: string;
   title: string;
   objective: string;

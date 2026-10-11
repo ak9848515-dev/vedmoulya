@@ -6,6 +6,35 @@ import { createTestService } from './fixtures.js';
 import { transition } from '../domain/mission-state-machine.js';
 
 describe('Mission Security Boundaries', () => {
+  it('reuses a caller-supplied stable mission id idempotently and preserves ownership', async () => {
+    const { service, store } = createTestService();
+    const first = await service.createMission({
+      missionId: 'mission_opportunity_test-key',
+      userId: 'u1',
+      title: 'Original title',
+      objective: 'Approved objective',
+    });
+    const repeated = await service.createMission({
+      missionId: 'mission_opportunity_test-key',
+      userId: 'u1',
+      title: 'Changed retry payload',
+      objective: 'Changed objective',
+    });
+    expect(repeated.missionId).toBe(first.missionId);
+    expect(repeated.title).toBe('Original title');
+    expect(
+      (await store.listByUserId('u1')).filter((m) => m.missionId === first.missionId),
+    ).toHaveLength(1);
+    await expect(
+      service.createMission({
+        missionId: first.missionId,
+        userId: 'u2',
+        title: 'Foreign owner',
+        objective: 'Must fail closed',
+      }),
+    ).rejects.toThrow(/another owner/);
+  });
+
   it('mission constraints (allowedTools) flow through to the frozen runtime executor', async () => {
     let passedAllowedTools: string[] | undefined;
     let passedPermissionClasses: string[] | undefined;

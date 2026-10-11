@@ -246,11 +246,24 @@ export interface OpportunityMissionAssociation {
   createdAt: string;
 }
 
+/** Durable pre-creation intent, stored at the same owner/opportunity key as
+ * the final association. `status: 'PENDING'` means the Mission ID is reserved
+ * and may be reconciled; `LINKED` means creation and association completed. */
+export interface OpportunityMissionLaunchIntent extends OpportunityMissionAssociation {
+  status: 'PENDING' | 'LINKED';
+}
+
 /** Owner-scoped persistence seam for the association. */
 export interface OpportunityMissionLinkStore {
   /** Idempotent by (userId, opportunityId) — returns the EXISTING link when
    *  one is already present, so a repeated call never duplicates. */
   save(link: OpportunityMissionAssociation): OpportunityMissionAssociation;
+  /** Atomically reserve one stable Mission ID before calling Mission creation. */
+  claimLaunch(intent: OpportunityMissionAssociation): Promise<OpportunityMissionLaunchIntent>;
+  /** Atomically mark the matching reserved Mission ID as associated. */
+  completeLaunch(link: OpportunityMissionAssociation): Promise<OpportunityMissionAssociation>;
+  /** Return either a pending intent or a completed link for recovery. */
+  getLaunch(userId: string, opportunityId: string): OpportunityMissionLaunchIntent | undefined;
   getByOpportunity(
     userId: string,
     opportunityId: string,

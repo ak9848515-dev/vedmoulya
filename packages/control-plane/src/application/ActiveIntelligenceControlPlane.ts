@@ -23,6 +23,7 @@ import type {
   OpportunityLifecycleRecord,
   OpportunitySourceRef,
   OpportunityMissionAssociation,
+  OpportunityMissionLaunchIntent,
   OpportunityStatus,
 } from '../types/control-types.js';
 import type {
@@ -334,6 +335,37 @@ export class ActiveIntelligenceControlPlane {
       throw new Error('Only an APPROVED opportunity may be linked to a Mission.');
     }
     return this.stores.opportunityMissionLinks.save(link);
+  }
+
+  claimOpportunityMissionLaunch(
+    intent: OpportunityMissionAssociation,
+  ): Promise<OpportunityMissionLaunchIntent> {
+    const record = this.opportunities.get(intent.userId, intent.opportunityId);
+    if (
+      !record ||
+      (record.status !== 'APPROVED' && record.status !== 'PLANNED') ||
+      !record.approval
+    ) {
+      throw new Error('Only an approved opportunity may reserve a Mission launch.');
+    }
+    return this.stores.opportunityMissionLinks.claimLaunch(intent);
+  }
+
+  completeOpportunityMissionLaunch(
+    link: OpportunityMissionAssociation,
+  ): Promise<OpportunityMissionAssociation> {
+    const record = this.opportunities.get(link.userId, link.opportunityId);
+    if (!record || record.status !== 'PLANNED' || !record.approval) {
+      throw new Error('Only an approved, claimed opportunity may complete a Mission launch.');
+    }
+    return this.stores.opportunityMissionLinks.completeLaunch(link);
+  }
+
+  getOpportunityMissionLaunch(
+    userId: string,
+    opportunityId: string,
+  ): OpportunityMissionLaunchIntent | undefined {
+    return this.stores.opportunityMissionLinks.getLaunch(userId, opportunityId);
   }
 
   getMissionForOpportunity(

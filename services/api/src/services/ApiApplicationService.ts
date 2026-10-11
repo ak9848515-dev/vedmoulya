@@ -2023,6 +2023,7 @@ export class ApiApplicationService {
             // MissionService requires `objective`, so fall back to the title (a
             // non-empty objective is structurally required) — never undefined.
             title: input.title,
+            ...(input.missionId !== undefined ? { missionId: input.missionId } : {}),
             objective: input.objective ?? input.description,
             ...(input.initialObjectives !== undefined && input.initialObjectives.length > 0
               ? { initialObjectives: input.initialObjectives }

@@ -14,6 +14,7 @@ import type {
   EmergencyStopState,
   OpportunityLifecycleRecord,
   OpportunityMissionAssociation,
+  OpportunityMissionLaunchIntent,
   OpportunityMissionLinkStore,
 } from '../types/control-types.js';
 
@@ -98,7 +99,7 @@ export class PostgresOpportunityStore
  *  Idempotent by construction: `save` returns the existing link instead of
  *  writing a second one, so a retried handoff can never duplicate a Mission. */
 export class PostgresOpportunityMissionLinkStore
-  extends WriteThroughDocumentStore<OpportunityMissionAssociation>
+  extends WriteThroughDocumentStore<OpportunityMissionLaunchIntent>
   implements OpportunityMissionLinkStore
 {
   constructor(sql: postgres.Sql, table = 'control_opportunity_mission_links') {
@@ -108,22 +109,78 @@ export class PostgresOpportunityMissionLinkStore
   save(link: OpportunityMissionAssociation): OpportunityMissionAssociation {
     const existing = this.read(link.userId, link.opportunityId);
     if (existing) return existing;
-    this.write(link.userId, link.opportunityId, link);
-    return link;
+    const linked = { ...link, status: 'LINKED' as const };
+    this.write(link.userId, link.opportunityId, linked);
+    return linked;
+  }
+
+  async claimLaunch(
+    intent: OpportunityMissionAssociation,
+  ): Promise<OpportunityMissionLaunchIntent> {
+    const key = intent.opportunityId;
+    const pending = { ...intent, status: 'PENDING' as const };
+    const rows = await this.sql<Array<{ doc: OpportunityMissionLaunchIntent }>>`
+      INSERT INTO ${this.sql(this.tableName)} (owner, key, doc)
+      VALUES (${intent.userId}, ${key}, ${this.sql.json(pending)})
+      ON CONFLICT (owner, key) DO NOTHING
+      RETURNING doc
+    `;
+    if (rows[0]?.doc) return this.remember(intent.userId, key, rows[0].doc);
+    const existingRows = await this.sql<Array<{ doc: OpportunityMissionLaunchIntent }>>`
+      SELECT doc FROM ${this.sql(this.tableName)} WHERE owner = ${intent.userId} AND key = ${key} FOR UPDATE
+    `;
+    const existing = existingRows[0]?.doc ?? this.read(intent.userId, key);
+    if (!existing) throw new Error('Launch intent could not be read after claim.');
+    const normalized = (
+      typeof existing === 'string' ? JSON.parse(existing) : existing
+    ) as OpportunityMissionLaunchIntent;
+    return this.remember(
+      intent.userId,
+      key,
+      'status' in normalized ? normalized : Object.assign({}, normalized, { status: 'LINKED' }),
+    );
+  }
+
+  async completeLaunch(
+    link: OpportunityMissionAssociation,
+  ): Promise<OpportunityMissionAssociation> {
+    const key = link.opportunityId;
+    const rows = await this.sql<Array<{ doc: OpportunityMissionLaunchIntent }>>`
+      UPDATE ${this.sql(this.tableName)} SET doc = ${this.sql.json({ ...link, status: 'LINKED' })}, updated_at = now()
+      WHERE owner = ${link.userId} AND key = ${key}
+        AND doc->>'missionId' = ${link.missionId}
+      RETURNING doc
+    `;
+    if (rows[0]?.doc) return this.remember(link.userId, key, rows[0].doc);
+    const existing = this.read(link.userId, key);
+    if (existing?.status === 'LINKED' && existing.missionId === link.missionId) return existing;
+    throw new Error('Launch intent is missing or Mission ID does not match.');
+  }
+
+  getLaunch(userId: string, opportunityId: string): OpportunityMissionLaunchIntent | undefined {
+    const row = this.read(userId, opportunityId);
+    return row
+      ? 'status' in row
+        ? row
+        : { ...(row as OpportunityMissionAssociation), status: 'LINKED' }
+      : undefined;
   }
 
   getByOpportunity(
     userId: string,
     opportunityId: string,
   ): OpportunityMissionAssociation | undefined {
-    return this.read(userId, opportunityId);
+    const row = this.getLaunch(userId, opportunityId);
+    return row?.status === 'LINKED' ? row : undefined;
   }
 
   getByMission(userId: string, missionId: string): OpportunityMissionAssociation | undefined {
-    return this.all(userId).find((l) => l.missionId === missionId);
+    return this.all(userId).find((l) => l.status === 'LINKED' && l.missionId === missionId);
   }
 
   list(userId: string): OpportunityMissionAssociation[] {
-    return this.all(userId).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    return this.all(userId)
+      .filter((l) => l.status === 'LINKED')
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }
 }

@@ -10,6 +10,13 @@ export class InMemoryMissionStore implements MissionStore {
     this.missions.set(mission.missionId, mission);
   }
 
+  createIfAbsent(mission: Mission): Promise<Mission> {
+    const existing = this.missions.get(mission.missionId);
+    if (existing) return Promise.resolve(existing);
+    this.missions.set(mission.missionId, mission);
+    return Promise.resolve(mission);
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await
   async get(missionId: string): Promise<Mission | undefined> {
     return this.missions.get(missionId);

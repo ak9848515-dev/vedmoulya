@@ -67,7 +67,7 @@ export abstract class WriteThroughDocumentStore<TDoc extends object> {
   private draining = false;
   private drainPromise: Promise<void> | undefined;
   private evictionWarned = false;
-  private readonly sql: postgres.Sql;
+  protected readonly sql: postgres.Sql;
   private readonly table: string;
 
   protected constructor(sql: postgres.Sql, table: string) {
@@ -179,6 +179,12 @@ export abstract class WriteThroughDocumentStore<TDoc extends object> {
       }
     }
     void this.drain();
+    return doc;
+  }
+
+  /** Refresh the synchronous mirror after a subclass performs an awaited SQL transaction. */
+  protected remember(owner: string, key: string, doc: TDoc): TDoc {
+    this.mirror.set(this.keyOf(owner, key), structuredClone(doc));
     return doc;
   }
 

@@ -64,11 +64,10 @@ function harness() {
     now: () => NOW,
   });
   const launched: Array<{ userId: string; title: string }> = [];
-  let n = 0;
   const mission = createMissionLaunchPort({
     createAndRun: async (userId, input) => {
       launched.push({ userId, title: input.title });
-      return { missionId: `mission-${++n}` };
+      return { missionId: input.missionId ?? `mission-${launched.length}` };
     },
   });
   const router = createControlRouter(plane, {
@@ -119,7 +118,8 @@ describe('REVENUE-001 — APPROVED opportunity → Mission', () => {
 
     const started = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
     expect(started.success).toBe(true);
-    expect((started.data as { missionId: string }).missionId).toBe('mission-1');
+    const missionId = (started.data as { missionId: string }).missionId;
+    expect(missionId).toMatch(/^mission_opportunity_/);
     expect((started.data as { created: boolean }).created).toBe(true);
     expect(h.launched).toHaveLength(1);
   });
@@ -128,11 +128,12 @@ describe('REVENUE-001 — APPROVED opportunity → Mission', () => {
     const h = harness();
     const id = await walk(h, h.ctx, 'APPROVED');
 
-    await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+    const first = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
     const second = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
 
     expect(second.success).toBe(true);
-    expect((second.data as { missionId: string }).missionId).toBe('mission-1');
+    const missionId = (first.data as { missionId: string }).missionId;
+    expect((second.data as { missionId: string }).missionId).toBe(missionId);
     expect((second.data as { created: boolean }).created).toBe(false);
     // The engine was reached once and only once.
     expect(h.launched).toHaveLength(1);

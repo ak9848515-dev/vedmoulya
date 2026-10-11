@@ -10,6 +10,7 @@ import type {
   EmergencyStopState,
   OpportunityLifecycleRecord,
   OpportunityMissionAssociation,
+  OpportunityMissionLaunchIntent,
 } from '../types/control-types.js';
 import type { ControlStores } from '../contracts/control-ports.js';
 
@@ -23,7 +24,7 @@ export class InMemoryControlStores implements ControlStores {
     const settingsMap = new Map<string, AutonomySettings>();
     const stopMap = new Map<string, EmergencyStopState>();
     const oppMap = new Map<string, OpportunityLifecycleRecord>();
-    const linkMap = new Map<string, OpportunityMissionAssociation>();
+    const linkMap = new Map<string, OpportunityMissionLaunchIntent>();
 
     this.settings = {
       get: (ownerId): AutonomySettings | undefined => settingsMap.get(ownerId),
@@ -58,16 +59,40 @@ export class InMemoryControlStores implements ControlStores {
         const key = `${link.userId}:${link.opportunityId}`;
         const existing = linkMap.get(key);
         if (existing) return existing;
-        linkMap.set(key, link);
-        return link;
+        const linked = { ...link, status: 'LINKED' as const };
+        linkMap.set(key, linked);
+        return linked;
       },
-      getByOpportunity: (userId, opportunityId): OpportunityMissionAssociation | undefined =>
+      claimLaunch: (intent): Promise<OpportunityMissionLaunchIntent> => {
+        const key = `${intent.userId}:${intent.opportunityId}`;
+        const existing = linkMap.get(key);
+        if (existing) return Promise.resolve(existing);
+        const pending = { ...intent, status: 'PENDING' as const };
+        linkMap.set(key, pending);
+        return Promise.resolve(pending);
+      },
+      completeLaunch: (link): Promise<OpportunityMissionAssociation> => {
+        const key = `${link.userId}:${link.opportunityId}`;
+        const existing = linkMap.get(key);
+        if (!existing || existing.missionId !== link.missionId)
+          throw new Error('Launch intent mismatch.');
+        const completed = { ...existing, status: 'LINKED' as const };
+        linkMap.set(key, completed);
+        return Promise.resolve(completed);
+      },
+      getLaunch: (userId, opportunityId): OpportunityMissionLaunchIntent | undefined =>
         linkMap.get(`${userId}:${opportunityId}`),
+      getByOpportunity: (userId, opportunityId): OpportunityMissionAssociation | undefined =>
+        linkMap.get(`${userId}:${opportunityId}`)?.status === 'LINKED'
+          ? linkMap.get(`${userId}:${opportunityId}`)
+          : undefined,
       getByMission: (userId, missionId): OpportunityMissionAssociation | undefined =>
-        [...linkMap.values()].find((l) => l.userId === userId && l.missionId === missionId),
+        [...linkMap.values()].find(
+          (l) => l.status === 'LINKED' && l.userId === userId && l.missionId === missionId,
+        ),
       list: (userId): OpportunityMissionAssociation[] =>
         [...linkMap.values()]
-          .filter((l) => l.userId === userId)
+          .filter((l) => l.userId === userId && l.status === 'LINKED')
           .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
     };
   }

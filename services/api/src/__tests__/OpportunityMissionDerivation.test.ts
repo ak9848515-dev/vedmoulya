@@ -67,6 +67,7 @@ const POSTING = {
 interface LaunchedMission {
   userId: string;
   title: string;
+  missionId?: string;
   objective?: string;
   initialObjectives?: string[];
 }
@@ -94,12 +95,13 @@ function harness(): {
       launched.push({
         userId,
         title: input.title,
+        ...(input.missionId !== undefined ? { missionId: input.missionId } : {}),
         ...(input.objective !== undefined ? { objective: input.objective } : {}),
         ...(input.initialObjectives !== undefined
           ? { initialObjectives: input.initialObjectives }
           : {}),
       });
-      return { missionId: `mission-${launched.length}` };
+      return { missionId: input.missionId ?? `mission-${launched.length}` };
     },
   });
   const router = createControlRouter(plane, {

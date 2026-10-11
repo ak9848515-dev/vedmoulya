@@ -20,6 +20,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import type {
   ActiveIntelligenceControlPlane,
   OpportunityLifecycleRecord,
@@ -687,27 +688,54 @@ export function createControlRouter(
         // PLANNED (not APPROVED) and is refused below instead of reaching
         // MissionLaunchPort.createAndRun a second time. No in-memory lock, no
         // new store, no Mission change — the lifecycle IS the atomic claim.
-        const claimed = plane.transitionOpportunity({
-          ownerId,
-          id: record.id,
-          to: 'PLANNED',
-          note: `mission launch claimed — association pending; suitability score ${assessment.score.toFixed(2)}, assessed risk ${assessment.riskLevel}, persisted risk ${record.riskLevel}, approval ${record.approval.id}`,
-        });
-        if (!claimed.success) {
-          // A concurrent request already claimed (or moved) this opportunity.
-          // Deterministic, recoverable: retrying after the winner finishes
-          // returns the existing linkage via the alreadyLinked path above.
-          return Promise.resolve(
-            acquisitionError(
-              'LAUNCH_IN_PROGRESS',
-              'Another launch already claimed this opportunity. Retry to receive the existing Mission linkage.',
-              409,
-            ),
+        if (record.status === 'APPROVED') {
+          const claimed = plane.transitionOpportunity({
+            ownerId,
+            id: record.id,
+            to: 'PLANNED',
+            note: `mission launch claimed — association pending; suitability score ${assessment.score.toFixed(2)}, assessed risk ${assessment.riskLevel}, persisted risk ${record.riskLevel}, approval ${record.approval.id}`,
+          });
+          if (!claimed.success) {
+            // A concurrent request already claimed (or moved) this opportunity.
+            // Deterministic, recoverable: retrying after the winner finishes
+            // returns the existing linkage via the alreadyLinked path above.
+            return Promise.resolve(
+              acquisitionError(
+                'LAUNCH_IN_PROGRESS',
+                'Another launch already claimed this opportunity. Retry to receive the existing Mission linkage.',
+                409,
+              ),
+            );
+          }
+        }
+
+        let intent;
+        try {
+          intent = await plane.claimOpportunityMissionLaunch({
+            userId: ownerId,
+            opportunityId: record.id,
+            missionId: `mission_opportunity_${randomUUID()}`,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          return acquisitionError(
+            'LAUNCH_INTENT_PERSIST_FAILED',
+            `The launch intent could not be durably recorded: ${error instanceof Error ? error.message : 'unknown error'}`,
+            503,
           );
+        }
+        if (intent.status === 'LINKED') {
+          return successResponse({
+            opportunityId: record.id,
+            missionId: intent.missionId,
+            created: false,
+            alreadyLinked: true,
+          });
         }
 
         const launched = await acquisition.mission.launch({
           userId: ownerId,
+          missionId: intent.missionId,
           title: record.title,
           description: record.description,
           // S7.2 — derive a BOUNDED, verifiable Mission objective from the
@@ -747,23 +775,27 @@ export function createControlRouter(
           // differs from the one just launched, the loser does NOT silently
           // create a second Mission: it reconciles onto the winner and reports
           // the duplicate honestly. Retry once on transient failure.
-          const persist = (): { missionId: string; duplicate: boolean } => {
-            const link = plane.linkClaimedOpportunityToMission({
+          const persist = async (): Promise<{ missionId: string; duplicate: boolean }> => {
+            const link = await plane.completeOpportunityMissionLaunch({
               userId: ownerId,
               opportunityId: record.id,
-              missionId: launched.missionId,
-              createdAt: new Date().toISOString(),
+              missionId: intent.missionId,
+              createdAt: intent.createdAt,
             });
-            return { missionId: link.missionId, duplicate: link.missionId !== launched.missionId };
+            if (launched.missionId !== intent.missionId)
+              throw new Error(
+                'Canonical Mission returned a different ID than the durable launch intent.',
+              );
+            return { missionId: link.missionId, duplicate: false };
           };
           try {
-            const first = persist();
+            const first = await persist();
             missionId = first.missionId;
             recovered = first.duplicate;
           } catch {
             // Retry once — the save is idempotent so this either creates
             // the link or returns the existing one without duplicating.
-            const second = persist();
+            const second = await persist();
             missionId = second.missionId;
             recovered = second.duplicate;
           }

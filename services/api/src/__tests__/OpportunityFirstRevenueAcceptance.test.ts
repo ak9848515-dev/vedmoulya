@@ -131,7 +131,7 @@ function missionEngineDouble(): {
     initialObjectives?: string[];
   }> = [];
 
-  const created: Mission = runningMissionDouble();
+  let currentMission: Mission = runningMissionDouble();
 
   const service = new MissionService();
   // The runtime is a controlled double: the real provider fabric is never
@@ -140,7 +140,12 @@ function missionEngineDouble(): {
   const runtime = {
     controller: {
       createMission: vi.fn(
-        async (input: { title: string; objective: string; initialObjectives?: string[] }) => {
+        async (input: {
+          missionId?: string;
+          title: string;
+          objective: string;
+          initialObjectives?: string[];
+        }) => {
           captured.push({
             userId: OWNER,
             title: input.title,
@@ -149,17 +154,23 @@ function missionEngineDouble(): {
               ? { initialObjectives: input.initialObjectives }
               : {}),
           });
-          return { ...created, title: input.title, objective: input.objective };
+          currentMission = {
+            ...currentMission,
+            missionId: input.missionId ?? currentMission.missionId,
+            title: input.title,
+            objective: input.objective,
+          };
+          return currentMission;
         },
       ),
-      runAutonomousLoop: vi.fn(async () => created),
+      runAutonomousLoop: vi.fn(async () => currentMission),
     },
     api: {
-      start: vi.fn(async () => created),
-      getStatus: vi.fn(async () => created),
-      listMissions: vi.fn(async () => [created]),
+      start: vi.fn(async () => currentMission),
+      getStatus: vi.fn(async () => currentMission),
+      listMissions: vi.fn(async () => [currentMission]),
     },
-    stores: { missions: { get: vi.fn(async () => created) }, checkpoints: {} },
+    stores: { missions: { get: vi.fn(async () => currentMission) }, checkpoints: {} },
     runs: { get: vi.fn(() => undefined) },
     workspace: { getRoot: vi.fn(() => '/authorized/root') },
   } as unknown as MissionRuntime;
@@ -249,7 +260,7 @@ describe('S7.2 — FIRST-REVENUE acceptance', () => {
     const started = await router.startMissionForOpportunity({ id, userId: OWNER }, ctx);
     expect(started.success).toBe(true);
     const missionId = (started.data as { missionId: string }).missionId;
-    expect(missionId).toBe('mission-1');
+    expect(missionId).toMatch(/^mission_opportunity_/);
 
     // ── MISSION ASSOCIATED (owner-scoped) ───────────────────────────────────
     expect(plane.getMissionForOpportunity(OWNER, id)?.missionId).toBe(missionId);

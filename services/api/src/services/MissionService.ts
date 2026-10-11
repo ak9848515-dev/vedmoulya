@@ -161,6 +161,7 @@ export interface MissionStatusView {
 }
 
 export interface CreateMissionInputView {
+  missionId?: string;
   title: string;
   objective: string;
   workspace?: string;
@@ -585,6 +586,7 @@ export class MissionService {
     }
     const mission = await runtime.controller.createMission({
       userId,
+      ...(input.missionId !== undefined ? { missionId: input.missionId } : {}),
       title: input.title,
       objective: input.objective,
       description: input.objective,

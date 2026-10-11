@@ -48,6 +48,22 @@ export class PostgresMissionStore
     this.write(OWNER, mission.missionId, mission);
   }
 
+  async createIfAbsent(mission: Mission): Promise<Mission> {
+    const rows = await this.database<Array<{ doc: Mission }>>`
+      INSERT INTO ${this.database(this.tableName)} (owner, key, doc)
+      VALUES (${OWNER}, ${mission.missionId}, ${this.database.json(mission as unknown as JSONValue)})
+      ON CONFLICT (owner, key) DO NOTHING
+      RETURNING doc
+    `;
+    if (rows[0]?.doc) return this.remember(OWNER, mission.missionId, rows[0].doc);
+    const existingRows = await this.database<Array<{ doc: Mission }>>`
+      SELECT doc FROM ${this.database(this.tableName)} WHERE owner = ${OWNER} AND key = ${mission.missionId}
+    `;
+    const existing = existingRows[0]?.doc ?? this.read(OWNER, mission.missionId);
+    if (!existing) throw new Error('Mission ID claim could not be read after insert conflict.');
+    return this.remember(OWNER, mission.missionId, existing);
+  }
+
   async get(missionId: string): Promise<Mission | undefined> {
     return this.read(OWNER, missionId);
   }
