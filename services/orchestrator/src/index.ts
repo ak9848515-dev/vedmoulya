@@ -271,7 +271,9 @@ export function registerPlatformProviders(
 
   const enableMock =
     providers?.enableMock ??
-    (process.env.NODE_ENV !== 'production' || process.env.AI_ENABLE_MOCK === 'true');
+    (process.env.AI_ENABLE_MOCK === undefined
+      ? process.env.NODE_ENV !== 'production'
+      : process.env.AI_ENABLE_MOCK === 'true');
   if (enableMock) {
     orchestrator.registerProvider(new MockProvider());
   }

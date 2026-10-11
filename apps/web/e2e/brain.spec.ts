@@ -21,7 +21,9 @@ test.describe('VedMoulya Brain — Real-User Journey (EPIC-016)', () => {
   });
 
   test('run pipeline → honest terminal state → decisions → approval gate', async ({ page }) => {
-    test.setTimeout(240_000);
+    // Local inference is intentionally exercised end to end; the bound is
+    // generous enough for cold model load while every wait remains state based.
+    test.setTimeout(600_000);
 
     // SPRINT-090A: /health/ready readiness gate in Playwright webServer
     // ensures the gateway is initialized before tests begin.
@@ -57,25 +59,23 @@ test.describe('VedMoulya Brain — Real-User Journey (EPIC-016)', () => {
     await expect(page.getByText('Verify').first()).toBeVisible();
     await expect(page.getByText('Result').first()).toBeVisible();
 
+    const activeTask = page
+      .getByText('Write a high-quality blog post about AI productivity for professionals', {
+        exact: true,
+      })
+      .first()
+      .locator('xpath=../../../../..');
+
     // The pipeline advances: at least UNDERSTANDING must complete (the first
     // brain.createTask round-trip after a dev-server restart cold-compiles).
     await expect(page.getByText('completed').first()).toBeVisible({ timeout: 60_000 });
 
     // ── Honest terminal state ───────────────────────────────────────────
-    // Either execution reached a synthesized result (COMPLETED through the
-    // deterministic runtime) or a required capability had no eligible
-    // provider and the Brain honestly handed off (PARTIAL) — both truthful.
-    const resultPanel = page.getByText('Synthesized result');
-    const handOff = page.getByText(/missing-capabilities/i);
-    const noRoles = page.getByText(/No role assignments yet/i);
+    // A local-provider journey must record generated provider output. A
+    // transient PARTIAL badge or an empty result shell does not establish that.
+    const recordedOutput = activeTask.getByText(/[1-9]\d* provider output\(s\) recorded\./);
     await expect
-      .poll(
-        async () =>
-          (await resultPanel.count()) > 0 ||
-          (await handOff.count()) > 0 ||
-          (await noRoles.count()) > 0,
-        { timeout: 120_000 },
-      )
+      .poll(async () => (await recordedOutput.count()) > 0, { timeout: 420_000 })
       .toBe(true);
 
     // ── Decision explainability ─────────────────────────────────────────
@@ -90,9 +90,19 @@ test.describe('VedMoulya Brain — Real-User Journey (EPIC-016)', () => {
     // ── Approval gate: request → approve through the real backend ──────
     // Wait for the pipeline to fully finish (the terminal status badge) so
     // the approval controls are enabled.
-    await expect(page.getByText(/COMPLETED|PARTIAL|FAILED|CANCELLED/).first()).toBeVisible({
-      timeout: 60_000,
-    });
+    const activeStatus = activeTask.getByText(/COMPLETED|PARTIAL|FAILED|CANCELLED/).first();
+    await expect
+      .poll(
+        async () => {
+          const status = await activeStatus.textContent();
+          if (!status) return false;
+          const cancel = activeTask.getByRole('button', { name: 'Cancel' });
+          if ((await cancel.count()) === 0) return /FAILED|CANCELLED/.test(status);
+          return cancel.isEnabled();
+        },
+        { timeout: 120_000 },
+      )
+      .toBe(true);
     // The panel offers to request approval for a sensitive action (also when
     // an informational missing-capability hand-off is pending).
     await page
@@ -106,6 +116,16 @@ test.describe('VedMoulya Brain — Real-User Journey (EPIC-016)', () => {
     // missing-capability notice may remain, which is honest).
     await page.getByRole('button', { name: 'Approve' }).click();
     await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(0, { timeout: 30_000 });
+
+    // Approval records consent only. A second request can be explicitly
+    // rejected and must clear without submitting the publish action.
+    await page
+      .getByText('Request approval for a sensitive action (publish, send, deploy…)')
+      .click();
+    await page.getByRole('button', { name: 'Publish' }).click();
+    await expect(page.getByRole('button', { name: 'Reject' })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Reject' }).click();
+    await expect(page.getByRole('button', { name: 'Reject' })).toHaveCount(0, { timeout: 30_000 });
 
     // ── Recent tasks history reflects the run ───────────────────────────
     await expect(page.getByText(/Recent Brain tasks/)).toBeVisible();

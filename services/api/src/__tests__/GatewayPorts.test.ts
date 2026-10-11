@@ -107,7 +107,7 @@ describe('createBrainPlanPort', () => {
     const port = createBrainPlanPort({
       capability: capability as never,
       capabilitySource: {} as never,
-      ai: {} as never,
+      ai: { listProviders: () => ({ providers: [{ id: 'p1' }] }) } as never,
       preferenceLedger: {} as never,
     });
     await expect(port.planFor('u1', 'outcome-x')).resolves.toBe(plan);
@@ -128,15 +128,33 @@ describe('createBrainCandidatePort', () => {
     const port = createBrainCandidatePort({
       capability: {} as never,
       capabilitySource: source as never,
-      ai: {} as never,
+      ai: { listProviders: () => ({ providers: [{ id: 'p1' }] }) } as never,
       preferenceLedger: {} as never,
     });
-    await expect(port.providerCandidates('CODING')).resolves.toBe(p);
+    await expect(port.providerCandidates('CODING')).resolves.toEqual(p);
     await expect(port.discoveryCandidates('CODING')).resolves.toBe(d);
     await expect(port.localModelCandidates('CODING')).resolves.toBe(l);
     expect(source.providerCandidates).toHaveBeenCalledWith('CODING');
     expect(source.discoveryCandidates).toHaveBeenCalledWith('CODING');
     expect(source.localModelCandidates).toHaveBeenCalledWith('CODING');
+  });
+
+  it('does not offer catalogue providers that have no registered execution adapter', async () => {
+    const source = {
+      providerCandidates: vi.fn(async () => [{ providerId: 'ollama' }, { providerId: 'google' }]),
+      discoveryCandidates: vi.fn(async () => []),
+      localModelCandidates: vi.fn(async () => []),
+    };
+    const port = createBrainCandidatePort({
+      capability: {} as never,
+      capabilitySource: source as never,
+      ai: { listProviders: () => ({ providers: [{ id: 'ollama' }] }) } as never,
+      preferenceLedger: {} as never,
+    });
+
+    await expect(port.providerCandidates('TEXT_GENERATION')).resolves.toEqual([
+      { providerId: 'ollama' },
+    ]);
   });
 });
 

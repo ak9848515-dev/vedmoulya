@@ -70,7 +70,9 @@ export function createBrainCandidatePort(deps: BrainPortsDeps): BrainCandidatePo
     providerCandidates: async (capability): Promise<ProviderCandidateFact[]> => {
       // Reuse the frozen capability-marketplace source seam (the same one the
       // planner and execution bridge consume) — zero duplication.
-      return deps.capabilitySource.providerCandidates(capability);
+      const candidates = await deps.capabilitySource.providerCandidates(capability);
+      const executable = new Set(deps.ai.listProviders().providers.map((provider) => provider.id));
+      return candidates.filter((candidate) => executable.has(candidate.providerId));
     },
     discoveryCandidates: async (capability): Promise<DiscoveryCandidateFact[]> => {
       return deps.capabilitySource.discoveryCandidates(capability);

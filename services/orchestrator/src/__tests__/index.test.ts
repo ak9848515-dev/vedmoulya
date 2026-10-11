@@ -15,6 +15,7 @@ import {
   DeepSeekProvider,
   GoogleGeminiProvider,
   OpenAICompatibleProvider,
+  OllamaProvider,
   registerPlatformProviders,
 } from '../index.js';
 import { AIMetrics } from '../observability/AIMetrics.js';
@@ -102,6 +103,7 @@ describe('registerPlatformProviders', () => {
   const OLD_DEEPSEEK_ENV = process.env.AI_DEEPSEEK_API_KEY;
   const OLD_GOOGLE_ENV = process.env.AI_GOOGLE_API_KEY;
   const OLD_AI_OPENAI_ENV = process.env.AI_OPENAI_API_KEY;
+  const OLD_OPENROUTER_ENV = process.env.AI_OPENROUTER_API_KEY;
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -124,6 +126,11 @@ describe('registerPlatformProviders', () => {
       delete process.env.AI_OPENAI_API_KEY;
     } else {
       process.env.AI_OPENAI_API_KEY = OLD_AI_OPENAI_ENV;
+    }
+    if (OLD_OPENROUTER_ENV === undefined) {
+      delete process.env.AI_OPENROUTER_API_KEY;
+    } else {
+      process.env.AI_OPENROUTER_API_KEY = OLD_OPENROUTER_ENV;
     }
     delete process.env.AI_RUNTIME_LEGACY_RAW_FETCH;
   });
@@ -215,6 +222,33 @@ describe('registerPlatformProviders', () => {
     registerPlatformProviders(orchestrator);
     expect(orchestrator.getProvider('mock')).toBeInstanceOf(MockProvider);
     expect(orchestrator.getProvider('openai')).toBeUndefined();
+  });
+
+  it('allows a real local provider without the development mock when explicitly disabled', () => {
+    const oldNodeEnv = process.env.NODE_ENV;
+    const oldMock = process.env.AI_ENABLE_MOCK;
+    try {
+      process.env.NODE_ENV = 'development';
+      process.env.AI_ENABLE_MOCK = 'false';
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.AI_OPENAI_API_KEY;
+      delete process.env.AI_DEEPSEEK_API_KEY;
+      delete process.env.AI_GOOGLE_API_KEY;
+      delete process.env.AI_OPENROUTER_API_KEY;
+
+      const orchestrator = createOrchestrator();
+      registerPlatformProviders(orchestrator, {
+        providers: { ollama: { baseUrl: 'http://127.0.0.1:11434' } },
+      });
+
+      expect(orchestrator.getProvider('ollama')).toBeInstanceOf(OllamaProvider);
+      expect(orchestrator.getProvider('mock')).toBeUndefined();
+    } finally {
+      if (oldNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = oldNodeEnv;
+      if (oldMock === undefined) delete process.env.AI_ENABLE_MOCK;
+      else process.env.AI_ENABLE_MOCK = oldMock;
+    }
   });
 
   it('the runtime registry (core) agrees with actual adapter registration (EPIC-019 contract)', () => {

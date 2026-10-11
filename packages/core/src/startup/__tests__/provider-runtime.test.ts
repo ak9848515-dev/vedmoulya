@@ -84,6 +84,13 @@ describe('AI provider runtime registry — dev mode without credentials', () => 
     expect(mock.freeTier).toBe(true);
   });
 
+  it('AI_ENABLE_MOCK=false disables the development mock explicitly', () => {
+    const mock = stateByFamily({ ...env, AI_ENABLE_MOCK: 'false' }, 'development', 'mock');
+    expect(mock.status).toBe('DISABLED');
+    expect(mock.registered).toBe(false);
+    expect(mock.reason).toContain('AI_ENABLE_MOCK=false');
+  });
+
   it('development is AI-executable through the deterministic mock (no keys needed)', () => {
     const result = runtimeExecutionReady(env, 'development');
     expect(result.ok).toBe(true);

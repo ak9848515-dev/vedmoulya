@@ -474,6 +474,7 @@ export default tseslint.config(
       '**/build/**',
       '**/node_modules/**',
       '**/.next/**',
+      '**/.next-sprint7/**',
       '**/coverage/**',
       '**/coverage-analyze.mjs',
       '**/__tests__/**',

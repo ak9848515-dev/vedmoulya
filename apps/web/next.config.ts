@@ -94,6 +94,7 @@ if (nodeEnv !== 'production' && nodeEnv !== 'staging') {
 }
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NEXT_DIST_DIR?.trim() || '.next',
   // ── Mobile static export (RD-001) ───────────────────────────────────────
   // Set by apps/web/scripts/build-mobile.mjs so the Capacitor WebView can
   // load a self-contained static bundle (server route handlers are moved

@@ -176,12 +176,13 @@ export function readProviderRuntimeState(
   const strict = isStrictRuntimeMode(mode);
   const aiEnabled = options.aiEnabled ?? env.FF_AI_ASSISTANT_ENABLED !== 'false';
   const mockExplicit = env.AI_ENABLE_MOCK === 'true';
+  const mockDisabled = env.AI_ENABLE_MOCK === 'false';
 
   return PROVIDER_RUNTIME_DESCRIPTORS.map((desc) => {
     if (desc.family === 'mock') {
       // The mock is only ever active when AI itself is enabled — an AI-ops
       // disabled platform registers no provider at all (truthful).
-      const active = aiEnabled && (!strict || mockExplicit);
+      const active = aiEnabled && !mockDisabled && (!strict || mockExplicit);
       return {
         family: desc.family,
         name: desc.name,
@@ -190,7 +191,9 @@ export function readProviderRuntimeState(
           ? mockExplicit
             ? 'Explicit production opt-in (AI_ENABLE_MOCK=true) — the only way production may serve the deterministic mock.'
             : 'Not registered in production unless AI_ENABLE_MOCK=true (never silent).'
-          : 'Automatically registered in development/test so every AI pipeline is exercisable without provider keys.',
+          : mockDisabled
+            ? 'Explicitly disabled (AI_ENABLE_MOCK=false).'
+            : 'Automatically registered in development/test so every AI pipeline is exercisable without provider keys.',
         envKeys: [],
         adapterImplemented: true,
         registered: active,
