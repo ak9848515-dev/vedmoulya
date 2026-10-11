@@ -334,6 +334,21 @@ import {
   createEISql,
 } from '../infrastructure/ProductionRepositories.js';
 
+// ── Orchestration Fabric composition (G-17 — DEFERRED) ───────────────────────
+/**
+ * G-17 / SPRINT-093: the orchestration fabric is composed **dormant**.
+ *
+ * The canonical provider-routing authority is `AIOrchestrationService`. The
+ * fabric's `ProviderRouter` has no production caller, no provider/handler is
+ * registered on it, and `start()` is never called, so provider routing is
+ * inert. Its `enableProviderRouting` flag is therefore explicitly `false` so
+ * the fabric can never *silently* become a second provider-routing authority.
+ *
+ * Do NOT flip this to `true` without a dedicated composition sprint that
+ * proves a `down` provider is excluded on the composed production path.
+ */
+export const ORCHESTRATION_FABRIC_PROVIDER_ROUTING = false as const;
+
 // ── ApiApplicationService ───────────────────────────────────────────────────
 
 /**
@@ -2800,7 +2815,9 @@ export class ApiApplicationService {
       tickIntervalMs: 100,
       maxItemsPerTick: 50,
       enableDependencyGraph: true,
-      enableProviderRouting: true,
+      // G-17 — DEFERRED: provider routing stays disabled so the fabric cannot
+      // become a second routing authority alongside AIOrchestrationService.
+      enableProviderRouting: ORCHESTRATION_FABRIC_PROVIDER_ROUTING,
     });
 
     // ── Create the Life OS integration layer ────────────────────────────
