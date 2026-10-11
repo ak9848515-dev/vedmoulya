@@ -47,12 +47,17 @@ loadEnvLocal();
 
 const { ApiApplicationService } =
   await import('../services/api/src/services/ApiApplicationService.js');
+const { awaitAllEngineEnsureTables } =
+  await import('../services/api/src/infrastructure/ProductionRepositories.js');
 const { AiUsageRecorder } = await import('../services/api/src/observability/AiUsageRecorder.js');
 const { InMemoryAiUsageStore } = await import('../services/api/src/observability/AiUsageLedger.js');
 const { aggregateAiUsage } = await import('../services/api/src/observability/AiUsageBoard.js');
 
 const EXPECTED = 'VEDMOULYA_MISSION_ACCEPTANCE_OK';
-const OWNER = 'live-mission-acceptance-owner';
+// A unique owner avoids reusing persisted provider credentials from a previous
+// operator run and keeps each acceptance's provider configuration independent.
+const OWNER =
+  process.env.MISSION_ACCEPTANCE_OWNER?.trim() || `live-mission-acceptance-${Date.now()}`;
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -95,6 +100,11 @@ async function main(): Promise<number> {
   }
 
   const app = new ApiApplicationService({ aiUsageStore: usageStore });
+
+  // The web gateway awaits this existing idempotent DDL pass during startup.
+  // This standalone operator harness constructs the service directly, so it
+  // must do the same before its final provider/control-center read path.
+  await awaitAllEngineEnsureTables();
 
   section('1. REAL PROVIDER PROBE (Ollama — no paid credit)');
   const ollamaUrl = process.env.AI_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434';
