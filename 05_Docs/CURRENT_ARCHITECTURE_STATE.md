@@ -101,9 +101,18 @@ authority. Existing authorities remain the source of truth.
   Cheapest never wins; FREE MUST NOT BEAT QUALITY (AI-RUNTIME-003 calibrated: latency
   weight corrected so an 18× slower provider can no longer win).
 - Runtime adapters: OpenAI (REGISTERED/EXECUTABLE/VERIFIED), DeepSeek
-  (REGISTERED/EXECUTABLE via Vercel-AI-SDK `createOpenAI`), Mock (dev / explicit prod
-  opt-in via `AI_ENABLE_MOCK=true`). Anthropic/Google/OpenRouter/Ollama =
-  **catalog-only (UNSUPPORTED_RUNTIME)** — no adapters added.
+  (REGISTERED/EXECUTABLE via Vercel-AI-SDK `createOpenAI`), Google (`GoogleGeminiProvider`,
+  `@ai-sdk/google`), OpenRouter (`OpenAICompatibleProvider` at `https://openrouter.ai/api/v1`),
+  Ollama (`OllamaProvider`, local) — all registered conditionally when configured
+  (`registerPlatformProviders`) — and Mock (dev / explicit prod opt-in via
+  `AI_ENABLE_MOCK=true`). Anthropic = **catalog-only (UNSUPPORTED_RUNTIME)** — no adapter
+  exists. Registration ≠ reachability ≠ successful generation.
+
+  > Correction (2026-10-11): this section previously listed Google/OpenRouter/Ollama as
+  > catalog-only. The implementation and `packages/core/src/startup/provider-runtime.ts`
+  > (the single source of truth) have provided conditional runtime adapters for them since
+  > SPRINT-049 / BLD-022; this document was stale.
+
 - Provider intelligence profiles (EPIC-012A/B) with provenance (VERIFIED/PROVIDER_DECLARED/
   MEASURED/INFERRED/UNKNOWN), resource types (LOCAL/FREE HOSTED/FREE API QUOTA/USER-PAID
   API/…), model lifecycle ledger, 24 h refresh policy.
