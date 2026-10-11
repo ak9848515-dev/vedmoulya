@@ -561,6 +561,61 @@ describe('ClientOperationsApplicationService — Client Portal', () => {
     const login = await ctx.svc.portalLogin(token);
     expect(login.success).toBe(false);
   });
+
+  it('denies cross-client invoices, deliverables and mutations (IDOR at every portal read/write)', async () => {
+    const foreignContent = contentItem({ id: 'content_OTHER', clientId: 'client_OTHER' });
+    ctx = makeService({
+      getContent: vi.fn(async () => ({ success: true, data: foreignContent })),
+      getInvoice: vi.fn(async () => ({
+        success: true,
+        data: { id: 'inv_1', clientId: 'client_OTHER' },
+      })),
+      exportContent: vi.fn(async () => ({
+        success: true,
+        data: {
+          contentId: 'content_OTHER',
+          title: 'x',
+          format: 'pdf',
+          filename: 'x.pdf',
+          data: 'x',
+          supported: true,
+        },
+      })),
+    } as unknown as Partial<Record<string, ReturnType<typeof vi.fn>>>);
+
+    const access = await ctx.svc.createPortalAccess(USER, {
+      clientId: 'client_1',
+      email: 'client@acme.com',
+    });
+    const token = access.data!.rawToken;
+
+    await expect(ctx.svc.portalGetInvoice(token, 'inv_1')).resolves.toMatchObject({
+      success: false,
+    });
+    await expect(
+      ctx.svc.portalDownloadDeliverable(token, 'content_OTHER', 'pdf'),
+    ).resolves.toMatchObject({ success: false });
+    await expect(ctx.svc.portalApproveContent(token, 'content_OTHER', 'ok')).resolves.toMatchObject(
+      { success: false },
+    );
+    await expect(ctx.svc.portalRejectContent(token, 'content_OTHER', 'no')).resolves.toMatchObject({
+      success: false,
+    });
+    await expect(
+      ctx.svc.portalCommentContent(token, 'content_OTHER', 'note'),
+    ).resolves.toMatchObject({ success: false });
+
+    // No mutation side effects may occur for foreign content.
+    expect(ctx.contentAgency.addReview).not.toHaveBeenCalled();
+    expect(ctx.contentAgency.transitionStatus).not.toHaveBeenCalled();
+    expect(ctx.contentAgency.exportContent).not.toHaveBeenCalled();
+
+    // A malformed / too-short token cannot perform a mutation either.
+    await expect(ctx.svc.portalApproveContent('short', 'content_1', 'ok')).resolves.toMatchObject({
+      success: false,
+    });
+    expect(ctx.contentAgency.addReview).not.toHaveBeenCalled();
+  });
 });
 
 describe('ClientOperationsApplicationService — Notifications', () => {

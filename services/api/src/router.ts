@@ -34,6 +34,13 @@ export interface TRPCContext {
   userId: string;
   email: string;
   role: string;
+  /**
+   * Client IP derived from the request headers (x-forwarded-for / x-real-ip).
+   * Optional and never used for authentication or ownership — it exists so
+   * unauthenticated, token-scoped surfaces (the client portal) can be rate
+   * limited per client instead of sharing a single anonymous bucket.
+   */
+  clientIp?: string;
 }
 
 // ── App Router ──────────────────────────────────────────────────────────────

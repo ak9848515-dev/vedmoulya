@@ -6,7 +6,7 @@
 // BLD-016A — API Gateway & Platform Services
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 // PR-003A: pin the process-metrics snapshot so the HealthRouter cpu/memory
 // components are deterministic. cpuUsagePercent() measures process CPU over
@@ -47,7 +47,12 @@ vi.mock('@vedmoulya/core', async (importOriginal) => {
   };
 });
 
-import { createAppRouter, t } from '../services/RouterRegistry.js';
+import { createAppRouter, t, portalRateLimitKey } from '../services/RouterRegistry.js';
+import {
+  configureRateLimiter,
+  resetRateLimiter,
+  type RateLimiter,
+} from '../middleware/rate-limit.js';
 import { ApiApplicationService } from '../services/ApiApplicationService.js';
 import { AIOrchestrationService } from '@vedmoulya/services';
 import { MockProvider } from '@vedmoulya/orchestrator';
@@ -2414,5 +2419,88 @@ describe('router coverage walker (every namespace through the pipeline)', () => 
     // schema-valid procedures were fired (sanity guard against a silent no-op).
     expect(validated).toBeGreaterThan(200);
     expect(fired).toBeGreaterThan(0);
+  });
+});
+
+// ── S-1 — Portal rate limiting (IP-keyed, production-only) ──────────────────
+// The client portal is token-scoped (no JWT). These tests pin the S-1 fix:
+// portal procedures are rate-limited per client IP in production, skipped in
+// dev/test (matching the shared limiter), and the key is never the userId.
+describe('Portal security — S-1 IP-keyed rate limiting', () => {
+  const allowAll: RateLimiter = {
+    backend: 'memory',
+    distributed: false,
+    allow: async () => true,
+    stats: async () => null,
+  };
+  const denyAll: RateLimiter = {
+    backend: 'memory',
+    distributed: false,
+    allow: async () => false,
+    stats: async () => null,
+  };
+  const TOKEN = 'tok-1234567890abcdef';
+
+  function callerWithCtx(ctx: TRPCContext) {
+    const router = createAppRouter(createMockServices() as unknown as ApiApplicationService);
+    return t.createCallerFactory(router)(ctx);
+  }
+
+  afterEach(() => {
+    resetRateLimiter();
+    vi.unstubAllEnvs();
+  });
+
+  it('derives a distinct bucket per client IP (shared bucket when absent)', () => {
+    expect(portalRateLimitKey('1.2.3.4')).toBe('portal:1.2.3.4');
+    expect(portalRateLimitKey(' 1.2.3.4 ')).toBe('portal:1.2.3.4');
+    expect(portalRateLimitKey(undefined)).toBe('portal:anonymous');
+    expect(portalRateLimitKey('')).toBe('portal:anonymous');
+  });
+
+  it('is skipped outside production (dev/test never throttle the portal)', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    configureRateLimiter(denyAll);
+    const caller = callerWithCtx(testCtx);
+    const res = await caller.portal.login({ token: TOKEN });
+    expect(res.success).toBe(true);
+  });
+
+  it('allows portal requests in production when the limiter allows', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    configureRateLimiter(allowAll);
+    const caller = callerWithCtx(testCtx);
+    const res = await caller.portal.login({ token: TOKEN });
+    expect(res.success).toBe(true);
+  });
+
+  it('rejects portal requests in production when the limiter denies', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    configureRateLimiter(denyAll);
+    const caller = callerWithCtx(testCtx);
+    await expect(caller.portal.login({ token: TOKEN })).rejects.toMatchObject({
+      code: 'TOO_MANY_REQUESTS',
+    });
+  });
+
+  it('keys the limiter by client IP, not by userId or token', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const seen: string[] = [];
+    const recording: RateLimiter = {
+      backend: 'memory',
+      distributed: false,
+      allow: async (key) => {
+        seen.push(key);
+        return true;
+      },
+      stats: async () => null,
+    };
+    configureRateLimiter(recording);
+    const caller = callerWithCtx({ ...testCtx, clientIp: '9.9.9.9' });
+    await caller.portal.login({ token: TOKEN });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].startsWith('portal:9.9.9.9')).toBe(true);
+    expect(seen[0]).not.toContain(testCtx.userId);
+    expect(seen[0]).not.toContain(TOKEN);
   });
 });

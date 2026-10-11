@@ -21,6 +21,22 @@ export interface AuthSession {
 
 const ANONYMOUS_CONTEXT: TRPCContext = { userId: 'anonymous', email: '', role: 'guest' };
 
+/**
+ * Best-effort client IP from proxy headers. Never trusted for auth — used only
+ * to give the token-scoped client portal a per-client rate-limit bucket instead
+ * of one shared anonymous bucket. Returns undefined when no header is present
+ * (the portal limiter then falls back to a shared bucket).
+ */
+export function clientIpFromHeaders(headers: Headers): string | undefined {
+  const forwarded = headers.get('x-forwarded-for');
+  if (forwarded) {
+    const first = forwarded.split(',')[0]?.trim();
+    if (first) return first;
+  }
+  const realIp = headers.get('x-real-ip')?.trim();
+  return realIp || undefined;
+}
+
 // ── Token Verification ──────────────────────────────────────────────────────
 
 /**
@@ -58,13 +74,14 @@ export async function verifyAccessToken(token: string): Promise<AuthSession | nu
  * via `isAuthenticated` in the RouterRegistry auth middleware.
  */
 export async function createAuthContext(headers: Headers): Promise<TRPCContext> {
+  const clientIp = clientIpFromHeaders(headers);
   const authHeader = headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return ANONYMOUS_CONTEXT;
+  if (!authHeader?.startsWith('Bearer ')) return { ...ANONYMOUS_CONTEXT, clientIp };
 
   const session = await verifyAccessToken(authHeader.slice(7));
-  if (!session) return ANONYMOUS_CONTEXT;
+  if (!session) return { ...ANONYMOUS_CONTEXT, clientIp };
 
-  return session;
+  return { ...session, clientIp };
 }
 
 /**
@@ -102,7 +119,7 @@ export async function authenticateRequest(headers: Headers): Promise<TRPCContext
     });
   }
 
-  return session;
+  return { ...session, clientIp: clientIpFromHeaders(headers) };
 }
 
 // ── Authorization (IDOR guard) ───────────────────────────────────────────────

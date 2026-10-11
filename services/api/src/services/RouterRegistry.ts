@@ -84,6 +84,8 @@ export interface TRPCContext {
   userId: string;
   email: string;
   role: string;
+  /** Client IP (x-forwarded-for / x-real-ip); used only for portal rate limiting. */
+  clientIp?: string;
 }
 
 export const t = initTRPC.context<TRPCContext>().create();
@@ -137,6 +139,37 @@ function createRateLimitMiddleware(tier: RateLimitConfig): ReturnType<typeof t.m
   });
 }
 
+// ── Portal Rate Limit Middleware (S-1) ──────────────────────────────────────
+// The client portal is not JWT-authenticated — its credential is a per-client
+// access token, so it cannot use the userId-keyed limiter above (every portal
+// caller would collapse into one 'anonymous' bucket). This variant keys on the
+// client IP so a single client cannot brute-force portal tokens or amplify
+// load. Same production-only convention as the shared limiter (dev/test rely
+// on the in-memory backend and share one userId, so limiting there is spurious).
+function createPortalRateLimitMiddleware(tier: RateLimitConfig): ReturnType<typeof t.middleware> {
+  return t.middleware(async ({ ctx, next }) => {
+    if (process.env.NODE_ENV !== 'production') return next();
+    if (!(await checkRateLimitInternal(portalRateLimitKey(ctx.clientIp), tier))) {
+      metrics.increment('api.ratelimit.hit');
+      throw new TRPCError({
+        code: 'TOO_MANY_REQUESTS',
+        message: 'Rate limit exceeded. Please try again later.',
+      });
+    }
+    return next();
+  });
+}
+
+/**
+ * Per-client rate-limit bucket for the token-scoped portal. When no client IP
+ * is available the bucket falls back to a single shared 'anonymous' key — the
+ * same no-unknown-user-bypass contract as the userId keying.
+ */
+export function portalRateLimitKey(clientIp?: string): string {
+  const ip = clientIp?.trim();
+  return `portal:${ip ? ip : 'anonymous'}`;
+}
+
 // ── Auth Middleware ─────────────────────────────────────────────────────────
 // Real JWT enforcement: rejects requests without a verified session.
 // Health procedures use `healthProcedure` (public) below; everything else
@@ -167,6 +200,10 @@ const requestMetricsMiddleware = createRequestMetricsMiddleware();
 const baseProcedure = t.procedure.use(requestMetricsMiddleware);
 
 export const publicProcedure = baseProcedure;
+/** Token-scoped client portal: no JWT context, but IP-rate-limited (S-1). */
+export const portalProcedure = baseProcedure.use(
+  createPortalRateLimitMiddleware(RateLimitTiers.standard),
+);
 export const standardProcedure = baseProcedure
   .use(authMiddleware)
   .use(createRateLimitMiddleware(RateLimitTiers.standard));
@@ -5899,35 +5936,36 @@ export function createAppRouter(services: ApiApplicationService) {
     }),
 
     // ── Client Portal (public, token-scoped — EPIC-003 / AC-002) ────────────
+    //    Token-scoped (no JWT), but IP-rate-limited: see portalProcedure (S-1).
     portal: router({
-      login: publicProcedure
+      login: portalProcedure
         .input(portalToken)
         .mutation(({ input, ctx }) => createPortalRouter(services.clientOps).login(input, ctx)),
-      getDashboard: publicProcedure
+      getDashboard: portalProcedure
         .input(portalToken)
         .query(({ input, ctx }) => createPortalRouter(services.clientOps).getDashboard(input, ctx)),
-      listContent: publicProcedure
+      listContent: portalProcedure
         .input(portalToken)
         .query(({ input, ctx }) => createPortalRouter(services.clientOps).listContent(input, ctx)),
-      getContent: publicProcedure
+      getContent: portalProcedure
         .input(portalTokenAndContent)
         .query(({ input, ctx }) => createPortalRouter(services.clientOps).getContent(input, ctx)),
-      approveContent: publicProcedure
+      approveContent: portalProcedure
         .input(portalTokenComment)
         .mutation(({ input, ctx }) =>
           createPortalRouter(services.clientOps).approveContent(input, ctx),
         ),
-      rejectContent: publicProcedure
+      rejectContent: portalProcedure
         .input(portalTokenComment)
         .mutation(({ input, ctx }) =>
           createPortalRouter(services.clientOps).rejectContent(input, ctx),
         ),
-      commentContent: publicProcedure
+      commentContent: portalProcedure
         .input(portalTokenComment)
         .mutation(({ input, ctx }) =>
           createPortalRouter(services.clientOps).commentContent(input, ctx),
         ),
-      downloadDeliverable: publicProcedure
+      downloadDeliverable: portalProcedure
         .input(
           z.object({
             token: z.string().min(16),
@@ -5938,10 +5976,10 @@ export function createAppRouter(services: ApiApplicationService) {
         .query(({ input, ctx }) =>
           createPortalRouter(services.clientOps).downloadDeliverable(input, ctx),
         ),
-      listInvoices: publicProcedure
+      listInvoices: portalProcedure
         .input(portalToken)
         .query(({ input, ctx }) => createPortalRouter(services.clientOps).listInvoices(input, ctx)),
-      getInvoice: publicProcedure
+      getInvoice: portalProcedure
         .input(portalTokenInvoice)
         .query(({ input, ctx }) => createPortalRouter(services.clientOps).getInvoice(input, ctx)),
     }),
