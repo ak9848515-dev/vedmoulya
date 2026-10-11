@@ -21,7 +21,14 @@ interface Doc {
  *  `sql('table')` call) are spliced into the SQL text like the real client;
  *  bound values become '?' placeholders and are never part of the text. */
 function createFakeSql(
-  options: { fail?: boolean; selectRows?: unknown[]; gateFirstInsert?: Promise<unknown> } = {},
+  options: {
+    fail?: boolean;
+    /** Dynamic failure switch — lets a test model a TRANSIENT outage that
+     *  recovers mid-test (e.g. a DNS `ENOTFOUND` that later resolves). */
+    failWhile?: () => boolean;
+    selectRows?: unknown[];
+    gateFirstInsert?: Promise<unknown>;
+  } = {},
 ): {
   sql: postgres.Sql;
   calls: string[];
@@ -40,8 +47,12 @@ function createFakeSql(
         text += `? ${strings[i + 1] ?? ''}`;
       }
     }
+    if (options.fail || (options.failWhile?.() ?? false)) {
+      // A failed attempt is NOT recorded — `calls` means "queries that reached
+      // the database", so tests can prove which writes actually persisted.
+      return Promise.reject(new Error('getaddrinfo ENOTFOUND example.invalid'));
+    }
     calls.push(text);
-    if (options.fail) return Promise.reject(new Error('database unavailable'));
     if (/^\s*SELECT/i.test(text)) return Promise.resolve(options.selectRows ?? []);
     if (options.gateFirstInsert) {
       // Hold the FIRST non-select query until the test releases it, so the
@@ -241,6 +252,26 @@ describe('WriteThroughDocumentStore', () => {
     // (the json() shim rejects strings — mirroring real postgres.js's
     // double-encoding failure mode). The mirror still serves the document.
     expect(store.getDoc('u1', 'a')).toMatchObject({ id: 'a' });
+  });
+
+  it('recovers a transient outage on the SAME store — no queued write is lost', async () => {
+    // Models the managed-Postgres DNS failure (getaddrinfo ENOTFOUND): the
+    // write fails while resolution is down and must be persisted after it
+    // returns — on the SAME store, without any process recreation.
+    let failing = true;
+    const { sql, calls } = createFakeSql({ failWhile: () => failing });
+    const store = new TestStore(sql, 'test_docs');
+
+    store.save(doc('a', 'u1'));
+    await store.flush();
+    // Outage: nothing reached the database yet, the doc is still queued.
+    expect(calls.filter((c) => /INSERT INTO test_docs/i.test(c))).toHaveLength(0);
+    expect(store.getDoc('u1', 'a')).toMatchObject({ id: 'a' });
+
+    // Database (DNS) recovers; the next flush persists the queued write once.
+    failing = false;
+    await store.flush();
+    expect(calls.filter((c) => /INSERT INTO test_docs/i.test(c))).toHaveLength(1);
   });
 
   it('never leaks document contents into failure logs', async () => {
