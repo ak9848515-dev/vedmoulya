@@ -156,6 +156,31 @@ export interface MissionStatusView {
   revisions?: number;
   /** Live activity log (bounded; oldest entries are dropped). */
   activity: MissionActivityEvent[];
+  /** Owner-authorized, identifier-only join points into existing execution records. */
+  trace: {
+    objectives: Array<{
+      objectiveId: string;
+      state: MissionObjective['state'];
+      goalId?: string;
+      planId?: string;
+      executionRunId?: string;
+      checkpointIds: string[];
+      executionAvailable: boolean;
+      actions: Array<{
+        actionId: string;
+        observationId?: string;
+        stepId: string;
+        attempt: number;
+        status: string;
+        provider?: string;
+        model?: string;
+        toolName?: string;
+        error?: string;
+        artifacts: Array<{ name: string; type: string }>;
+      }>;
+    }>;
+    checkpointIds: string[];
+  };
   /** True while this process is actively driving the autonomous loop. */
   loopRunning: boolean;
 }
@@ -972,6 +997,58 @@ export class MissionService {
       attempts: run?.usage.attempts,
       revisions: run?.usage.revisions,
       activity: this.activityView(mission),
+      trace: {
+        objectives: mission.objectives.map((objective) => {
+          const run = objective.executionRunId
+            ? this.runtime?.runs.get(objective.executionRunId)
+            : undefined;
+          const actions = (run?.stepResults ?? []).flatMap((step) =>
+            step.actions.map((action) => ({
+              actionId: action.actionId,
+              ...(action.observationId !== undefined
+                ? { observationId: action.observationId }
+                : {}),
+              stepId: action.stepId,
+              attempt: action.attempt,
+              status: action.status,
+              ...(action.provider !== undefined ? { provider: action.provider } : {}),
+              ...(action.model !== undefined ? { model: action.model } : {}),
+              ...(action.toolName !== undefined ? { toolName: action.toolName } : {}),
+              ...(action.error !== undefined
+                ? { error: redactSecrets(action.error).slice(0, 500) }
+                : {}),
+              artifacts: step.observations
+                .filter((observation) => observation.actionId === action.actionId)
+                .flatMap((observation) => observation.artifacts as unknown[])
+                .filter(
+                  (artifact): artifact is { name: string; type: string } =>
+                    typeof artifact === 'object' &&
+                    artifact !== null &&
+                    'name' in artifact &&
+                    typeof artifact.name === 'string' &&
+                    'type' in artifact &&
+                    typeof artifact.type === 'string',
+                )
+                .map((artifact) => ({ name: artifact.name, type: artifact.type })),
+            })),
+          );
+          return {
+            objectiveId: objective.objectiveId,
+            state: objective.state,
+            ...(objective.goalId !== undefined ? { goalId: objective.goalId } : {}),
+            ...(objective.planId !== undefined ? { planId: objective.planId } : {}),
+            ...(objective.executionRunId !== undefined
+              ? { executionRunId: objective.executionRunId }
+              : {}),
+            checkpointIds: mission.checkpoints
+              .filter((checkpoint) => checkpoint.objectiveId === objective.objectiveId)
+              .map((checkpoint) => checkpoint.checkpointId),
+            executionAvailable: run !== undefined,
+            actions,
+          };
+        }),
+        checkpointIds: mission.checkpoints.map((checkpoint) => checkpoint.checkpointId),
+      },
       loopRunning: this.loopsInFlight.has(mission.missionId),
     };
   }

@@ -195,12 +195,43 @@ describe('mission namespace — BLD-024 Mission Control API', () => {
       state: string;
       objectives: Array<{ state: string; evidence: string[] }>;
       checkpoints: Array<{ checkpointId: string; state: string }>;
+      trace: {
+        objectives: Array<{
+          objectiveId: string;
+          goalId?: string;
+          planId?: string;
+          executionRunId?: string;
+          checkpointIds: string[];
+          executionAvailable: boolean;
+          actions: Array<{
+            actionId: string;
+            status: string;
+            artifacts: Array<{ name: string; type: string }>;
+          }>;
+        }>;
+        checkpointIds: string[];
+      };
       activity: Array<{ kind: string; message: string }>;
       budgetUsage: { objectivesCompleted: number };
     }>(caller.mission.status({ userId: 'owner-a', missionId: missionId as string }));
     expect(status.state).toBe('COMPLETED');
     expect(status.objectives.every((o) => o.evidence.length > 0)).toBe(true);
     expect(status.checkpoints.length).toBeGreaterThan(0);
+    expect(status.trace.objectives).toHaveLength(3);
+    expect(status.trace.checkpointIds).toHaveLength(status.checkpoints.length);
+    expect(status.trace.objectives.every((o) => o.checkpointIds.length > 0)).toBe(true);
+    expect(status.trace.objectives.every((o) => o.executionRunId !== undefined)).toBe(true);
+    expect(status.trace.objectives.every((o) => o.actions.length > 0)).toBe(true);
+    expect(
+      status.trace.objectives.flatMap((o) => o.actions).every((action) => action.actionId),
+    ).toBe(true);
+    // The deterministic provider/tool fixture does not emit artifact refs for
+    // these actions. Preserve that absence instead of inventing an artifact.
+    expect(
+      status.trace.objectives
+        .flatMap((o) => o.actions)
+        .every((action) => action.artifacts.length === 0),
+    ).toBe(true);
     expect(status.budgetUsage.objectivesCompleted).toBe(3);
     expect(status.activity.some((e) => e.kind === 'MISSION_COMPLETED')).toBe(true);
   });
