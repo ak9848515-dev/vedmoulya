@@ -1,0 +1,18 @@
+{
+  "missionId": "mission_mv3rok73_2",
+  "independentPostRunDatabaseRead": true,
+  "missionRows": 1,
+  "state": "COMPLETED",
+  "outcome": "ACHIEVED",
+  "objectives": [
+    {
+      "state": "VERIFIED",
+      "achieved": true,
+      "evidenceCount": 4
+    }
+  ],
+  "checkpointRows": 1,
+  "checkpointStates": [
+    "VERIFIED"
+  ]
+}
