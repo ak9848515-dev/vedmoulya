@@ -1020,6 +1020,29 @@ describe('createAppRouter — real pipeline (auth + rate limit + handlers)', () 
     expect(updated.success).toBe(true);
   });
 
+  // D-10 privacy/data-lifecycle: identity data is user-scoped. The gateway
+  // auth middleware must reject a caller that supplies ANOTHER user's id
+  // (horizontal privilege escalation / IDOR) — verified through the real
+  // tRPC pipeline, not just the guard unit test.
+  it('identity rejects cross-user profile access (IDOR guard)', async () => {
+    const otherCaller = t.createCallerFactory(router)({
+      userId: 'rr-other-user',
+      email: 'other@vedmoulya.com',
+      role: 'user',
+    });
+
+    await expect(otherCaller.identity.getProfile({ userId: 'rr-t-user' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+
+    await expect(
+      otherCaller.identity.updateProfile({
+        userId: 'rr-t-user',
+        updates: { displayName: 'Hijacked' },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it('lifeOS procedures succeed', async () => {
     const snap = await caller.lifeOS.getSnapshot({ userId: 'rr-t-user' });
     expect(snap.success).toBe(true);
