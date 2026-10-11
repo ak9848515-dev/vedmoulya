@@ -16,6 +16,7 @@
 // learning must never cross mission or objective boundaries.
 // ──────────────────────────────────────────────────────────────────
 
+import { buildExecutionTrace } from '@vedmoulya/agent-execution';
 import { ExecutionMemoryService } from '@vedmoulya/execution-memory';
 import { ExperienceOptimizationService } from '@vedmoulya/experience-optimization';
 import type {
@@ -67,7 +68,13 @@ export class MissionExecutionMemoryAdapter implements ExecutionMemoryPort {
     const run = this.runs.forObjective(missionId, objectiveId);
     if (!run) return;
     try {
-      await this.memory.ingestRun(run);
+      // QUALITY-SPRINT-006 — the learning cycle derives every step/tool/
+      // verification candidate from the run's sanitized TRACE. Ingesting the
+      // run without it left only run-level signals, so a clean verified run
+      // produced zero candidates and nothing was ever persisted. The trace is
+      // built by the frozen agent-execution trace builder (no prompts, no
+      // arguments, no secrets) — no new pipeline, no fabricated evidence.
+      await this.memory.ingestRun(run, buildExecutionTrace(run));
     } catch {
       // Learning evidence recording must never break a mission.
     }
