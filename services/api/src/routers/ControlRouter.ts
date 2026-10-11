@@ -610,6 +610,63 @@ export function createControlRouter(
           }
         }
 
+        // Approval is durable lifecycle evidence, but it does not make stale
+        // or high-risk source data safe to launch. Re-read the canonical
+        // assessor immediately before taking the durable launch claim. A
+        // human-approved, non-HIGH recommendation may proceed; HIGH risk is a
+        // hard stop. This uses the existing assessor and adds no authority.
+        if (record.approval === undefined) {
+          return Promise.resolve(
+            acquisitionError(
+              'APPROVAL_REQUIRED',
+              'A persisted approval record is required before Mission creation.',
+              403,
+            ),
+          );
+        }
+        let suitability: OpportunityQualification;
+        try {
+          suitability = acquisition.qualify(record);
+        } catch (error) {
+          return Promise.resolve(
+            acquisitionError(
+              'SUITABILITY_UNAVAILABLE',
+              `Current opportunity suitability could not be checked: ${error instanceof Error ? error.message : 'unknown error'}`,
+              503,
+            ),
+          );
+        }
+        const assessment = suitability.assessment;
+        if (
+          assessment.ownerId !== ownerId ||
+          !Number.isFinite(assessment.score) ||
+          assessment.score < 0 ||
+          assessment.score > 1 ||
+          !['LOW', 'MEDIUM', 'HIGH', 'UNKNOWN'].includes(assessment.riskLevel)
+        ) {
+          return Promise.resolve(
+            acquisitionError(
+              'SUITABILITY_INVALID',
+              'The current suitability result is incomplete or belongs to another owner.',
+              503,
+            ),
+          );
+        }
+        if (record.riskLevel === 'HIGH' || assessment.riskLevel === 'HIGH') {
+          return Promise.resolve(
+            acquisitionError(
+              'HIGH_RISK_BLOCKED',
+              'Mission creation is blocked because the persisted or current suitability assessment marks this opportunity HIGH risk.',
+              403,
+              {
+                persistedRiskLevel: record.riskLevel,
+                assessedRiskLevel: assessment.riskLevel,
+                suitabilityScore: assessment.score,
+              },
+            ),
+          );
+        }
+
         // Idempotency BEFORE creating anything: an approved opportunity that
         // already has a Mission must never create a second one.
         const existing = plane.getMissionForOpportunity(ownerId, record.id);
@@ -634,7 +691,7 @@ export function createControlRouter(
           ownerId,
           id: record.id,
           to: 'PLANNED',
-          note: 'mission launch claimed — association pending',
+          note: `mission launch claimed — association pending; suitability score ${assessment.score.toFixed(2)}, assessed risk ${assessment.riskLevel}, persisted risk ${record.riskLevel}, approval ${record.approval.id}`,
         });
         if (!claimed.success) {
           // A concurrent request already claimed (or moved) this opportunity.
@@ -669,7 +726,7 @@ export function createControlRouter(
             evidence: record.evidence,
             category: record.category,
             ...(record.confidence !== undefined ? { qualificationScore: record.confidence } : {}),
-            ...(record.approval !== undefined ? { approvalScope: record.approval.scope } : {}),
+            approvalScope: record.approval.scope,
           }),
         });
         if (!launched.success) {

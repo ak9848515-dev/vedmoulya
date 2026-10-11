@@ -214,6 +214,23 @@ describe('S7.2 — APPROVED opportunity → derived Mission', () => {
     expect(h.launched).toHaveLength(1);
   });
 
+  it('blocks a HIGH-risk approved opportunity before creating a Mission', async () => {
+    const h = harness();
+    const id = await walk(h, h.ctx, 'APPROVED');
+    const record = h.plane.listOpportunities(OWNER).find((o) => o.id === id)!;
+    h.stores.opportunities.save({ ...record, riskLevel: 'HIGH' });
+
+    const result = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
+
+    expect(result.success).toBe(false);
+    expect(
+      (result as { error?: { details?: { opportunityCode?: string } } }).error?.details,
+    ).toMatchObject({ opportunityCode: 'HIGH_RISK_BLOCKED' });
+    expect(h.launched).toHaveLength(0);
+    expect(h.plane.getMissionForOpportunity(OWNER, id)).toBeUndefined();
+    expect(h.plane.listOpportunities(OWNER).find((o) => o.id === id)?.status).toBe('APPROVED');
+  });
+
   it('3. the Mission is owner-scoped (other owner refused)', async () => {
     const h = harness();
     const id = await walk(h, h.ctx, 'APPROVED');
