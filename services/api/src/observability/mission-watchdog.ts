@@ -162,12 +162,13 @@ export function startMissionWatchdog(options: MissionWatchdogOptions = {}): Miss
   let nextTickAt: number | undefined;
   const startedAt = now();
 
-  const schedule = (delayMs: number): void => {
+  const schedule = (delayMs: number, anchorAt = now()): void => {
     if (stopped) return;
-    nextTickAt = now() + delayMs;
+    nextTickAt = anchorAt + delayMs;
+    const remainingMs = Math.max(0, nextTickAt - now());
     timer = setTimeout(() => {
       void runPass();
-    }, delayMs);
+    }, remainingMs);
     // A background heartbeat must never hold the process open.
     timer.unref();
   };
@@ -229,7 +230,7 @@ export function startMissionWatchdog(options: MissionWatchdogOptions = {}): Miss
       });
     } finally {
       running = false;
-      schedule(nextDelayMs);
+      schedule(nextDelayMs, lastTick?.finishedAt ?? now());
     }
   };
 
@@ -241,10 +242,11 @@ export function startMissionWatchdog(options: MissionWatchdogOptions = {}): Miss
     instance = undefined;
   };
 
-  schedule(intervalMs);
-
-  if (options.runImmediately ?? true) {
+  const runImmediately = options.runImmediately ?? true;
+  if (runImmediately) {
     void runPass();
+  } else {
+    schedule(intervalMs);
   }
 
   instance = {
