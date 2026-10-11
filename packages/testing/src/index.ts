@@ -56,10 +56,14 @@ export function mockFn<A extends unknown[] = unknown[], R = unknown>(): MockFn<A
       return result;
     }
     if (rejectedValue !== undefined) {
-      results.push({ type: 'throw', value: rejectedValue as R });
-      throw rejectedValue instanceof Error
-        ? rejectedValue
-        : new Error(JSON.stringify(rejectedValue));
+      // Mirror mockResolvedValue: return a REJECTED PROMISE rather than
+      // throwing synchronously, so a mock typed `() => Promise<T>` honours
+      // its contract and `await expect(fn()).rejects` works as with jest/vitest.
+      const reason =
+        rejectedValue instanceof Error ? rejectedValue : new Error(JSON.stringify(rejectedValue));
+      const result = Promise.reject(reason) as unknown as R;
+      results.push({ type: 'return', value: result });
+      return result;
     }
     if (resolvedValue !== undefined) {
       const result = Promise.resolve(resolvedValue) as unknown as R;
