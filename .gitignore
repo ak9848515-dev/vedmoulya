@@ -108,6 +108,7 @@ test.txt
 /_live*/
 /_real08/
 /_s3*/
+/_sprint*/
 # One-off root-level command capture output.
 /format_output.txt
 /lint_output.txt
