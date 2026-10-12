@@ -98,6 +98,7 @@ interface ExecutionResultData {
   output?: string;
   error?: string;
   failureClass?: string;
+  trace?: import('../types/mission-types.js').MissionExecutionTrace;
   usage: { tokens: number; costUsd: number; latencyMs: number; toolCalls: number };
 }
 
@@ -680,6 +681,16 @@ export class MissionControllerService {
         failureClass: classification.failureClass,
         usage: { tokens: 0, costUsd: 0, latencyMs: 0, toolCalls: 0 },
       };
+    }
+    if (executionResult.trace) {
+      objective.executionTraces = [
+        ...(objective.executionTraces ?? []),
+        executionResult.trace,
+      ].slice(-5);
+      // Keep evidence persistence outside the executor catch path: a database
+      // failure must stop this objective rather than fabricate an execution failure.
+      if (this.options.store.saveRequired) await this.options.store.saveRequired(mission);
+      else await this.options.store.save(mission);
     }
     mission.budgetUsage.runtimeMs += this.options.clock.timestampMs() - attemptStartedAtMs;
 

@@ -164,6 +164,12 @@ export interface MissionStatusView {
       goalId?: string;
       planId?: string;
       executionRunId?: string;
+      execution?: {
+        state: string;
+        startedAt: string;
+        finishedAt?: string;
+        usage: import('@vedmoulya/mission-controller').MissionExecutionTrace['usage'];
+      };
       checkpointIds: string[];
       executionAvailable: boolean;
       actions: Array<{
@@ -1002,36 +1008,39 @@ export class MissionService {
           const run = objective.executionRunId
             ? this.runtime?.runs.get(objective.executionRunId)
             : undefined;
-          const actions = (run?.stepResults ?? []).flatMap((step) =>
-            step.actions.map((action) => ({
-              actionId: action.actionId,
-              ...(action.observationId !== undefined
-                ? { observationId: action.observationId }
-                : {}),
-              stepId: action.stepId,
-              attempt: action.attempt,
-              status: action.status,
-              ...(action.provider !== undefined ? { provider: action.provider } : {}),
-              ...(action.model !== undefined ? { model: action.model } : {}),
-              ...(action.toolName !== undefined ? { toolName: action.toolName } : {}),
-              ...(action.error !== undefined
-                ? { error: redactSecrets(action.error).slice(0, 500) }
-                : {}),
-              artifacts: step.observations
-                .filter((observation) => observation.actionId === action.actionId)
-                .flatMap((observation) => observation.artifacts as unknown[])
-                .filter(
-                  (artifact): artifact is { name: string; type: string } =>
-                    typeof artifact === 'object' &&
-                    artifact !== null &&
-                    'name' in artifact &&
-                    typeof artifact.name === 'string' &&
-                    'type' in artifact &&
-                    typeof artifact.type === 'string',
-                )
-                .map((artifact) => ({ name: artifact.name, type: artifact.type })),
-            })),
-          );
+          const persistedTrace = objective.executionTraces?.at(-1);
+          const actions = persistedTrace
+            ? persistedTrace.actions
+            : (run?.stepResults ?? []).flatMap((step) =>
+                step.actions.map((action) => ({
+                  actionId: action.actionId,
+                  ...(action.observationId !== undefined
+                    ? { observationId: action.observationId }
+                    : {}),
+                  stepId: action.stepId,
+                  attempt: action.attempt,
+                  status: action.status,
+                  ...(action.provider !== undefined ? { provider: action.provider } : {}),
+                  ...(action.model !== undefined ? { model: action.model } : {}),
+                  ...(action.toolName !== undefined ? { toolName: action.toolName } : {}),
+                  ...(action.error !== undefined
+                    ? { error: redactSecrets(action.error).slice(0, 500) }
+                    : {}),
+                  artifacts: step.observations
+                    .filter((observation) => observation.actionId === action.actionId)
+                    .flatMap((observation) => observation.artifacts as unknown[])
+                    .filter(
+                      (artifact): artifact is { name: string; type: string } =>
+                        typeof artifact === 'object' &&
+                        artifact !== null &&
+                        'name' in artifact &&
+                        typeof artifact.name === 'string' &&
+                        'type' in artifact &&
+                        typeof artifact.type === 'string',
+                    )
+                    .map((artifact) => ({ name: artifact.name, type: artifact.type })),
+                })),
+              );
           return {
             objectiveId: objective.objectiveId,
             state: objective.state,
@@ -1040,10 +1049,20 @@ export class MissionService {
             ...(objective.executionRunId !== undefined
               ? { executionRunId: objective.executionRunId }
               : {}),
+            ...(persistedTrace
+              ? {
+                  execution: {
+                    state: persistedTrace.state,
+                    startedAt: persistedTrace.startedAt,
+                    ...(persistedTrace.finishedAt ? { finishedAt: persistedTrace.finishedAt } : {}),
+                    usage: persistedTrace.usage,
+                  },
+                }
+              : {}),
             checkpointIds: mission.checkpoints
               .filter((checkpoint) => checkpoint.objectiveId === objective.objectiveId)
               .map((checkpoint) => checkpoint.checkpointId),
-            executionAvailable: run !== undefined,
+            executionAvailable: run !== undefined || persistedTrace !== undefined,
             actions,
           };
         }),

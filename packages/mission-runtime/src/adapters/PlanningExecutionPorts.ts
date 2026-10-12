@@ -16,10 +16,13 @@
 import type {
   AgentExecutionRun,
   AgentExecutionService,
+  AgentActionRecord,
+  AgentObservation,
   AgentPlan,
   AgentRunBudgetConfig,
   ToolPermissionClass,
 } from '@vedmoulya/agent-execution';
+import { sanitizeTraceText } from '@vedmoulya/agent-execution';
 import { PlanningApplicationService } from '@vedmoulya/planning';
 import type {
   ExecutionPort,
@@ -29,6 +32,7 @@ import type {
   PlanningPort,
   VerificationPort,
 } from '@vedmoulya/mission-controller';
+import type { MissionExecutionTrace } from '@vedmoulya/mission-controller';
 import { sanitizePlanningGoal } from './WorkspaceDevTemplate.js';
 
 /** Bounded in-process registry of the runs executed by this runtime. */
@@ -63,6 +67,10 @@ export class RunRegistry {
 }
 
 const ZERO_USAGE = { tokens: 0, costUsd: 0, latencyMs: 0, toolCalls: 0 };
+
+function safeArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
 
 /**
  * PlanningPort over the frozen PlanningApplicationService. Deterministic
@@ -253,6 +261,7 @@ export class AgentExecutionAdapter implements ExecutionPort {
     output?: string;
     error?: string;
     failureClass?: string;
+    trace?: MissionExecutionTrace;
     usage: { tokens: number; costUsd: number; latencyMs: number; toolCalls: number };
   }> {
     if (allowedTools) {
@@ -319,6 +328,63 @@ export class AgentExecutionAdapter implements ExecutionPort {
       verified,
       output,
       error,
+      trace: {
+        runId: run.runId,
+        goalId: run.goalId,
+        planId: run.planId,
+        state: run.state,
+        startedAt: run.createdAt,
+        ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
+        usage: {
+          tokens: run.usage.tokensUsed,
+          costUsd: run.usage.costUsd,
+          latencyMs: run.usage.latencyMs,
+          toolCalls: run.usage.toolCalls,
+          attempts: run.usage.attempts,
+          revisions: run.usage.revisions,
+        },
+        actions: safeArray<AgentExecutionRun['stepResults'][number]>(run.stepResults)
+          .flatMap((step) =>
+            safeArray<AgentActionRecord>(step.actions).map((action) => ({
+              actionId: action.actionId,
+              stepId: action.stepId,
+              attempt: action.attempt,
+              status: action.status,
+              startedAt: action.startedAt,
+              endedAt: action.endedAt,
+              ...(action.observationId ? { observationId: action.observationId } : {}),
+              ...(action.provider ? { provider: action.provider } : {}),
+              ...(action.model ? { model: action.model } : {}),
+              ...(action.toolName ? { toolName: action.toolName } : {}),
+              ...(action.error
+                ? { error: sanitizeTraceText(action.error, { maxLength: 400 }) }
+                : {}),
+              artifacts: safeArray<AgentObservation>(step.observations)
+                .filter((observation) => observation.actionId === action.actionId)
+                .flatMap((observation) => observation.artifacts)
+                .slice(0, 20)
+                .map((artifact) => ({
+                  name: sanitizeTraceText(artifact.name, { maxLength: 120 }),
+                  type: sanitizeTraceText(artifact.type, { maxLength: 80 }),
+                })),
+            })),
+          )
+          .slice(-200),
+        observations: safeArray<AgentExecutionRun['stepResults'][number]>(run.stepResults)
+          .flatMap((step) => safeArray<AgentObservation>(step.observations))
+          .slice(-200)
+          .map((observation) => ({
+            observationId: observation.observationId,
+            actionId: observation.actionId,
+            stepId: observation.stepId,
+            attempt: observation.attempt,
+            status: observation.status,
+            observedAt: observation.observedAt,
+            ...(observation.provider ? { provider: observation.provider } : {}),
+            ...(observation.model ? { model: observation.model } : {}),
+            ...(observation.toolName ? { toolName: observation.toolName } : {}),
+          })),
+      },
       failureClass,
       usage: {
         tokens: run.usage.tokensUsed,

@@ -99,6 +99,7 @@ test.txt
 /_*.log
 /_*.json
 /_*.diff
+/_*.mjs
 /.dev.txt
 /.dev.err.txt
 # Live acceptance workspaces — the scripts/live-*.ts harnesses mkdir and

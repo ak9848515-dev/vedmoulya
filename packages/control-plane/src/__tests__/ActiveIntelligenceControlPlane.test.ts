@@ -203,3 +203,204 @@ describe('ActiveIntelligenceControlPlane (SPRINT-031)', () => {
     expect(plane.listOpportunities('u2')).toEqual([]);
   });
 });
+// ─────────────────────────────────────────────────────────────────────────────
+// SPRINT-031 / S5.2 — launch handshake, gate passthrough and briefing branches.
+// These exercise the composition seams the router depends on: the single gate
+// entry point, discovery-with-result, the claim/complete launch handshake (with
+// its fail-closed guards) and the no-spam briefing content selection.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ActiveIntelligenceControlPlane — gate, discovery and launch seams', () => {
+  function approvedOpportunity(
+    plane: ActiveIntelligenceControlPlane,
+    ownerId = 'u1',
+    title = 'Launch me',
+  ): string {
+    const opp = plane.discoverOpportunity({
+      ownerId,
+      title,
+      description: 'x',
+      category: 'x',
+      evidence: [],
+      riskLevel: 'LOW',
+      automationPotential: 'LOW',
+    });
+    for (const to of ['ASSESSED', 'SHORTLISTED', 'PRESENTED'] as const) {
+      plane.transitionOpportunity({ ownerId, id: opp.id, to, note: 'walk' });
+    }
+    plane.transitionOpportunity({
+      ownerId,
+      id: opp.id,
+      to: 'APPROVED',
+      note: 'approved',
+      approval: { id: 'a1', grantedBy: ownerId, grantedAt: '2026-10-05T00:00:00.000Z', scope: 's' },
+    });
+    return opp.id;
+  }
+
+  it('gateAction delegates to the fail-closed gate (unconfirmed settings blocked)', () => {
+    const { plane } = makePlane();
+    const decision = plane.gateAction({
+      ownerId: 'u1',
+      action: 'Summarize the report',
+      category: 'TASK',
+      settings: undefined,
+      emergencyStop: plane.emergencyStop,
+      emergencyStopEngaged: false,
+    });
+    expect(decision.verdict).toBe('BLOCKED_BY_POLICY');
+    expect(decision.allowed).toBe(false);
+  });
+
+  it('discoverOpportunityWithResult reports CREATED then EXISTING (idempotent)', () => {
+    const { plane } = makePlane();
+    const input = {
+      ownerId: 'u1',
+      title: 'A durable opportunity',
+      description: 'x',
+      category: 'x',
+      evidence: [],
+      riskLevel: 'LOW' as const,
+      automationPotential: 'LOW' as const,
+    };
+    const first = plane.discoverOpportunityWithResult(input);
+    expect(first.created).toBe(true);
+    const second = plane.discoverOpportunityWithResult(input);
+    expect(second.created).toBe(false);
+    expect(second.record.id).toBe(first.record.id);
+  });
+
+  it('claimOpportunityMissionLaunch reserves once and is idempotent for the same owner', async () => {
+    const { plane } = makePlane();
+    const id = approvedOpportunity(plane);
+    const intent = {
+      userId: 'u1',
+      opportunityId: id,
+      missionId: 'm-1',
+      createdAt: '2026-10-05T00:00:00.000Z',
+    };
+    const pending = await plane.claimOpportunityMissionLaunch(intent);
+    expect(pending.status).toBe('PENDING');
+    // A retried claim returns the SAME reserved intent (no second reservation).
+    const again = await plane.claimOpportunityMissionLaunch({ ...intent, missionId: 'm-2' });
+    expect(again.missionId).toBe('m-1');
+    expect(plane.getOpportunityMissionLaunch('u1', id)?.status).toBe('PENDING');
+  });
+
+  it('claimOpportunityMissionLaunch refuses a missing, non-approved or approval-less opportunity', () => {
+    const { plane } = makePlane();
+    // The guard throws synchronously (no awaited I/O before it).
+    expect(() =>
+      plane.claimOpportunityMissionLaunch({
+        userId: 'u1',
+        opportunityId: 'nope',
+        missionId: 'm-1',
+        createdAt: '2026-10-05T00:00:00.000Z',
+      }),
+    ).toThrow('Only an approved opportunity may reserve a Mission launch.');
+
+    // DISCOVERED (not APPROVED / PLANNED).
+    const opp = plane.discoverOpportunity({
+      ownerId: 'u1',
+      title: 'Not ready',
+      description: 'x',
+      category: 'x',
+      evidence: [],
+      riskLevel: 'LOW',
+      automationPotential: 'LOW',
+    });
+    expect(() =>
+      plane.claimOpportunityMissionLaunch({
+        userId: 'u1',
+        opportunityId: opp.id,
+        missionId: 'm-1',
+        createdAt: '2026-10-05T00:00:00.000Z',
+      }),
+    ).toThrow('Only an approved opportunity may reserve a Mission launch.');
+  });
+
+  it('completeOpportunityMissionLaunch links a claimed opportunity and refuses the wrong status', async () => {
+    const { plane } = makePlane();
+    const id = approvedOpportunity(plane);
+    const intent = {
+      userId: 'u1',
+      opportunityId: id,
+      missionId: 'm-1',
+      createdAt: '2026-10-05T00:00:00.000Z',
+    };
+    await plane.claimOpportunityMissionLaunch(intent);
+    // The router performs the APPROVED → PLANNED boundary transition alongside
+    // the claim; completion then requires that PLANNED state.
+    expect(
+      plane.transitionOpportunity({ ownerId: 'u1', id, to: 'PLANNED', note: 'launch claimed' })
+        .success,
+    ).toBe(true);
+    const completed = await plane.completeOpportunityMissionLaunch(intent);
+    expect(completed).toMatchObject({ status: 'LINKED', missionId: 'm-1' });
+
+    // A second, DISTINCT opportunity still APPROVED (never claimed) cannot complete.
+    const other = approvedOpportunity(plane, 'u1', 'A second launch candidate');
+    expect(() =>
+      plane.completeOpportunityMissionLaunch({
+        userId: 'u1',
+        opportunityId: other,
+        missionId: 'm-9',
+        createdAt: '2026-10-05T00:00:00.000Z',
+      }),
+    ).toThrow('Only an approved, claimed opportunity may complete a Mission launch.');
+  });
+
+  it('todayBriefing reports no content when nothing needs attention', () => {
+    const { plane } = makePlane({ approvals: [], recs: [] });
+    const briefing = plane.todayBriefing('u1');
+    expect(briefing.hasContent).toBe(false);
+    expect(briefing.recommendedNextAction).toBe('Nothing requires attention right now.');
+  });
+
+  it('todayBriefing surfaces provider-health attention when a provider is unavailable', () => {
+    const stores = new InMemoryControlStores();
+    const plane = new ActiveIntelligenceControlPlane({
+      brain: { listTasksWithApprovals: () => [], outcomeCount: () => 0 },
+      proactive: { refresh: async () => ({ success: true }), listRecommendations: () => [] },
+      fabric: {
+        allProviderHealth: () => [{ providerId: 'openai', state: 'UNAVAILABLE', observedCalls: 0 }],
+        costSnapshot: () => ({}),
+      },
+      stores,
+      now: () => '2026-10-05T00:00:00.000Z',
+    });
+    const briefing = plane.todayBriefing('u1');
+    expect(briefing.hasContent).toBe(true);
+    expect(briefing.recommendedNextAction).toMatch(/provider health attention/);
+  });
+
+  it('todayBriefing excludes REJECTED and COMPLETED opportunities and caps at five', () => {
+    const { plane } = makePlane({ approvals: [], recs: [] });
+    // Create six active opportunities plus one that will be rejected.
+    for (let i = 0; i < 6; i++) {
+      plane.discoverOpportunity({
+        ownerId: 'u1',
+        title: `active-${i}`,
+        description: 'x',
+        category: 'x',
+        evidence: [],
+        riskLevel: 'LOW',
+        automationPotential: 'LOW',
+      });
+    }
+    const rejected = plane.discoverOpportunity({
+      ownerId: 'u1',
+      title: 'reject-me',
+      description: 'x',
+      category: 'x',
+      evidence: [],
+      riskLevel: 'LOW',
+      automationPotential: 'LOW',
+    });
+    plane.transitionOpportunity({ ownerId: 'u1', id: rejected.id, to: 'REJECTED', note: 'no' });
+
+    const briefing = plane.todayBriefing('u1');
+    expect(briefing.opportunities).toHaveLength(5); // capped at five
+    expect(briefing.opportunities.some((o) => o.title === 'reject-me')).toBe(false);
+  });
+});

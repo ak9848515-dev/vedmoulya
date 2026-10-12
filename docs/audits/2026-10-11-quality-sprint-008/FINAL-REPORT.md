@@ -48,15 +48,15 @@ See [live acceptance log](evidence/live-mission-acceptance-ollama.log) and [inde
 
 ## 5. Phase E — quality gates
 
-| Command | Result |
-| --- | --- |
-| Focused Mission Runtime, planner, verification, failure-classifier and approval tests | 5 files, 62 passed |
-| Fresh Ollama Mission acceptance | Passed; actual provider/model and artifact verified |
-| `npm run deps:cycles` | Passed; 57 workspaces, no cycles |
-| `npm run typecheck` | Passed |
-| `npm run lint` | Passed; 58 scopes, 0 failed |
-| `npm test -- --maxWorkers=4 --reporter=dot` | Passed; 972 files, 12,914 tests, 405.29 seconds |
-| Targeted Prettier check on changed source/tests | Passed |
+| Command                                                                               | Result                                              |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Focused Mission Runtime, planner, verification, failure-classifier and approval tests | 5 files, 62 passed                                  |
+| Fresh Ollama Mission acceptance                                                       | Passed; actual provider/model and artifact verified |
+| `npm run deps:cycles`                                                                 | Passed; 57 workspaces, no cycles                    |
+| `npm run typecheck`                                                                   | Passed                                              |
+| `npm run lint`                                                                        | Passed; 58 scopes, 0 failed                         |
+| `npm test -- --maxWorkers=4 --reporter=dot`                                           | Passed; 972 files, 12,914 tests, 405.29 seconds     |
+| Targeted Prettier check on changed source/tests                                       | Passed                                              |
 
 The full-suite log is preserved under `_sprint8-live/full-test.log`. The four pre-existing Sprint 3 evidence Markdown files were not changed or reformatted.
 
@@ -72,18 +72,18 @@ D-09 staging recovery/restore remains unverified. D-11b still has no automatic t
 
 The verified live Mission closes a real end-to-end acceptance defect, so End-to-end functionality increases modestly from 8.0 to 8.1. Other dimensions remain unchanged; no score increase is awarded merely for adding tests.
 
-| Dimension | Weight | Sprint 007 | Sprint 008 | Weighted Sprint 008 |
-| --- | ---: | ---: | ---: | ---: |
-| Architecture | 15% | 6.8 | 6.8 | 1.020 |
-| End-to-end functionality | 15% | 8.0 | 8.1 | 1.215 |
-| AI intelligence | 12% | 7.5 | 7.5 | 0.900 |
-| Runtime / recovery | 12% | 7.1 | 7.1 | 0.852 |
-| Tests | 10% | 8.3 | 8.3 | 0.830 |
-| Security | 10% | 7.5 | 7.5 | 0.750 |
-| Persistence | 8% | 7.0 | 7.0 | 0.560 |
-| UX / accessibility | 8% | 7.0 | 7.0 | 0.560 |
-| Performance | 5% | 5.5 | 5.5 | 0.275 |
-| Documentation / operations | 5% | 7.4 | 7.4 | 0.370 |
-| **Weighted total** | **100%** | **7.32 → 7.3** | **7.332 → 7.3 / 10** | **7.332** |
+| Dimension                  |   Weight |     Sprint 007 |           Sprint 008 | Weighted Sprint 008 |
+| -------------------------- | -------: | -------------: | -------------------: | ------------------: |
+| Architecture               |      15% |            6.8 |                  6.8 |               1.020 |
+| End-to-end functionality   |      15% |            8.0 |                  8.1 |               1.215 |
+| AI intelligence            |      12% |            7.5 |                  7.5 |               0.900 |
+| Runtime / recovery         |      12% |            7.1 |                  7.1 |               0.852 |
+| Tests                      |      10% |            8.3 |                  8.3 |               0.830 |
+| Security                   |      10% |            7.5 |                  7.5 |               0.750 |
+| Persistence                |       8% |            7.0 |                  7.0 |               0.560 |
+| UX / accessibility         |       8% |            7.0 |                  7.0 |               0.560 |
+| Performance                |       5% |            5.5 |                  5.5 |               0.275 |
+| Documentation / operations |       5% |            7.4 |                  7.4 |               0.370 |
+| **Weighted total**         | **100%** | **7.32 → 7.3** | **7.332 → 7.3 / 10** |           **7.332** |
 
 Sprint 008's end-to-end dimension improvement is evidence-based; the overall rounded score remains **7.3 / 10**.

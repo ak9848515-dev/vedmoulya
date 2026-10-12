@@ -45,17 +45,17 @@ No automatic retry was added: the current contract is best-effort async persiste
 
 ## 6. Regression gates
 
-| Gate | Result |
-| --- | --- |
-| Focused Brain, API, provider runtime, orchestrator and write-through Vitest | 6 files, 242 tests passed |
-| Live Ollama Brain Chromium journey | 1 passed; real Ollama usage verified |
-| Mock Brain browser journey | 1 passed |
-| `npm run deps:cycles` | Passed; 57 workspaces |
-| `npm run typecheck` | Passed |
-| `npm run lint` | Passed; 58 scopes, 0 failed |
-| `npm test -- --maxWorkers=4 --reporter=dot` | Passed; 972 files, 12,913 tests |
-| Targeted Prettier check on changed source/test files | Passed |
-| `npm run format` | Failed only on four pre-existing untracked Sprint 3 Markdown evidence files; preserved untouched |
+| Gate                                                                        | Result                                                                                           |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Focused Brain, API, provider runtime, orchestrator and write-through Vitest | 6 files, 242 tests passed                                                                        |
+| Live Ollama Brain Chromium journey                                          | 1 passed; real Ollama usage verified                                                             |
+| Mock Brain browser journey                                                  | 1 passed                                                                                         |
+| `npm run deps:cycles`                                                       | Passed; 57 workspaces                                                                            |
+| `npm run typecheck`                                                         | Passed                                                                                           |
+| `npm run lint`                                                              | Passed; 58 scopes, 0 failed                                                                      |
+| `npm test -- --maxWorkers=4 --reporter=dot`                                 | Passed; 972 files, 12,913 tests                                                                  |
+| Targeted Prettier check on changed source/test files                        | Passed                                                                                           |
+| `npm run format`                                                            | Failed only on four pre-existing untracked Sprint 3 Markdown evidence files; preserved untouched |
 
 The full-suite, lint, typecheck and dependency-cycle logs are retained under `_sprint7-live/`.
 

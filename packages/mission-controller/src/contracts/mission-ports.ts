@@ -12,6 +12,7 @@ import type {
   Mission,
   MissionCheckpoint,
   MissionObjective,
+  MissionExecutionTrace,
   ObjectiveSelectionResult,
   ProviderCapability,
   ProviderStatus,
@@ -39,6 +40,8 @@ export type {
 // -- Mission Persistence -------------------------------------------
 export interface MissionStore {
   save(mission: Mission): Promise<void>;
+  /** Optional durability barrier for evidence that must survive process loss. */
+  saveRequired?(mission: Mission): Promise<void>;
   createIfAbsent?(mission: Mission): Promise<Mission>;
   get(missionId: string): Promise<Mission | undefined>;
   getSync?(missionId: string): Mission | undefined;
@@ -129,6 +132,7 @@ export interface ExecutionPort {
     output?: string;
     error?: string;
     failureClass?: string;
+    trace?: MissionExecutionTrace;
     usage: {
       tokens: number;
       costUsd: number;

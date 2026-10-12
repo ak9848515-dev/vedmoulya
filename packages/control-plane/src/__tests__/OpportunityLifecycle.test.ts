@@ -173,3 +173,98 @@ describe('OpportunityLifecycle (SPRINT-031)', () => {
     if (!stolen.success) expect(stolen.code).toBe('NOT_FOUND');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPRINT-031 — remaining lifecycle branches: idempotent same-status transition,
+// VERIFIED-only-after-EXECUTED guard, and the externally-sourced dedup key.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('OpportunityLifecycle — boundary and dedup branches', () => {
+  it('a transition to the CURRENT status is a no-op success (idempotent)', () => {
+    const store = createStore();
+    const lc = new OpportunityLifecycle(store);
+    const opp = lc.discover({ ownerId: 'u1', ...base });
+    const same = lc.transition({ ownerId: 'u1', id: opp.id, to: 'DISCOVERED', note: 'no-op' });
+    expect(same.success).toBe(true);
+    if (same.success) expect(same.record.status).toBe('DISCOVERED');
+    // No extra transition recorded.
+    expect(store.get('u1', opp.id)!.transitions.length).toBe(0);
+  });
+
+  it('REFUSES VERIFIED unless the record is already EXECUTED', () => {
+    const store = createStore();
+    const lc = new OpportunityLifecycle(store);
+    const opp = lc.discover({ ownerId: 'u1', ...base });
+    // Walk to EXECUTED is required; first prove the guard fires from DISCOVERED.
+    const illegal = lc.transition({ ownerId: 'u1', id: opp.id, to: 'VERIFIED', note: 'jump' });
+    expect(illegal.success).toBe(false);
+    if (!illegal.success) expect(illegal.code).toBe('ILLEGAL_TRANSITION');
+  });
+
+  it('REFUSES VERIFIED from a state whose legal set excludes it (EXECUTED-gated)', () => {
+    // A direct check of the explicit `VERIFIED only after EXECUTED` guard: reach
+    // a state where OPPORTUNITY_TRANSITIONS includes VERIFIED in no other way.
+    const store = createStore();
+    const lc = new OpportunityLifecycle(store);
+    const opp = lc.discover({ ownerId: 'u1', ...base });
+    lc.transition({ ownerId: 'u1', id: opp.id, to: 'ASSESSED', note: 'a' });
+    lc.transition({ ownerId: 'u1', id: opp.id, to: 'SHORTLISTED', note: 's' });
+    lc.transition({ ownerId: 'u1', id: opp.id, to: 'PRESENTED', note: 'p' });
+    lc.transition({
+      ownerId: 'u1',
+      id: opp.id,
+      to: 'APPROVED',
+      note: 'ok',
+      approval: { id: 'a1', grantedBy: 'alice', grantedAt: '2026-08-14T09:00:00Z', scope: 'opp' },
+    });
+    lc.transition({ ownerId: 'u1', id: opp.id, to: 'REJECTED', note: 'drop' });
+    const reopened = lc.transition({ ownerId: 'u1', id: opp.id, to: 'VERIFIED', note: 'nope' });
+    expect(reopened.success).toBe(false);
+  });
+
+  it('externally-sourced opportunities dedup by (source, sourceReference), not title', () => {
+    const store = createStore();
+    const lc = new OpportunityLifecycle(store);
+    const ref = { source: 'RSS-Feed', sourceReference: 'https://example.com/job/42' };
+    const first = lc.discover({ ownerId: 'u1', ...base, sourceRef: ref });
+    // Same source ref but a DIFFERENT title → still ONE record.
+    const second = lc.discover({
+      ownerId: 'u1',
+      ...base,
+      title: 'A different title for the same posting',
+      sourceRef: ref,
+    });
+    expect(second.id).toBe(first.id);
+    expect(lc.list('u1').length).toBe(1);
+    // A different sourceReference → a distinct record.
+    const other = lc.discover({
+      ownerId: 'u1',
+      ...base,
+      sourceRef: { source: 'rss-feed', sourceReference: 'https://example.com/job/43' },
+    });
+    expect(other.id).not.toBe(first.id);
+    expect(lc.list('u1').length).toBe(2);
+  });
+
+  it('discoverWithResult reports created/existing and clamps confidence + caps arrays', () => {
+    const store = createStore();
+    const lc = new OpportunityLifecycle(store);
+    const created = lc.discoverWithResult({
+      ownerId: 'u1',
+      ...base,
+      confidence: 5, // clamped to 1
+      requiredCapabilities: Array.from({ length: 25 }, (_, i) => `cap-${i}`),
+      evidence: Array.from({ length: 12 }, (_, i) => ({
+        label: `e${i}`,
+        status: 'UNKNOWN' as const,
+      })),
+    });
+    expect(created.created).toBe(true);
+    expect(created.record.confidence).toBe(1);
+    expect(created.record.requiredCapabilities).toHaveLength(20);
+    expect(created.record.evidence).toHaveLength(8);
+    const existing = lc.discoverWithResult({ ownerId: 'u1', ...base });
+    expect(existing.created).toBe(false);
+    expect(existing.record.id).toBe(created.record.id);
+  });
+});

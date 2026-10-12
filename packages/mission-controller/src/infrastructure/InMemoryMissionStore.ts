@@ -10,6 +10,10 @@ export class InMemoryMissionStore implements MissionStore {
     this.missions.set(mission.missionId, mission);
   }
 
+  saveRequired(mission: Mission): Promise<void> {
+    return this.save(mission);
+  }
+
   createIfAbsent(mission: Mission): Promise<Mission> {
     const existing = this.missions.get(mission.missionId);
     if (existing) return Promise.resolve(existing);

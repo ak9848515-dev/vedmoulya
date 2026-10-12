@@ -48,6 +48,15 @@ export class PostgresMissionStore
     this.write(OWNER, mission.missionId, mission);
   }
 
+  async saveRequired(mission: Mission): Promise<void> {
+    await this.flush();
+    await this.writeThroughUpsert(OWNER, mission.missionId, mission);
+    // Replace any failed/stale queued copy with the durable version. If a
+    // previous best-effort flush could not reach Postgres, its old snapshot
+    // must not overwrite this required write on a later retry.
+    this.write(OWNER, mission.missionId, mission);
+  }
+
   async createIfAbsent(mission: Mission): Promise<Mission> {
     const rows = await this.database<Array<{ doc: Mission }>>`
       INSERT INTO ${this.database(this.tableName)} (owner, key, doc)

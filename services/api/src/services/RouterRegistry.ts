@@ -2623,6 +2623,7 @@ export function createAppRouter(services: ApiApplicationService) {
     approval: services.opportunityApproval,
     qualify: (record) => services.opportunityQualifier.qualify(record),
     mission: services.opportunityMissionLaunch,
+    readMissionTrace: (userId, missionId) => services.mission.getStatus(userId, missionId),
     // S7.1 — monitoring owns no scheduler and no store: it drives the EXISTING
     // canonical discovery through the bounded pass, and the proposal port can
     // only DRAFT (it has no submission method to reach).
@@ -6337,6 +6338,14 @@ export function createAppRouter(services: ApiApplicationService) {
         .input(controlInputs.missionOpportunityLookup)
         .query(({ input, ctx }) =>
           createControlRouter(services.controlPlane, acquisitionDeps).getOpportunityForMission(
+            { ...(input as Record<string, unknown>), userId: ctx.userId },
+            ctx,
+          ),
+        ),
+      getMissionTrace: standardProcedure
+        .input(controlInputs.missionTrace)
+        .query(({ input, ctx }) =>
+          createControlRouter(services.controlPlane, acquisitionDeps).getMissionTrace(
             { ...(input as Record<string, unknown>), userId: ctx.userId },
             ctx,
           ),

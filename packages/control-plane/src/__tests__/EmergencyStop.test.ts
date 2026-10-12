@@ -82,3 +82,44 @@ describe('EmergencyStop (SPRINT-031)', () => {
     expect(stop.history('u1').length).toBe(10);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPRINT-031 — remaining EmergencyStop branches: history for an unknown owner,
+// and a RELEASE that has no prior engaged state (defensive default).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('EmergencyStop — empty/absent state branches', () => {
+  it('history(owner) is empty when no record exists', () => {
+    const stop = new EmergencyStop(createStore(), fixedNow);
+    expect(stop.history('never-seen')).toEqual([]);
+  });
+
+  it('RELEASE with no prior record still succeeds with an empty history', () => {
+    const store = createStore();
+    const stop = new EmergencyStop(store, fixedNow);
+    const result = stop.release({
+      ownerId: 'u1',
+      actor: 'alice',
+      reason: 'nothing was engaged',
+      source: 'operator',
+    });
+    expect(result.success).toBe(true);
+    expect(result.state.engaged).toBe(false);
+    expect(result.state.engagedAt).toBeUndefined();
+    expect(result.state.engagedBy).toBeUndefined();
+    expect(result.state.reason).toBeUndefined();
+    expect(result.state.history).toHaveLength(1);
+    expect(result.state.history[0]).toMatchObject({ action: 'RELEASE', engagedBefore: false });
+  });
+
+  it('a released-after-engaged record keeps the prior engage metadata', () => {
+    const store = createStore();
+    const stop = new EmergencyStop(store, fixedNow);
+    stop.engage({ ownerId: 'u1', actor: 'alice', reason: 'why', source: 'user' });
+    stop.release({ ownerId: 'u1', actor: 'bob', reason: 'resolved', source: 'operator' });
+    const state = store.get('u1')!;
+    expect(state.engagedBy).toBe('alice');
+    expect(state.reason).toBe('why');
+    expect(state.history).toHaveLength(2);
+  });
+});

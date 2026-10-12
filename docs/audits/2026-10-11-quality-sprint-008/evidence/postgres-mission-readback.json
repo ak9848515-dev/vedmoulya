@@ -12,7 +12,5 @@
     }
   ],
   "checkpointRows": 1,
-  "checkpointStates": [
-    "VERIFIED"
-  ]
+  "checkpointStates": ["VERIFIED"]
 }

@@ -83,3 +83,77 @@ describe('AutonomySettingsValidator (SPRINT-031)', () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPRINT-031 — remaining validator branches: category/provider allowlist
+// shape, automation-permission id shape, and the defaulted cap fields.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('AutonomySettingsValidator — list and id validation branches', () => {
+  const base = {
+    ownerId: 'u1',
+    autonomyLevel: 2,
+    updatedBy: 'u1',
+    userConfirmed: true,
+  };
+
+  it('REFUSES malformed allowed/prohibited categories', () => {
+    const bad = new AutonomySettingsValidator().validate({
+      ...base,
+      allowedCategories: ['lowercase'],
+    });
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.error).toMatch(/allowedCategories contains an invalid category/);
+
+    const prohibitedBad = new AutonomySettingsValidator().validate({
+      ...base,
+      prohibitedCategories: ['A'],
+    });
+    expect(prohibitedBad.success).toBe(false);
+    if (!prohibitedBad.success) {
+      expect(prohibitedBad.error).toMatch(/prohibitedCategories contains an invalid category/);
+    }
+  });
+
+  it('REFUSES malformed provider ids in either list', () => {
+    const bad = new AutonomySettingsValidator().validate({
+      ...base,
+      allowedProviders: ['OpenAI'],
+    });
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.error).toMatch(/allowedProviders contains an invalid provider id/);
+
+    const prohibitedBad = new AutonomySettingsValidator().validate({
+      ...base,
+      prohibitedProviders: ['has spaces'],
+    });
+    expect(prohibitedBad.success).toBe(false);
+    if (!prohibitedBad.success) {
+      expect(prohibitedBad.error).toMatch(/prohibitedProviders contains an invalid provider id/);
+    }
+  });
+
+  it('REFUSES malformed automation-permission ids', () => {
+    const result = new AutonomySettingsValidator().validate({
+      ...base,
+      automationPermissions: ['valid-wf-1', 'bad id!'],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success)
+      expect(result.error).toMatch(/automationPermissions contains an invalid id/);
+  });
+
+  it('accepts valid automation-permission ids and caps the retained shape', () => {
+    const result = new AutonomySettingsValidator().validate({
+      ...base,
+      automationPermissions: ['wf-1', 'wf_2', 'wf3'],
+      maxDailyCostUsd: 0,
+      maxTaskCostUsd: 0,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.automationPermissions).toEqual(['wf-1', 'wf_2', 'wf3']);
+      expect(result.settings.maxDailyCostUsd).toBe(0);
+    }
+  });
+});

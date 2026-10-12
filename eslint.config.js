@@ -487,6 +487,12 @@ export default tseslint.config(
       '_live*/',
       '_real08/',
       '_s3*/',
+      // Sprint acceptance-evidence workspaces mirror the _live*/_s3* pattern
+      // above (generated per run, not TS project members).
+      '_sprint*/',
+      // Root-level ad-hoc coverage/analysis scratch (same category as the
+      // .tmp-*.mjs probes excluded below); never part of the source tree.
+      '_*.mjs',
       // Generated build output (never authored, never linted):
       'apps/web/out/**', // Next.js static export
       'apps/web/android/**', // Capacitor wrapper incl. copied web assets

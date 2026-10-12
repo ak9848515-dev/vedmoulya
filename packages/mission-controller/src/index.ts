@@ -28,6 +28,7 @@ export type {
   GitSafetyClassification,
   MissionActivityEvent,
   MissionObjectiveLease,
+  MissionExecutionTrace,
   MissionFailureDiagnosisRecord,
   DiscoveredWorkScope,
   DiscoveredWorkKind,

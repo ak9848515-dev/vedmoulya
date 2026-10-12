@@ -135,6 +135,11 @@ export interface MissionObjective {
   goalId?: string;
   planId?: string;
   executionRunId?: string;
+  /**
+   * Bounded, sanitized snapshots of actual Agent Execution evidence. Optional
+   * so older persisted Mission JSONB documents remain readable.
+   */
+  executionTraces?: MissionExecutionTrace[];
   startedAt?: string;
   completedAt?: string;
   /** BLD-025 durable execution ownership (see MissionObjectiveLease). */
@@ -165,6 +170,49 @@ export interface MissionObjective {
     label: string;
     rationale: string;
   };
+}
+
+/** Minimal execution evidence persisted with its canonical Mission objective. */
+export interface MissionExecutionTrace {
+  runId: string;
+  goalId: string;
+  planId: string;
+  state: string;
+  startedAt: string;
+  finishedAt?: string;
+  usage: {
+    tokens: number;
+    costUsd: number;
+    latencyMs: number;
+    toolCalls: number;
+    attempts: number;
+    revisions: number;
+  };
+  actions: Array<{
+    actionId: string;
+    stepId: string;
+    attempt: number;
+    status: 'succeeded' | 'failed' | 'denied' | 'blocked';
+    startedAt: string;
+    endedAt: string;
+    observationId?: string;
+    provider?: string;
+    model?: string;
+    toolName?: string;
+    error?: string;
+    artifacts: Array<{ name: string; type: string }>;
+  }>;
+  observations: Array<{
+    observationId: string;
+    actionId: string;
+    stepId: string;
+    attempt: number;
+    status: string;
+    observedAt: string;
+    provider?: string;
+    model?: string;
+    toolName?: string;
+  }>;
 }
 
 /**

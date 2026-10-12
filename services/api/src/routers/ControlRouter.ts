@@ -49,6 +49,8 @@ export interface OpportunityAcquisitionDeps {
   /** S5.1 — the EXISTING canonical Mission creation path. Injected so the
    *  acquisition layer can never reach a Mission engine directly. */
   mission: MissionLaunchPort;
+  /** Read-only bridge to the owner-scoped canonical Mission status projection. */
+  readMissionTrace?: (userId: string, missionId: string) => Promise<unknown>;
   /** S7.1 — the bounded external monitoring pass (optional; absent = not
    *  configured, reported honestly rather than silently). It ingests only
    *  DISCOVERED records through the canonical lifecycle. */
@@ -214,6 +216,7 @@ export const controlInputs = {
   opportunityStartMission: z.object({ id: z.string().min(1).max(128) }),
   opportunityMissionLookup: z.object({ opportunityId: z.string().min(1).max(128) }),
   missionOpportunityLookup: z.object({ missionId: z.string().min(1).max(128) }),
+  missionTrace: z.object({ missionId: z.string().min(1).max(128) }),
   gate: z.object({
     userId: z.string().min(1),
     action: z.string().min(1).max(300),
@@ -261,6 +264,7 @@ export interface ControlHandlers {
     input: Record<string, unknown>,
     ctx: TRPCContext,
   ) => Promise<ApiResponse>;
+  getMissionTrace: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
   /** S7.1 — run ONE bounded external monitoring pass for the session owner. */
   monitorOpportunities: (input: Record<string, unknown>, ctx: TRPCContext) => Promise<ApiResponse>;
   /** S7.1 — rank the session owner's opportunities on the EXISTING verdicts. */
@@ -846,6 +850,75 @@ export function createControlRouter(
       const ownerId = input.userId as string;
       const link = plane.getOpportunityForMission(ownerId, input.missionId as string);
       return Promise.resolve(successResponse(link ?? null));
+    },
+
+    getMissionTrace: async (input): Promise<ApiResponse> => {
+      const ownerId = input.userId as string;
+      const missionId = input.missionId as string;
+      if (!acquisition?.readMissionTrace) {
+        return acquisitionError(
+          'SERVICE_UNAVAILABLE',
+          'Mission trace retrieval is not configured.',
+          503,
+        );
+      }
+      let mission: unknown;
+      try {
+        // Resolve the canonical Mission first. This both enforces ownership
+        // and avoids disclosing whether another owner's opportunity is linked.
+        mission = await acquisition.readMissionTrace(ownerId, missionId);
+      } catch (error) {
+        const notFound =
+          error instanceof Error && error.message.toLowerCase().includes('not found');
+        return acquisitionError(
+          notFound ? 'NOT_FOUND' : 'SERVICE_UNAVAILABLE',
+          notFound ? 'Mission not found.' : 'Mission trace could not be reconstructed.',
+          notFound ? 404 : 503,
+        );
+      }
+      const link = plane.getOpportunityForMission(ownerId, missionId);
+      if (!link) {
+        return successResponse({
+          origin: { kind: 'USER_GOAL', status: 'NOT_LINKED' },
+          approval: { status: 'NOT_APPLICABLE' },
+          launchIntent: { status: 'NOT_APPLICABLE' },
+          mission,
+          delivery: { status: 'NOT_JOINED' },
+        });
+      }
+      const opportunity = plane
+        .listOpportunities(ownerId)
+        .find((item) => item.id === link.opportunityId);
+      const intent = plane.getOpportunityMissionLaunch(ownerId, link.opportunityId);
+      return successResponse({
+        origin: opportunity
+          ? {
+              kind: 'OPPORTUNITY',
+              status: 'FOUND',
+              opportunityId: opportunity.id,
+              title: opportunity.title,
+              lifecycleStatus: opportunity.status,
+              riskLevel: opportunity.riskLevel,
+            }
+          : { kind: 'OPPORTUNITY', status: 'MISSING', opportunityId: link.opportunityId },
+        approval: opportunity?.approval
+          ? {
+              status: 'APPROVED',
+              approvalId: opportunity.approval.id,
+              grantedAt: opportunity.approval.grantedAt,
+            }
+          : { status: 'MISSING' },
+        launchIntent: intent
+          ? {
+              status: intent.status,
+              opportunityId: intent.opportunityId,
+              missionId: intent.missionId,
+              createdAt: intent.createdAt,
+            }
+          : { status: 'MISSING', opportunityId: link.opportunityId, missionId: link.missionId },
+        mission,
+        delivery: { status: 'NOT_JOINED' },
+      });
     },
 
     // S5 — register the approval request with the EXISTING Brain authority.

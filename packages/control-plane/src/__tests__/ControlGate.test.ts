@@ -304,3 +304,74 @@ describe('ControlGate (SPRINT-031) — structural guarantees', () => {
     expect(gate.gate(input).verdict).toBe(gate.gate(input).verdict);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPRINT-031 — remaining ControlGate branches: the default clock is optional,
+// and privateOnly permits a LOCAL provider (only remote use is blocked).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ControlGate — option defaults and provider-privacy boundary', () => {
+  it('constructs without options (uses the real default clock and policies)', () => {
+    const gate = new ControlGate();
+    const emergencyStop = new EmergencyStop(stopStore(false));
+    // A class-A advisory action with confirmed settings is ALLOWED, proving the
+    // default-constructed gate composes the real autonomy + cost authorities.
+    const decision = gate.gate({
+      ownerId: 'u1',
+      action: 'Summarize the weekly report',
+      category: 'TASK',
+      settings: settings(),
+      emergencyStop,
+      emergencyStopEngaged: false,
+    });
+    expect(decision.verdict).toBe('ALLOWED');
+  });
+
+  it('privateOnly still allows a LOCAL provider (only remote routing is blocked)', () => {
+    const gate = new ControlGate();
+    const emergencyStop = new EmergencyStop(stopStore(false));
+    const local = gate.gate({
+      ownerId: 'u1',
+      action: 'Summarize the weekly report',
+      category: 'TASK',
+      providerId: 'local-ollama',
+      settings: settings({ privateOnly: true }),
+      emergencyStop,
+      emergencyStopEngaged: false,
+    });
+    expect(local.verdict).toBe('ALLOWED');
+  });
+
+  it('prohibited provider wins even when privateOnly is off', () => {
+    const gate = new ControlGate();
+    const emergencyStop = new EmergencyStop(stopStore(false));
+    const decision = gate.gate({
+      ownerId: 'u1',
+      action: 'Summarize the weekly report',
+      category: 'TASK',
+      providerId: 'openai',
+      settings: settings({ privateOnly: false, prohibitedProviders: ['openai'] }),
+      emergencyStop,
+      emergencyStopEngaged: false,
+    });
+    expect(decision.verdict).toBe('BLOCKED_BY_POLICY');
+    expect(decision.reasons[0]).toMatch(/prohibited/);
+  });
+
+  it('currentLevel override caps authority below the settings level', () => {
+    const gate = new ControlGate();
+    const emergencyStop = new EmergencyStop(stopStore(false));
+    // Settings grant level 4, but the caller passes currentLevel 0 → the
+    // autonomy policy refuses to act on the user's behalf at level 0.
+    const decision = gate.gate({
+      ownerId: 'u1',
+      action: 'Prepare the monthly sales report',
+      category: 'AUTOMATION',
+      settings: settings({ autonomyLevel: 5 }),
+      emergencyStop,
+      emergencyStopEngaged: false,
+      currentLevel: 0,
+    });
+    expect(decision.verdict).toBe('BLOCKED_BY_POLICY');
+  });
+});

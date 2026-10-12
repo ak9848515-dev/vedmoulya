@@ -108,6 +108,12 @@ function harness(): {
     approval: createOpportunityApprovalPort(brain),
     qualify: createOpportunityQualifier({ brain, now: () => NOW }).qualify,
     mission,
+    readMissionTrace: async (userId, missionId) => {
+      if (userId !== OWNER || !launched.some((item) => item.missionId === missionId)) {
+        throw new Error('mission not found for user');
+      }
+      return { missionId, userId, state: 'COMPLETED' };
+    },
   });
   return {
     router,
@@ -214,6 +220,34 @@ describe('S7.2 — APPROVED opportunity → derived Mission', () => {
     const started = await h.router.startMissionForOpportunity({ id, userId: OWNER }, h.ctx);
     expect(started.success).toBe(true);
     expect(h.launched).toHaveLength(1);
+  });
+
+  it('reconstructs the owner-scoped opportunity, approval, launch intent and Mission in one read', async () => {
+    const h = harness();
+    const opportunityId = await walk(h, h.ctx, 'APPROVED');
+    const started = await h.router.startMissionForOpportunity(
+      { id: opportunityId, userId: OWNER },
+      h.ctx,
+    );
+    expect(started.success).toBe(true);
+    const missionId = (started.data as { missionId: string }).missionId;
+
+    const trace = await h.router.getMissionTrace({ userId: OWNER, missionId }, h.ctx);
+    expect(trace.data).toMatchObject({
+      origin: { kind: 'OPPORTUNITY', status: 'FOUND', opportunityId, lifecycleStatus: 'PLANNED' },
+      approval: { status: 'APPROVED' },
+      launchIntent: { status: 'LINKED', opportunityId, missionId },
+      mission: { missionId, userId: OWNER, state: 'COMPLETED' },
+      delivery: { status: 'NOT_JOINED' },
+    });
+
+    const foreign = await h.router.getMissionTrace({ userId: OTHER, missionId }, h.otherCtx);
+    expect(foreign.success).toBe(false);
+    expect(foreign.error).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      statusCode: 404,
+      details: { opportunityCode: 'NOT_FOUND' },
+    });
   });
 
   it('blocks a HIGH-risk approved opportunity before creating a Mission', async () => {
