@@ -92,6 +92,7 @@ import {
   registerIdentityServices,
   initializeDatabase as initializeIdentityDb,
   PostgresIdentityRepository,
+  ensureIdentitySchema,
 } from '@vedmoulya/identity';
 import {
   registerMemoryServices,
@@ -321,11 +322,27 @@ export function createProductionIdentityRepository(): IdentityRepository {
   const repo = resolveOnce(identitySlot, 'identity.repository', registerIdentityServices, () => {
     initializeIdentityDb();
   }) as unknown as PostgresIdentityRepository;
+  // REMEDIATION B — the VERSIONED identity schema runs first: it creates the
+  // `identity_schema_migrations` ledger, applies every pending migration in
+  // order (users, refresh_token_denylist, oauth_states, email_verifications),
+  // and RECORDS each one. It rides the same sequential, awaited boot pass as
+  // the per-store fallbacks below, so no query can observe a half-created
+  // identity schema and a failure is logged with its full cause chain instead
+  // of being swallowed. Single-flight: the web auth-app's own bootstrap and
+  // this one share one migration run per process (they cannot race on DDL).
+  ensureTable(
+    { ensureTable: () => ensureIdentitySchema().then(() => undefined) },
+    'Identity migrations',
+  );
   // SPRINT-040 — first-run local-runtime fix: the identity `users` table is the
   // ONE Postgres store that was never created anywhere (its DB init only opened
   // a connection), so fresh environments failed auth with REGISTRATION_FAILED.
   // Bootstrap it idempotently on every startup like every other registry.
   // The web auth-app additionally awaits it for a deterministic cold start.
+  //
+  // REMEDIATION B — this is now the DEFENSIVE FALLBACK that keeps working if
+  // the versioned path is disabled; it emits the same statements as migration
+  // 001_users (single source: identitySchema.ts), so the two cannot drift.
   ensureTable(repo, 'Identity users');
   return repo;
 }

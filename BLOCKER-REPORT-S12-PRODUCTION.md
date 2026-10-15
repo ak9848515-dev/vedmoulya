@@ -116,6 +116,21 @@ npx tsx scripts/ai-production-verify.ts && npx tsx scripts/ai-critique-verify.ts
 npm run test:auth:logout:revoke  # Should pass when denylist is active
 ```
 
+> **Update — 2026-10-15 (working tree, uncommitted, HEAD `81dd5f88`).** The
+> statement above ("neither rotated nor revocable upon logout") no longer
+> describes the working tree. Rotation is now single-use via an atomic claim,
+> logout durably revokes the refresh family, and both paths are verified
+> against a **real PostgreSQL engine** — see
+> `docs/audits/2026-10-15-s12-4a-durable-revocation/FINAL-REPORT.md`. That
+> report also records two production-breaking defects the in-memory-only
+> evidence could not have caught: every identity store write threw when bound
+> through drizzle's `sql.param(Date)`, and a time-zone skew on the read path
+> widened the post-logout gap by the Node/DB zone difference (330 minutes on a
+> non-UTC process). **Blocker 4A is therefore NOT closed by this update**: its
+> own evidence requirement is an _approved, merged_ migration, which requires a
+> review and a commit, and its migration cannot be deployed ahead of condition 1
+> below. The verification command above remains un-runnable until then.
+
 ---
 
 ## Conclusion

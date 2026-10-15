@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { getDatabase } from './DatabaseConnection.js';
+import { OAUTH_STATES_SCHEMA_STATEMENTS, executeStatements } from './identitySchema.js';
 
 export interface OAuthStateStore {
   /** Persist a state hash with its expiry. */
@@ -29,35 +30,39 @@ export interface OAuthStateStore {
 
 // ── Postgres ─────────────────────────────────────────────────────────────
 
+type IdentityDatabase = ReturnType<typeof getDatabase>;
+
 export class PostgresOAuthStateStore implements OAuthStateStore {
+  /**
+   * `db` is injectable so real-engine tests can run against a dedicated
+   * pool; production wiring passes nothing and shares the process-wide
+   * identity pool (unchanged behaviour).
+   */
+  constructor(private readonly injectedDb?: IdentityDatabase) {}
+
+  private database(): IdentityDatabase {
+    return this.injectedDb ?? getDatabase();
+  }
+
   /**
    * Idempotent schema bootstrap — the estate-wide convention (CREATE TABLE
    * IF NOT EXISTS on startup, wired alongside the identity `users` table).
    */
   async ensureTable(): Promise<void> {
-    const db = getDatabase();
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS oauth_states (
-        id varchar(64) PRIMARY KEY,
-        state_hash varchar(64) NOT NULL,
-        expires_at timestamp NOT NULL,
-        consumed_at timestamp,
-        created_at timestamp NOT NULL DEFAULT now()
-      );
-    `);
-    await db.execute(
-      sql`CREATE UNIQUE INDEX IF NOT EXISTS oauth_states_hash_idx ON oauth_states (state_hash)`,
-    );
-    await db.execute(
-      sql`CREATE INDEX IF NOT EXISTS oauth_states_expires_idx ON oauth_states (expires_at)`,
-    );
+    // Statements come from `identitySchema.ts`, the same source the versioned
+    // migration `003_oauth_states` uses (remediation B — no duplicated DDL).
+    await executeStatements(this.database(), OAUTH_STATES_SCHEMA_STATEMENTS);
   }
 
   async save(stateHash: string, expiresAt: Date): Promise<void> {
-    const db = getDatabase();
+    const db = this.database();
     await db.execute(sql`
       INSERT INTO oauth_states (id, state_hash, expires_at, consumed_at, created_at)
-      VALUES (${sql.param(randomUUID())}, ${sql.param(stateHash)}, ${sql.param(expiresAt)}, NULL, now())
+      -- expires_at is bound as an ISO-8601 string with an explicit cast:
+      -- passing a JS Date made postgres-js reject it (ERR_INVALID_ARG_TYPE),
+      -- which made state persistence throw in production/staging and blocked
+      -- Google sign-in. Covered by identity-stores.postgres.test.ts.
+      VALUES (${sql.param(randomUUID())}, ${sql.param(stateHash)}, ${expiresAt.toISOString()}::timestamptz, NULL, now())
       ON CONFLICT (state_hash) DO UPDATE SET
         expires_at = EXCLUDED.expires_at,
         consumed_at = NULL
@@ -65,7 +70,7 @@ export class PostgresOAuthStateStore implements OAuthStateStore {
   }
 
   async consume(stateHash: string): Promise<boolean> {
-    const db = getDatabase();
+    const db = this.database();
     // Single atomic statement: only the first callback can flip consumed_at.
     const rows = await db.execute(sql`
       UPDATE oauth_states SET consumed_at = now()

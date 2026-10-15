@@ -77,10 +77,25 @@ export async function getAuthApp(): Promise<Hono> {
     // awaitAllEngineEnsureTables() runs that DDL sequentially. No gateway
     // initialization is required.
     //
-    // SPRINT-090B — DDL is fire-and-forget: the /session endpoint only
-    // verifies JWTs and must not block on database readiness.
-    void awaitAllEngineEnsureTables().catch(() => {});
+    // REMEDIATION B — ORDER FIX: the identity repository is resolved FIRST so
+    // its deferred DDL entries (the versioned identity migrations + the users
+    // fallback) are registered BEFORE the sequential DDL pass starts. The
+    // previous order started the pass first and then registered the identity
+    // entries, so on a cold serverless instance that only ever served the auth
+    // app — the /sign-in path on a fresh database — the `users` table DDL was
+    // queued but never awaited by any caller.
     const repository = createProductionIdentityRepository();
+    // SPRINT-090B — DDL stays fire-and-forget: the /session endpoint only
+    // verifies JWTs and must not block on database readiness. REMEDIATION B —
+    // but a failed schema bootstrap must never be SILENT: the previous
+    // `.catch(() => {})` discarded the error entirely, so a database outage or
+    // a permission fault surfaced only as an unexplained sign-in failure.
+    void awaitAllEngineEnsureTables().catch((error: unknown) => {
+      logger.error(
+        'Identity schema bootstrap failed — auth endpoints will fail until this is resolved',
+        { reason: error instanceof Error ? error.message : String(error) },
+      );
+    });
     // SPRINT-045 — same deterministic cold-start for the email-verification
     // token table: a fresh production database must have `email_verifications`
     // before the first sign-up can issue a verification token.

@@ -402,20 +402,26 @@ export class AuthService extends BaseService {
    *
    *  Lifecycle enforced here:
    *   1. The presented refresh JWT must verify (signature/issuer/expiry/type).
-   *   2. Its JTI must NOT be in the durable denylist (rotation already used),
-   *      and the owning user must NOT carry a family-level logout revocation.
-   *      Either match → the refresh is rejected (no replacement issued).
-   *   3. On success the presented JTI is durably revoked FIRST (single-use
-   *      rotation: the old token can never rotate twice, even concurrently —
-   *      the denylist write wins for the loser), then a fresh pair is minted.
-   *   4. If the denylist store is unreachable the refresh FAILS CLOSED — no
-   *      replacement pair is issued, so a persistence outage can never mint
-   *      tokens that bypass replay protection.
+   *   2. Its JTI must NOT already be revoked (rotation already consumed).
+   *   3. Its ISSUED-AT must be strictly AFTER the user's most recent family
+   *      revocation instant. The family marker is time-scoped, not a blanket
+   *      boolean, so logging out invalidates every token issued up to that
+   *      moment while a SUBSEQUENT successful sign-in starts a new family
+   *      whose tokens refresh normally.
+   *   4. The presented JTI is then CLAIMED atomically (single-use rotation)
+   *      BEFORE any minting: only the caller that durably records the JTI
+   *      proceeds, so two concurrent refreshes of one token can never both
+   *      produce a valid pair.
+   *   5. If the denylist store is unreachable the refresh FAILS CLOSED at
+   *      steps 2-4 — no replacement pair is issued, so a persistence outage
+   *      can never mint tokens that bypass replay protection.
    *
-   *  NOTE: already-issued ACCESS tokens remain valid until they expire
-   *  (15 min); logout revokes the refresh family immediately, it does not
-   *  retroactively invalidate unexpired access tokens (no server-side access
-   *  denylist exists — out of scope for this change).
+   *  ACCESS tokens are stateless and are NOT revoked by logout: an already
+   *  issued access token stays valid until it expires (15 min, AUTH_JWT_
+   *  EXPIRES_IN). This is the deliberate security model — there is no
+   *  server-side access denylist — and it is documented in the status doc.
+   *  Logout immediately revokes the refresh family, so the session cannot be
+   *  extended beyond that access-token lifetime.
    */
   async refreshSession(refreshToken: string): Promise<{ tokens: TokenPair } | null> {
     // Decode the refresh token to get the user ID
@@ -428,11 +434,18 @@ export class AuthService extends BaseService {
         this.logger.warn('Refresh token replay rejected', { userId: verified.sub });
         return null;
       }
-      if (await this.refreshTokenDenylist.isUserRevoked(verified.sub)) {
-        this.logger.warn('Refresh rejected: session family revoked (logged out)', {
-          userId: verified.sub,
-        });
-        return null;
+      // Time-scoped family revocation: reject only tokens issued at or before
+      // the last logout, so a NEW sign-in's token is unaffected. Fail closed
+      // when a marker exists but the token carries no issued-at claim.
+      const familyRevokedAt = await this.refreshTokenDenylist.familyRevokedAt(verified.sub);
+      if (familyRevokedAt !== null) {
+        const issuedAtMs = verified.iat !== undefined ? verified.iat * 1000 : null;
+        if (issuedAtMs === null || issuedAtMs <= familyRevokedAt.getTime()) {
+          this.logger.warn('Refresh rejected: token predates the session family revocation', {
+            userId: verified.sub,
+          });
+          return null;
+        }
       }
     } catch (error) {
       // Persistence outage → fail closed: refuse to mint a token we cannot
@@ -452,7 +465,33 @@ export class AuthService extends BaseService {
     const authCheck = this.domainService.canAuthenticate(user);
     if (!authCheck.allowed) return null;
 
-    // Generate new token pair
+    // Single-use rotation, CLAIMED BEFORE MINTING: the durable record of the
+    // presented JTI is what decides the winner, so exactly one concurrent
+    // refresh of the same token can proceed. A caller that loses the claim
+    // sees replay semantics (null, no pair).
+    const presentedExpiry =
+      verified.exp !== undefined
+        ? new Date(verified.exp * 1000)
+        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    let claimed: boolean;
+    try {
+      claimed = await this.refreshTokenDenylist.claim(verified.jti, verified.sub, presentedExpiry);
+    } catch (error) {
+      // Claim unreadable/unwritable → fail closed: never mint a pair whose
+      // replay protection could not be recorded.
+      this.logger.error('Refresh rotation claim failed — refresh refused', { error });
+      return null;
+    }
+    if (!claimed) {
+      this.logger.warn('Refresh token replay rejected (rotation claim lost)', {
+        userId: verified.sub,
+      });
+      return null;
+    }
+
+    // Generate new token pair. The presented token is already spent at this
+    // point: if minting fails the user re-authenticates rather than keeping a
+    // reusable refresh token (fail-closed, no partial state).
     const tokens = await this.tokenService.refreshAccessToken(refreshToken, {
       email: user.email.toString(),
       role: user.role.role,
@@ -460,32 +499,16 @@ export class AuthService extends BaseService {
 
     if (!tokens) return null;
 
-    // Single-use rotation: durably revoke the PRESENTED JTI so it can never
-    // rotate again (replay). The write is idempotent; the first writer wins.
-    try {
-      const verifiedNew = await this.tokenService.verifyRefreshToken(tokens.refreshToken);
-      const newExp = verifiedNew
-        ? new Date((verifiedNew.exp ?? Math.floor(Date.now() / 1000) + 7 * 24 * 3600) * 1000)
-        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      await this.refreshTokenDenylist.revoke(verified.jti, verified.sub, newExp);
-    } catch (error) {
-      // Rotation evidence could not be persisted: the NEW pair was already
-      // minted, so the safest posture is to revoke nothing and FAIL the
-      // refresh — the caller keeps no partial state and the presented token
-      // remains single-use only after a successful persist. Returning null
-      // tells the client the refresh did not complete.
-      this.logger.error('Refresh rotation persist failed — refresh refused', { error });
-      return null;
-    }
-
     return { tokens };
   }
 
   /** Sign out a user — revoke the refresh family (S024-4A) then record logout.
    *
-   *  The durable family marker guarantees subsequent refresh attempts for
-   *  this user fail closed, even across a new connection or process restart.
-   *  Already-issued access tokens still expire naturally (no access denylist).
+   *  The durable family marker is TIME-SCOPED: every refresh token issued at
+   *  or before this instant is rejected (across a new connection or process
+   *  restart), while a later successful sign-in starts a new family whose
+   *  tokens refresh normally. Already-issued access tokens still expire
+   *  naturally (15 min; no server-side access denylist).
    *  If the denylist write fails the logout STILL records locally (audit
    *  trail), but the error is rethrown so callers do not believe revocation
    *  succeeded — fail-closed on the revocation claim.
