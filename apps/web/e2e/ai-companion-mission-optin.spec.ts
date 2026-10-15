@@ -32,15 +32,25 @@
 // verified WITHOUT any provider (tests 1–4).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { injectSession } from './helpers/auth.js';
 import { BASE_URL } from './helpers/factory-journey.js';
 
 const KNOWN_STATE =
   /^(CREATED|RUNNING|PAUSED|WAITING_FOR_APPROVAL|WAITING_FOR_PROVIDER|BLOCKED|COMPLETED|FAILED|CANCELLED)$/;
 
-/** Every header state the Ask panel may show — nothing else, ever. */
-const AI_STATUS = /^(AI Ready|AI not available|Checking AI…)$/;
+/**
+ * Every header state the Ask panel may show — nothing else, ever.
+ *
+ * Surrounding whitespace is tolerated in the PATTERN because the panel renders
+ * the status dot, then `{' '}`, then the label — so the chip's text content
+ * carries a LEADING SPACE (" AI Ready"). This pattern locates the chip; the
+ * value read from the located element is still trimmed before it is validated
+ * against AI_STATUS_RESOLVED below. Matching the raw text with an anchored
+ * pattern (as this spec previously did) never matched the two resolved states,
+ * which silently made those branches unreachable.
+ */
+const AI_STATUS_CHIP = /^\s*(AI Ready|AI not available|Checking AI…)\s*$/;
 /** The two RESOLVED states readiness may settle on. */
 const AI_STATUS_RESOLVED = /^(AI Ready|AI not available)$/;
 
@@ -61,6 +71,15 @@ async function openAskPanel(page: Page): Promise<void> {
   await expect(page.getByTestId('ask-vedmoulya-panel')).toBeVisible({ timeout: 60_000 });
 }
 
+/**
+ * The user's turn as echoed INSIDE the companion panel. The goal text is also
+ * the title of persisted mission-history entries in the page sidebar, so the
+ * panel must be named explicitly or the locator is ambiguous.
+ */
+function panelEcho(page: Page, text: string): Locator {
+  return page.getByTestId('ask-vedmoulya-panel').getByText(text, { exact: false });
+}
+
 /** Send a message through the panel's real input + send control. */
 async function ask(page: Page, prompt: string): Promise<void> {
   await page.locator('#ask-vedmoulya-input').fill(prompt);
@@ -69,7 +88,7 @@ async function ask(page: Page, prompt: string): Promise<void> {
 
 /** Read the panel's honest readiness label; 'unresolved' when it never settles. */
 async function settleAiStatus(page: Page): Promise<'AI Ready' | 'AI not available' | 'unresolved'> {
-  const label = page.getByText(AI_STATUS).first();
+  const label = page.getByText(AI_STATUS_CHIP).first();
   await expect(label).toBeVisible({ timeout: 60_000 });
   const deadline = Date.now() + COLD_START;
   while (Date.now() < deadline) {
@@ -123,7 +142,10 @@ test.describe('Ask VedMoulya → Mission opt-in journey (Sprint 022 gap closure)
     // conversational turn, and an offer (when the AI can answer) is the only
     // mission affordance it may produce.
     await ask(page, GOAL_PROMPT);
-    await expect(page.getByText(GOAL_PROMPT, { exact: false })).toBeVisible({ timeout: 60_000 });
+    // Scoped to the companion panel: the same goal text is also the title of
+    // persisted mission-history entries in the page sidebar, so an unscoped
+    // locator resolves to more than one element once any mission exists.
+    await expect(panelEcho(page, GOAL_PROMPT)).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText('Mission created')).toHaveCount(0);
     expect(new URL(page.url()).searchParams.get('mission')).toBeNull();
     await expect(page.getByTestId('mission-detail-tabs')).toHaveCount(0);
@@ -300,7 +322,9 @@ test.describe('Ask VedMoulya → Mission opt-in journey (Sprint 022 gap closure)
     test.info().annotations.push({ type: 'ai-status', description: status });
 
     await ask(page, GOAL_PROMPT);
-    await expect(page.getByText(GOAL_PROMPT, { exact: false })).toBeVisible({ timeout: 60_000 });
+    // Scoped to the companion panel (the goal text is also a persisted
+    // mission-history title in the sidebar — see test 1).
+    await expect(panelEcho(page, GOAL_PROMPT)).toBeVisible({ timeout: 60_000 });
 
     // Invariant for EVERY branch: an unanswered goal must never be rendered as
     // AI execution, and no mission may be created behind the user's back.
