@@ -96,20 +96,25 @@ export class PostgresVerificationTokenStore implements VerificationTokenStore {
 
   async findByHash(tokenHash: string): Promise<VerificationTokenRecord | null> {
     const db = this.database();
-    // TIME-ZONE CORRECTNESS (real-engine defect, fixed 2026-10-15): these
-    // columns are `timestamp WITHOUT time zone`, and postgres-js decodes such
-    // a value as if it were in the NODE process's time zone. The stored value
-    // is the database session's wall clock, so reading it naively shifts the
-    // instant by the difference between the two zones (measured: Node
-    // Asia/Calcutta vs DB Etc/UTC → 330 minutes). `expiresAt` is compared in
-    // JS against Date.now(), so a late-running zone would have accepted
-    // EXPIRED verification tokens. `AT TIME ZONE current_setting('TimeZone')`
-    // converts the stored wall clock back into the absolute instant it
-    // represents (exact round trip, proven by the real-engine suite).
+    // TIME-ZONE CORRECTNESS (real-engine defect, fixed 2026-10-15): the
+    // `::timestamptz` casts are load-bearing, not decoration. `expiresAt` is
+    // compared in JS against Date.now(), and a value read without a zone
+    // crossing shifts by (Node zone − DB session zone) — measured at 330
+    // minutes on this machine — which in a late-running zone would have
+    // ACCEPTED EXPIRED verification tokens.
+    //
+    // The cast is deliberately the TYPE-AGNOSTIC form so this read is correct
+    // both before and after migration 005 converts these columns to
+    // `timestamptz`:
+    //   • `timestamp`    → interpreted in the session zone, which is exactly
+    //                      how the value was stored, recovering the instant;
+    //   • `timestamptz`  → already an absolute instant, so the cast is a no-op.
+    // (`col AT TIME ZONE zone` would be WRONG for the second shape: on a
+    // tz-aware column it returns a naive wall clock.)
     const rows = (await db.execute(sql`
       SELECT id, user_id, token_hash,
-             expires_at AT TIME ZONE current_setting('TimeZone') AS expires_at,
-             consumed_at AT TIME ZONE current_setting('TimeZone') AS consumed_at
+             expires_at::timestamptz AS expires_at,
+             consumed_at::timestamptz AS consumed_at
       FROM email_verifications
       WHERE token_hash = ${sql.param(tokenHash)}
       LIMIT 1

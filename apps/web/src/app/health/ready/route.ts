@@ -20,7 +20,14 @@
 //   - Process alive (we're responding)
 //   - Gateway initialized (getServices() called)
 //   - Database reachable (or in-memory stores in dev/test)
-//
+//   - Identity schema current — ONLY when the operator opts in with
+//     IDENTITY_SCHEMA_READINESS_GATE=1 (see lib/identity-schema-gate.ts).
+//     Boot already applies every pending migration before traffic can arrive,
+//     so this gate covers a database that drifts AFTER boot; it is opt-in
+//     because turning "behind the code" into a 503 is a runtime behaviour
+//     change that belongs to an explicit operator decision. While the flag is
+//     off the gate does no I/O and this response is byte-identical to before.
+
 // Optional / degraded (NOT required for READY):
 //   - Redis (rate limiter degrades to in-memory)
 //   - AI providers (MockProvider fallback in dev)
@@ -43,6 +50,10 @@
 import { NextResponse } from 'next/server';
 import { databaseManager } from '@vedmoulya/core';
 import { sanitizeDbError } from '../../../lib/health-error.js';
+import {
+  checkIdentitySchemaGate,
+  identitySchemaGateBlocks,
+} from '../../../lib/identity-schema-gate.js';
 
 const startupTime = Date.now();
 
@@ -93,6 +104,13 @@ export async function GET(): Promise<NextResponse> {
     dbError = error instanceof Error ? error.message : undefined;
   }
 
+  // ── 3. Identity schema (OPT-IN, see IDENTITY_SCHEMA_READINESS_GATE) ───
+  // No I/O and no response change while the flag is off. When it is on, a
+  // pending migration or an undeterminable schema state blocks readiness:
+  // every other outcome would report an unknown schema as ready.
+  const identitySchema = await checkIdentitySchemaGate();
+  const schemaBlocks = identitySchemaGateBlocks(identitySchema);
+
   // ── Verdict ──────────────────────────────────────────────────────────
   // READY requires: gateway initialized + database healthy.
   // In dev/test, database failure is NOT blocking — the app falls back to
@@ -101,8 +119,10 @@ export async function GET(): Promise<NextResponse> {
   // requests without persistence.
   // In production/staging, DB must be healthy. In dev/test, the app
   // gracefully degrades to in-memory stores — DB failure is not blocking.
+  // The opt-in schema gate is NOT mode-dependent: enabling it is itself the
+  // operator's deliberate decision, so it blocks wherever it is enabled.
   const dbReady = isStrict ? dbStatus === 'healthy' : true;
-  const ready = gatewayInitialized && dbReady;
+  const ready = gatewayInitialized && dbReady && !schemaBlocks;
 
   const result = {
     status: ready ? 'ready' : 'not_ready',
@@ -119,6 +139,21 @@ export async function GET(): Promise<NextResponse> {
         // real infrastructure must not leak either.
         error: sanitizeDbError(dbError),
       },
+      // Present ONLY when the operator opted in, so the default response
+      // contract is unchanged. Migration ids are repository constants; the
+      // reason is sanitized by the same shared sanitizer as the database error.
+      ...(identitySchema.status === 'disabled'
+        ? {}
+        : {
+            identitySchema: {
+              status: identitySchema.status,
+              ...(identitySchema.version !== undefined ? { version: identitySchema.version } : {}),
+              ...(identitySchema.pendingMigrations !== undefined
+                ? { pendingMigrations: identitySchema.pendingMigrations }
+                : {}),
+              ...(identitySchema.reason !== undefined ? { reason: identitySchema.reason } : {}),
+            },
+          }),
     },
   };
 

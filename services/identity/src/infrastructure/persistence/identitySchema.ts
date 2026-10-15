@@ -15,10 +15,19 @@
 // they bind identically through `db.execute(...)` in both paths.
 //
 // NO DATE PARAMETERS: no statement binds a JS `Date` (defaults use the
-// database's own `now()`). Binding a `Date` through postgres-js is the
-// defect that previously made every identity store write throw in
+// database's own `now()`). Binding a `Date` through drizzle's `sql.param()`
+// is the defect that previously made every identity store write throw in
 // production/staging (see RefreshTokenDenylistStore.claim and
 // RefreshTokenDenylistStore.postgres.test.ts).
+//
+// TZ-AWARE INSTANTS: every instant column is declared `timestamptz`. A
+// `timestamp WITHOUT time zone` holds no offset, so its value only means
+// anything relative to the session's zone, and a reader in a different zone
+// silently shifts it — the defect fixed on 2026-10-15, which widened the
+// post-logout revocation gap and could accept expired verification tokens.
+// Fresh databases therefore get the unambiguous type directly. Migration
+// `005_timestamptz_instants` performs the same conversion for databases
+// created before this change (running either path is a no-op for the other).
 // ──────────────────────────────────────────────────────────────────
 
 import { sql } from 'drizzle-orm';
@@ -71,12 +80,12 @@ export const USERS_SCHEMA_STATEMENTS: SQL[] = [
         preferred_auth_method varchar(16) NOT NULL DEFAULT 'any',
         status_state varchar(16) NOT NULL DEFAULT 'pending',
         status_reason text,
-        status_changed_at timestamp,
+        status_changed_at timestamptz,
         entity_status varchar(16) NOT NULL DEFAULT 'active',
         password_hash text NOT NULL,
-        password_updated_at timestamp NOT NULL DEFAULT now(),
-        created_at timestamp NOT NULL DEFAULT now(),
-        updated_at timestamp NOT NULL DEFAULT now(),
+        password_updated_at timestamptz NOT NULL DEFAULT now(),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
         google_id varchar(128),
         auth_provider varchar(32) NOT NULL DEFAULT 'email'
       );
@@ -102,9 +111,9 @@ export const REFRESH_TOKEN_DENYLIST_SCHEMA_STATEMENTS: SQL[] = [
         jti_hash varchar(64) NOT NULL,
         user_id varchar(64) NOT NULL,
         kind varchar(16) NOT NULL DEFAULT 'jti',
-        revoked_at timestamp NOT NULL DEFAULT now(),
-        expires_at timestamp NOT NULL,
-        created_at timestamp NOT NULL DEFAULT now()
+        revoked_at timestamptz NOT NULL DEFAULT now(),
+        expires_at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
       );
     `,
   sql`CREATE UNIQUE INDEX IF NOT EXISTS rtd_jti_hash_idx ON refresh_token_denylist (jti_hash)`,
@@ -117,9 +126,9 @@ export const OAUTH_STATES_SCHEMA_STATEMENTS: SQL[] = [
       CREATE TABLE IF NOT EXISTS oauth_states (
         id varchar(64) PRIMARY KEY,
         state_hash varchar(64) NOT NULL,
-        expires_at timestamp NOT NULL,
-        consumed_at timestamp,
-        created_at timestamp NOT NULL DEFAULT now()
+        expires_at timestamptz NOT NULL,
+        consumed_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now()
       );
     `,
   sql`CREATE UNIQUE INDEX IF NOT EXISTS oauth_states_hash_idx ON oauth_states (state_hash)`,
@@ -133,9 +142,9 @@ export const EMAIL_VERIFICATIONS_SCHEMA_STATEMENTS: SQL[] = [
         id varchar(64) PRIMARY KEY,
         user_id varchar(64) NOT NULL,
         token_hash varchar(64) NOT NULL,
-        expires_at timestamp NOT NULL,
-        consumed_at timestamp,
-        created_at timestamp NOT NULL DEFAULT now()
+        expires_at timestamptz NOT NULL,
+        consumed_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now()
       );
     `,
   sql`CREATE UNIQUE INDEX IF NOT EXISTS ev_user_id_idx ON email_verifications (user_id)`,

@@ -147,18 +147,22 @@ export class PostgresRefreshTokenDenylistStore implements RefreshTokenDenylistSt
     // per-JTI rotation rows use kind='jti', so a single rotation can never
     // invalidate the whole session family.
     //
-    // TIME-ZONE CORRECTNESS (real-engine defect, fixed 2026-10-15):
-    // `revoked_at` is a `timestamp WITHOUT time zone` written by the database
-    // (`now()`), and postgres-js decodes such a value as NODE-local time. The
-    // naive read therefore returned an instant shifted by (Node zone − DB
-    // session zone) — measured at 330 minutes for Node Asia/Calcutta vs DB
-    // Etc/UTC. AuthService compares this instant against the refresh token's
-    // `iat`, and a revocation instant reported too EARLY makes tokens minted
-    // before the logout look "newer than the revocation" and refreshable, so
-    // the shift silently widened the logout gap by the offset. `AT TIME ZONE
-    // current_setting('TimeZone')` restores the exact instant.
+    // TIME-ZONE CORRECTNESS (real-engine defect, fixed 2026-10-15): the
+    // `revoked_at::timestamptz` cast is load-bearing. `AuthService` compares
+    // this instant against the refresh token's `iat`, and an instant reported
+    // too EARLY makes tokens minted before the logout look "newer than the
+    // revocation" and refreshable — so reading the column without a zone
+    // crossing silently widened the logout gap by (Node zone − DB zone),
+    // measured at 330 minutes for Node Asia/Calcutta vs DB Etc/UTC.
+    //
+    // The cast is the TYPE-AGNOSTIC form, correct both before and after
+    // migration 005 converts these columns to `timestamptz`: on a naive column
+    // it interprets the stored wall clock in the session zone (exactly how it
+    // was written, recovering the instant), and on a tz-aware column it is a
+    // no-op. (`col AT TIME ZONE zone` would be WRONG on the tz-aware shape:
+    // it returns a naive wall clock there.)
     const rows = (await db.execute(sql`
-      SELECT revoked_at AT TIME ZONE current_setting('TimeZone') AS revoked_at
+      SELECT revoked_at::timestamptz AS revoked_at
       FROM refresh_token_denylist
       WHERE user_id = ${userId}
         AND kind = 'family'

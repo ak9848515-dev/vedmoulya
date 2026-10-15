@@ -123,12 +123,83 @@ export const MIGRATION_004_EMAIL_VERIFICATIONS: IdentityMigration = {
   down: (db) => executeStatements(db, [sql`DROP TABLE IF EXISTS email_verifications`]),
 };
 
+/**
+ * 005 — every instant column becomes `timestamptz`.
+ *
+ * WHY THIS IS A MIGRATION AND NOT A DOC NOTE
+ * A `timestamp WITHOUT time zone` stores a wall clock with no offset. Its
+ * value therefore only means anything relative to the session's zone, and a
+ * reader in a different zone silently shifts it: with the database on
+ * `Etc/UTC` and the Node process on `Asia/Calcutta`, reading one of these
+ * columns returned an instant 330 minutes early. That was not cosmetic —
+ * `AuthService` compares `familyRevokedAt` against a refresh token's `iat`
+ * (an early revocation instant leaves pre-logout tokens refreshable) and
+ * compares `expiresAt` against `Date.now()` (a late one accepts an expired
+ * verification token). `timestamptz` removes the ambiguity at the source.
+ *
+ * THE USING CLAUSE IS THE WHOLE POINT OF THIS STATEMENT
+ * `USING <column>::timestamptz` is NOT a formality — omitting `USING` makes
+ * PostgreSQL reinterpret the stored digits in the session zone, which is what
+ * the data already represents, so the cast preserves the instant instead of
+ * re-inventing it. It also makes the statement idempotent: on a column that is
+ * already `timestamptz` the cast is a no-op, so a database created AFTER this
+ * change (whose DDL in `identitySchema.ts` declares `timestamptz` directly) is
+ * still adopted cleanly on first run.
+ *
+ * Post-conditions: every column below is `timestamptz`; no row is added or
+ * removed; not-NULL and DEFAULT constraints are carried over by ALTER TYPE.
+ * The `down()` is lossy on purpose (it reinterprets instants in the session
+ * zone) and, like every `down()`, is only ever reached through an explicit
+ * operator rollback — never at boot.
+ */
+export const MIGRATION_005_TIMESTAMPTZ_INSTANTS: IdentityMigration = {
+  id: '005_timestamptz_instants',
+  description: 'Convert every identity instant column to timestamptz',
+  up: (db) =>
+    executeStatements(db, [
+      // users
+      sql`ALTER TABLE users ALTER COLUMN status_changed_at TYPE timestamptz USING status_changed_at::timestamptz`,
+      sql`ALTER TABLE users ALTER COLUMN password_updated_at TYPE timestamptz USING password_updated_at::timestamptz`,
+      sql`ALTER TABLE users ALTER COLUMN created_at TYPE timestamptz USING created_at::timestamptz`,
+      sql`ALTER TABLE users ALTER COLUMN updated_at TYPE timestamptz USING updated_at::timestamptz`,
+      // refresh_token_denylist
+      sql`ALTER TABLE refresh_token_denylist ALTER COLUMN revoked_at TYPE timestamptz USING revoked_at::timestamptz`,
+      sql`ALTER TABLE refresh_token_denylist ALTER COLUMN expires_at TYPE timestamptz USING expires_at::timestamptz`,
+      sql`ALTER TABLE refresh_token_denylist ALTER COLUMN created_at TYPE timestamptz USING created_at::timestamptz`,
+      // oauth_states
+      sql`ALTER TABLE oauth_states ALTER COLUMN expires_at TYPE timestamptz USING expires_at::timestamptz`,
+      sql`ALTER TABLE oauth_states ALTER COLUMN consumed_at TYPE timestamptz USING consumed_at::timestamptz`,
+      sql`ALTER TABLE oauth_states ALTER COLUMN created_at TYPE timestamptz USING created_at::timestamptz`,
+      // email_verifications
+      sql`ALTER TABLE email_verifications ALTER COLUMN expires_at TYPE timestamptz USING expires_at::timestamptz`,
+      sql`ALTER TABLE email_verifications ALTER COLUMN consumed_at TYPE timestamptz USING consumed_at::timestamptz`,
+      sql`ALTER TABLE email_verifications ALTER COLUMN created_at TYPE timestamptz USING created_at::timestamptz`,
+    ]),
+  down: (db) =>
+    executeStatements(db, [
+      sql`ALTER TABLE users ALTER COLUMN status_changed_at TYPE timestamp USING status_changed_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE users ALTER COLUMN password_updated_at TYPE timestamp USING password_updated_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE users ALTER COLUMN created_at TYPE timestamp USING created_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE users ALTER COLUMN updated_at TYPE timestamp USING updated_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE refresh_token_denylist ALTER COLUMN revoked_at TYPE timestamp USING revoked_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE refresh_token_denylist ALTER COLUMN expires_at TYPE timestamp USING expires_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE refresh_token_denylist ALTER COLUMN created_at TYPE timestamp USING created_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE oauth_states ALTER COLUMN expires_at TYPE timestamp USING expires_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE oauth_states ALTER COLUMN consumed_at TYPE timestamp USING consumed_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE oauth_states ALTER COLUMN created_at TYPE timestamp USING created_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE email_verifications ALTER COLUMN expires_at TYPE timestamp USING expires_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE email_verifications ALTER COLUMN consumed_at TYPE timestamp USING consumed_at AT TIME ZONE current_setting('TimeZone')`,
+      sql`ALTER TABLE email_verifications ALTER COLUMN created_at TYPE timestamp USING created_at AT TIME ZONE current_setting('TimeZone')`,
+    ]),
+};
+
 /** All identity migrations, in application order. */
 export const IDENTITY_MIGRATIONS: IdentityMigration[] = [
   MIGRATION_001_USERS,
   MIGRATION_002_REFRESH_TOKEN_DENYLIST,
   MIGRATION_003_OAUTH_STATES,
   MIGRATION_004_EMAIL_VERIFICATIONS,
+  MIGRATION_005_TIMESTAMPTZ_INSTANTS,
 ];
 
 /**

@@ -137,10 +137,34 @@ describe('IDENTITY_MIGRATIONS registry', () => {
       '002_refresh_token_denylist',
       '003_oauth_states',
       '004_email_verifications',
+      '005_timestamptz_instants',
     ]);
     for (const migration of IDENTITY_MIGRATIONS) {
       expect(migration.description.length).toBeGreaterThan(0);
     }
+  });
+
+  it('converts every instant column with an explicit USING clause (005)', async () => {
+    // The USING clause is the entire point of 005: without it PostgreSQL
+    // reinterprets the stored digits instead of preserving the instant. A
+    // future edit that drops it would silently corrupt every stored instant.
+    const engine = makeEngine();
+    await runIdentityMigrations(engine.db);
+
+    // Only the TYPE conversions — migration 001 also emits ALTER TABLE ...
+    // ADD COLUMN statements, which carry no USING clause by nature.
+    const conversions = engine.statements.filter((text) =>
+      /^ALTER TABLE \w+ ALTER COLUMN \w+ TYPE /.test(text),
+    );
+    expect(conversions.length).toBeGreaterThan(0);
+    for (const statement of conversions) {
+      expect(statement, statement).toContain('TYPE timestamptz');
+      expect(statement, statement).toContain('USING');
+      expect(statement, statement).toMatch(/USING \w+::timestamptz/);
+    }
+    // One conversion per instant column across the four tables (4 users +
+    // 3 denylist + 3 oauth + 3 verifications).
+    expect(conversions).toHaveLength(13);
   });
 
   it('records versions in a dedicated ledger table', () => {
@@ -217,12 +241,20 @@ describe('runIdentityMigrations', () => {
     // 001 + 002 are recorded; the failed step and everything after stay pending.
     expect(engine.ledger.map(([id]) => id)).toEqual(['001_users', '002_refresh_token_denylist']);
     const pending = await pendingMigrations(engine.db);
-    expect(pending.map((m) => m.id)).toEqual(['003_oauth_states', '004_email_verifications']);
+    expect(pending.map((m) => m.id)).toEqual([
+      '003_oauth_states',
+      '004_email_verifications',
+      '005_timestamptz_instants',
+    ]);
 
     // The retry resumes from the failed step instead of replaying the whole set.
     engine.failWhen = () => false;
     const retry = await runIdentityMigrations(engine.db);
-    expect(retry.applied).toEqual(['003_oauth_states', '004_email_verifications']);
+    expect(retry.applied).toEqual([
+      '003_oauth_states',
+      '004_email_verifications',
+      '005_timestamptz_instants',
+    ]);
     expect(engine.ledger.map(([id]) => id)).toEqual(IDENTITY_MIGRATIONS.map((m) => m.id));
   });
 });
@@ -233,7 +265,7 @@ describe('migrationStatus / schemaVersion', () => {
   it('reports every migration as pending on a database that never ran the versioned path', async () => {
     const engine = makeEngine();
     const status = await migrationStatus(engine.db);
-    expect(status.map((entry) => entry.appliedAt)).toEqual([null, null, null, null]);
+    expect(status.map((entry) => entry.appliedAt)).toEqual([null, null, null, null, null]);
     expect(await schemaVersion(engine.db)).toBeNull();
   });
 
@@ -242,7 +274,7 @@ describe('migrationStatus / schemaVersion', () => {
     await runIdentityMigrations(engine.db);
     const status = await migrationStatus(engine.db);
     expect(status.every((entry) => entry.appliedAt instanceof Date)).toBe(true);
-    expect(await schemaVersion(engine.db)).toBe('004_email_verifications');
+    expect(await schemaVersion(engine.db)).toBe('005_timestamptz_instants');
   });
 });
 
@@ -252,7 +284,7 @@ describe('assertIdentitySchemaCurrent', () => {
   it('passes and returns the version when nothing is pending', async () => {
     const engine = makeEngine();
     await runIdentityMigrations(engine.db);
-    await expect(assertIdentitySchemaCurrent(engine.db)).resolves.toBe('004_email_verifications');
+    await expect(assertIdentitySchemaCurrent(engine.db)).resolves.toBe('005_timestamptz_instants');
   });
 
   it('throws with the pending ids when the database is behind the code', async () => {
@@ -263,7 +295,7 @@ describe('assertIdentitySchemaCurrent', () => {
       ['002_refresh_token_denylist', 'denylist'],
     ];
     await expect(assertIdentitySchemaCurrent(engine.db)).rejects.toThrow(
-      /2 pending migration\(s\) \[003_oauth_states, 004_email_verifications\]/,
+      /3 pending migration\(s\) \[003_oauth_states, 004_email_verifications, 005_timestamptz_instants\]/,
     );
   });
 });
@@ -277,6 +309,7 @@ describe('rollbackIdentityMigrations', () => {
 
     const rolledBack = await rollbackIdentityMigrations(engine.db);
     expect(rolledBack).toEqual([
+      '005_timestamptz_instants',
       '004_email_verifications',
       '003_oauth_states',
       '002_refresh_token_denylist',
@@ -292,6 +325,7 @@ describe('rollbackIdentityMigrations', () => {
 
     const rolledBack = await rollbackIdentityMigrations(engine.db, { to: '001_users' });
     expect(rolledBack).toEqual([
+      '005_timestamptz_instants',
       '004_email_verifications',
       '003_oauth_states',
       '002_refresh_token_denylist',

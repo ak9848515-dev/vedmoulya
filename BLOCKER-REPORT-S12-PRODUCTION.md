@@ -59,6 +59,23 @@ npm run preflight:prod && npm run doctor:prod && npm run test:a11y
 npx tsx scripts/ai-production-verify.ts && npx tsx scripts/ai-critique-verify.ts
 ````
 
+> **Update — 2026-10-15 (live journey executed; base HEAD `f1dbce7f`).** The line
+> above reading _"Live completions unverified on cloud providers"_ is no longer
+> true and is corrected here. Both verifier scripts were run live against the
+> real provider: each still exits **3** because the OpenAI account has no
+> billing credits (_"You have no credits remaining"_ — authentication and model
+> negotiation both succeeded, so this is a funding state and not an integration
+> defect). Separately, **real, non-mocked cloud completions are now verified**
+> through the repository's own provider path on Google Gemini: 3/3 consecutive
+> HTTP 200 completions on `gemini-3.5-flash-lite`, plus successful completions
+> on `gemini-3.5-flash`, `gemini-flash-lite-latest` and `gemini-flash-latest`.
+> **S012-B is NOT closed**: its evidence requirement names the two scripts above
+> and both still fail, so the remaining gap is _an OpenAI account with funds_,
+> not the ability to generate. The run also found that OpenRouter's model-list
+> probe reports "connected" with a credential that the very next real request
+> rejects, and that this checkout's `.env.local` holds a credential in the wrong
+> slot. Evidence: `docs/audits/2026-10-15-s12-b-live-provider/FINAL-REPORT.md`.
+
 ---
 
 ### 3. Authorized Staging: Disaster Recovery Drills
