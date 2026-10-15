@@ -11,6 +11,7 @@ import { TokenUsage } from '../value-objects/TokenUsage.js';
 import { CostEstimate } from '../value-objects/CostEstimate.js';
 import { ProviderId } from '../value-objects/ProviderId.js';
 import type { QualityTier, AIResponse, FailureReason } from '../../types/index.js';
+import { RETRYABLE_FAILURE_REASONS } from '../rules/AIRules.js';
 
 export type AIRequestStatus =
   'pending' | 'routing' | 'executing' | 'completed' | 'failed' | 'fallback';
@@ -153,10 +154,11 @@ export class AIRequest {
   }
 
   isRetryable(): boolean {
-    const retryableReasons: FailureReason[] = ['timeout', 'rate_limited', 'provider_unavailable'];
+    // One authoritative allowlist (AIRules.RETRYABLE_FAILURE_REASONS) shared
+    // with `retryLimitRule` — never a second, drifting copy.
     return (
       this._failureReason !== null &&
-      retryableReasons.includes(this._failureReason) &&
+      RETRYABLE_FAILURE_REASONS.includes(this._failureReason) &&
       this._attempts < 3
     );
   }

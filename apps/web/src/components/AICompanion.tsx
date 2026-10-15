@@ -23,6 +23,7 @@ import { useLifeOSSnapshot, useAIReadiness, useMissionCreateAndRun } from '../li
 import { missionDetailRoute } from '../lib/navigation-model.js';
 import {
   classifyAskIntent,
+  isGoalLikeRequest,
   missionDraftFromRequest,
   buildAskContext,
   conversationHistoryFor,
@@ -55,6 +56,13 @@ interface Message {
     missionId?: string;
     reason?: string;
   };
+  /**
+   * Offer affordance for a goal-like ANSWER: the preceding USER text read
+   * like something to achieve. Rendered as an explicit opt-in button that
+   * routes through the SAME `runMissionAction` path (user-confirmed, never
+   * automatic). Never set on action-result messages.
+   */
+  goalOffer?: { request: string };
 }
 
 type RuntimeStage =
@@ -310,6 +318,9 @@ export function AICompanion(): React.JSX.Element {
     await new Promise((resolve) => setTimeout(resolve, 120));
 
     const final = result.data.final;
+    // When the USER text reads like a goal (not an explicit mission
+    // command), offer — never auto-create — a mission from their own words.
+    const offer = isGoalLikeRequest(request) ? { request } : undefined;
     setMessages((prev) => [
       ...prev,
       {
@@ -317,6 +328,7 @@ export function AICompanion(): React.JSX.Element {
         content: final.content || 'I could not generate a response for that request.',
         timestamp: new Date().toISOString(),
         runtime: { provider: final.provider, model: final.model },
+        ...(offer ? { goalOffer: offer } : {}),
       },
     ]);
     setStreamingText('');
@@ -488,6 +500,20 @@ export function AICompanion(): React.JSX.Element {
                     </p>
                   )}
                   <p className="whitespace-pre-wrap text-[14px] leading-relaxed">{msg.content}</p>
+
+                  {msg.role === 'ai' && msg.goalOffer && !isResult && !isFailure ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        void runMissionAction(msg.goalOffer?.request ?? '');
+                      }}
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-[10px] border border-[#2B5FD9]/30 bg-white px-3 py-1.5 text-[12px] font-medium text-[#2B5FD9] transition-colors hover:bg-[#EFF4FE] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] dark:bg-[#0F172A]"
+                    >
+                      <Rocket className="h-3.5 w-3.5" aria-hidden="true" />
+                      Turn this into a mission
+                    </button>
+                  ) : null}
 
                   {isResult && missionRoute && (
                     <button

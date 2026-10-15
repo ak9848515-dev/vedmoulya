@@ -36,6 +36,34 @@ export type OpportunityApprovalResult =
  *  string, so the authority's policy engine is what classifies the action. */
 export const OPPORTUNITY_APPROVAL_ACTION = 'accept_work' as const;
 
+/**
+ * The scope an approval for this opportunity carries. The approval authority
+ * MINTS it (never the caller) and the launch gate VERIFIES it, so the scope
+ * format has exactly one definition.
+ */
+export function opportunityApprovalScope(opportunityId: string): string {
+  return `${OPPORTUNITY_APPROVAL_ACTION}:${opportunityId}`;
+}
+
+/**
+ * S11 — is this persisted approval actually FOR this opportunity and granted BY
+ * this owner? An approval is scoped to the action it was granted for; a record
+ * naming a different opportunity (or a different granter) was not produced by
+ * this authority for this resource and must never authorize a launch.
+ *
+ * Pure and fail-closed: anything unrecognised is not a binding.
+ */
+export function isOpportunityApprovalBoundTo(input: {
+  approval: { grantedBy: string; scope: string };
+  ownerId: string;
+  opportunityId: string;
+}): boolean {
+  return (
+    input.approval.grantedBy === input.ownerId &&
+    input.approval.scope === opportunityApprovalScope(input.opportunityId)
+  );
+}
+
 export type OpportunityApprovalDecision =
   | { success: true; data: OpportunityApprovalRecord }
   | { success: false; code: string; message: string };
@@ -109,7 +137,7 @@ export function createOpportunityApprovalPort(
           id: input.taskId,
           grantedBy: input.userId,
           grantedAt: result.data.updatedAt,
-          scope: `${OPPORTUNITY_APPROVAL_ACTION}:${input.opportunityId}`,
+          scope: opportunityApprovalScope(input.opportunityId),
         },
       };
     },

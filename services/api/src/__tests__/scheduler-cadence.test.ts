@@ -771,3 +771,138 @@ describe('S7.1 — external opportunity monitoring on the cadence heartbeat', ()
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deployment-scoped provider-usage ingest on the SAME heartbeat.
+//
+// The ingest (provider-account usage/billing endpoints) used to be reachable
+// only from the operator CLI script. It now rides this heartbeat, ONCE per pass
+// and BEFORE the per-user loop, so a provider-reported quota can actually reach
+// the registry the AI Providers screen reads. Opt-in, fail-closed:
+//   • off by default (env AI_PROVIDER_USAGE_CADENCE_ENABLED, default false)
+//   • a failed probe is COUNTED, never converted into a quota
+//   • a throwing pass never aborts the user tick
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('scheduler cadence — provider-usage ingest step', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    stopSchedulerCadenceDriver();
+    delete process.env.AI_WORLD_CADENCE_ENABLED;
+    delete process.env.AI_WORLD_CADENCE_REFRESH_INTELLIGENCE;
+    delete process.env.AI_WORLD_CADENCE_PROACTIVE;
+    delete process.env.AI_PROVIDER_USAGE_CADENCE_ENABLED;
+  });
+
+  afterEach(() => {
+    stopSchedulerCadenceDriver();
+    delete process.env.AI_PROVIDER_USAGE_CADENCE_ENABLED;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function start(
+    h: Harness,
+    ingest: { run: ReturnType<typeof vi.fn> },
+    providerUsageIngestEnabled: boolean | undefined,
+  ): void {
+    startSchedulerCadenceDriver({
+      getScheduler: h.makeScheduler,
+      userSource: h.users,
+      log: h.log,
+      refreshIntelligenceEnabled: false,
+      proactiveRefreshEnabled: false,
+      externalMonitorEnabled: false,
+      ...(providerUsageIngestEnabled === undefined ? {} : { providerUsageIngestEnabled }),
+      providerUsageIngest: ingest as never,
+      intervalMs: 60_000,
+    });
+  }
+
+  it('is OFF by default — no ingest is attempted', async () => {
+    const h = makeHarness();
+    const ingest = { run: vi.fn() };
+    start(h, ingest, undefined);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(ingest.run).not.toHaveBeenCalled();
+    expect(getSchedulerCadenceDriver()?.status().providerUsageIngestEnabled).toBe(false);
+    expect(getSchedulerCadenceDriver()?.lastTick).toMatchObject({
+      providerUsageQuotaSamples: 0,
+      providerUsageCheckedSamples: 0,
+      providerUsageFailures: 0,
+    });
+  });
+
+  it('runs ONCE per pass (not per user) and reports the outcomes', async () => {
+    const h = makeHarness({ userIds: ['user-a', 'user-b', 'user-c'] });
+    const ingest = {
+      run: vi
+        .fn()
+        .mockResolvedValue({ quotaSamplesWritten: 2, checkedSamplesWritten: 1, probesFailed: 1 }),
+    };
+    start(h, ingest, true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(ingest.run).toHaveBeenCalledTimes(1);
+    expect(h.scheduler.tick).toHaveBeenCalledTimes(3);
+    expect(getSchedulerCadenceDriver()?.status().providerUsageIngestEnabled).toBe(true);
+    expect(getSchedulerCadenceDriver()?.lastTick).toMatchObject({
+      providerUsageQuotaSamples: 2,
+      providerUsageCheckedSamples: 1,
+      providerUsageFailures: 1,
+    });
+  });
+
+  it('every pass runs the ingest again (each cadence, not one-shot)', async () => {
+    const h = makeHarness();
+    const ingest = {
+      run: vi
+        .fn()
+        .mockResolvedValue({ quotaSamplesWritten: 1, checkedSamplesWritten: 0, probesFailed: 0 }),
+    };
+    start(h, ingest, true);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(ingest.run).toHaveBeenCalledTimes(2);
+  });
+
+  it('honours AI_PROVIDER_USAGE_CADENCE_ENABLED=true and its false-y spellings', async () => {
+    for (const value of ['1', 'true', 'yes', 'on', 'TRUE']) {
+      stopSchedulerCadenceDriver();
+      process.env.AI_PROVIDER_USAGE_CADENCE_ENABLED = value;
+      const h = makeHarness();
+      const ingest = {
+        run: vi
+          .fn()
+          .mockResolvedValue({ quotaSamplesWritten: 0, checkedSamplesWritten: 0, probesFailed: 0 }),
+      };
+      start(h, ingest, undefined);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ingest.run, value).toHaveBeenCalledTimes(1);
+    }
+    for (const value of ['0', 'false', 'no', 'off', '']) {
+      stopSchedulerCadenceDriver();
+      process.env.AI_PROVIDER_USAGE_CADENCE_ENABLED = value;
+      const h = makeHarness();
+      const ingest = { run: vi.fn() };
+      start(h, ingest, undefined);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ingest.run, value).not.toHaveBeenCalled();
+    }
+    delete process.env.AI_PROVIDER_USAGE_CADENCE_ENABLED;
+  });
+
+  it('isolates a throwing ingest: counted, logged, and the user tick still runs', async () => {
+    const h = makeHarness();
+    const ingest = { run: vi.fn().mockRejectedValue(new Error('billing endpoint down')) };
+    start(h, ingest, true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.scheduler.tick).toHaveBeenCalledTimes(2);
+    const tick = getSchedulerCadenceDriver()?.lastTick;
+    expect(tick).toMatchObject({ providerUsageFailures: 1, errors: 1, usersProcessed: 2 });
+    expect(tick?.errorSample).toContain('billing endpoint down');
+  });
+});

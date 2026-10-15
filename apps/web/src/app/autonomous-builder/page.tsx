@@ -11,7 +11,8 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, Button } from '@vedmoulya/ui';
 import { Sparkles as SparklesIcon } from 'lucide-react';
 import { ErrorBoundary } from '../../components/ErrorBoundary.js';
@@ -37,6 +38,13 @@ function AutonomousBuilderInner(): React.JSX.Element {
   const { user } = useAuthStore();
   const hydrated = useAuthHydrated();
   const userId = user?.userId ?? '';
+  // UX — the Ask Vedmoulya hand-off ("Open mission") is a CLIENT-SIDE navigation
+  // to THIS SAME route with a new `?mission=` query. A mount-only read of
+  // `window.location.search` never observes that change because the page does
+  // not remount, so the created mission would not open. Subscribing to the
+  // search params keeps the URL the single source of truth for "which mission
+  // is open" without changing any backend behaviour.
+  const searchParams = useSearchParams();
   // UX-08 — the contextual Ask entry opens the canonical experience.
   const setAiPanelOpen = useUIStore((s) => s.setAiPanelOpen);
   const setPendingQuestion = useUIStore((s) => s.setPendingQuestion);
@@ -65,14 +73,14 @@ function AutonomousBuilderInner(): React.JSX.Element {
   const approve = useMissionApprove();
   const reject = useMissionReject();
 
-  // Browser-refresh recovery: restore the mission reference from the URL so
-  // an in-flight mission is OBSERVED, never restarted, never duplicated.
+  // Restore/replace the mission reference from the URL so an in-flight mission
+  // is OBSERVED, never restarted, never duplicated. Reacting to the search
+  // param (not just the initial `window.location.search`) means a same-route
+  // hand-off — the Ask panel's "Open mission" — opens the real mission too.
+  const missionFromUrl = searchParams.get('mission');
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const fromUrl = params.get('mission');
-    if (fromUrl) setMissionId(fromUrl);
-  }, []);
+    if (missionFromUrl) setMissionId(missionFromUrl);
+  }, [missionFromUrl]);
 
   useEffect(() => {
     if (missionId && typeof window !== 'undefined') {
@@ -361,7 +369,10 @@ function AutonomousBuilderInner(): React.JSX.Element {
 export default function AutonomousBuilderPage(): React.JSX.Element {
   return (
     <ErrorBoundary>
-      <AutonomousBuilderInner />
+      {/* Static export requires useSearchParams inside a Suspense boundary. */}
+      <Suspense fallback={null}>
+        <AutonomousBuilderInner />
+      </Suspense>
     </ErrorBoundary>
   );
 }

@@ -117,30 +117,70 @@ describe('deriveProviderReadiness', () => {
   // 'unhealthy' or a future value like 'unknown' — fell through to READY.
 
   it('does NOT report READY for a cross-vocabulary health value (F-U1)', () => {
-    const view = deriveProviderReadiness(base({ healthStatus: 'unhealthy' }));
+    const view = deriveProviderReadiness(
+      base({ healthStatus: 'unhealthy', healthSource: 'MEASURED' as const }),
+    );
     expect(view.state).not.toBe('READY');
     expect(view.ready).toBe(false);
     expect(view.executable).toBe(false);
   });
 
   it('does NOT report READY for an unknown/future health value (F-U1)', () => {
-    const view = deriveProviderReadiness(base({ healthStatus: 'unknown' }));
+    const view = deriveProviderReadiness(
+      base({ healthStatus: 'unknown', healthSource: 'MEASURED' as const }),
+    );
     expect(view.state).not.toBe('READY');
     expect(view.ready).toBe(false);
     expect(view.executable).toBe(false);
   });
 
   it('does NOT report READY for an invalid empty health value (F-U1)', () => {
-    const view = deriveProviderReadiness(base({ healthStatus: '' }));
+    const view = deriveProviderReadiness(
+      base({ healthStatus: '', healthSource: 'MEASURED' as const }),
+    );
     expect(view.state).not.toBe('READY');
     expect(view.ready).toBe(false);
   });
 
-  it('recognizes every canonical health value explicitly', () => {
-    expect(deriveProviderReadiness(base({ healthStatus: 'healthy' })).state).toBe('READY');
-    expect(deriveProviderReadiness(base({ healthStatus: 'degraded' })).state).toBe('DEGRADED');
-    expect(deriveProviderReadiness(base({ healthStatus: 'unstable' })).state).toBe('UNAVAILABLE');
-    expect(deriveProviderReadiness(base({ healthStatus: 'down' })).state).toBe('UNAVAILABLE');
+  it('recognizes every canonical health value explicitly (measured record)', () => {
+    const measured = (healthStatus: string) =>
+      deriveProviderReadiness(base({ healthStatus, healthSource: 'MEASURED' as const })).state;
+    expect(measured('healthy')).toBe('READY');
+    expect(measured('degraded')).toBe('DEGRADED');
+    expect(measured('unstable')).toBe('UNAVAILABLE');
+    expect(measured('down')).toBe('UNAVAILABLE');
+  });
+
+  // ── Provenance: a SEED health record is not evidence ─────────────────────
+  // The registry catalog's health record is seed data (the catalog even stamps
+  // `lastCheckedAt` with its build time). Reading the seeded 'healthy' as a live
+  // check would present an unverified provider as verified.
+
+  it('a SEED "healthy" record does not count as a live check', () => {
+    const seeded = deriveProviderReadiness(
+      base({ healthStatus: 'healthy', healthSource: 'SEED' as const }),
+    );
+    // The provider is still READY on its real evidence (credential + no known
+    // blocker) — but only because nothing contradicts it, not because a seed
+    // confirmed it. The reason never claims a check happened.
+    expect(seeded.state).toBe('READY');
+    expect(seeded.reason).not.toMatch(/check|verified|healthy/i);
+  });
+
+  it('an ABSENT provenance is treated as SEED (unproven)', () => {
+    const absent = deriveProviderReadiness(base({ healthStatus: 'healthy' }));
+    const seed = deriveProviderReadiness(
+      base({ healthStatus: 'healthy', healthSource: 'SEED' as const }),
+    );
+    expect(absent).toEqual(seed);
+  });
+
+  it('a SEED "down"/"degraded" record cannot fabricate a failure either', () => {
+    const view = deriveProviderReadiness(
+      base({ healthStatus: 'down', healthSource: 'SEED' as const }),
+    );
+    expect(view.state).toBe('READY');
+    expect(view.reason).not.toMatch(/reported unhealthy/i);
   });
 
   it('keeps READY when health is simply not reported (absence of evidence)', () => {
@@ -153,7 +193,9 @@ describe('deriveProviderReadiness', () => {
   it('never lets an unrecognized health value reach READY via the quota path (F-U1)', () => {
     // Quota evidence is evaluated before health (existing precedence). An
     // unrecognized health value must still not upgrade the view to READY.
-    const view = deriveProviderReadiness(base({ quotaUsedPercent: 95, healthStatus: 'unhealthy' }));
+    const view = deriveProviderReadiness(
+      base({ quotaUsedPercent: 95, healthStatus: 'unhealthy', healthSource: 'MEASURED' as const }),
+    );
     expect(view.state).not.toBe('READY');
     expect(view.state).toBe('DEGRADED');
     expect(view.reason).toMatch(/quota/i);

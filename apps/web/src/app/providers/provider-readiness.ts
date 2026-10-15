@@ -191,8 +191,17 @@ export const PROVIDER_QUOTA_DISCLAIMER =
 
 export interface ProviderUsageInput {
   readiness: ProviderReadiness;
-  /** Registry health snapshot quota (0 when the provider reports none). */
+  /** The registry's quota figure (0 when it holds none). */
   quotaUsedPercent: number;
+  /**
+   * Provenance of `quotaUsedPercent` (absent ⇒ 'SEED').
+   *
+   * Only 'PROVIDER_REPORTED' is account data. A 'SEED' figure is a catalog
+   * constant that no runtime request refreshes, so it must NOT become a
+   * "% remaining" — that would fabricate the user's remaining quota from an
+   * arbitrary number. Those rows read "Unavailable from provider".
+   */
+  quotaSource?: 'SEED' | 'PROVIDER_REPORTED';
   /** Local provider (ollama / lm-studio / local family) — no metered quota. */
   local?: boolean;
   /** Deterministic mock runtime active — no metered quota. */
@@ -203,10 +212,13 @@ export interface ProviderUsageInput {
  * Honest per-provider usage display. Order matters:
  *  1. A provider that cannot operate is simply "Not configured".
  *  2. Local / mock providers are unmetered by construction.
- *  3. quotaUsedPercent <= 0 means the provider reports NO quota to the
+ *  3. The quota must be PROVIDER-REPORTED. A registry seed constant is not a
+ *     measurement: the row reads "Unavailable from provider" — no percentage
+ *     and no remaining balance is derived from it.
+ *  4. quotaUsedPercent <= 0 means the provider reports NO quota to the
  *     platform — the UI says "Usage unavailable" rather than inventing a
  *     number (e.g. claiming "100% remaining" from a missing signal).
- *  4. Only then is a REAL remaining-percent derived from the reported quota.
+ *  5. Only then is a REAL remaining-percent derived from the reported quota.
  */
 export function deriveProviderUsage(input: ProviderUsageInput): ProviderUsageDisplay {
   if (input.readiness.key === 'red') {
@@ -231,6 +243,17 @@ export function deriveProviderUsage(input: ProviderUsageInput): ProviderUsageDis
       label: 'Unmetered',
       detail: 'Deterministic mock — no metered quota.',
       tone: 'emerald',
+    };
+  }
+  if (input.quotaSource !== 'PROVIDER_REPORTED') {
+    // A registry seed estimate. The provider itself has told VedMoulya
+    // nothing about account usage, so no percentage is shown at all.
+    return {
+      state: 'UNAVAILABLE',
+      label: 'Unavailable from provider',
+      detail:
+        'This provider reports no account usage to VedMoulya — no quota percentage or remaining balance is shown.',
+      tone: 'slate',
     };
   }
   const quota = input.quotaUsedPercent;

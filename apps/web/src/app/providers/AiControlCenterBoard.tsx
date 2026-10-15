@@ -32,6 +32,17 @@ export function formatUsd(usd: number, known: boolean): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
+/**
+ * The cost figure with its PROVENANCE. VedMoulya never receives a
+ * provider-reported price per request, so a known figure is the provider's
+ * measured token counts priced by VedMoulya's registry pricing — an ESTIMATE.
+ * The label stops it from reading as a provider-reported charge.
+ */
+export function costLabel(row: AiProviderBoardRowDTO): string {
+  if (!row.monthCostKnown) return row.monthExecutions > 0 ? 'Unknown' : '$0.00';
+  return formatUsd(row.monthCostUsd, true);
+}
+
 const CARD =
   'rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#0F172A] p-4 shadow-sm';
 
@@ -110,11 +121,10 @@ function ProviderRow({ row }: { row: AiProviderBoardRowDTO }): React.JSX.Element
         <div className="flex gap-1">
           <dt>Cost:</dt>
           <dd className="font-medium">
-            {row.monthCostKnown
-              ? formatUsd(row.monthCostUsd, true)
-              : row.monthExecutions > 0
-                ? 'Unknown'
-                : '$0.00'}
+            {costLabel(row)}
+            {row.monthCostKnown && !row.local ? (
+              <span className="ml-1 text-[10px] text-[#94A3B8]">estimated</span>
+            ) : null}
           </dd>
         </div>
         <div className="flex gap-1">
@@ -143,7 +153,32 @@ function ProviderRow({ row }: { row: AiProviderBoardRowDTO }): React.JSX.Element
       )}
       {!quota.quotaKnown && !row.local && (
         <p className="mt-1 text-[10px] text-[#94A3B8]">
-          This provider does not report quota to VedMoulya — remaining is unknown, not zero.
+          Unavailable from provider — this provider reports no account usage to VedMoulya, so
+          remaining is unknown, not zero.
+        </p>
+      )}
+      {/* Cost provenance: a known figure is priced from the registry's per-1K
+          rates, never a provider-reported charge — say so on the row. */}
+      {!row.local && row.monthCostKnown && row.monthCostUsd > 0 && (
+        <p className="mt-0.5 text-[10px] text-[#94A3B8]">
+          Cost is estimated from VedMoulya’s registry pricing and the provider’s reported token
+          counts — not a provider-reported charge.
+        </p>
+      )}
+      {/* The registry's own seed estimate is shown SEPARATELY and labelled for
+          what it is. It never becomes "% used", a remaining balance or a bar. */}
+      {!row.local && quota.registryEstimatePercent !== undefined && (
+        <p className="mt-0.5 text-[10px] text-[#94A3B8]">
+          Registry estimate {Math.round(quota.registryEstimatePercent)}% — seed figure from
+          VedMoulya’s provider catalog, not your account usage.
+        </p>
+      )}
+      {/* Health provenance: the readiness state above is derived from real
+          evidence, but the registry's health record itself may still be catalog
+          data. Saying so stops a seeded 'healthy' from reading as a check. */}
+      {row.healthSource === 'SEED' && (
+        <p className="mt-0.5 text-[10px] text-[#94A3B8]">
+          Health record: catalog estimate — this provider has never been checked at runtime.
         </p>
       )}
     </li>

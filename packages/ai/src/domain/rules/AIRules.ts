@@ -60,8 +60,28 @@ export function qualityTierRule(capability: CapabilityType, tier: QualityTier): 
 /**
  * Retry rule: Determine maximum retries for a failure type
  */
+/**
+ * The SINGLE source of truth for "may this failure be retried?".
+ *
+ * `retryLimitRule` and `AIRequest.isRetryable()` BOTH read this list — a
+ * duplicated copy previously existed in the entity, so a reason added here was
+ * silently not retryable there (or vice versa).
+ *
+ * 'invalid_response' is a malformed/unvalidatable MODEL RESPONSE: a transient
+ * generation artifact (not a configuration problem), so re-asking within the
+ * same bounded budget is the documented structured-output behaviour. Credential,
+ * unsupported-model and internal failures stay out of this list: retrying them
+ * cannot succeed and only burns budget.
+ */
+export const RETRYABLE_FAILURE_REASONS: readonly FailureReason[] = [
+  'timeout',
+  'rate_limited',
+  'provider_unavailable',
+  'invalid_response',
+] as const;
+
 export function retryLimitRule(failureReason: FailureReason, currentAttempts: number): RuleResult {
-  const retryableReasons: FailureReason[] = ['timeout', 'rate_limited', 'provider_unavailable'];
+  const retryableReasons = RETRYABLE_FAILURE_REASONS;
 
   if (!retryableReasons.includes(failureReason)) {
     return { passed: false, message: `Non-retryable failure: ${failureReason}` };

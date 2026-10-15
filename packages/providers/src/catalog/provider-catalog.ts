@@ -6,11 +6,14 @@
 // profiles, health, and capability matrices. Providers are enterprise
 // assets — no routing or selection decisions live here.
 //
-// All cost/latency/quality figures are REGISTRY ESTIMATES derived from
-// public provider documentation and the AI platform's own adapter
-// telemetry; they are the intelligence the registry exposes, not a
-// recommendation. The Provider Benchmark Engine (EI-003) will refresh
-// them nightly.
+// All cost/latency/quality/health figures are REGISTRY ESTIMATES derived from
+// public provider documentation and the AI platform's own adapter telemetry;
+// they are the intelligence the registry exposes, not a recommendation, and
+// NOT measurements of this deployment (no runtime code refreshes them). The
+// Provider Benchmark Engine (EI-003) is intended to refresh them; until it is
+// wired, every figure below is tagged with its provenance — `quotaSource:
+// 'SEED'` on health — so consumers can refuse to present a seed constant as
+// provider-reported account usage.
 // ──────────────────────────────────────────────────────────────────
 
 import type { CapabilityType, ModalityType, ProviderFamily, QualityTier } from '@vedmoulya/ai';
@@ -71,6 +74,19 @@ function health(params: {
     successCount: params.success,
     failureCount: params.failure,
     quotaUsedPercent: params.quota ?? 0,
+    // CATALOG DATA IS SEED DATA. These figures come from public provider
+    // documentation captured at CATALOG_EPOCH — not from a measurement of this
+    // deployment. Tagging them 'SEED' is what stops the UI from ever
+    // presenting them as the provider's reported account usage or remaining
+    // balance (see ProviderQuotaSource); only an ingested, provider-reported
+    // sample can promote a quota.
+    quotaSource: 'SEED' as const,
+    // Same rule for the health record itself: `status`/`healthScore`/
+    // `latencyMs`/the sample counts below are catalog estimates, and
+    // `lastCheckedAt` is stamped with the build time — NOT a health check. The
+    // 'SEED' tag is what stops a consumer from rendering the seeded 'healthy'
+    // (or that timestamp) as a live check of this deployment.
+    healthSource: 'SEED' as const,
     rateLimitRemaining: params.remaining ?? 0,
     rateLimitResetAt: null,
     lastSuccessAt: params.checkedAt ?? null,

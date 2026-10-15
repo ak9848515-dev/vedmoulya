@@ -157,10 +157,31 @@ describe('Phase 1 — real execution evidence reaches the Control Center', () =>
     health.recordExecution({ providerId: 'openai', ok: true });
     const readiness = await readinessFor(
       health,
-      row({ health: { status: 'healthy', score: 1, latencyMs: 5, quotaUsedPercent: 100 } }),
+      row({
+        health: {
+          status: 'healthy',
+          score: 1,
+          latencyMs: 5,
+          quotaUsedPercent: 100,
+          quotaSource: 'PROVIDER_REPORTED',
+        },
+      }),
     );
     expect(readiness.state).toBe('QUOTA_EXHAUSTED');
     expect(readiness.executable).toBe(false);
+  });
+
+  it('a SEED (unproven) quota percent is NOT quota evidence', async () => {
+    // The registry catalog ships seed constants (45/38/30/55/40 …). Reading one
+    // as account usage would fabricate exhaustion, so an unproven percentage
+    // must not move readiness at all.
+    const health = makeHealth();
+    health.recordExecution({ providerId: 'openai', ok: true });
+    const readiness = await readinessFor(
+      health,
+      row({ health: { status: 'healthy', score: 1, latencyMs: 5, quotaUsedPercent: 100 } }),
+    );
+    expect(readiness.state).toBe('READY');
   });
 
   it('keeps LOCAL AI executable and out of cloud accounting', async () => {

@@ -154,7 +154,45 @@ export interface ProviderExperienceRowDTO {
   switchDisabledReason?: string;
   resourceType: string;
   freeToUse: boolean;
-  health: { status: string; score: number; latencyMs: number; quotaUsedPercent: number };
+  health: {
+    status: string;
+    score: number;
+    latencyMs: number;
+    quotaUsedPercent: number;
+    /**
+     * Provenance of `quotaUsedPercent` (absent ⇒ 'SEED'). Registry seed figures
+     * are catalog constants — never account usage and never a remaining quota.
+     */
+    quotaSource?: 'SEED' | 'PROVIDER_REPORTED';
+    /**
+     * Provenance of the health RECORD (absent ⇒ 'SEED'). A 'SEED' record is
+     * catalog data — status/score/latency were never measured here — so the
+     * seeded 'healthy' must never be rendered as a live check.
+     */
+    healthSource?: 'SEED' | 'MEASURED';
+    /**
+     * GENUINE provider-reported account metrics (account tokens / cost /
+     * credits / bounded-quota-used), keyed by metric, carried verbatim from the
+     * registry. Absent key ⇒ never retrieved — render "Unavailable from
+     * provider", never zero. Distinct from runtime tokens / estimated cost.
+     */
+    accountUsage?: Partial<
+      Record<
+        'ACCOUNT_TOKENS' | 'ACCOUNT_COST' | 'ACCOUNT_CREDITS' | 'BOUNDED_QUOTA_USED',
+        {
+          provider: string;
+          metric: string;
+          source: string;
+          retrievedAt: string;
+          window?: { startEpochSec: number; endEpochSec: number };
+          value: number;
+          unit: 'tokens' | 'usd' | 'percent';
+          breakdown?: Array<{ key: string; value: number; unit: 'tokens' | 'usd' | 'percent' }>;
+          unlimited?: boolean;
+        }
+      >
+    >;
+  };
   lifecycleStatus: string;
 }
 
@@ -162,11 +200,20 @@ export interface ProviderExperienceViewDTO {
   providers: ProviderExperienceRowDTO[];
   usage: {
     tokensUsed: number;
-    tokenBudget: number;
+    /** The user's configured monthly limit — absent when none is configured. */
+    tokenBudget?: number;
+    budgetSource: 'NONE' | 'USER_CONFIGURED' | 'PLATFORM_ALLOWANCE';
+    budgetConfiguredAt?: string;
+    remainingTokens?: number;
+    budgetBasis: 'USER_BUDGET' | 'PLATFORM_ALLOWANCE' | 'PROVIDER_QUOTA' | 'UNKNOWN';
     costUsd: number;
     aiCalls: number;
     cacheHits: number;
+    costUnknown: boolean;
     freePercent: number;
+    /** WHICH store answered — never implied by the numbers themselves. */
+    usageSource: 'DURABLE_USAGE_LEDGER' | 'TRACE_LEDGER';
+    durableChecked: boolean;
     budgetPolicy: ProviderPreferences['budgetPolicy'];
     budgets: ProviderPreferences['budgets'];
   };
@@ -202,6 +249,8 @@ interface ProviderUsageDetailDTO {
     costUsd: number;
   }>;
   executions: Array<{
+    /** The durable ledger's execution id (request-level correlation). */
+    executionId?: string;
     traceId: string;
     name: string;
     status: string;
@@ -211,6 +260,18 @@ interface ProviderUsageDetailDTO {
     startedAt: number;
   }>;
   preferences: ProviderPreferences;
+  /**
+   * WHICH store these figures were read from. 'DURABLE_USAGE_LEDGER' is the
+   * owner-scoped durable ledger (same authority as the AI Control Center);
+   * 'TRACE_LEDGER' is the in-process trace store, which can report 0 for usage
+   * that really happened. The screen must label the source.
+   */
+  usageSource: 'DURABLE_USAGE_LEDGER' | 'TRACE_LEDGER';
+  /** True only when the durable store was actually queried. */
+  durableChecked: boolean;
+  /** True while any recorded execution had no provider-reported price. */
+  costUnknown: boolean;
+  window: 'ALL_RECORDED';
 }
 
 type ProviderPreferencesDTO = ProviderPreferences;
@@ -680,7 +741,31 @@ export function useAiControlCenter(userId: string, timezone?: string) {
 
 export function useProviderExperience(userId: string) {
   const q = api.providers.getExperience.useQuery({ userId }, { enabled: Boolean(userId) });
-  return { ...q, data: unwrap<ProviderExperienceViewDTO>(q.data) };
+  // The gateway reports a SERVICE failure as HTTP 200 + `{ success: false }`
+  // (see guardMutation above). Without translating that envelope into a real
+  // error state the query looks "successful but empty": `data` stays undefined
+  // and every consumer renders its loading state forever — the AI Providers
+  // screen sat on "Loading AI providers…" with no reason and no retry. The
+  // reason is passed through verbatim; nothing is fabricated in its place.
+  const failure = gatewayFailureMessage(q.data);
+  return {
+    ...q,
+    data: failure === null ? unwrap<ProviderExperienceViewDTO>(q.data) : undefined,
+    isError: q.isError || failure !== null,
+    error: failure !== null ? new Error(failure) : q.error,
+  };
+}
+
+/**
+ * Read the gateway's `{ success: false, error }` envelope. The gateway maps
+ * service failures to an HTTP 200 body, so `isError` never fires for them;
+ * returns the gateway's message when the payload IS a failure, else null.
+ */
+function gatewayFailureMessage(payload: unknown): string | null {
+  if (payload === null || typeof payload !== 'object') return null;
+  const envelope = payload as { success?: boolean; error?: { message?: string } | null };
+  if (envelope.success !== false) return null;
+  return envelope.error?.message ?? 'Request failed';
 }
 
 export function useProviderPreferences(userId: string) {
@@ -948,6 +1033,37 @@ export function useOpenAIOrgUsage(userId: string, period: OpenAIOrgPeriod) {
     { enabled: Boolean(userId) },
   );
   return { ...q, data: unwrap<OpenAIOrgUsageDTO>(q.data) };
+}
+
+/**
+ * Provider-usage INGEST status (deployment-scoped — no owner data). It is the
+ * honest reason behind a provider row that reads "Unavailable from provider":
+ * whether the scheduled probe runs at all, and what the last pass found per
+ * family. Nothing is inferred — an empty list means "never ran".
+ */
+export interface ProviderUsageIngestStatusDTO {
+  /** True when the gateway heartbeat actually schedules the ingest pass. */
+  scheduleEnabled: boolean;
+  /** The cadence in ms when scheduled (absent otherwise). */
+  scheduleIntervalMs?: number;
+  /** When the most recent pass finished (absent ⇒ never ran in this process). */
+  lastRunAt?: string;
+  /** Per-family outcomes of the most recent pass (empty ⇒ never ran). */
+  entries: Array<{
+    providerId: string;
+    family: string;
+    outcome: 'QUOTA_WRITTEN' | 'CHECKED_WRITTEN' | 'NO_PROBE' | 'NOT_CONFIGURED' | 'PROBE_FAILED';
+    detail: string;
+  }>;
+  /** Provider-reported quotas written by the most recent pass. */
+  quotaSamplesWritten: number;
+  /** Plain "checked" samples written by the most recent pass. */
+  checkedSamplesWritten: number;
+}
+
+export function useProviderUsageIngestStatus(userId: string) {
+  const q = api.providers.getUsageIngestStatus.useQuery({ userId }, { enabled: Boolean(userId) });
+  return { ...q, data: unwrap<ProviderUsageIngestStatusDTO>(q.data) };
 }
 
 export function useExplainModelSelection() {
@@ -1448,14 +1564,24 @@ export interface BrainDashboardViewDTO {
     name: string;
     availability: string;
     healthStatus: string;
+    /** Provenance of the health record (absent ⇒ 'SEED' — not a live check). */
+    healthSource?: 'SEED' | 'MEASURED';
     quotaUsedPercent: number;
+    /** Provenance of the quota (absent ⇒ 'SEED' — not account usage). */
+    quotaSource?: 'SEED' | 'PROVIDER_REPORTED';
   }>;
   usage: {
     tokensUsed: number;
-    tokenBudget: number;
+    tokenBudget?: number;
+    budgetSource: 'NONE' | 'USER_CONFIGURED' | 'PLATFORM_ALLOWANCE';
+    budgetConfiguredAt?: string;
+    remainingTokens?: number;
+    budgetBasis: 'USER_BUDGET' | 'PLATFORM_ALLOWANCE' | 'PROVIDER_QUOTA' | 'UNKNOWN';
     costUsd: number;
     aiCalls: number;
     freePercent: number;
+    usageSource: 'DURABLE_USAGE_LEDGER' | 'TRACE_LEDGER';
+    durableChecked: boolean;
   };
   adaptiveScores: Array<{
     providerId: string;

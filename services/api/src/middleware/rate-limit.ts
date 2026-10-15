@@ -137,6 +137,23 @@ export interface RedisLikeClient {
   pexpire(key: string, ms: number): Promise<unknown>;
 }
 
+/**
+ * Bounded reconnect backoff (ms) for the distributed limiter's Redis client.
+ *
+ * The limiter DEGRADES to per-process buckets on outage but keeps trying Redis
+ * on every request, so a recovered Redis restores distributed enforcement
+ * automatically — reconnecting must stay enabled. What must not happen is the
+ * ioredis default: an immediate, unbounded reconnect loop that fires a
+ * connection attempt per event-loop turn for the whole outage (measured on the
+ * real client with these options: 7 attempts in 1.2 s), flooding the log and
+ * burning CPU without changing enforcement. Capped exponential backoff keeps
+ * the recovery property and removes the flood.
+ */
+const REDIS_RECONNECT_MAX_DELAY_MS = 5_000;
+export function redisRetryStrategy(times: number): number {
+  return Math.min(Math.max(times, 1) * 500, REDIS_RECONNECT_MAX_DELAY_MS);
+}
+
 export class RedisRateLimiter implements RateLimiter {
   readonly backend = 'redis' as const;
   readonly distributed = true;
@@ -155,11 +172,19 @@ export class RedisRateLimiter implements RateLimiter {
     }
     // Lazy ioredis: no connection until the first command; fail fast on
     // outage (maxRetriesPerRequest 0) so degradation is immediate + loud.
-    this.client = new Redis(url ?? 'redis://localhost:6379', {
+    const redisClient = new Redis(url ?? 'redis://localhost:6379', {
       lazyConnect: true,
       maxRetriesPerRequest: 0,
       enableOfflineQueue: false,
+      retryStrategy: redisRetryStrategy,
     });
+    // This class reports its own degradation EXACTLY once (structured, with a
+    // classified reason). Without a listener ioredis prints an
+    // "Unhandled error event" line on EVERY reconnect attempt, which buries
+    // that once-only signal in noise and defeats its purpose. The listener is
+    // intentionally inert: the reason is captured by the `allow()` catch.
+    redisClient.on('error', () => undefined);
+    this.client = redisClient;
   }
 
   async allow(key: string, maxRequests: number, windowMs: number): Promise<boolean> {

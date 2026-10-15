@@ -1308,7 +1308,12 @@ export class AIOrchestrationService extends BaseService {
           return response;
         } catch (error) {
           lastError = error as Error;
-          const reason = this.classifyFailure(error);
+          // A schema-invalid model response is `invalid_response` — a transient
+          // generation artifact the domain allows a bounded retry for — rather
+          // than a generic internal error (which the domain forbids retrying).
+          const reason: FailureReason = this.isStructuredValidationFailure(error)
+            ? 'invalid_response'
+            : this.classifyFailure(error);
           aiRequest.fail(reason, lastError.message);
           executionSpan.setAttribute('status', 'error');
           executionSpan.setAttribute('error_reason', reason);
@@ -1319,7 +1324,14 @@ export class AIOrchestrationService extends BaseService {
             ok: false,
             failureReason: reason,
           });
-          if (attempt < MAX_RETRIES) {
+          // The SAME retry gate the text path applies: a failure the domain
+          // classifies as non-retryable (a missing/invalid credential, an
+          // unsupported model, an invalid model response) must move straight to
+          // the next candidate instead of spending the retry budget on a call
+          // that cannot succeed. Without this, a broken key was retried to
+          // exhaustion on the structured path while the text path retried once.
+          const retryRule = retryLimitRule(reason, aiRequest.attempts);
+          if (aiRequest.isRetryable() && retryRule.passed && attempt < MAX_RETRIES) {
             const retrySpan = this.observability.startSpan(
               'ai.retry',
               requestId ?? 'unknown',
@@ -1331,7 +1343,13 @@ export class AIOrchestrationService extends BaseService {
             );
             retrySpan.end();
             aiRequest.fallback(providerId);
+            continue;
           }
+          // Non-retryable (or the retry budget is spent): stop retrying THIS
+          // provider and move to the next candidate. Continuing the retry loop
+          // here would also be invalid state-machine-wise — a request left in
+          // 'failed' cannot start another execution.
+          break;
         }
       }
       const fallbackSpan = this.observability.startSpan(
@@ -1948,6 +1966,17 @@ export class AIOrchestrationService extends BaseService {
     );
     error.name = 'ProviderExecutionFailed';
     return error;
+  }
+
+  /**
+   * True when the failure is the runtime's OWN schema-validation rejection of a
+   * model response (`executeStructured`). Only that failure is a retryable
+   * `invalid_response`; everything else keeps its classified reason.
+   */
+  private isStructuredValidationFailure(error: unknown): boolean {
+    return (
+      error instanceof Error && error.message.startsWith('Structured output validation failed')
+    );
   }
 
   /** Small helper: recover the requesting user for span correlation. */

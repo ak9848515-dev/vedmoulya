@@ -1121,3 +1121,79 @@ describe('MissionService — outcome activity derived from real mission state', 
     expect(activity.some((event) => event.kind === 'MISSION_CANCELLED')).toBe(true);
   });
 });
+
+// ── S10 — durability-barrier observability ──────────────────────────────────
+
+describe('S10 — BLOCKED recovery requirement + durable barrier trail', () => {
+  async function viewFor(value: Mission) {
+    const { runtime } = runtimeDouble(value);
+    const service = new MissionService();
+    service.setRuntimeForTesting(runtime);
+    return service.getStatus('u-1', 'm-1');
+  }
+
+  it('exposes the requirement + operator action for a durability-barrier BLOCK', async () => {
+    const view = await viewFor(
+      mission({
+        state: 'BLOCKED',
+        outcomeReason:
+          'Durability barrier: terminal:COMPLETE could not be persisted after 3 attempt(s) — the outcome is NOT acknowledged as durable',
+      }),
+    );
+
+    expect(view.recoveryRequirement?.requirement).toBe('OPERATOR_ACTION');
+    expect(view.recoveryRequirement?.rationale.length).toBeGreaterThan(0);
+    expect(view.recoveryRequirement?.operatorAction).toMatch(/persistence/i);
+  });
+
+  it('classifies a dependency block as an external condition', async () => {
+    const view = await viewFor(
+      mission({
+        state: 'BLOCKED',
+        outcomeReason: 'No selectable objective with satisfied dependencies',
+      }),
+    );
+
+    expect(view.recoveryRequirement?.requirement).toBe('EXTERNAL_CONDITION');
+    expect(view.recoveryRequirement?.operatorAction).toBeDefined();
+  });
+
+  it('never marks a non-BLOCKED mission with a recovery requirement', async () => {
+    for (const state of [
+      'CREATED',
+      'RUNNING',
+      'PAUSED',
+      'WAITING_FOR_PROVIDER',
+      'WAITING_FOR_APPROVAL',
+      'COMPLETED',
+      'FAILED',
+      'CANCELLED',
+    ] as const) {
+      const view = await viewFor(mission({ state }));
+      expect(view.recoveryRequirement).toBeUndefined();
+    }
+  });
+
+  it('surfaces the durable barrier trail events to the operator', async () => {
+    const value = mission({ state: 'BLOCKED', outcomeReason: 'Durability barrier: held' });
+    value.activity = [
+      {
+        id: 'a-1',
+        at: '2026-10-13T10:00:00.000Z',
+        kind: 'PERSISTENCE_FAILED',
+        message: 'Durability barrier: objective_result:obj-1:VERIFIED could not be persisted',
+      },
+      {
+        id: 'a-2',
+        at: '2026-10-13T10:00:01.000Z',
+        kind: 'PERSISTENCE_RETRIED',
+        message: 'Required persistence for objective_start:obj-1 succeeded on attempt 2',
+      },
+    ];
+
+    const view = await viewFor(value);
+
+    expect(view.activity.some((event) => event.kind === 'PERSISTENCE_FAILED')).toBe(true);
+    expect(view.activity.some((event) => event.kind === 'PERSISTENCE_RETRIED')).toBe(true);
+  });
+});

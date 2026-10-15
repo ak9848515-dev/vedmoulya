@@ -69,6 +69,7 @@ import { ProviderConfigureExperience } from './ProviderConfigureExperience.js';
 import { SimpleProviderConfig } from './SimpleProviderConfig.js';
 import { OpenAIOrgUsagePanel } from './OpenAIOrgUsagePanel.js';
 import { AiControlCenterBoard } from './AiControlCenterBoard.js';
+import { ProviderUsageIngestNote } from './ProviderUsageIngestNote.js';
 import {
   UsageAvailabilityWidget,
   ReadinessLegend,
@@ -161,6 +162,33 @@ function CenteredLoading({ label }: { label: string }): React.JSX.Element {
     <div className="flex items-center justify-center h-[40vh]" role="status" aria-live="polite">
       <Loading label={label} size="lg" />
     </div>
+  );
+}
+
+// ── Failed provider read (visible + actionable) ─────────────────────────────
+// A failed provider read must NEVER be disguised as "Loading …". The guards
+// below used to test `isLoading || !data` BEFORE `isError`, so a rejected query
+// (offline, 500, 401 after the token refresh was refused) or the gateway's
+// HTTP 200 `{ success: false }` envelope left the spinner on screen forever —
+// no reason, no retry. The gateway's own message is shown verbatim when it has
+// one; the error is never swallowed and never replaced by fabricated data.
+function ProviderReadFailure({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string;
+  message?: string | null;
+  onRetry: () => void;
+}): React.JSX.Element {
+  const reason = typeof message === 'string' && message.trim() !== '' ? message.trim() : null;
+  return (
+    <EmptyState
+      icon={<AlertCircle className="h-8 w-8" />}
+      title={title}
+      description={reason ?? 'Please try again in a moment.'}
+      action={{ label: 'Try again', onClick: onRetry }}
+    />
   );
 }
 
@@ -424,7 +452,7 @@ function ProviderConfigLoader({
   onBack: () => void;
   onOpenDetails: (providerId: string) => void;
 }): React.JSX.Element {
-  const { data, isLoading, isError, refetch } = useProviderExperience(userId);
+  const { data, isLoading, isError, error, refetch } = useProviderExperience(userId);
   const runtimeStatus = useProviderRuntimeStatus(userId);
   const setEnabledMutation = useSetProviderEnabled();
   const setPrefsMutation = useSetProviderPreferences();
@@ -478,18 +506,22 @@ function ProviderConfigLoader({
     [userId, setPrefsMutation, refetch],
   );
 
-  if (isLoading || !data) {
-    return <CenteredLoading label="Loading this AI..." />;
-  }
-
+  // ERROR FIRST — a failed read must say why (and offer a retry) instead of
+  // presenting the loading state indefinitely.
   if (isError) {
     return (
-      <EmptyState
-        icon={<Cpu className="h-8 w-8" />}
+      <ProviderReadFailure
         title="Unable to load this AI"
-        description="Please try again in a moment."
+        message={error instanceof Error ? error.message : null}
+        onRetry={() => {
+          void refetch();
+        }}
       />
     );
+  }
+
+  if (isLoading || !data) {
+    return <CenteredLoading label="Loading this AI..." />;
   }
 
   const provider = data.providers.find((entry) => entry.providerId === providerId);
@@ -635,7 +667,7 @@ function ProviderExperienceView({
   onOpenDetails: (providerId: string) => void;
   onUsageClick: () => void;
 }): React.JSX.Element {
-  const { data, isLoading, isError, refetch } = useProviderExperience(userId);
+  const { data, isLoading, isError, error, refetch } = useProviderExperience(userId);
   const runtimeStatus = useProviderRuntimeStatus(userId);
   const setEnabledMutation = useSetProviderEnabled();
   const setPrefsMutation = useSetProviderPreferences();
@@ -663,6 +695,18 @@ function ProviderExperienceView({
   // ONE Local AI controller shared by the panel and the overview card, so both
   // surfaces show the SAME live connection state (never two probes/derivations).
   const localAi = useLocalAiStatus();
+
+  // SPRINT — the honest AI Control Center board. Every number (today, this
+  // month, per-provider usage, quota, cost, budget) comes from the durable
+  // usage ledger; nothing is derived or defaulted client-side.
+  //
+  // Declared HERE, with the other hooks and ABOVE the loading/error returns: the
+  // query hooks this call site consumes must run on EVERY render. Calling it
+  // after an early return made the loading render and the data render disagree
+  // on the hook order, so React rejected the data render ("Rendered more hooks
+  // than during the previous render") and the ErrorBoundary replaced the whole
+  // provider list — the list never appeared.
+  const { data: controlCenter } = useAiControlCenter(userId);
 
   useEffect(() => {
     if (data && !isLoading && !isError) {
@@ -724,18 +768,22 @@ function ProviderExperienceView({
     [userId, setPrefsMutation, refetch],
   );
 
-  if (isLoading || !data) {
-    return <CenteredLoading label="Loading AI providers..." />;
-  }
-
+  // ERROR FIRST (the same order ProviderDetailView uses): a failed read is a
+  // failure, not an unfinished one — otherwise it never leaves the spinner.
   if (isError) {
     return (
-      <EmptyState
-        icon={<Cpu className="h-8 w-8" />}
+      <ProviderReadFailure
         title="Unable to load AI providers"
-        description="Please try again in a moment."
+        message={error instanceof Error ? error.message : null}
+        onRetry={() => {
+          void refetch();
+        }}
       />
     );
+  }
+
+  if (isLoading || !data) {
+    return <CenteredLoading label="Loading AI providers..." />;
   }
 
   const { providers, preferences } = data;
@@ -765,15 +813,11 @@ function ProviderExperienceView({
       name: p.name,
       readiness: readinessOf(p),
       quotaUsedPercent: p.health.quotaUsedPercent,
+      quotaSource: p.health.quotaSource ?? 'SEED',
       local: p.availability === 'LOCAL',
       mock: runtime?.status === 'MOCK',
     };
   });
-
-  // SPRINT — the honest AI Control Center board. Every number (today, this
-  // month, per-provider usage, quota, cost, budget) comes from the durable
-  // usage ledger; nothing is derived or defaulted client-side.
-  const { data: controlCenter } = useAiControlCenter(userId);
 
   return (
     <div className="space-y-6">
@@ -847,6 +891,10 @@ function ProviderExperienceView({
                 </p>
               </div>
             )}
+            {/* Is provider usage being checked at all, and what did the last
+                pass really report? This is the explanation behind every
+                "Unavailable from provider" row. */}
+            <ProviderUsageIngestNote userId={userId} />
             <UsageAvailabilityWidget
               rows={usageRows}
               summary={summary}
@@ -922,13 +970,26 @@ function UsageDetailView({
   onBack: () => void;
   fx?: ExchangeRateProvider;
 }): React.JSX.Element {
-  const { data, isLoading } = useProviderUsageDetail(userId);
+  const { data, isLoading, isError, error, refetch } = useProviderUsageDetail(userId);
+
+  if (isError) {
+    return (
+      <ProviderReadFailure
+        title="Unable to load usage details"
+        message={error instanceof Error ? error.message : null}
+        onRetry={() => {
+          void refetch();
+        }}
+      />
+    );
+  }
 
   if (isLoading || !data) {
     return <CenteredLoading label="Loading usage details..." />;
   }
 
-  const { totals, byProvider, byModel, executions } = data;
+  const { totals, byProvider, byModel, executions, usageSource, durableChecked, costUnknown } =
+    data;
 
   return (
     <div className="space-y-5 animate-slide-up">
@@ -997,6 +1058,22 @@ function UsageDetailView({
         {fx
           ? `INR reference rate ${String(fx.usdToInrRate())} · ${fx.source()} · published ${fx.observedAt()}`
           : 'INR reference rate unavailable; costs cannot be converted right now.'}
+      </p>
+
+      {/* SOURCE LABEL — the numbers above are only as good as the store they
+          were read from, and the two stores are not equivalent. */}
+      <p data-testid="usage-source" className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+        {durableChecked && usageSource === 'DURABLE_USAGE_LEDGER'
+          ? `Source: durable usage ledger (ai_usage_events) — every recorded execution for this account.${costUnknown ? ' At least one execution had no provider-reported price, so the cost here is a lower bound.' : ''}`
+          : 'Source: execution trace ledger only (in-process). This store has no accounting attributes for plain Ask calls, so 0 tokens / $0.00 here can mean "not measured", not "not used".'}
+      </p>
+      {/* COST PROVENANCE — the platform never receives a provider-reported
+          per-request price, so every cost figure above is an ESTIMATE from
+          VedMoulya's registry pricing applied to the provider's reported
+          token counts. It is not the provider's own billed amount. */}
+      <p data-testid="usage-cost-source" className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+        Cost source: estimated from VedMoulya&rsquo;s registry pricing and the providers&rsquo;
+        reported token counts — not a provider-reported charge or billed amount.
       </p>
 
       {/* OpenAI ORGANIZATION usage — real per-model numbers from OpenAI for
@@ -1086,11 +1163,19 @@ function UsageDetailView({
         </div>
       )}
 
-      {executions.length === 0 && byProvider.length === 0 && (
+      {/* "No recorded usage" is claimed ONLY for a store that was really read. */}
+      {executions.length === 0 && byProvider.length === 0 && durableChecked && (
         <EmptyState
           icon={<BarChart3 className="h-8 w-8" />}
-          title="No usage data yet"
-          description="Usage data appears here after you run AI workflows."
+          title="No recorded AI usage"
+          description="The durable usage ledger was read and holds no executions for this account yet."
+        />
+      )}
+      {executions.length === 0 && byProvider.length === 0 && !durableChecked && (
+        <EmptyState
+          icon={<BarChart3 className="h-8 w-8" />}
+          title="Usage is not measurable in this environment"
+          description="No durable usage ledger was read, so VedMoulya cannot say whether any AI was used — it does not claim zero."
         />
       )}
     </div>

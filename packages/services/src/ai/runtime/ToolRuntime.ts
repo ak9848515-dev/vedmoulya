@@ -31,6 +31,7 @@
    the same justification used by PostgresRagRepository and the runtime
    validators. */
 import { ValidationError } from '@vedmoulya/core';
+import { redactSecrets } from './AIObservability.js';
 
 // ── Tool schema (JSON-schema subset, mirroring StructuredOutputValidator) ──
 
@@ -571,7 +572,11 @@ export class ToolRegistry {
         tenantId: request.tenantId,
         conversationId: request.conversationId,
         capturedInput: this.capturePayloads ? this.sanitizePayload(request.arguments) : undefined,
-        error: error instanceof Error ? error.message : String(error),
+        // A handler failure is returned to the caller (and to the model), so
+        // the message is REDACTED with the runtime's single redaction policy
+        // before it is stored or returned: a tool that fails on a request
+        // carrying a credential-shaped string must never echo it back.
+        error: redactSecrets(error instanceof Error ? error.message : String(error)),
         latencyMs: Date.now() - startedAt,
         at: new Date().toISOString(),
       });

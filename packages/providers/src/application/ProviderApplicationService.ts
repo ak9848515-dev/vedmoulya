@@ -32,6 +32,7 @@ import {
   OpenAICompatibleModelDiscovery,
 } from '../infrastructure/LocalModelDiscovery.js';
 import type { ProviderRepository } from '../domain/repository/ProviderRepository.js';
+import type { ProviderAccountUsageMetric } from '../types/provider-types.js';
 import type { ProviderPreferencesStore } from '../domain/preferences/ProviderPreferencesStore.js';
 import { currentProviderUser } from './request-context.js';
 import { createProviderId } from '../domain/value-objects/ProviderId.js';
@@ -347,6 +348,8 @@ export class ProviderApplicationService {
       rateLimitRemaining?: number;
       rateLimitResetAt?: string | null;
       checkedAt?: string;
+      /** Genuine provider-reported account metrics to persist verbatim. */
+      accountUsage?: ProviderAccountUsageMetric[];
     },
   ): Promise<ProviderResult<ProviderDTO>> {
     const provider = await this.repository.findById(createProviderId(id));

@@ -75,6 +75,89 @@ export interface ProviderRateLimits {
 
 // ── Health ─────────────────────────────────────────────────────────────────
 
+/**
+ * Provenance of `quotaUsedPercent`.
+ *
+ *   'SEED'              → a registry/catalog constant. NOT a measurement:
+ *                         nothing at runtime refreshes it, so it must never be
+ *                         presented as the provider's account usage, remaining
+ *                         balance or remaining percentage.
+ *   'PROVIDER_REPORTED' → the provider itself reported usage and it was
+ *                         ingested (Provider.recordHealthSample).
+ * Absent ⇒ 'SEED'.
+ */
+export type ProviderQuotaSource = 'SEED' | 'PROVIDER_REPORTED';
+
+/**
+ * Which account-level metric a genuine provider response carried. These are
+ * DISTINCT by construction and must never be conflated with each other or with
+ * VedMoulya's own runtime-token measurements:
+ *
+ *   'ACCOUNT_TOKENS'     → tokens the provider reports were consumed by the
+ *                          account over a window (usage API).
+ *   'ACCOUNT_COST'       → USD the provider reports the account spent over a
+ *                          window (cost/billing API).
+ *   'ACCOUNT_CREDITS'    → a prepaid credit balance the provider reports for
+ *                          the key/account (no window — a point-in-time balance).
+ *   'BOUNDED_QUOTA_USED' → a provider-reported bounded quota consumed 0–100%
+ *                          (e.g. OpenAI hard USD limit, OpenRouter credit limit).
+ */
+export type ProviderAccountMetric =
+  'ACCOUNT_TOKENS' | 'ACCOUNT_COST' | 'ACCOUNT_CREDITS' | 'BOUNDED_QUOTA_USED';
+
+/**
+ * ONE genuine, provider-reported account metric. Persisted verbatim from a
+ * provider response — provider, metric, source, retrieval timestamp, the
+ * applicable window, and the value/unit. Nothing here is ever fabricated:
+ * an absent metric is simply absent, never zero.
+ */
+export interface ProviderAccountUsageMetric {
+  provider: string;
+  metric: ProviderAccountMetric;
+  /** The authoritative source (endpoint/path) the value came from. */
+  source: string;
+  /** ISO timestamp of when the response was retrieved. */
+  retrievedAt: string;
+  /**
+   * The window the metric applies to, in epoch seconds (inclusive start,
+   * exclusive end). Absent for a point-in-time balance (credits).
+   */
+  window?: { startEpochSec: number; endEpochSec: number };
+  /** The reported numeric value. */
+  value: number;
+  /** Unit of `value` — 'tokens' | 'usd' | 'percent'. */
+  unit: 'tokens' | 'usd' | 'percent';
+  /**
+   * Optional breakdown rows the provider itself reported (e.g. per model / per
+   * line item). Never synthesized. */
+  breakdown?: Array<{ key: string; value: number; unit: 'tokens' | 'usd' | 'percent' }>;
+  /**
+   * True when the provider explicitly reports the value is an unlimited / no
+   * ceiling figure (e.g. OpenRouter limit === -1). An unlimited metric carries
+   * no numeric value and MUST NOT become a percentage.
+   */
+  unlimited?: boolean;
+}
+
+/**
+ * Provenance of a provider health RECORD (status / score / latency / the
+ * sample counts it aggregates).
+ *
+ *   'SEED'     → catalog data. It is a documentation-derived estimate captured
+ *                when the registry catalog was built (the catalog even stamps
+ *                `lastCheckedAt` with the build time), so it is NOT a check of
+ *                this deployment: no runtime request measured it and no health
+ *                probe ever ran. A seeded 'healthy' must never be presented as
+ *                "connected", "verified" or "checked just now".
+ *   'MEASURED' → at least one health sample was written at RUNTIME through
+ *                `Provider.recordHealthSample` (the executor health feedback
+ *                and the provider-usage ingestor are its writers).
+ * Absent ⇒ 'SEED'. Defaulting to SEED is deliberate: a record is only promoted
+ * by a real runtime write, never by time passing, so every legacy or persisted
+ * record stays unproven until something actually checks it.
+ */
+export type ProviderHealthSource = 'SEED' | 'MEASURED';
+
 export interface ProviderHealthSnapshot {
   /** Operational status from the AI platform taxonomy. */
   status: ProviderHealthStatus;
@@ -85,6 +168,18 @@ export interface ProviderHealthSnapshot {
   successCount: number;
   failureCount: number;
   quotaUsedPercent: number;
+  /** See ProviderQuotaSource — absent means 'SEED' (never provider-reported). */
+  quotaSource?: ProviderQuotaSource;
+  /** See ProviderHealthSource — absent means 'SEED' (never a live check). */
+  healthSource?: ProviderHealthSource;
+  /**
+   * The most recent GENUINE provider-reported account metrics, keyed by metric.
+   * Each entry is a verbatim provider response (provider/metric/source/retrievedAt
+   * /window/value). Absent key ⇒ that metric was never retrieved — the UI shows
+   * "Unavailable from provider", never zero. This is the persistence home for
+   * account usage/cost/credits, kept separate from VedMoulya's runtime tokens.
+   */
+  accountUsage?: Partial<Record<ProviderAccountMetric, ProviderAccountUsageMetric>>;
   rateLimitRemaining: number;
   rateLimitResetAt: string | null;
   lastSuccessAt: string | null;

@@ -294,7 +294,7 @@ describe('AuthRoutes — sign-out edge cases', () => {
       headers: { authorization: 'Bearer valid-token' },
     });
     expect(res.status).toBe(200);
-    expect(service.signOut).toHaveBeenCalledWith('user-1');
+    expect(service.signOut).toHaveBeenCalledWith('user-1', undefined);
   });
 
   it('POST /sign-out with invalid token still succeeds (no user to sign out)', async () => {

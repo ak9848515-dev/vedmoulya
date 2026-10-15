@@ -2,6 +2,13 @@
 // VedMoulya — API Gateway: AI World Scheduler Cadence Driver
 // EPIC-018 — RUNTIME CLOSURE · EPIC-021 — SCHEDULED OPPORTUNITY REFRESH.
 //
+// The same heartbeat ALSO carries one DEPLOYMENT-SCOPED step: the provider-usage
+// ingest (opt-in, env `AI_PROVIDER_USAGE_CADENCE_ENABLED`), which runs once per
+// pass before the per-user loop so the provider-account usage endpoints are
+// reached in-product and not only from the operator CLI script. It is off by
+// default because it makes real outbound calls with the deployment's own
+// provider credentials.
+//
 // The scheduler domain (DiscoveryScheduler) decides WHEN each job may run;
 // this driver is the process-level heartbeat that gives scheduler.tick() a
 // REAL runtime caller so 6-hour / daily / weekly discovery actually executes
@@ -90,6 +97,13 @@ export interface SchedulerCadenceTickResult {
    *  unavailable). Reported honestly — a failure never becomes a candidate and
    *  never counts as discovery. */
   externalOpportunityFailures: number;
+  /** Deployment-scoped provider-usage ingest: provider-reported quotas written
+   *  this pass (0 when no provider reported one — never an invented quota). */
+  providerUsageQuotaSamples: number;
+  /** Provider-usage probes that succeeded without a reported quota. */
+  providerUsageCheckedSamples: number;
+  /** Provider-usage probes that FAILED (counted, never turned into a quota). */
+  providerUsageFailures: number;
   /** Users whose scheduler tick or intelligence refresh failed (isolated —
    *  never aborts the pass; the two share one per-user failure counter). */
   errors: number;
@@ -115,6 +129,9 @@ export interface SchedulerRuntimeStatus {
   /** S7.1 — whether the external opportunity monitoring pass rides this
    *  heartbeat. Optional so existing status literals stay valid. */
   externalOpportunityMonitorEnabled?: boolean;
+  /** Whether the deployment-scoped provider-usage ingest rides this heartbeat.
+   *  Optional so existing status literals stay valid. */
+  providerUsageIngestEnabled?: boolean;
   startedAt?: number;
   lastTickAt?: number;
   lastTick?: SchedulerCadenceTickResult;
@@ -141,6 +158,30 @@ export interface SchedulerIntelligenceRefreshPort {
  *  idempotency means a repeat refresh proposes nothing new. */
 export interface SchedulerProactiveRefreshPort {
   refresh(userId: string): Promise<{ recommendationsRefreshed: number }>;
+}
+
+/**
+ * DEPLOYMENT-SCOPED provider-usage ingest (NOT per user).
+ *
+ * The heartbeat gives the provider-usage ingestor a real runtime caller so the
+ * provider-account usage endpoints (OpenAI organization usage / billing,
+ * DeepSeek balance, OpenRouter credits) are reached IN PRODUCT instead of only
+ * from the operator CLI script. It runs ONCE per pass, before the per-user
+ * loop: provider accounts belong to the deployment, not to a user.
+ *
+ * The driver stays a heartbeat — it only runs the pass and counts honest
+ * outcomes. Probing, credential resolution and the "never fabricate a quota"
+ * rules all stay in ProviderUsageIngestor.
+ */
+export interface SchedulerProviderUsagePort {
+  run(): Promise<{
+    /** Provider-reported quotas written (0 when nothing was reported). */
+    quotaSamplesWritten: number;
+    /** Plain "checked" samples written (probe succeeded, no quota reported). */
+    checkedSamplesWritten: number;
+    /** Families whose probe failed (reported, never converted into a quota). */
+    probesFailed: number;
+  }>;
 }
 
 /** S7.1 — external opportunity monitoring on the SAME heartbeat. The driver
@@ -203,6 +244,18 @@ export interface SchedulerCadenceDriverOptions {
   /** S7.1 — the monitoring bridge. Defaults to the gateway singleton
    *  (opportunityMonitor.monitor). It owns no scheduler of its own. */
   externalMonitor?: SchedulerExternalOpportunityMonitorPort;
+  /**
+   * Deployment-scoped provider-usage ingest on this heartbeat (once per pass).
+   * OPT-IN, default OFF: env `AI_PROVIDER_USAGE_CADENCE_ENABLED=1|true|yes|on`
+   * enables it. It is off by default because a pass makes real outbound calls to
+   * the deployment's provider billing/usage endpoints with the deployment's own
+   * credentials — an operator opts in. With no credential configured the pass
+   * makes NO request and reports the honest NOT_CONFIGURED outcome.
+   */
+  providerUsageIngestEnabled?: boolean;
+  /** The ingest bridge. Defaults to the gateway singleton (its registry is the
+   *  persistence target). */
+  providerUsageIngest?: SchedulerProviderUsagePort;
   /** Scheduler accessor. Defaults to the gateway singleton (getServices()). */
   getScheduler?: () => SchedulerApplicationService;
   /** User source. Defaults to the identity directory (registered users). */
@@ -347,6 +400,25 @@ const defaultExternalOpportunityMonitor: SchedulerExternalOpportunityMonitorPort
   monitor: (userId) => getServices().opportunityMonitor.monitor(userId),
 };
 
+/** DEPLOYMENT-SCOPED — the default provider-usage ingest bridge, wired to the
+ *  gateway singleton (the same service the operator CLI script uses). It owns no
+ *  probe logic: outcomes, credential resolution and the "never write a quota the
+ *  provider did not report" rules stay in ProviderUsageIngestor. */
+const defaultProviderUsageIngest: SchedulerProviderUsagePort = {
+  async run(): Promise<{
+    quotaSamplesWritten: number;
+    checkedSamplesWritten: number;
+    probesFailed: number;
+  }> {
+    const report = await getServices().runProviderUsageIngest();
+    return {
+      quotaSamplesWritten: report.quotaSamplesWritten,
+      checkedSamplesWritten: report.checkedSamplesWritten,
+      probesFailed: report.entries.filter((entry) => entry.outcome === 'PROBE_FAILED').length,
+    };
+  },
+};
+
 /**
  * Start the AI World discovery cadence. Idempotent — subsequent calls return
  * the existing driver. Each tick asks the EXISTING SchedulerApplicationService
@@ -371,6 +443,7 @@ export function startSchedulerCadenceDriver(
         maxUsersPerTick: 0,
         refreshIntelligenceEnabled: false,
         proactiveRefreshEnabled: false,
+        providerUsageIngestEnabled: false,
       }),
       lastTick: undefined,
     };
@@ -404,6 +477,20 @@ export function startSchedulerCadenceDriver(
     options.externalMonitorEnabled ??
     envFlagEnabled(process.env.AI_WORLD_CADENCE_EXTERNAL_OPPORTUNITIES);
   const externalMonitor = options.externalMonitor ?? defaultExternalOpportunityMonitor;
+  // DEPLOYMENT-SCOPED provider-usage ingest — OPT-IN (see the option doc). When
+  // enabled it runs ONCE per pass before the per-user loop and announces its
+  // schedule to the gateway so the in-product status read can be honest about
+  // whether anything is scheduled at all.
+  const providerUsageIngestEnabled =
+    options.providerUsageIngestEnabled ??
+    envFlagEnabled(process.env.AI_PROVIDER_USAGE_CADENCE_ENABLED, false);
+  const providerUsageIngest = options.providerUsageIngest ?? defaultProviderUsageIngest;
+  // No announcement call here on purpose: the schedule is reported to the
+  // in-product status read through THIS driver's own status()
+  // (`providerUsageIngestEnabled` + `intervalMs`), which the gateway already
+  // binds at startup. Calling the gateway from the driver's start path would
+  // construct it (and its production repositories) on every boot — including in
+  // hermetic tests — for information it can read directly.
   const now = options.now ?? ((): number => Date.now());
   const log = options.log ?? logger;
 
@@ -427,11 +514,34 @@ export function startSchedulerCadenceDriver(
       proactiveRefreshes: 0,
       externalOpportunitiesDiscovered: 0,
       externalOpportunityFailures: 0,
+      providerUsageQuotaSamples: 0,
+      providerUsageCheckedSamples: 0,
+      providerUsageFailures: 0,
       errors: 0,
       errorSample: [],
       truncated: false,
     };
     try {
+      // ── 0. DEPLOYMENT-SCOPED provider-usage ingest (once per pass). ────
+      //      Runs BEFORE the user loop because provider accounts belong to the
+      //      deployment, not to a user. Isolated like every other step: a
+      //      failure is counted and logged, never thrown into the timer, and a
+      //      failed probe never turns into a quota.
+      if (providerUsageIngestEnabled) {
+        try {
+          const ingested = await providerUsageIngest.run();
+          result.providerUsageQuotaSamples += ingested.quotaSamplesWritten;
+          result.providerUsageCheckedSamples += ingested.checkedSamplesWritten;
+          result.providerUsageFailures += ingested.probesFailed;
+        } catch (error) {
+          result.providerUsageFailures += 1;
+          result.errors += 1;
+          if (result.errorSample.length < ERROR_SAMPLE_LIMIT) {
+            result.errorSample.push(error instanceof Error ? error.message : String(error));
+          }
+        }
+      }
+
       // ── 1. Enumerate users (identity directory — bounded). ────────────
       let users: string[];
       try {
@@ -536,6 +646,9 @@ export function startSchedulerCadenceDriver(
       result.proactiveRefreshes > 0 ||
       result.externalOpportunitiesDiscovered > 0 ||
       result.externalOpportunityFailures > 0 ||
+      result.providerUsageQuotaSamples > 0 ||
+      result.providerUsageCheckedSamples > 0 ||
+      result.providerUsageFailures > 0 ||
       result.errors > 0 ||
       result.userDirectoryError
     ) {
@@ -548,6 +661,9 @@ export function startSchedulerCadenceDriver(
         proactiveRefreshes: result.proactiveRefreshes,
         externalOpportunitiesDiscovered: result.externalOpportunitiesDiscovered,
         externalOpportunityFailures: result.externalOpportunityFailures,
+        providerUsageQuotaSamples: result.providerUsageQuotaSamples,
+        providerUsageCheckedSamples: result.providerUsageCheckedSamples,
+        providerUsageFailures: result.providerUsageFailures,
         errors: result.errors,
         truncated: result.truncated,
         userDirectoryError: result.userDirectoryError,
@@ -589,6 +705,7 @@ export function startSchedulerCadenceDriver(
         refreshIntelligenceEnabled,
         proactiveRefreshEnabled,
         externalOpportunityMonitorEnabled: externalMonitorEnabled,
+        providerUsageIngestEnabled,
         startedAt,
         lastTickAt: lastTick?.finishedAt,
         lastTick,

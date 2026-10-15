@@ -38,8 +38,9 @@ import {
   MemoryIntelligenceStoreAdapter,
 } from '@vedmoulya/execution-memory';
 import { PostgresMemoryRepository } from '@vedmoulya/memory-intelligence';
-import { MISSION_TERMINAL_STATES } from '@vedmoulya/mission-controller';
+import { MISSION_TERMINAL_STATES, assessBlockedRecovery } from '@vedmoulya/mission-controller';
 import type {
+  BlockedRecoveryAssessment,
   InitialObjectiveDependency,
   Mission,
   MissionObjective,
@@ -104,7 +105,11 @@ export interface MissionActivityEvent {
     | 'MISSION_RESUMED'
     | 'MISSION_APPROVED'
     | 'MISSION_BLOCKED'
-    | 'OBJECTIVE_STARTED';
+    | 'OBJECTIVE_STARTED'
+    // S10 — durability-barrier + checkpoint-fidelity events (durable trail).
+    | 'PERSISTENCE_FAILED'
+    | 'PERSISTENCE_RETRIED'
+    | 'CHECKPOINT_RESTORED';
   message: string;
 }
 
@@ -116,6 +121,12 @@ export interface MissionStatusView {
   state: string;
   outcome?: string;
   outcomeReason?: string;
+  /**
+   * S10 — present ONLY while the mission is BLOCKED: why it is blocked, who can
+   * clear it, and the operator action required. Nothing auto-resumes a BLOCKED
+   * mission unless the classification is AUTO_SAFE.
+   */
+  recoveryRequirement?: BlockedRecoveryAssessment;
   mode?: string;
   workspace?: string;
   autonomyLevel: string;
@@ -966,6 +977,11 @@ export class MissionService {
       state: mission.state,
       outcome: mission.outcome,
       outcomeReason: mission.outcomeReason,
+      // S10 — a BLOCKED mission carries its classification + operator action so
+      // the operator can see why it stopped and what clears it.
+      ...(mission.state === 'BLOCKED'
+        ? { recoveryRequirement: assessBlockedRecovery(mission.outcomeReason) }
+        : {}),
       mode: mission.mode,
       workspace: mission.workspace,
       autonomyLevel: mission.autonomyLevel,

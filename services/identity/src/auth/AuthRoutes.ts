@@ -173,6 +173,11 @@ export function createAuthRouter(authService: AuthService): Hono {
   });
 
   // ── Sign-Out ─────────────────────────────────────────────────────────
+  // S024-4A: accepts an optional refreshToken in the body so the exact
+  // presented JTI can be revoked alongside the family marker. The field is
+  // optional — existing callers that send only the Bearer access token keep
+  // working (family revocation still applies).
+  const signOutSchema = z.object({ refreshToken: z.string().min(1).optional() });
   router.post('/sign-out', async (c) => {
     try {
       const authHeader = c.req.header('Authorization');
@@ -184,7 +189,15 @@ export function createAuthRouter(authService: AuthService): Hono {
       const payload = await authService.verifySession(token);
 
       if (payload) {
-        await authService.signOut(payload.sub);
+        let presented: string | undefined;
+        try {
+          const body: Record<string, unknown> = await c.req.json();
+          const parsed = signOutSchema.safeParse(body);
+          if (parsed.success) presented = parsed.data.refreshToken;
+        } catch {
+          presented = undefined; // empty/non-JSON body → family revocation only
+        }
+        await authService.signOut(payload.sub, presented);
       }
 
       return c.json({ success: true, data: { message: 'Signed out' } }, 200);

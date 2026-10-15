@@ -7,7 +7,11 @@
 // Data honesty (non-negotiable, mirrors the backend contract):
 //   • cloud and LOCAL usage are separate concepts and separate totals
 //   • `quota.quotaKnown === false` ⇒ the UI must say "Unknown", never a number
+//   • `quota.registryEstimatePercent` is a REGISTRY SEED ESTIMATE — it is only
+//     ever labelled as such and never turned into account usage or a balance
 //   • `remaining.remainingTokens === undefined` ⇒ "Unknown", never `limit - used`
+//   • `healthSource === 'SEED'` ⇒ the health record is catalog data, never a
+//     live check of this deployment
 //   • `budget.source` distinguishes "your budget" from a VedMoulya allowance
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -54,6 +58,14 @@ export interface AiUsageTotalsDTO {
   cachedExecutions: number;
 }
 
+/**
+ * Provenance of a displayed cost figure. VedMoulya never receives a
+ * provider-reported per-request price, so every cost the ledger records is an
+ * ESTIMATE (provider-reported token counts × the registry's per-1K pricing).
+ * This label stops an estimate from reading as a provider-reported charge.
+ */
+export type AiCostSource = 'ESTIMATED_FROM_REGISTRY_PRICING' | 'UNKNOWN';
+
 export interface AiProviderQuotaDTO {
   provider: string;
   quotaKnown: boolean;
@@ -61,6 +73,12 @@ export interface AiProviderQuotaDTO {
   /** Present ONLY when the provider itself reported a real remaining count. */
   remainingTokens?: number;
   source: AiQuotaSource;
+  /**
+   * The REGISTRY's own seed estimate, when one exists. It is an ESTIMATE, not
+   * account usage: render it only with that label, never as "% used" or as a
+   * remaining balance.
+   */
+  registryEstimatePercent?: number;
   note?: string;
 }
 
@@ -75,7 +93,15 @@ export interface AiProviderBoardRowDTO {
   quota: AiProviderQuotaDTO;
   monthCostUsd: number;
   monthCostKnown: boolean;
+  /** Provenance of `monthCostUsd` — always estimated unless unknown. */
+  monthCostSource: AiCostSource;
   readiness: AiProviderReadinessDTO;
+  /**
+   * Provenance of the registry health record behind `readiness` (absent ⇒
+   * 'SEED'). A catalog record was never measured for this deployment, so the
+   * seeded 'healthy' must not read as a live check.
+   */
+  healthSource: 'SEED' | 'MEASURED';
 }
 
 export interface AiConfiguredSummaryDTO {

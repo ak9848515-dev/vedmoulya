@@ -30,6 +30,7 @@ import type { ApiResponse } from '../services/ResponseMapper.js';
 import type { ErrorCode } from '../middleware/error.js';
 import { successResponse } from '../services/ResponseMapper.js';
 import type { OpportunityApprovalPort } from '../infrastructure/OpportunityApprovalPorts.js';
+import { isOpportunityApprovalBoundTo } from '../infrastructure/OpportunityApprovalPorts.js';
 import { normalizeExternalOpportunity } from '../services/OpportunitySourceAdapter.js';
 import type { OpportunityQualification } from '../services/OpportunityQualification.js';
 import type { MissionLaunchPort } from '../infrastructure/OpportunityMissionPorts.js';
@@ -37,6 +38,7 @@ import { deriveOpportunityMissionObjective } from '../infrastructure/Opportunity
 import type { ExternalSourceFailureCode } from '../infrastructure/OpportunityMonitoringPorts.js';
 import type { OpportunityMonitor } from '../services/OpportunityMonitoring.js';
 import { rankOpportunities } from '../services/OpportunityRecommendation.js';
+import type { AcquisitionValuation } from '../services/OpportunityAcquisitionDecision.js';
 import type { OpportunityProposalPort } from '../infrastructure/OpportunityProposalPorts.js';
 
 /** S5 — the acquisition dependencies a router needs. Deliberately narrow: the
@@ -58,6 +60,15 @@ export interface OpportunityAcquisitionDeps {
   /** S7.1 — the proposal DRAFT port. Preparation only: it has no submission
    *  method, so this router cannot send anything to anyone. */
   proposal?: OpportunityProposalPort;
+  /**
+   * S9 — read-only, owner-scoped access to the EXISTING Sprint 016 valuation
+   * (`world.opportunityPipeline`), keyed by opportunityId. It is a READ: the
+   * acquisition decision consumes the valuation and never recomputes it.
+   * Absent ⇒ every candidate is honestly valued UNKNOWN.
+   */
+  listValuations?: (ownerId: string) => ReadonlyMap<string, AcquisitionValuation>;
+  /** S9 — optional hard budget gate. Absent ⇒ no budget gate is applied. */
+  budget?: { availableUsd?: number };
 }
 
 // S5.2 — in-process launch collapse. Concurrent startMission calls for the
@@ -629,6 +640,26 @@ export function createControlRouter(
             ),
           );
         }
+        // S11 — an approval authorizes ONE action for ONE owner. The record is
+        // read owner-scoped, but a persisted approval that names a different
+        // opportunity or a different granter was not produced by the approval
+        // authority for this resource, so it cannot authorize this launch.
+        // Fail-closed: nothing below may treat an unbound record as approval.
+        if (
+          !isOpportunityApprovalBoundTo({
+            approval: record.approval,
+            ownerId,
+            opportunityId: record.id,
+          })
+        ) {
+          return Promise.resolve(
+            acquisitionError(
+              'APPROVAL_MISMATCH',
+              'The persisted approval was not granted by this owner for this opportunity.',
+              403,
+            ),
+          );
+        }
         let suitability: OpportunityQualification;
         try {
           suitability = acquisition.qualify(record);
@@ -986,15 +1017,24 @@ export function createControlRouter(
           acquisitionError('QUALIFICATION_UNAVAILABLE', 'Qualification is not configured.', 503),
         );
       }
+      // S9 — one owner-scoped read of the EXISTING Sprint 016 valuation, shared
+      // by every candidate. No valuation is recomputed here.
+      const valuations = acquisition.listValuations?.(ownerId);
       const recommendations = rankOpportunities(
         plane.listOpportunities(ownerId),
         acquisition.qualify,
+        {
+          ...(valuations !== undefined ? { valuationsByOpportunityId: valuations } : {}),
+          ...(acquisition.budget !== undefined ? { budget: acquisition.budget } : {}),
+        },
       );
       return Promise.resolve(
         successResponse({
           recommendations,
           // Always true — ranking is advisory and can never approve or launch.
           authorizationRequired: true,
+          // S9 — whether the Sprint 016 valuation was available to the decision.
+          valuationAvailable: valuations !== undefined,
         }),
       );
     },

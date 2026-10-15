@@ -90,7 +90,18 @@ describe('AIRules', () => {
   });
 
   it('retryLimitRule handles non-retryable reasons', () => {
-    expect(retryLimitRule('invalid_response', 0).passed).toBe(false);
+    // Credential / internal / unsupported-model failures cannot be fixed by
+    // re-asking: they are never retried.
+    expect(retryLimitRule('authentication_error', 0).passed).toBe(false);
+    expect(retryLimitRule('internal_error', 0).passed).toBe(false);
+    expect(retryLimitRule('unsupported_model', 0).passed).toBe(false);
+  });
+
+  it('retryLimitRule allows a bounded retry for a malformed model response', () => {
+    // A schema-invalid response is transient (structured-output contract).
+    expect(retryLimitRule('invalid_response', 0).passed).toBe(true);
+    expect(retryLimitRule('invalid_response', 2).passed).toBe(true);
+    expect(retryLimitRule('invalid_response', 3).passed).toBe(false);
   });
 
   it('retryLimitRule enforces the max retry count', () => {

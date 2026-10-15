@@ -48,8 +48,22 @@ export interface ProviderBoardRow {
   /** Cost semantics: real when known, explicitly UNKNOWN otherwise. */
   monthCostUsd: number;
   monthCostKnown: boolean;
+  /**
+   * Provenance of `monthCostUsd`. VedMoulya receives no provider-reported
+   * per-request price, so a known figure is an ESTIMATE (provider-reported
+   * token counts × the registry's per-1K pricing) — labelled, never presented
+   * as a provider-reported charge.
+   */
+  monthCostSource: 'ESTIMATED_FROM_REGISTRY_PRICING' | 'UNKNOWN';
   /** Honest runtime state — a configured provider can be NOT executable. */
   readiness: ProviderReadinessView;
+  /**
+   * Provenance of the registry health RECORD behind `readiness` (absent ⇒
+   * 'SEED'). A 'SEED' record is catalog data: the seeded 'healthy' is not a
+   * check of this deployment, so the board labels it as an estimate instead of
+   * implying the provider was just verified.
+   */
+  healthSource: 'SEED' | 'MEASURED';
 }
 
 export interface ConfiguredAiSummary {
@@ -162,8 +176,15 @@ export class AiControlCenterService {
         providerId: p.providerId,
         enabled: p.enabled,
         credentialSource: p.credentialSource,
-        quotaUsedPercent: quotaPercent,
+        // Only a PROVIDER-REPORTED percentage is evidence. A registry seed
+        // constant (45/38/30/55/40 …) is catalog data, so it is not passed as
+        // quota evidence at all — otherwise a seed could mark a provider
+        // "Quota nearly exhausted" without anything ever being measured.
+        quotaUsedPercent: p.health.quotaSource === 'PROVIDER_REPORTED' ? quotaPercent : undefined,
         healthStatus: p.health.status,
+        // A seed health record is not evidence: the seeded 'healthy' can never
+        // pass as a live check (see ProviderHealthSource).
+        healthSource: p.health.healthSource ?? 'SEED',
         local,
       });
       return {
@@ -174,10 +195,24 @@ export class AiControlCenterService {
         enabled: p.enabled,
         monthTokens: usageRow?.totalTokens ?? 0,
         monthExecutions: usageRow?.executions ?? 0,
-        quota: resolveProviderQuotaView(p.providerId, quotaPercent, local),
+        // Provenance travels with the value: a seed constant must never be
+        // presented as the provider's reported account usage.
+        quota: resolveProviderQuotaView(
+          p.providerId,
+          quotaPercent,
+          local,
+          p.health.quotaSource ?? 'SEED',
+        ),
         monthCostUsd: usageRow?.costUsd ?? 0,
         monthCostKnown: usageRow !== undefined ? !usageRow.costUnknown : false,
+        // Cost is only ever an estimate here: the ledger stores tokens the
+        // adapter measured plus a registry-priced cost, never a provider price.
+        monthCostSource:
+          usageRow !== undefined && !usageRow.costUnknown
+            ? 'ESTIMATED_FROM_REGISTRY_PRICING'
+            : 'UNKNOWN',
         readiness,
+        healthSource: p.health.healthSource ?? 'SEED',
       };
     });
 

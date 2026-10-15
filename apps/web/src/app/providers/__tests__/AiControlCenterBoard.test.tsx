@@ -27,6 +27,7 @@ function provider(overrides: Partial<AiProviderBoardRowDTO> = {}): AiProviderBoa
     quota: { provider: 'google', quotaKnown: false, source: 'UNKNOWN' },
     monthCostUsd: 0,
     monthCostKnown: false,
+    monthCostSource: 'UNKNOWN',
     readiness: {
       providerId: 'google',
       configured: true,
@@ -37,6 +38,9 @@ function provider(overrides: Partial<AiProviderBoardRowDTO> = {}): AiProviderBoa
       state: 'READY',
       reason: 'Ready.',
     },
+    // The registry health record is catalog data until a runtime sample writes
+    // it — the default fixture states that provenance explicitly.
+    healthSource: 'SEED',
     ...overrides,
   };
 }
@@ -132,7 +136,36 @@ describe('AiControlCenterBoard — provider quota honesty', () => {
     // Quota AND Remaining both read "Unknown" — neither is ever a number here.
     expect(screen.getAllByText('Unknown').length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByLabelText('Google provider quota used')).toBeNull();
-    expect(screen.getByText(/does not report quota/i)).toBeTruthy();
+    // The row says WHERE the number is missing from (the provider), and that
+    // the unknown is not a zero balance.
+    expect(screen.getByText(/Unavailable from provider/i)).toBeTruthy();
+    expect(screen.getByText(/reports no account usage/i)).toBeTruthy();
+  });
+
+  it('labels a registry seed estimate as an estimate — never as used quota', () => {
+    render(
+      <AiControlCenterBoard
+        board={board({
+          providers: [
+            provider({
+              quota: {
+                provider: 'google',
+                quotaKnown: false,
+                source: 'UNKNOWN',
+                registryEstimatePercent: 45,
+                note: 'No usage reported by this provider.',
+              },
+            }),
+          ],
+        })}
+      />,
+    );
+    // The seed constant is visible ONLY with its provenance attached, and it is
+    // never rendered as "45% used" nor as a bar.
+    expect(screen.queryByText('45% used')).toBeNull();
+    expect(screen.queryByLabelText('Google provider quota used')).toBeNull();
+    expect(screen.getByText(/Registry estimate 45%/)).toBeTruthy();
+    expect(screen.getByText(/not your account usage/i)).toBeTruthy();
   });
 
   it('renders a real reported quota with its own bar', () => {
@@ -159,6 +192,50 @@ describe('AiControlCenterBoard — provider quota honesty', () => {
   it('renders unknown cost as "Unknown", never a fabricated dollar figure', () => {
     render(<AiControlCenterBoard board={board()} />);
     expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
+  });
+
+  it('labels a known cost as ESTIMATED from registry pricing — never a provider-reported charge', () => {
+    render(
+      <AiControlCenterBoard
+        board={board({
+          providers: [
+            provider({
+              monthCostUsd: 0.42,
+              monthCostKnown: true,
+              monthCostSource: 'ESTIMATED_FROM_REGISTRY_PRICING',
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText('$0.42')).toBeTruthy();
+    // The provenance is visible on the row: an estimate, not a charge.
+    expect(screen.getByText('estimated')).toBeTruthy();
+    expect(screen.getByText(/estimated from VedMoulya’s registry pricing/i)).toBeTruthy();
+    // And it is explicitly negated as a provider-reported charge.
+    expect(screen.getByText(/not a provider-reported charge/i)).toBeTruthy();
+  });
+
+  it('never shows a cost number for an execution that had no reported pricing', () => {
+    render(
+      <AiControlCenterBoard
+        board={board({
+          providers: [
+            provider({
+              monthTokens: 500,
+              monthExecutions: 3,
+              monthCostUsd: 0,
+              monthCostKnown: false,
+              monthCostSource: 'UNKNOWN',
+            }),
+          ],
+        })}
+      />,
+    );
+    // No fabricated $0.0000 charge: the unknown cost reads Unknown.
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
+    expect(screen.queryByText('$0.00')).toBeNull();
+    expect(screen.queryByText('estimated')).toBeNull();
   });
 });
 

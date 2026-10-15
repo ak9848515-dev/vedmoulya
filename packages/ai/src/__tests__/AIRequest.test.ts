@@ -128,7 +128,14 @@ describe('AIRequest', () => {
     request.fail('timeout');
     expect(request.isRetryable()).toBe(true);
 
+    // A malformed model response is a transient generation artifact: the domain
+    // allows a bounded retry (same allowlist as `retryLimitRule`).
     request.fail('invalid_response');
+    expect(request.isRetryable()).toBe(true);
+
+    // A credential failure is NOT retryable — retrying a broken key cannot
+    // succeed; the runtime falls back to the next provider instead.
+    request.fail('authentication_error');
     expect(request.isRetryable()).toBe(false);
   });
 

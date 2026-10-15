@@ -97,8 +97,20 @@ export {
   DEFAULT_LEASE_TTL_MS,
   DEFAULT_MAX_ACTIVITY_EVENTS,
   DEFAULT_MAX_DIAGNOSIS_HISTORY,
+  // S10 — durability barrier: bounded retry budget + the error a failed
+  // required write raises (never a fabricated durable success).
+  DEFAULT_PERSISTENCE_ATTEMPTS,
+  DEFAULT_PERSISTENCE_BASE_DELAY_MS,
+  RequiredPersistenceError,
   MissionControllerService,
 } from './application/MissionControllerService.js';
+
+// S10 — BLOCKED-mission recovery policy (pure; nothing auto-resumes).
+export { assessBlockedRecovery, mayAutoResumeBlocked } from './domain/recovery-policy.js';
+export type {
+  BlockedRecoveryAssessment,
+  MissionRecoveryRequirement,
+} from './domain/recovery-policy.js';
 export type {
   MissionControllerOptions,
   MissionStatusDTO,

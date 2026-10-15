@@ -189,12 +189,18 @@ describe('BrainDashboardService', () => {
     providerExperience.getOverview.mockResolvedValue({ success: false, error: 'down' });
     const view = await new BrainDashboardService(input).get('u1');
     expect(view.providerHealth).toEqual([]);
+    // A failed read degrades to honest zeros: no fabricated 1M-token allowance
+    // (`tokenBudget` stays ABSENT and `budgetSource` says NONE), and the usage
+    // source is reported as the weaker one instead of claiming the ledger.
     expect(view.usage).toEqual({
       tokensUsed: 0,
-      tokenBudget: 0,
+      budgetSource: 'NONE',
+      budgetBasis: 'UNKNOWN',
       costUsd: 0,
       aiCalls: 0,
       freePercent: 0,
+      usageSource: 'TRACE_LEDGER',
+      durableChecked: false,
     });
   });
 

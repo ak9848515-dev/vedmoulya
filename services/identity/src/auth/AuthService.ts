@@ -25,6 +25,10 @@ import {
   createVerificationTokenStore,
 } from '../infrastructure/persistence/VerificationTokenStore.js';
 import {
+  type RefreshTokenDenylistStore,
+  createRefreshTokenDenylistStore,
+} from '../infrastructure/persistence/RefreshTokenDenylistStore.js';
+import {
   createVerificationToken,
   hashVerificationToken,
   buildVerificationLink,
@@ -106,6 +110,11 @@ export interface AuthServiceOptions {
   /** Server-side OAuth state authority. Absent → the env-driven default
    *  (Postgres in production/staging, in-memory otherwise). */
   oauthStateStore?: OAuthStateStore;
+  /** Durable refresh-token revocation authority (S024-4A). Absent → the
+   *  env-driven default (Postgres in production/staging, in-memory
+   *  otherwise). Fail-closed: when the store throws, refresh is refused
+   *  and no replacement token is issued. */
+  refreshTokenDenylist?: RefreshTokenDenylistStore;
 }
 
 export class AuthService extends BaseService {
@@ -118,6 +127,7 @@ export class AuthService extends BaseService {
   private readonly verificationTokenStore: VerificationTokenStore;
   private readonly emailSender: VerificationEmailSender;
   private readonly oauthStateStore: OAuthStateStore;
+  private readonly refreshTokenDenylist: RefreshTokenDenylistStore;
 
   constructor(
     repository: IdentityRepository,
@@ -134,6 +144,7 @@ export class AuthService extends BaseService {
     this.verificationTokenStore = options.verificationTokenStore ?? createVerificationTokenStore();
     this.emailSender = options.emailSender ?? createVerificationEmailSender();
     this.oauthStateStore = options.oauthStateStore ?? createOAuthStateStore();
+    this.refreshTokenDenylist = options.refreshTokenDenylist ?? createRefreshTokenDenylistStore();
   }
 
   // ── Email/Password Sign-In ────────────────────────────────────────────
@@ -387,11 +398,48 @@ export class AuthService extends BaseService {
     return this.tokenService.verifyAccessToken(token);
   }
 
-  /** Refresh an expired access token */
+  /** Refresh an expired access token (S024-4A: durable rotation + revocation).
+   *
+   *  Lifecycle enforced here:
+   *   1. The presented refresh JWT must verify (signature/issuer/expiry/type).
+   *   2. Its JTI must NOT be in the durable denylist (rotation already used),
+   *      and the owning user must NOT carry a family-level logout revocation.
+   *      Either match → the refresh is rejected (no replacement issued).
+   *   3. On success the presented JTI is durably revoked FIRST (single-use
+   *      rotation: the old token can never rotate twice, even concurrently —
+   *      the denylist write wins for the loser), then a fresh pair is minted.
+   *   4. If the denylist store is unreachable the refresh FAILS CLOSED — no
+   *      replacement pair is issued, so a persistence outage can never mint
+   *      tokens that bypass replay protection.
+   *
+   *  NOTE: already-issued ACCESS tokens remain valid until they expire
+   *  (15 min); logout revokes the refresh family immediately, it does not
+   *  retroactively invalidate unexpired access tokens (no server-side access
+   *  denylist exists — out of scope for this change).
+   */
   async refreshSession(refreshToken: string): Promise<{ tokens: TokenPair } | null> {
     // Decode the refresh token to get the user ID
     const verified = await this.tokenService.verifyRefreshToken(refreshToken);
     if (!verified) return null;
+
+    try {
+      // Fail-closed denylist check BEFORE any minting.
+      if (await this.refreshTokenDenylist.isRevoked(verified.jti)) {
+        this.logger.warn('Refresh token replay rejected', { userId: verified.sub });
+        return null;
+      }
+      if (await this.refreshTokenDenylist.isUserRevoked(verified.sub)) {
+        this.logger.warn('Refresh rejected: session family revoked (logged out)', {
+          userId: verified.sub,
+        });
+        return null;
+      }
+    } catch (error) {
+      // Persistence outage → fail closed: refuse to mint a token we cannot
+      // replay-protect or revocation-check.
+      this.logger.error('Refresh denylist check failed — refusing refresh', { error });
+      return null;
+    }
 
     // Fetch user to get current role/email
     const { createUserId } = await import('@vedmoulya/domain');
@@ -412,11 +460,37 @@ export class AuthService extends BaseService {
 
     if (!tokens) return null;
 
+    // Single-use rotation: durably revoke the PRESENTED JTI so it can never
+    // rotate again (replay). The write is idempotent; the first writer wins.
+    try {
+      const verifiedNew = await this.tokenService.verifyRefreshToken(tokens.refreshToken);
+      const newExp = verifiedNew
+        ? new Date((verifiedNew.exp ?? Math.floor(Date.now() / 1000) + 7 * 24 * 3600) * 1000)
+        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await this.refreshTokenDenylist.revoke(verified.jti, verified.sub, newExp);
+    } catch (error) {
+      // Rotation evidence could not be persisted: the NEW pair was already
+      // minted, so the safest posture is to revoke nothing and FAIL the
+      // refresh — the caller keeps no partial state and the presented token
+      // remains single-use only after a successful persist. Returning null
+      // tells the client the refresh did not complete.
+      this.logger.error('Refresh rotation persist failed — refresh refused', { error });
+      return null;
+    }
+
     return { tokens };
   }
 
-  /** Sign out a user — revoke session */
-  async signOut(userId: string): Promise<void> {
+  /** Sign out a user — revoke the refresh family (S024-4A) then record logout.
+   *
+   *  The durable family marker guarantees subsequent refresh attempts for
+   *  this user fail closed, even across a new connection or process restart.
+   *  Already-issued access tokens still expire naturally (no access denylist).
+   *  If the denylist write fails the logout STILL records locally (audit
+   *  trail), but the error is rethrown so callers do not believe revocation
+   *  succeeded — fail-closed on the revocation claim.
+   */
+  async signOut(userId: string, presentedRefreshToken?: string): Promise<void> {
     const { createUserId } = await import('@vedmoulya/domain');
     const id = createUserId(userId);
     const user = await this.repository.findById(id);
@@ -425,11 +499,28 @@ export class AuthService extends BaseService {
       throw new NotFoundError('User', userId);
     }
 
+    // Durably revoke the refresh family FIRST so a crash between the two
+    // steps leaves tokens revoked (safe side) rather than merely logged out.
+    await this.refreshTokenDenylist.revokeForUser(userId);
+
+    // Also revoke the presented JTI explicitly when the caller supplies it,
+    // so the exact token can never be replayed even within clock skew.
+    if (presentedRefreshToken) {
+      const verified = await this.tokenService.verifyRefreshToken(presentedRefreshToken);
+      if (verified && verified.sub === userId) {
+        await this.refreshTokenDenylist.revoke(
+          verified.jti,
+          userId,
+          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        );
+      }
+    }
+
     user.recordLogout();
     await this.repository.update(user);
     await this.eventPublisher.publishUserLoggedOut(user.id);
 
-    this.logger.info('User signed out', { userId });
+    this.logger.info('User signed out (refresh family revoked)', { userId });
   }
 
   /** Read the authenticated user's own profile (server-authoritative source of

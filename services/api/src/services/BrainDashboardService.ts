@@ -66,14 +66,32 @@ export interface BrainDashboardView {
     name: string;
     availability: string;
     healthStatus: string;
+    /** Provenance of `healthStatus` (absent ⇒ 'SEED' — never a live check). */
+    healthSource?: 'SEED' | 'MEASURED';
     quotaUsedPercent: number;
+    /** Provenance of `quotaUsedPercent` (absent ⇒ 'SEED' — not account usage). */
+    quotaSource?: 'SEED' | 'PROVIDER_REPORTED';
   }>;
+  /**
+   * AI usage for this owner. Every figure is measured; the budget is READ from
+   * the user's preferences (never a platform default) and its provenance travels
+   * with it.
+   */
   usage: {
     tokensUsed: number;
-    tokenBudget: number;
+    /** The user's configured monthly limit. Undefined when none is configured. */
+    tokenBudget?: number;
+    budgetSource: 'NONE' | 'USER_CONFIGURED' | 'PLATFORM_ALLOWANCE';
+    budgetConfiguredAt?: string;
+    /** Present ONLY when a real limit exists. */
+    remainingTokens?: number;
+    budgetBasis: 'USER_BUDGET' | 'PLATFORM_ALLOWANCE' | 'PROVIDER_QUOTA' | 'UNKNOWN';
     costUsd: number;
     aiCalls: number;
     freePercent: number;
+    /** WHICH store answered: the durable ledger, or the weaker trace store. */
+    usageSource: 'DURABLE_USAGE_LEDGER' | 'TRACE_LEDGER';
+    durableChecked: boolean;
   };
   adaptiveScores: Array<{
     providerId: string;
@@ -169,18 +187,47 @@ export class BrainDashboardService {
         name: row.name,
         availability: row.availability,
         healthStatus: row.health.status,
+        healthSource: row.health.healthSource,
         quotaUsedPercent: row.health.quotaUsedPercent,
+        quotaSource: row.health.quotaSource,
       }))
       .slice(0, 12);
-    const usage = overview.success
+    // Usage comes from the DURABLE owner-scoped ledger through the provider
+    // experience read (which also reports which store answered). The budget is
+    // whatever the user actually configured: when nothing is configured the
+    // figure is absent and the UI says "not configured" — there is no default
+    // 1M-token allowance to fall back to.
+    const overviewUsage = overview.success ? overview.data?.usage : undefined;
+    const usage: BrainDashboardView['usage'] = overviewUsage
       ? {
-          tokensUsed: overview.data?.usage.tokensUsed ?? 0,
-          tokenBudget: overview.data?.usage.tokenBudget ?? 0,
-          costUsd: overview.data?.usage.costUsd ?? 0,
-          aiCalls: overview.data?.usage.aiCalls ?? 0,
-          freePercent: overview.data?.usage.freePercent ?? 0,
+          tokensUsed: overviewUsage.tokensUsed,
+          ...(overviewUsage.tokenBudget !== undefined
+            ? { tokenBudget: overviewUsage.tokenBudget }
+            : {}),
+          budgetSource: overviewUsage.budgetSource,
+          ...(overviewUsage.budgetConfiguredAt !== undefined
+            ? { budgetConfiguredAt: overviewUsage.budgetConfiguredAt }
+            : {}),
+          ...(overviewUsage.remainingTokens !== undefined
+            ? { remainingTokens: overviewUsage.remainingTokens }
+            : {}),
+          budgetBasis: overviewUsage.budgetBasis,
+          costUsd: overviewUsage.costUsd,
+          aiCalls: overviewUsage.aiCalls,
+          freePercent: overviewUsage.freePercent,
+          usageSource: overviewUsage.usageSource,
+          durableChecked: overviewUsage.durableChecked,
         }
-      : { tokensUsed: 0, tokenBudget: 0, costUsd: 0, aiCalls: 0, freePercent: 0 };
+      : {
+          tokensUsed: 0,
+          budgetSource: 'NONE',
+          budgetBasis: 'UNKNOWN',
+          costUsd: 0,
+          aiCalls: 0,
+          freePercent: 0,
+          usageSource: 'TRACE_LEDGER',
+          durableChecked: false,
+        };
 
     // Adaptive provider performance evidence (internal scores, advisory only).
     const capabilities = ['CODING', 'REASONING', 'RESEARCH', 'TEXT_GENERATION', 'RAG'];

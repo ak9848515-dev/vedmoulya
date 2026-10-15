@@ -24,6 +24,10 @@ import {
   createVerificationTokenStore,
 } from '../persistence/VerificationTokenStore.js';
 import { type OAuthStateStore, createOAuthStateStore } from '../persistence/OAuthStateStore.js';
+import {
+  type RefreshTokenDenylistStore,
+  createRefreshTokenDenylistStore,
+} from '../persistence/RefreshTokenDenylistStore.js';
 
 /** Register all identity infrastructure services with the DI container */
 export function registerIdentityServices(): void {
@@ -90,6 +94,19 @@ export function registerIdentityServices(): void {
     return store;
   });
 
+  container.register<RefreshTokenDenylistStore>('identity.refresh-token-denylist', () => {
+    const store = createRefreshTokenDenylistStore();
+    // Idempotent bootstrap of the refresh-token denylist table (estate
+    // convention, S024-4A). Fire-and-forget: production/staging uses the
+    // Postgres store; dev/test uses the in-memory store where ensureTable
+    // is an optional no-op.
+    const withEnsure = store as RefreshTokenDenylistStore & { ensureTable?(): Promise<void> };
+    void withEnsure.ensureTable?.().catch((error: unknown) => {
+      console.warn('Refresh token denylist table creation failed', error);
+    });
+    return store;
+  });
+
   container.register<AuthService>('identity.auth-service', () => {
     const repository = container.resolve('identity.repository') as IdentityRepository;
     const eventPublisher = container.resolve('identity.event-publisher') as IdentityEventPublisher;
@@ -97,9 +114,13 @@ export function registerIdentityServices(): void {
       'identity.verification-token-store',
     ) as VerificationTokenStore;
     const oauthStateStore = container.resolve('identity.oauth-state-store') as OAuthStateStore;
+    const refreshTokenDenylist = container.resolve(
+      'identity.refresh-token-denylist',
+    ) as RefreshTokenDenylistStore;
     return new AuthService(repository, eventPublisher, {
       verificationTokenStore,
       oauthStateStore,
+      refreshTokenDenylist,
     });
   });
 

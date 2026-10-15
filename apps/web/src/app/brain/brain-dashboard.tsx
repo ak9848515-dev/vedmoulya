@@ -38,6 +38,82 @@ import {
   useBrainUpdateIntelligenceEvent,
 } from '../../lib/api-client.js';
 
+// ── Honest usage/budget/provenance labels (pure) ─────────────────────────────
+// The Brain dashboard shows AI usage from the DURABLE ledger and the budget the
+// user actually configured. When nothing is configured it says so — it never
+// falls back to a platform default (the historical 1M-token allowance that
+// nobody set, which read as a real balance).
+
+interface DashboardUsage {
+  tokensUsed: number;
+  tokenBudget?: number;
+  budgetSource: 'NONE' | 'USER_CONFIGURED' | 'PLATFORM_ALLOWANCE';
+  remainingTokens?: number;
+  budgetBasis: 'USER_BUDGET' | 'PLATFORM_ALLOWANCE' | 'PROVIDER_QUOTA' | 'UNKNOWN';
+  costUsd: number;
+  aiCalls: number;
+  usageSource: 'DURABLE_USAGE_LEDGER' | 'TRACE_LEDGER';
+  durableChecked: boolean;
+}
+
+function tokens(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
+/**
+ * The user's own budget line, by PROVENANCE. A platform allowance is named as
+ * such, and "not configured" is a real answer — never a fabricated limit.
+ */
+export function brainBudgetLabel(usage: DashboardUsage): string {
+  if (usage.budgetSource === 'NONE' || usage.tokenBudget === undefined) {
+    return 'No AI budget configured';
+  }
+  const amount = `${tokens(usage.tokenBudget)} tokens`;
+  if (usage.remainingTokens === undefined) {
+    return usage.budgetSource === 'USER_CONFIGURED'
+      ? `Your budget: ${amount} (remaining unknown)`
+      : `VedMoulya allowance: ${amount} (remaining unknown)`;
+  }
+  return usage.budgetSource === 'USER_CONFIGURED'
+    ? `Your budget: ${tokens(usage.remainingTokens)} of ${amount} left`
+    : `VedMoulya allowance: ${tokens(usage.remainingTokens)} of ${amount} left`;
+}
+
+/**
+ * The measured usage line, naming its source. The in-process trace store can
+ * report 0 for usage that really happened, so it is never presented as if it
+ * were the durable ledger.
+ */
+export function brainUsageSourceLabel(usage: DashboardUsage): string {
+  const base = `${tokens(usage.tokensUsed)} tokens · ${usage.aiCalls} AI calls`;
+  return usage.usageSource === 'DURABLE_USAGE_LEDGER'
+    ? `${base} · from your usage ledger`
+    : `${base} · trace store only (durable ledger not read)`;
+}
+
+/**
+ * The provider chip tooltip: availability, the health record's PROVENANCE and
+ * the quota's provenance. A seeded 'healthy' is named a catalog estimate, and a
+ * seed quota percent never appears as account usage.
+ */
+export function providerChipTitle(p: {
+  availability: string;
+  healthStatus: string;
+  healthSource?: 'SEED' | 'MEASURED';
+  quotaUsedPercent: number;
+  quotaSource?: 'SEED' | 'PROVIDER_REPORTED';
+}): string {
+  const health =
+    p.healthSource === 'MEASURED'
+      ? `health measured at runtime (${p.healthStatus})`
+      : `catalog health estimate (${p.healthStatus}) — not a live check`;
+  const quota =
+    p.quotaSource === 'PROVIDER_REPORTED'
+      ? `provider-reported quota ${p.quotaUsedPercent}% used`
+      : 'no provider-reported quota';
+  return `${p.availability} · ${health} · ${quota}`;
+}
+
 // ── Status hero ──────────────────────────────────────────────────────────────
 
 export function BrainStatusHero({ userId }: { userId: string }): React.JSX.Element {
@@ -94,6 +170,22 @@ export function BrainStatusHero({ userId }: { userId: string }): React.JSX.Eleme
         <span className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-[#64748B] dark:text-[#CBD5E1]">
           {view.usage.costUsd > 0 ? `$${view.usage.costUsd.toFixed(4)} used` : 'no AI spend yet'}
         </span>
+        {/* Usage provenance: which store answered (the durable ledger is the
+            authority; the trace store can under-report). */}
+        <span
+          title={brainUsageSourceLabel(view.usage)}
+          className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-[#64748B] dark:text-[#CBD5E1]"
+        >
+          {brainUsageSourceLabel(view.usage)}
+        </span>
+        {/* Budget provenance: "your budget" vs a VedMoulya allowance vs
+            "not configured" — never a default 1M allowance. */}
+        <span
+          title="AI budget provenance"
+          className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-[#64748B] dark:text-[#CBD5E1]"
+        >
+          {brainBudgetLabel(view.usage)}
+        </span>
       </div>
 
       {/* Pending approvals — the most important surface */}
@@ -123,7 +215,7 @@ export function BrainStatusHero({ userId }: { userId: string }): React.JSX.Eleme
           {view.providerHealth.map((p) => (
             <span
               key={p.providerId}
-              title={`${p.availability} · quota ${p.quotaUsedPercent}%`}
+              title={providerChipTitle(p)}
               className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
                 p.availability === 'AVAILABLE'
                   ? 'border-emerald-200 text-emerald-700 dark:border-emerald-900 dark:text-emerald-300'

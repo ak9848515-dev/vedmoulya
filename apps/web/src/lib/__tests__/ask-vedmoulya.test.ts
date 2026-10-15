@@ -14,6 +14,7 @@ import {
   askContextIsEmpty,
   conversationHistoryFor,
   missionDraftFromRequest,
+  isGoalLikeRequest,
   ASK_GREETING,
 } from '../ask-vedmoulya.js';
 
@@ -34,6 +35,26 @@ describe('UX-08 classifyAskIntent (answer vs action)', () => {
   it('never turns an empty request into an action', () => {
     expect(classifyAskIntent('')).toBe('answer');
     expect(classifyAskIntent('   ')).toBe('answer');
+  });
+});
+
+describe('Mission-journey isGoalLikeRequest (offer, never auto-create)', () => {
+  it('offers a mission for plain-language goals without the word "mission"', () => {
+    expect(isGoalLikeRequest('I want to revise ABAP before my interview.')).toBe(true);
+    expect(isGoalLikeRequest('Help me learn Spanish for my new role.')).toBe(true);
+    expect(isGoalLikeRequest('My goal is to ship the MVP this month.')).toBe(true);
+  });
+
+  it('never offers for questions, greetings, or empty input', () => {
+    expect(isGoalLikeRequest('What is SAP?')).toBe(false);
+    expect(isGoalLikeRequest('How is my career progressing?')).toBe(false);
+    expect(isGoalLikeRequest('hi')).toBe(false);
+    expect(isGoalLikeRequest('')).toBe(false);
+  });
+
+  it('does not widen classifyAskIntent (explicit commands still own creation)', () => {
+    expect(classifyAskIntent('I want to revise ABAP before my interview.')).toBe('answer');
+    expect(classifyAskIntent('Help me learn Spanish for my new role.')).toBe('answer');
   });
 });
 

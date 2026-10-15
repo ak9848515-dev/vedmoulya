@@ -207,6 +207,11 @@ import {
   createRagRetrievalPort,
 } from '../infrastructure/RuntimePorts.js';
 import { ProviderExperienceService } from './ProviderExperienceService.js';
+import { ProviderUsageIngestor } from './ProviderUsageIngestor.js';
+import type {
+  ProviderUsageIngestReport,
+  ProviderUsageIngestStatus,
+} from './ProviderUsageIngestor.js';
 import { ProviderSetupOrchestrator } from './ProviderSetupOrchestrator.js';
 import { RoutingEvidenceService } from './RoutingEvidenceService.js';
 import { ExecutionHealthService } from './ExecutionHealthService.js';
@@ -914,6 +919,53 @@ export class ApiApplicationService {
   /** Bind the cadence driver status (called once at gateway startup). */
   setSchedulerRuntimeStatusSource(source: () => SchedulerRuntimeStatus): void {
     this.schedulerRuntimeSource = source;
+  }
+
+  // ── Deployment-scoped provider-usage ingest ──────────────────────────────
+  // The SAME ingestor the operator CLI script runs, owned by the gateway so the
+  // scheduled heartbeat (and any manual run) share ONE instance and ONE report.
+  // Its job is to reach the provider-account usage endpoints (OpenAI billing /
+  // organization usage, DeepSeek balance, OpenRouter credits) IN PRODUCT and
+  // write honest samples into the registry the AI Providers screen reads.
+
+  private providerUsageIngestorInstance: ProviderUsageIngestor | undefined;
+
+  private providerUsageIngestor(): ProviderUsageIngestor {
+    this.providerUsageIngestorInstance ??= new ProviderUsageIngestor({
+      providers: this.providers,
+    });
+    return this.providerUsageIngestorInstance;
+  }
+
+  /** Run one ingest pass (the heartbeat's deployment-scoped step). */
+  async runProviderUsageIngest(): Promise<ProviderUsageIngestReport> {
+    return this.providerUsageIngestor().run(process.env);
+  }
+
+  /**
+   * The in-product answer to "is provider usage being checked, and what did the
+   * last pass actually say?".
+   *
+   * The SCHEDULE is read from the bound cadence-driver status (the driver owns
+   * it, and the gateway already binds that getter at startup), so this is the
+   * live answer rather than a cached assumption. Absence is reported honestly:
+   * no active driver with the ingest switched on ⇒ `scheduleEnabled: false`, and
+   * no pass in this process ⇒ no `lastRunAt` and no entries.
+   */
+  getProviderUsageIngestStatus(): ProviderUsageIngestStatus {
+    const schedule = this.schedulerRuntimeStatus();
+    const scheduled = schedule.active && schedule.providerUsageIngestEnabled === true;
+    const report = this.providerUsageIngestorInstance?.getLastReport();
+    return {
+      scheduleEnabled: scheduled,
+      ...(scheduled && schedule.intervalMs !== undefined
+        ? { scheduleIntervalMs: schedule.intervalMs }
+        : {}),
+      ...(report !== undefined ? { lastRunAt: report.at } : {}),
+      entries: report?.entries ?? [],
+      quotaSamplesWritten: report?.quotaSamplesWritten ?? 0,
+      checkedSamplesWritten: report?.checkedSamplesWritten ?? 0,
+    };
   }
 
   // ── SPRINT-022 — persistence lifecycle ────────────────────────────────
@@ -1780,6 +1832,10 @@ export class ApiApplicationService {
       // overview reflect a user-supplied key the runtime registry cannot see.
       // No secret material is ever exposed; only the source name.
       {
+        // The DURABLE owner-scoped AI usage ledger — the same authority the AI
+        // Control Center reads, so the usage screen cannot report 0 tokens for
+        // usage that really happened.
+        usageRecorder: this.aiUsage,
         resolveCredentialSource: async (
           userId: string,
           family: string,

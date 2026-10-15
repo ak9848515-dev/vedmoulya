@@ -99,7 +99,12 @@ import { buildFounderBriefing } from '../domain/FounderBriefing.js';
 import { WorkflowExecutionBlueprintFactory } from '../domain/WorkflowExecutionBlueprint.js';
 import { OutcomeEvidenceModel } from '../domain/OutcomeEvidence.js';
 import { BlueprintApprovalFactory } from '../domain/BlueprintApprovalFactory.js';
-import { CostWeightedRevenue } from '../domain/CostWeightedRevenue.js';
+import {
+  CostWeightedRevenue,
+  marginOf,
+  rankScoreOf,
+  roiUsdOf,
+} from '../domain/CostWeightedRevenue.js';
 import {
   MultiProviderOrchestrator,
   type OrchestrateInput,
@@ -480,8 +485,190 @@ export class WorldModelService {
       });
     }
 
-    const sorted = entries.sort((a, b) => b.score - a.score).slice(0, limit);
+    // S8 — value/cost/provenance-aware ranking. Each candidate is valued from
+    // the owner's OWN outcome evidence; margin-aware rankScore decides first,
+    // then the advisory composite score. Never a promise, never auto-launches.
+    const valued = entries.map((entry) => this.attachValuation(ownerId, entry));
+    const sorted = valued
+      .sort((a, b) => {
+        if (a.rankScore !== undefined && b.rankScore !== undefined)
+          return b.rankScore - a.rankScore;
+        if (a.rankScore !== undefined) return -1;
+        if (b.rankScore !== undefined) return 1;
+        return b.score - a.score;
+      })
+      .slice(0, limit);
     return ok(sorted);
+  }
+
+  /** S8 — attach the evidence-backed valuation to one candidate. */
+  private attachValuation(
+    ownerId: string,
+    entry: OpportunityPipelineEntry,
+  ): OpportunityPipelineEntry {
+    const valuation = this.pipelineValuation(ownerId, entry.opportunityId, entry.category);
+    const hasRecordLabel = entry.estimatedCost !== undefined || entry.estimatedValue !== undefined;
+    const valuationProvenance =
+      valuation.valuationProvenance === 'NONE' && hasRecordLabel
+        ? 'RECORD_LABEL'
+        : valuation.valuationProvenance;
+    const reasoning = [...valuation.reasoning];
+    if (valuationProvenance === 'RECORD_LABEL') {
+      reasoning.push(
+        'A non-numeric record label exists for value/cost — it is NOT treated as a number (numeric valuation stays UNKNOWN).',
+      );
+    }
+    return { ...entry, ...valuation, valuationProvenance, reasoning, advisory: true };
+  }
+
+  /**
+   * S8 — evidence-backed valuation for ONE pipeline candidate.
+   *
+   * Composes the EXISTING outcome-evidence model + CostWeightedRevenue helpers
+   * (no new engine, no promise):
+   *   • a numeric value/cost exists ONLY when a stored outcome record carries
+   *     one (preferring a VERIFIED actual over an ESTIMATED expectation);
+   *     UNKNOWN is never converted to zero;
+   *   • margin/ROI/rankScore exist ONLY when BOTH sides have evidence — revenue
+   *     alone never wins, and the rank score is clamped so one outlier cannot
+   *     dominate;
+   *   • bounded verified-outcome feedback is applied through the SAME model the
+   *     evaluation path uses (Δ ≤ FEEDBACK_DELTA_MAX per record).
+   */
+  private pipelineValuation(
+    ownerId: string,
+    opportunityId: string,
+    category: string,
+  ): {
+    expectedValue?: { value: number; status: ObservationStatus; evidence: string[] };
+    expectedCost?: { value: number; status: ObservationStatus; evidence: string[] };
+    expectedMargin?: number;
+    expectedRoi?: number;
+    rankScore?: number;
+    valuationProvenance: 'OUTCOME_EVIDENCE' | 'RECORD_LABEL' | 'NONE';
+    reasoning: string[];
+    boundedFeedback?: OutcomeFeedbackResult['adjustments'];
+  } {
+    const reasoning: string[] = [];
+    // Owner-scoped first; match by opportunity, then by category — never guessed.
+    const ownerEvidence = this.stores.outcomeEvidence.list(ownerId);
+    const byOpportunity = ownerEvidence.filter(
+      (e) => e.opportunityId !== undefined && e.opportunityId === opportunityId,
+    );
+    const matches =
+      byOpportunity.length > 0
+        ? byOpportunity
+        : category.length > 0
+          ? ownerEvidence.filter((e) => e.category !== undefined && e.category === category)
+          : [];
+
+    if (matches.length === 0) {
+      reasoning.push(
+        'No outcome evidence for this opportunity or category — expected value/cost stay UNKNOWN (never zero).',
+      );
+      return { valuationProvenance: 'NONE', reasoning };
+    }
+
+    const pick = (
+      kinds: OutcomeEvidence['kind'][],
+    ): { value: number; status: ObservationStatus; evidence: string[] } | undefined => {
+      const relevant = matches.filter((e) => kinds.includes(e.kind));
+      if (relevant.length === 0) return undefined;
+      const actual = relevant.find((e) => e.actual !== undefined && e.actual.status === 'VERIFIED');
+      if (actual?.actual) {
+        return {
+          value: actual.actual.value,
+          status: 'VERIFIED',
+          evidence:
+            actual.actual.evidence.length > 0
+              ? actual.actual.evidence.slice(0, 4)
+              : actual.evidence.slice(0, 4),
+        };
+      }
+      const expected = relevant.find((e) => e.expected !== undefined);
+      if (expected?.expected) {
+        return {
+          value: expected.expected.value,
+          status: 'ESTIMATED',
+          evidence: expected.expected.evidence.slice(0, 4),
+        };
+      }
+      return undefined;
+    };
+
+    const revenue = pick(['REVENUE', 'MARGIN']);
+    const cost = pick(['COST']);
+    const margin = marginOf(revenue, cost);
+    const roi = roiUsdOf(revenue, cost);
+    const rank = rankScoreOf(revenue, cost);
+
+    if (revenue) {
+      reasoning.push(
+        `Expected value $${revenue.value} (${revenue.status}) from ${revenue.evidence.length} evidence item(s).`,
+      );
+    } else {
+      reasoning.push(
+        'Expected value UNKNOWN — no revenue/margin outcome evidence (never treated as zero).',
+      );
+    }
+    if (cost) {
+      reasoning.push(
+        `Expected cost $${cost.value} (${cost.status}) from ${cost.evidence.length} evidence item(s).`,
+      );
+    } else {
+      reasoning.push('Expected cost UNKNOWN — no cost outcome evidence (never treated as zero).');
+    }
+    if (rank !== undefined && roi !== undefined && margin !== undefined) {
+      reasoning.push(
+        `Margin-aware rank ${round3v(rank)} (ROI ${round3v(roi)}×, margin ${Math.round(margin * 100)}%) — revenue alone never wins.`,
+      );
+    } else {
+      reasoning.push(
+        'Not ranked — a rank score exists only when BOTH value and cost evidence exist.',
+      );
+    }
+
+    // Bounded verified-outcome feedback through the EXISTING model.
+    const currentFactors: FactorInput[] = [];
+    if (margin !== undefined && revenue) {
+      currentFactors.push({
+        key: 'expectedMargin',
+        value: clamp01(margin),
+        status: 'ESTIMATED',
+        evidence: revenue.evidence,
+      });
+    }
+    if (cost) {
+      currentFactors.push({
+        key: 'operatingCost',
+        value: clamp01(cost.value),
+        status: 'ESTIMATED',
+        evidence: cost.evidence,
+      });
+    }
+    const verifiedMatches = matches.filter((e) => e.verificationStatus === 'VERIFIED');
+    const { adjustments } = this.applyOutcomeFeedbackToFactors(
+      ownerId,
+      category.length > 0 ? category : undefined,
+      currentFactors,
+      verifiedMatches,
+    );
+    for (const adjustment of adjustments) {
+      reasoning.push(
+        `Bounded verified-outcome feedback on ${adjustment.factor} (Δ ${adjustment.delta} ≤ FEEDBACK_DELTA_MAX) — one outcome never rewrites policy.`,
+      );
+    }
+
+    return {
+      ...(revenue ? { expectedValue: revenue } : {}),
+      ...(cost ? { expectedCost: cost } : {}),
+      ...(margin !== undefined ? { expectedMargin: round3v(margin) } : {}),
+      ...(roi !== undefined ? { expectedRoi: round3v(roi) } : {}),
+      ...(rank !== undefined ? { rankScore: round3v(rank) } : {}),
+      valuationProvenance: 'OUTCOME_EVIDENCE',
+      reasoning,
+      ...(adjustments.length > 0 ? { boundedFeedback: adjustments } : {}),
+    };
   }
 
   private capitalModeFromRecord(
@@ -1631,11 +1818,17 @@ export class WorldModelService {
     ownerId: string,
     category: string | undefined,
     factors: FactorInput[],
+    /** S8 — an explicit evidence set (already owner-scoped) may be supplied;
+     *  when absent the category-scoped VERIFIED evidence is used. */
+    evidenceOverride?: OutcomeEvidence[],
   ): { factors: FactorInput[]; adjustments: OutcomeFeedbackResult['adjustments'] } {
-    if (!category) return { factors, adjustments: [] };
-    const evidence = this.stores.outcomeEvidence
-      .list(ownerId)
-      .filter((e) => e.verificationStatus === 'VERIFIED' && e.category === category);
+    const evidence =
+      evidenceOverride ??
+      (category
+        ? this.stores.outcomeEvidence
+            .list(ownerId)
+            .filter((e) => e.verificationStatus === 'VERIFIED' && e.category === category)
+        : []);
     if (evidence.length === 0) return { factors, adjustments: [] };
     const adjustments: OutcomeFeedbackResult['adjustments'] = [];
     let adjusted = [...factors];
@@ -2049,4 +2242,14 @@ function classifyCapitalModeSimple(figure: RevenueFigure, _status: ObservationSt
   if (figure.value <= 0) return 'NO_COST';
   if (figure.value <= 100) return 'LOW_COST';
   return 'CAPITAL_REQUIRED';
+}
+
+/** S8 — clamp a 0..1 factor input (never fabricates a value). */
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+/** S8 — three-decimal rounding for advisory figures (display only). */
+function round3v(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }

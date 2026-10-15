@@ -2,7 +2,7 @@
 
 import React from 'react';
 import type { MissionStatusView } from '../../../lib/api-client.js';
-import { CheckCircle2, AlertTriangle, Clock, Target } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, Clock, Target } from 'lucide-react';
 
 interface MissionResultProps {
   status: MissionStatusView;
@@ -11,7 +11,8 @@ interface MissionResultProps {
 export function MissionResult({ status }: MissionResultProps): React.JSX.Element {
   const isCompleted = status.state === 'COMPLETED';
   const isFailed = status.state === 'FAILED';
-  const hasOutcome = isCompleted || isFailed || status.state === 'CANCELLED';
+  const isCancelled = status.state === 'CANCELLED';
+  const hasOutcome = isCompleted || isFailed || isCancelled;
   const verifiedCount = status.objectives.filter((o) => o.state === 'VERIFIED').length;
   const totalCount = status.objectives.length;
 
@@ -42,24 +43,40 @@ export function MissionResult({ status }: MissionResultProps): React.JSX.Element
       </div>
 
       <div
-        className={`rounded-lg border p-6 ${isCompleted ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}
+        className={`rounded-lg border p-6 ${
+          isCompleted
+            ? 'border-emerald-200 bg-emerald-50'
+            : isCancelled
+              ? 'border-slate-200 bg-slate-50'
+              : 'border-rose-200 bg-rose-50'
+        }`}
       >
         <div className="flex items-start gap-4">
           {isCompleted ? (
             <CheckCircle2 className="h-8 w-8 text-emerald-500 shrink-0 mt-1" />
+          ) : isCancelled ? (
+            <XCircle className="h-8 w-8 text-slate-500 shrink-0 mt-1" />
           ) : (
             <AlertTriangle className="h-8 w-8 text-rose-500 shrink-0 mt-1" />
           )}
           <div className="min-w-0">
             <h3
-              className={`text-[18px] font-semibold ${isCompleted ? 'text-emerald-700' : 'text-rose-700'}`}
+              className={`text-[18px] font-semibold ${
+                isCompleted ? 'text-emerald-700' : isCancelled ? 'text-slate-700' : 'text-rose-700'
+              }`}
             >
-              {isCompleted ? 'Mission Completed' : 'Mission Failed'}
+              {isCompleted
+                ? 'Mission Completed'
+                : isCancelled
+                  ? 'Mission Cancelled'
+                  : 'Mission Failed'}
             </h3>
             <p className="text-[14px] text-[#64748B] mt-1">
               {isCompleted
                 ? 'VedMoulya successfully completed this mission.'
-                : 'VedMoulya could not complete this mission.'}
+                : isCancelled
+                  ? 'You cancelled this mission before it finished.'
+                  : 'VedMoulya could not complete this mission.'}
             </p>
             {status.outcomeReason && <p className="text-[13px] mt-2">{status.outcomeReason}</p>}
           </div>
@@ -106,27 +123,51 @@ export function MissionResult({ status }: MissionResultProps): React.JSX.Element
             Objectives
           </h3>
           <ul className="space-y-2">
-            {status.objectives.map((o) => (
-              <li
-                key={o.objectiveId}
-                className={`flex items-start gap-3 p-2 rounded ${o.state === 'VERIFIED' ? 'bg-emerald-50' : ''}`}
-              >
-                {o.state === 'VERIFIED' ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
-                ) : (
-                  <Clock className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                )}
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium text-[#111827]">{o.title}</p>
-                  <p className="text-[11px] text-[#94A3B8] uppercase tracking-wide">{o.state}</p>
-                  {o.verifiedAt && (
-                    <p className="text-[11px] text-[#94A3B8] mt-1">
-                      Verified {new Date(o.verifiedAt).toLocaleString()}
-                    </p>
+            {status.objectives.map((o) => {
+              const verified = o.state === 'VERIFIED';
+              return (
+                <li
+                  key={o.objectiveId}
+                  className={`flex items-start gap-3 p-2 rounded ${verified ? 'bg-emerald-50' : ''}`}
+                >
+                  {verified ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                  ) : (
+                    <Clock className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
                   )}
-                </div>
-              </li>
-            ))}
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-[#111827]">{o.title}</p>
+                    <p
+                      className="text-[11px] text-[#94A3B8] uppercase tracking-wide"
+                      data-testid={`objective-result-label-${o.objectiveId}`}
+                    >
+                      {verified ? 'Verified' : 'Not yet verified'}
+                    </p>
+                    {verified && o.verificationMethod ? (
+                      <p className="text-[11px] text-[#64748B] mt-1">
+                        Verified via {o.verificationMethod}
+                        {o.verifiedAt ? ` · ${new Date(o.verifiedAt).toLocaleString()}` : ''}
+                      </p>
+                    ) : null}
+                    {verified && o.evidence.length > 0 ? (
+                      <ul className="mt-1 space-y-0.5">
+                        {o.evidence.slice(0, 3).map((item) => (
+                          <li
+                            key={item}
+                            className="font-mono text-[11px] text-[#64748B] break-words"
+                          >
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {!verified && o.failureReason ? (
+                      <p className="text-[11px] text-rose-600 mt-1">{o.failureReason}</p>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

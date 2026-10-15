@@ -148,6 +148,21 @@ export class PostgresCheckpointStore
     this.pruneMissionCheckpoints(checkpoint.missionId);
   }
 
+  /**
+   * S10 — durability barrier for the checkpoint that witnesses a verified
+   * objective. The upsert is AWAITED (it throws when Postgres rejects it), so
+   * the caller can never mistake this write for durable when it is not. Any
+   * earlier best-effort queue is drained first so an older snapshot cannot
+   * overwrite this one later, and the mirror is refreshed only after the
+   * durable write succeeded.
+   */
+  async saveRequired(checkpoint: MissionCheckpoint): Promise<void> {
+    await this.flush();
+    await this.writeThroughUpsert(OWNER, checkpoint.checkpointId, checkpoint);
+    this.write(OWNER, checkpoint.checkpointId, checkpoint);
+    this.pruneMissionCheckpoints(checkpoint.missionId);
+  }
+
   async getLatestForMission(missionId: string): Promise<MissionCheckpoint | undefined> {
     const list = this.listForMissionSync(missionId);
     return list[list.length - 1];

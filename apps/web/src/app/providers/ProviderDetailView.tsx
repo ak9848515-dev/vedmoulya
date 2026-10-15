@@ -50,6 +50,7 @@ import {
   Settings2,
   ChevronLeft,
 } from 'lucide-react';
+import { providerHealthDisplay } from './provider-health-provenance.js';
 import {
   useProvider,
   useProviderIntelligenceStatus,
@@ -202,6 +203,27 @@ function DisclosureSection({
   );
 }
 
+/**
+ * Honest quota presentation for the detail view.
+ *
+ * `provider.health.quotaUsedPercent` is a REGISTRY figure whose provenance is
+ * carried by `quotaSource`. Only a provider-reported sample is account usage;
+ * a SEED constant (the catalog's 45 / 38 / 30 / 55 / 40) must be labelled as an
+ * estimate and never rendered as "quota used". Pure + exported so the rule is
+ * testable without mounting this screen.
+ */
+export function providerQuotaDisplay(health: {
+  quotaUsedPercent: number;
+  quotaSource?: 'SEED' | 'PROVIDER_REPORTED';
+}): { reported: boolean; value: string; estimateLabel: string | null } {
+  const reported = health.quotaSource === 'PROVIDER_REPORTED';
+  return {
+    reported,
+    value: reported ? `${health.quotaUsedPercent}%` : 'Unavailable from provider',
+    estimateLabel: reported ? null : `Registry estimate ${health.quotaUsedPercent}%`,
+  };
+}
+
 // ── Main view ───────────────────────────────────────────────────────────────
 
 export function ProviderDetailView({
@@ -326,6 +348,8 @@ export function ProviderDetailView({
     );
   }
 
+  const quotaDisplay = providerQuotaDisplay(provider.health);
+  const healthDisplay = providerHealthDisplay(provider.health);
   const profile = status.record.profile;
   const staleness = status.staleness;
   const verification = verificationConfig(status.record.verificationState);
@@ -436,16 +460,35 @@ export function ProviderDetailView({
                 Connection status
               </span>
               <div className="mt-2 flex items-center gap-2">
+                {/* A catalog SEED record gets a NEUTRAL dot: colouring it green
+                    from unmeasured data is what made the seeded 'healthy' read
+                    as a live check. */}
                 <span
-                  className={`w-2 h-2 rounded-full ${provider.health.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                  className={`w-2 h-2 rounded-full ${
+                    healthDisplay.measured
+                      ? provider.health.status === 'healthy'
+                        ? 'bg-emerald-500'
+                        : 'bg-amber-500'
+                      : 'bg-[#94A3B8]'
+                  }`}
                 />
-                <span className="text-[14px] font-medium text-[#111827] dark:text-[#F8FAFC] capitalize">
-                  {provider.health.status}
+                <span className="text-[14px] font-medium text-[#111827] dark:text-[#F8FAFC]">
+                  {healthDisplay.statusLabel}
                 </span>
-                <span className="text-[12px] text-[#94A3B8]">
-                  · {Math.round(provider.health.healthScore * 100)}% health
-                </span>
+                {healthDisplay.measured && (
+                  <span className="text-[12px] text-[#94A3B8]">
+                    · {Math.round(provider.health.healthScore * 100)}% health
+                  </span>
+                )}
               </div>
+              {/* Provenance sentence — always rendered, driven by the record's
+                  own provenance (never by optimism). */}
+              <p className="mt-1.5 text-[10px] text-[#94A3B8]">{healthDisplay.provenanceLabel}</p>
+              {healthDisplay.estimateLabel !== null && (
+                <p className="mt-0.5 text-[10px] text-[#94A3B8]">
+                  {healthDisplay.estimateLabel} — seed figure from VedMoulya’s provider catalog.
+                </p>
+              )}
             </div>
             <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B] dark:text-[#94A3B8]">
@@ -583,10 +626,18 @@ export function ProviderDetailView({
           >
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
               <div>
-                <span className="text-[#94A3B8]">Quota used</span>
+                <span className="text-[#94A3B8]">Provider-reported quota</span>
+                {/* A catalog seed figure is NOT account usage: it is never
+                    rendered as "quota used". Only an ingested,
+                    provider-reported sample may show a percentage. */}
                 <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
-                  {provider.health.quotaUsedPercent}%
+                  {quotaDisplay.value}
                 </p>
+                {quotaDisplay.estimateLabel !== null && (
+                  <p className="text-[10px] text-[#94A3B8]">
+                    {quotaDisplay.estimateLabel} — seed figure, not your account usage.
+                  </p>
+                )}
               </div>
               <div>
                 <span className="text-[#94A3B8]">Requests / min</span>
@@ -604,6 +655,12 @@ export function ProviderDetailView({
                 <span className="text-[#94A3B8]">Rate limit remaining</span>
                 <p className="font-medium text-[#374151] dark:text-[#E2E8F0]">
                   {provider.health.rateLimitRemaining}
+                </p>
+                {/* Same rule as the health record: this figure is a registry
+                    declaration captured from provider documentation, not a
+                    live reading of the account's rate-limit budget. */}
+                <p className="text-[10px] text-[#94A3B8]">
+                  Registry declaration — not a live rate-limit reading.
                 </p>
               </div>
             </div>

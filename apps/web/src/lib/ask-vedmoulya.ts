@@ -217,6 +217,34 @@ export function conversationHistoryFor(
 
 // ── Human labels ────────────────────────────
 
+/**
+ * Heuristic for a plain-language GOAL that could become a mission.
+ *
+ * Unlike `classifyAskIntent` (which stays conservative and only returns
+ * `action` for an explicit create/start request), this answers the softer
+ * question: "did the person express something they want to ACHIEVE?" It is
+ * used ONLY to offer an explicit, user-confirmed "Turn this into a mission"
+ * affordance — it never triggers creation on its own, so a question can
+ * never silently become a mission.
+ */
+const GOAL_PATTERNS: readonly RegExp[] = [
+  /\bi\s*(want|need|wish)\s+to\b/i,
+  /\bhelp\s+me\s+(learn|revise|study|prepare|plan|build|create|start|improve|get|achieve)\b/i,
+  /\b(learn|revise|study|prepare\s+for|improve|get\s+better\s+at)\b/i,
+  /\bmy\s+goal\s+is\b/i,
+  /\bi('m| am)\s+trying\s+to\b/i,
+];
+
+/** True when the text reads like a goal worth offering as a mission draft. */
+export function isGoalLikeRequest(input: string): boolean {
+  const text = input.trim();
+  if (text.length < 8) return false;
+  // Questions stay answers — the offer appears under the answer, on demand.
+  if (text.endsWith('?')) return false;
+  if (/^(what|who|when|where|why|how|which|is|are|can|do|does)\b/i.test(text)) return false;
+  return GOAL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 /** The greeting shown when a fresh conversation begins (no fake example). */
 export const ASK_GREETING =
   "Ask me anything about your goals, missions, career or learning — or ask me to start something, and I'll set up a mission for you.";

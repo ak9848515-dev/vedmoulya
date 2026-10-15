@@ -29,11 +29,18 @@ export interface ProviderQuotaView {
   provider: string;
   /** True only when the provider itself reported a real bounded quota. */
   quotaKnown: boolean;
-  /** 0–100, only meaningful when quotaKnown. */
+  /** 0–100, only meaningful when quotaKnown (i.e. provider-reported). */
   usedPercent?: number;
   /** Authoritative remaining tokens — undefined unless the provider reported them. */
   remainingTokens?: number;
   source: QuotaSource;
+  /**
+   * The REGISTRY's own seed estimate for this provider, when one exists
+   * (`quotaSource: 'SEED'`). It is surfaced ONLY so the UI can label it as an
+   * estimate; it carries no account meaning and MUST NOT be turned into a
+   * remaining balance, a "% remaining" or any other account figure.
+   */
+  registryEstimatePercent?: number;
   note?: string;
 }
 
@@ -104,6 +111,17 @@ export function resolveProviderQuotaView(
   provider: string,
   quotaUsedPercent: number,
   local: boolean,
+  /**
+   * Provenance of the percentage (ProviderQuotaSource; absent ⇒ 'SEED').
+   *
+   * Only 'PROVIDER_REPORTED' may be treated as account usage. A seed constant
+   * is NOT a measurement: it is not refreshed by any runtime request, so
+   * claiming a quota from it would fabricate the user's remaining balance.
+   * For a seed value `quotaKnown` stays FALSE (the UI says "Unavailable from
+   * provider") and the number is exposed only as `registryEstimatePercent`,
+   * explicitly labelled as an estimate.
+   */
+  quotaSource: 'SEED' | 'PROVIDER_REPORTED' = 'SEED',
 ): ProviderQuotaView {
   if (local) {
     return {
@@ -115,7 +133,25 @@ export function resolveProviderQuotaView(
       note: 'Local AI — unmetered by VedMoulya cloud quota.',
     };
   }
-  if (!Number.isFinite(quotaUsedPercent) || quotaUsedPercent <= 0) {
+  const bounded =
+    Number.isFinite(quotaUsedPercent) && quotaUsedPercent > 0
+      ? Math.min(100, Math.max(0, quotaUsedPercent))
+      : undefined;
+  if (quotaSource !== 'PROVIDER_REPORTED') {
+    // A registry seed constant. No provider-reported account usage exists, so
+    // no quota/bound is claimed — only the estimate is exposed, labelled.
+    return {
+      provider,
+      quotaKnown: false,
+      source: 'UNKNOWN',
+      ...(bounded !== undefined ? { registryEstimatePercent: bounded } : {}),
+      note:
+        bounded !== undefined
+          ? 'No usage reported by this provider. The registry figure is a seed estimate — not your account balance.'
+          : 'Provider quota unavailable.',
+    };
+  }
+  if (bounded === undefined) {
     return {
       provider,
       quotaKnown: false,
@@ -123,11 +159,10 @@ export function resolveProviderQuotaView(
       note: 'Provider quota unavailable.',
     };
   }
-  const used = Math.min(100, Math.max(0, quotaUsedPercent));
   return {
     provider,
     quotaKnown: true,
-    usedPercent: used,
+    usedPercent: bounded,
     source: 'PROVIDER_ACCOUNT',
   };
 }

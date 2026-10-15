@@ -33,6 +33,7 @@ import type {
   VerificationPort,
 } from '@vedmoulya/mission-controller';
 import type { MissionExecutionTrace } from '@vedmoulya/mission-controller';
+import { permissionClassForTool } from './GovernedToolRegistry.js';
 import { sanitizePlanningGoal } from './WorkspaceDevTemplate.js';
 
 /** Bounded in-process registry of the runs executed by this runtime. */
@@ -222,6 +223,18 @@ export function planToolNames(plan: AgentPlan): string[] {
     for (const action of step.actions) {
       if (action.kind === 'tool' && action.toolName) names.add(action.toolName);
     }
+    // A step may also EXECUTE a tool through its verification policy
+    // (`kind: 'command'`) — the frozen engine runs it through the same
+    // governed tool runtime. It is therefore subject to the same mission
+    // tool/class ceilings and must be scanned here; otherwise a plan could
+    // run a tool the mission never granted under the cover of "verification".
+    if (step.verificationPolicy?.kind === 'command') {
+      names.add(step.verificationPolicy.command.toolName);
+    }
+  }
+  // Goal-level verification can execute a tool too (same reasoning).
+  if (plan.finalVerification?.kind === 'command') {
+    names.add(plan.finalVerification.command.toolName);
   }
   return [...names];
 }
@@ -230,7 +243,11 @@ export function planToolNames(plan: AgentPlan): string[] {
  * ExecutionPort over the frozen AgentExecutionService. Mission tool
  * constraints are enforced HERE before any execution (a plan selecting a
  * tool the mission does not allow fails with PERMISSION_DENIED and never
- * runs). Run usage flows back to the controller's budget accounting.
+ * runs). Both ceilings are checked against every tool the plan can really
+ * execute — action tools AND verification-command tools:
+ *   • `allowedTools`             — tool NAMES the mission allows;
+ *   • `grantedPermissionClasses` — permission CLASSES the mission was granted.
+ * Run usage flows back to the controller's budget accounting.
  */
 /**
  * PROVIDER-01 → Mission: resolves the OWNER's agent (bound to a per-user
@@ -252,7 +269,7 @@ export class AgentExecutionAdapter implements ExecutionPort {
     userId: string,
     budget?: Partial<AgentRunBudgetConfig>,
     allowedTools?: string[],
-    _permissionClasses?: string[],
+    permissionClasses?: string[],
     executionContext?: { missionId: string; objectiveId: string },
   ): Promise<{
     runId: string;
@@ -273,6 +290,36 @@ export class AgentExecutionAdapter implements ExecutionPort {
           success: false,
           verified: false,
           error: `mission constraints deny required tools: ${denied.join(', ')}`,
+          failureClass: 'PERMISSION_DENIED',
+          usage: ZERO_USAGE,
+        };
+      }
+    }
+
+    // S11 — the mission's declared PERMISSION-CLASS ceiling.
+    //
+    // `allowedTools` bounds tool NAMES; `grantedPermissionClasses` bounds the
+    // CLASSES the mission was granted, and is enforced here — on the same
+    // pre-execution boundary, before the agent is ever started. The class of a
+    // tool is taken from the SAME governed classification table the registry
+    // advertises (`permissionClassForTool`), so no class can be invented or
+    // widened here; when the mission grants nothing, nothing may execute.
+    //
+    // Omitted (undefined) keeps the documented default: the mission declared
+    // no class ceiling, so the frozen runtime's own permission model applies
+    // unchanged. The check only ever RESTRICTS — it can never grant a class
+    // the governing registry would not already have reported.
+    if (permissionClasses !== undefined) {
+      const grantedClasses = new Set(permissionClasses);
+      const deniedClasses = planToolNames(plan).filter(
+        (tool) => !grantedClasses.has(permissionClassForTool(tool)),
+      );
+      if (deniedClasses.length > 0) {
+        return {
+          runId: `rejected-${plan.planId}`,
+          success: false,
+          verified: false,
+          error: `mission permission classes deny required tools: ${deniedClasses.join(', ')}`,
           failureClass: 'PERMISSION_DENIED',
           usage: ZERO_USAGE,
         };

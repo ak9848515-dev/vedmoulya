@@ -73,6 +73,7 @@ import { createProactiveRouter, proactiveInputs } from '../routers/ProactiveRout
 import { createFabricRouter, fabricInputs } from '../routers/FabricRouter.js';
 import { createControlRouter, controlInputs } from '../routers/ControlRouter.js';
 import type { OpportunityAcquisitionDeps } from '../routers/ControlRouter.js';
+import type { AcquisitionValuation } from '../services/OpportunityAcquisitionDecision.js';
 import { createWorldRouter, worldInputs } from '../routers/WorldRouter.js';
 import { checkRateLimitInternal, RateLimitTiers } from '../middleware/rate-limit.js';
 import type { RateLimitConfig } from '../middleware/rate-limit.js';
@@ -2629,6 +2630,28 @@ export function createAppRouter(services: ApiApplicationService) {
     // only DRAFT (it has no submission method to reach).
     monitor: services.opportunityMonitor,
     proposal: services.opportunityProposal,
+    // S9 — adaptive acquisition decisions consume the EXISTING Sprint 016
+    // valuation. This is ONE owner-scoped read of `world.opportunityPipeline`
+    // per ranking call; the S9 path never recomputes value/cost/margin/rank.
+    listValuations: (ownerId: string): ReadonlyMap<string, AcquisitionValuation> => {
+      const byOpportunityId = new Map<string, AcquisitionValuation>();
+      const pipeline = services.world.opportunityPipeline(ownerId, { limit: 50 });
+      if (!pipeline.success) return byOpportunityId;
+      for (const entry of pipeline.data) {
+        byOpportunityId.set(entry.opportunityId, {
+          ...(entry.expectedValue !== undefined ? { expectedValue: entry.expectedValue } : {}),
+          ...(entry.expectedCost !== undefined ? { expectedCost: entry.expectedCost } : {}),
+          ...(entry.expectedMargin !== undefined ? { expectedMargin: entry.expectedMargin } : {}),
+          ...(entry.expectedRoi !== undefined ? { expectedRoi: entry.expectedRoi } : {}),
+          ...(entry.rankScore !== undefined ? { rankScore: entry.rankScore } : {}),
+          ...(entry.valuationProvenance !== undefined
+            ? { valuationProvenance: entry.valuationProvenance }
+            : {}),
+          ...(entry.reasoning !== undefined ? { reasoning: entry.reasoning } : {}),
+        });
+      }
+      return byOpportunityId;
+    },
   };
 
   return router({
@@ -3823,6 +3846,23 @@ export function createAppRouter(services: ApiApplicationService) {
             services.providers,
             services.providerExperience,
           ).explainModelSelection(input, ctx),
+        ),
+      // Provider-usage INGEST status (DEPLOYMENT-scoped, read-only): is the
+      // gateway heartbeat scheduling the provider-account usage probes, and what
+      // did the most recent pass report per family? This is what makes the
+      // "Usage unavailable" rows explainable instead of mysterious — including
+      // when nothing is scheduled at all.
+      getUsageIngestStatus: standardProcedure
+        .input(providerPreferencesInput)
+        .query(({ input, ctx }) =>
+          createProvidersRouter(
+            services.providers,
+            services.providerExperience,
+            undefined,
+            undefined,
+            undefined,
+            { status: () => services.getProviderUsageIngestStatus() },
+          ).getUsageIngestStatus(input, ctx),
         ),
     }),
 

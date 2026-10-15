@@ -22,10 +22,22 @@
 // transitions), cannot launch a Mission, cannot bid or contact anyone. Its
 // result type states that structurally (`authorizationRequired: true`,
 // `approved: false`).
+//
+// S9 — ADAPTIVE ACQUISITION DECISION (additive). Each recommendation also
+// carries a `decision` (RECOMMEND | DEFER | REJECT | INELIGIBLE) computed by
+// `decideAcquisition`. It is the SAME composition rule applied to evidence the
+// estate already holds: the S5.1 qualification, the canonical lifecycle
+// evidence and (when wired) the Sprint 016 valuation. The pre-existing
+// `recommended` boolean and the ranking order are unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { OpportunityLifecycleRecord } from '@vedmoulya/control-plane';
 import type { OpportunityQualification } from './OpportunityQualification.js';
+import {
+  decideAcquisition,
+  type AcquisitionDecisionState,
+  type AcquisitionValuation,
+} from './OpportunityAcquisitionDecision.js';
 
 /**
  * PRESENTATION threshold over the EXISTING canonical 0..1 qualification score.
@@ -52,9 +64,28 @@ export interface OpportunityRecommendation {
   reasons: string[];
   /** The EXISTING S6.3 overall assessment, when the backend produced one. */
   valueAssessment?: string;
+  /**
+   * S9 — the adaptive acquisition verdict: RECOMMEND | DEFER | REJECT |
+   * INELIGIBLE. Composed from the EXISTING qualification evidence, the
+   * canonical lifecycle evidence and the EXISTING Sprint 016 valuation. It is
+   * advisory and grants nothing.
+   */
+  decision: AcquisitionDecisionState;
+  /** S9 — evidence that is missing and would refine the decision. */
+  missingEvidence: string[];
+  /** S9 — conditions that could change the decision. */
+  changeConditions: string[];
   /** Structural: this type cannot express approval. */
   authorizationRequired: true;
   approved: false;
+}
+
+/** S9 — optional evidence the adaptive decision may consume. */
+export interface RankOpportunityOptions {
+  /** Sprint 016 valuations keyed by opportunityId (`world.opportunityPipeline`). */
+  valuationsByOpportunityId?: ReadonlyMap<string, AcquisitionValuation>;
+  /** Optional hard budget gate. Absent ⇒ no budget gate is applied. */
+  budget?: { availableUsd?: number };
 }
 
 /** Terminal states are not candidates for attention (same rule as the briefing). */
@@ -71,6 +102,7 @@ function isActionable(record: OpportunityLifecycleRecord): boolean {
 export function rankOpportunities(
   records: readonly OpportunityLifecycleRecord[],
   qualify: (record: OpportunityLifecycleRecord) => OpportunityQualification,
+  options: RankOpportunityOptions = {},
 ): OpportunityRecommendation[] {
   const ranked = records.filter(isActionable).map((record): OpportunityRecommendation => {
     const qualification = qualify(record);
@@ -92,6 +124,17 @@ export function rankOpportunities(
       );
     }
 
+    // S9 — adaptive, evidence-backed acquisition decision over the SAME
+    // qualification and the EXISTING valuation. No second scoring engine.
+    const valuation = options.valuationsByOpportunityId?.get(record.id);
+    const decision = decideAcquisition({
+      record,
+      qualification,
+      ...(valuation !== undefined ? { valuation } : {}),
+      ...(options.budget !== undefined ? { budget: options.budget } : {}),
+      scoreThreshold: RECOMMENDATION_SCORE_THRESHOLD,
+    });
+
     return {
       opportunityId: record.id,
       ...(record.sourceRef !== undefined
@@ -107,6 +150,9 @@ export function rankOpportunities(
       recommended: score >= RECOMMENDATION_SCORE_THRESHOLD && riskLevel !== 'HIGH',
       reasons,
       ...(value !== undefined ? { valueAssessment: value.overallAssessment } : {}),
+      decision: decision.state,
+      missingEvidence: decision.missingEvidence,
+      changeConditions: decision.changeConditions,
       authorizationRequired: true,
       approved: false,
     };

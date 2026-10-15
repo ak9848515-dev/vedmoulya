@@ -84,7 +84,11 @@ describe('deriveProviderUsage', () => {
   });
 
   it('derives AVAILABLE from a real reported quota with plenty remaining', () => {
-    const usage = deriveProviderUsage({ readiness: green, quotaUsedPercent: 28 });
+    const usage = deriveProviderUsage({
+      readiness: green,
+      quotaUsedPercent: 28,
+      quotaSource: 'PROVIDER_REPORTED',
+    });
     expect(usage.state).toBe('AVAILABLE');
     expect(usage.label).toBe('Provider usage · 72% remaining');
   });
@@ -93,6 +97,7 @@ describe('deriveProviderUsage', () => {
     const usage = deriveProviderUsage({
       readiness: green,
       quotaUsedPercent: 100 - (USAGE_WARNING_BELOW_PCT - 1),
+      quotaSource: 'PROVIDER_REPORTED',
     });
     expect(usage.state).toBe('WARNING');
   });
@@ -101,21 +106,52 @@ describe('deriveProviderUsage', () => {
     const usage = deriveProviderUsage({
       readiness: green,
       quotaUsedPercent: 100 - (USAGE_LIMITED_BELOW_PCT - 1),
+      quotaSource: 'PROVIDER_REPORTED',
     });
     expect(usage.state).toBe('LIMITED');
     expect(usage.label).toBe(`Provider usage · ${USAGE_LIMITED_BELOW_PCT - 1}% remaining`);
   });
 
   it('never fabricates a remaining percent when quota is not reported', () => {
-    const usage = deriveProviderUsage({ readiness: green, quotaUsedPercent: 0 });
+    const usage = deriveProviderUsage({
+      readiness: green,
+      quotaUsedPercent: 0,
+      quotaSource: 'PROVIDER_REPORTED',
+    });
     expect(usage.state).toBe('UNAVAILABLE');
     expect(usage.label).toBe('Usage unavailable');
     expect(usage.label).not.toContain('%');
   });
 
+  it('refuses to derive ANY quota from a registry seed percentage', () => {
+    // The fabricated-quota defect: the catalog ships constants (45 / 38 / 30 …)
+    // and nothing at runtime refreshes them. A seed figure is NOT account
+    // usage, so no percentage and no "% remaining" may be shown for it.
+    for (const seed of [30, 38, 45, 55, 90]) {
+      const usage = deriveProviderUsage({
+        readiness: green,
+        quotaUsedPercent: seed,
+        quotaSource: 'SEED',
+      });
+      expect(usage.state).toBe('UNAVAILABLE');
+      expect(usage.label).toBe('Unavailable from provider');
+      expect(usage.label).not.toContain('%');
+      // No number is claimed anywhere — not even in the explanation.
+      expect(usage.detail ?? '').not.toMatch(/\d+%/);
+    }
+    // An ABSENT provenance is a seed too — persisted rows are unproven.
+    expect(deriveProviderUsage({ readiness: green, quotaUsedPercent: 45 }).state).toBe(
+      'UNAVAILABLE',
+    );
+  });
+
   it('labels every reported-quota percentage as provider-level — never a free-tier balance', () => {
     for (const quota of [10, 28, 45, 65, 88]) {
-      const usage = deriveProviderUsage({ readiness: green, quotaUsedPercent: quota });
+      const usage = deriveProviderUsage({
+        readiness: green,
+        quotaUsedPercent: quota,
+        quotaSource: 'PROVIDER_REPORTED',
+      });
       // A percentage is only ever shown when a real provider-level quota
       // signal exists, and the label then NAMES that source explicitly.
       if (usage.label.includes('%')) {
@@ -148,9 +184,19 @@ describe('deriveProviderUsage', () => {
   });
 
   it('clamps out-of-range quota values', () => {
-    expect(deriveProviderUsage({ readiness: green, quotaUsedPercent: 200 }).state).toBe('LIMITED');
-    expect(deriveProviderUsage({ readiness: green, quotaUsedPercent: -5 }).state).toBe(
-      'UNAVAILABLE',
-    );
+    expect(
+      deriveProviderUsage({
+        readiness: green,
+        quotaUsedPercent: 200,
+        quotaSource: 'PROVIDER_REPORTED',
+      }).state,
+    ).toBe('LIMITED');
+    expect(
+      deriveProviderUsage({
+        readiness: green,
+        quotaUsedPercent: -5,
+        quotaSource: 'PROVIDER_REPORTED',
+      }).state,
+    ).toBe('UNAVAILABLE');
   });
 });

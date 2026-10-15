@@ -7,7 +7,9 @@
 //   - the registry (every provider is an asset, disabled ones included),
 //   - the user's OWNER-SCOPED preferences (enabled set, preferred model,
 //     budget policy),
-//   - the EPIC-012 cost ledger (aggregate token/cost usage, per-provider).
+//   - the DURABLE owner-scoped AI usage ledger (aggregate token/cost usage,
+//     per-provider); the EPIC-012 trace cost ledger is only a fallback for
+//     embedders without a ledger, and `usageSource` says which one answered.
 //
 // The gateway's session middleware guarantees userId === session user, so
 // every read/write here is owner-scoped (IDOR refused at the boundary).
@@ -19,12 +21,21 @@ import type { ProviderApplicationService } from '@vedmoulya/providers';
 import { classifyResource, describeProviderSwitch } from '@vedmoulya/providers';
 import type { ProviderPreferencesService } from '@vedmoulya/providers';
 import type { ProviderPreferences } from '@vedmoulya/providers';
+import type { ProviderHealthSource, ProviderQuotaSource } from '@vedmoulya/providers';
+import type { ProviderAccountMetric, ProviderAccountUsageMetric } from '@vedmoulya/providers';
 import type { ProviderDTO, ProviderModelDTO } from '@vedmoulya/providers';
 import { defaultProviderPreferences } from '@vedmoulya/providers';
 import type { ProviderStatus } from '@vedmoulya/ai';
 import { ModelSelectionIntelligence } from '@vedmoulya/services';
 import type { CostLedger, CostLedgerSnapshot } from '../observability/CostLedger.js';
 import type { TraceStore } from '@vedmoulya/core';
+import type { AiUsageRecorder } from '../observability/AiUsageRecorder.js';
+import { aggregateAiUsage } from '../observability/AiUsageBoard.js';
+import {
+  resolveRemainingCapacity,
+  resolveUserBudgetView,
+  type BudgetSource,
+} from '../observability/AiBudgetSemantics.js';
 import { openaiOrgUsageProbe, openaiOrgWindow } from './ProviderUsageIngestor.js';
 import type { OpenAIOrgModelUsage, OpenAIOrgPeriod } from './ProviderUsageIngestor.js';
 
@@ -102,18 +113,71 @@ export interface ProviderExperienceRow {
   switchDisabledReason?: string;
   resourceType: string;
   freeToUse: boolean;
-  health: { status: string; score: number; latencyMs: number; quotaUsedPercent: number };
+  health: {
+    status: string;
+    score: number;
+    latencyMs: number;
+    quotaUsedPercent: number;
+    /**
+     * Provenance of `quotaUsedPercent` (absent ⇒ 'SEED'). Registry seed figures
+     * are NOT measurements: the screen must never render one as the provider's
+     * account usage, remaining balance or "% remaining".
+     */
+    quotaSource?: ProviderQuotaSource;
+    /**
+     * Provenance of the health RECORD (absent ⇒ 'SEED'). A 'SEED' record is
+     * catalog data — status/score/latency were never measured for this
+     * deployment and `lastCheckedAt` is the catalog's build time — so a seeded
+     * 'healthy' must never be rendered as a live check.
+     */
+    healthSource?: ProviderHealthSource;
+    /**
+     * GENUINE provider-reported account metrics (account tokens / cost / credits
+     * / bounded-quota-used), keyed by metric. Absent key ⇒ never retrieved.
+     * Kept DISTINCT from VedMoulya's runtime tokens and estimated cost.
+     */
+    accountUsage?: Partial<Record<ProviderAccountMetric, ProviderAccountUsageMetric>>;
+  };
   lifecycleStatus: string;
 }
 
 export interface UsageSummary {
   tokensUsed: number;
-  tokenBudget: number;
+  /**
+   * The USER's configured monthly token limit. UNDEFINED when none is
+   * configured: the historical platform default (1,000,000) is NEVER
+   * substituted, because presenting it as a budget fabricated a 1M-token
+   * allowance that nobody set. `budgetSource` says what the number is.
+   */
+  tokenBudget?: number;
+  /** Provenance of `tokenBudget` — 'NONE' means "not configured". */
+  budgetSource: BudgetSource;
+  /** ISO timestamp the user configured the budget (absent = never). */
+  budgetConfiguredAt?: string;
+  /** Authoritative remaining tokens — present ONLY when a real limit exists. */
+  remainingTokens?: number;
+  /** Basis of the remaining figure; 'UNKNOWN' means no limit is known. */
+  budgetBasis: 'USER_BUDGET' | 'PLATFORM_ALLOWANCE' | 'PROVIDER_QUOTA' | 'UNKNOWN';
   costUsd: number;
   aiCalls: number;
   cacheHits: number;
+  /** True while any recorded execution had no provider-reported price. */
+  costUnknown: boolean;
   /** Percentage of usage attributed to free resources (honest, 0 when unknown). */
   freePercent: number;
+  /**
+   * WHERE these figures came from — never implied:
+   *   'DURABLE_USAGE_LEDGER' → the owner-scoped durable ledger (survives
+   *                            restarts; the same authority the AI Control
+   *                            Center reads).
+   *   'TRACE_LEDGER'         → the in-process execution trace store only. Its
+   *                            accounting attributes are absent for plain Ask
+   *                            calls, so it can report 0 for usage that really
+   *                            happened.
+   */
+  usageSource: 'DURABLE_USAGE_LEDGER' | 'TRACE_LEDGER';
+  /** True only when the durable, owner-scoped usage store was actually read. */
+  durableChecked: boolean;
   budgetPolicy: ProviderPreferences['budgetPolicy'];
   budgets: ProviderPreferences['budgets'];
 }
@@ -140,6 +204,27 @@ export interface ProviderUsageDetail {
   byModel: ModelUsageRow[];
   executions: CostLedgerSnapshot['executions'];
   preferences: ProviderPreferences;
+  /**
+   * WHERE these numbers came from. The screen must say so, because the two
+   * sources are not equivalent:
+   *   'DURABLE_USAGE_LEDGER' → the owner-scoped durable AI usage ledger
+   *                            (`ai_usage_events`) — survives restarts and is
+   *                            the SAME authority the AI Control Center reads.
+   *   'TRACE_LEDGER'         → the in-process execution trace store only. Its
+   *                            accounting attributes are absent for plain Ask
+   *                            calls, so it can report 0 tokens/0 cost for
+   *                            usage that REALLY happened.
+   */
+  usageSource: 'DURABLE_USAGE_LEDGER' | 'TRACE_LEDGER';
+  /** True only when a durable, owner-scoped usage store was actually read. */
+  durableChecked: boolean;
+  /**
+   * True when at least one recorded execution carried no provider-reported
+   * price — the cost figures below are then a lower bound, never a total.
+   */
+  costUnknown: boolean;
+  /** The window the figures cover ('ALL_RECORDED' = every stored execution). */
+  window: 'ALL_RECORDED';
 }
 
 export interface ProviderExperienceResult<T> {
@@ -216,7 +301,13 @@ function deriveAvailability(
   }
 
   if (health === 'down' || health === 'unstable') return 'UNAVAILABLE';
-  if (health === 'degraded' || provider.health.quotaUsedPercent >= 80) return 'LIMITED';
+  // A registry SEED quota must not move availability either: only a
+  // provider-reported percentage may.
+  if (
+    health === 'degraded' ||
+    (provider.health.quotaSource === 'PROVIDER_REPORTED' && provider.health.quotaUsedPercent >= 80)
+  )
+    return 'LIMITED';
   if (prefs.disabledProviderIds.includes(provider.id)) return 'UNAVAILABLE';
   // Honest absence of evidence: a provider that has never produced a health
   // sample is not known to be usable — keep the pre-F-2 UNKNOWN rule.
@@ -263,6 +354,14 @@ export interface ProviderExperienceServiceOptions {
     userId: string,
     family: string,
   ) => Promise<'USER' | 'PLATFORM' | 'NONE'>;
+  /**
+   * The DURABLE AI usage ledger (same authority the AI Control Center reads).
+   * When supplied, usage detail is read from it — only a produced figure is
+   * ever shown, and "no recorded usage" is only claimed after the store was
+   * actually queried. Absent (tests/embedders): the trace ledger is used and
+   * the payload says so.
+   */
+  usageRecorder?: Pick<AiUsageRecorder, 'getStore'>;
 }
 
 export class ProviderExperienceService {
@@ -349,12 +448,19 @@ export class ProviderExperienceService {
           score: provider.health.healthScore,
           latencyMs: provider.health.latencyMs,
           quotaUsedPercent: provider.health.quotaUsedPercent,
+          quotaSource: provider.health.quotaSource,
+          healthSource: provider.health.healthSource,
+          // Genuine provider-reported account metrics, carried verbatim so the
+          // screen can show them separately from runtime tokens / estimated cost.
+          ...(provider.health.accountUsage !== undefined
+            ? { accountUsage: provider.health.accountUsage }
+            : {}),
         },
         lifecycleStatus: provider.lifecycleStatus,
       };
     });
 
-    const usage = this.buildUsageSummary(userId, providers, prefs);
+    const usage = await this.buildUsageSummary(userId, providers, prefs);
 
     return { success: true, data: { providers, usage, preferences: prefs } };
   }
@@ -368,6 +474,26 @@ export class ProviderExperienceService {
   async getUsageDetail(userId: string): Promise<ProviderExperienceResult<ProviderUsageDetail>> {
     if (!userId) return { success: false, error: 'userId is required' };
     const prefsResult = await this.preferences.getPreferences(userId);
+    const preferences = prefsResult.data ?? defaultPrefs();
+
+    // DURABLE FIRST. The in-process trace store is NOT the usage authority: it
+    // holds no accounting attributes for plain Ask calls, so reading it alone
+    // reported 0 tokens / 0 cost for usage that really happened. The durable
+    // owner-scoped ledger is the SAME evidence the AI Control Center reads, so
+    // both surfaces now agree.
+    const durable = this.options.usageRecorder;
+    if (durable) {
+      return {
+        success: true,
+        data: {
+          ...(await this.durableUsageDetail(userId, durable)),
+          preferences,
+        },
+      };
+    }
+
+    // Fallback for embedders/tests without a ledger: reported as the weaker
+    // source it is, never as the durable ledger.
     const snapshot = this.ledger.compute(this.traceStore, { userId, limit: 1000 });
     return {
       success: true,
@@ -376,8 +502,86 @@ export class ProviderExperienceService {
         byProvider: snapshot.byProvider,
         byModel: this.modelUsage(userId),
         executions: snapshot.executions,
-        preferences: prefsResult.data ?? defaultPrefs(),
+        preferences,
+        usageSource: 'TRACE_LEDGER',
+        durableChecked: false,
+        costUnknown: snapshot.byProvider.some((row) => row.costUsd === 0 && row.calls > 0),
+        window: 'ALL_RECORDED',
       },
+    };
+  }
+
+  /**
+   * Owner-scoped usage from the DURABLE ledger, projected into the existing
+   * detail shape. Purely a read of recorded executions: no estimate, no
+   * back-fill, and `costUnknown` stays true while any recorded execution had no
+   * provider-reported price.
+   */
+  private async durableUsageDetail(
+    userId: string,
+    recorder: Pick<AiUsageRecorder, 'getStore'>,
+  ): Promise<Omit<ProviderUsageDetail, 'preferences'>> {
+    const events = await recorder.getStore().list({ userId, limit: 20_000 });
+    const board = aggregateAiUsage(events);
+    const all = {
+      executions: board.cloud.executions + board.local.executions,
+      inputTokens: board.cloud.inputTokens + board.local.inputTokens,
+      outputTokens: board.cloud.outputTokens + board.local.outputTokens,
+      totalTokens: board.cloud.totalTokens + board.local.totalTokens,
+      costUsd: board.cloud.costUsd + board.local.costUsd,
+      cachedExecutions: board.cloud.cachedExecutions + board.local.cachedExecutions,
+      costUnknown: board.cloud.costUnknown || board.local.costUnknown,
+    };
+    return {
+      totals: {
+        aiCalls: all.executions,
+        tokensInput: all.inputTokens,
+        tokensOutput: all.outputTokens,
+        tokensTotal: all.totalTokens,
+        costUsd: all.costUsd,
+        cacheHits: all.cachedExecutions,
+        // Not tracked by the durable ledger (and never displayed as if they
+        // were) — the trace ledger is the only source for these two.
+        retries: 0,
+        latencyMs: 0,
+      },
+      byProvider: board.byProvider.map((row) => ({
+        provider: row.provider,
+        calls: row.executions,
+        latencyMs: 0,
+        tokensInput: row.inputTokens,
+        tokensOutput: row.outputTokens,
+        tokensTotal: row.totalTokens,
+        costUsd: row.costUsd,
+      })),
+      byModel: board.byModel.map((row) => ({
+        providerId: row.provider,
+        modelId: row.model,
+        calls: row.executions,
+        latencyMs: 0,
+        tokensTotal: row.totalTokens,
+        costUsd: row.costUsd,
+      })),
+      // The durable ledger records SUCCESSFUL executions only (the recorder
+      // skips failures with no billable usage), so every row here is 'OK' — a
+      // real recorded execution, correlated by its execution id.
+      executions: board.recent.map((event) => ({
+        executionId: event.executionId,
+        traceId: event.executionId,
+        userId: event.userId,
+        name: `${event.provider} · ${event.model}`,
+        status: 'OK' as const,
+        tokensTotal: event.totalTokens,
+        costUsd: event.costUsd,
+        aiCalls: 1,
+        cacheHits: event.cached ? 1 : 0,
+        startedAt: event.timestamp,
+        ...(event.latencyMs !== undefined ? { durationMs: event.latencyMs } : {}),
+      })),
+      usageSource: 'DURABLE_USAGE_LEDGER',
+      durableChecked: true,
+      costUnknown: all.costUnknown,
+      window: 'ALL_RECORDED',
     };
   }
 
@@ -509,33 +713,110 @@ export class ProviderExperienceService {
 
   // ── Internals ─────────────────────────────────────────────────────────────
 
-  private buildUsageSummary(
+  /**
+   * The usage summary for the AI Providers screen AND the Brain dashboard.
+   *
+   * DURABLE FIRST: the owner-scoped durable ledger is the usage authority. The
+   * in-process trace store is only a fallback for embedders/tests that have no
+   * ledger, and the payload says so (`usageSource`) instead of letting a weaker
+   * source masquerade as measured usage.
+   *
+   * The budget is READ, never invented: `budgetSource` distinguishes the user's
+   * own limit from a platform allowance and from "not configured".
+   */
+  private async buildUsageSummary(
     userId: string,
     providers: ProviderExperienceRow[],
     prefs: ProviderPreferences,
-  ): UsageSummary {
-    const snapshot = this.ledger.compute(this.traceStore, { userId, limit: 1000 });
-    const tokenBudget = prefs.budgets.monthlyTokenBudget ?? 1_000_000;
-    const byProvider = snapshot.byProvider;
+  ): Promise<UsageSummary> {
+    const budget = resolveUserBudgetView({
+      ...(prefs.budgets.monthlyTokenBudget !== undefined
+        ? { monthlyTokenBudget: prefs.budgets.monthlyTokenBudget }
+        : {}),
+      ...(prefs.budgets.monthlyTokenBudgetSource !== undefined
+        ? { monthlyTokenBudgetSource: prefs.budgets.monthlyTokenBudgetSource }
+        : {}),
+      ...(prefs.budgets.monthlyTokenBudgetConfiguredAt !== undefined
+        ? { budgetConfiguredAt: prefs.budgets.monthlyTokenBudgetConfiguredAt }
+        : {}),
+    });
 
     // Free percentage: tokens attributed to free providers / total tokens.
-    let freeTokens = 0;
-    let totalTokens = 0;
-    for (const row of byProvider) {
-      const provider = providers.find((p) => p.providerId === row.provider);
-      const isFree = provider?.freeToUse ?? false;
-      if (isFree) freeTokens += row.tokensTotal;
-      totalTokens += row.tokensTotal;
+    // Same rule for both sources — only the provider classification decides.
+    const freePercentOf = (rows: Array<{ provider: string; tokensTotal: number }>): number => {
+      let freeTokens = 0;
+      let totalTokens = 0;
+      for (const row of rows) {
+        const provider = providers.find((p) => p.providerId === row.provider);
+        if (provider?.freeToUse ?? false) freeTokens += row.tokensTotal;
+        totalTokens += row.tokensTotal;
+      }
+      return totalTokens > 0 ? Math.round((freeTokens / totalTokens) * 100) : 0;
+    };
+
+    let totals: {
+      tokensUsed: number;
+      costUsd: number;
+      aiCalls: number;
+      cacheHits: number;
+      costUnknown: boolean;
+    };
+    let usageRows: Array<{ provider: string; tokensTotal: number }>;
+    let usageSource: UsageSummary['usageSource'];
+    let durableChecked: boolean;
+
+    const durable = this.options.usageRecorder;
+    if (durable) {
+      const events = await durable.getStore().list({ userId, limit: 20_000 });
+      const board = aggregateAiUsage(events);
+      totals = {
+        tokensUsed: board.cloud.totalTokens + board.local.totalTokens,
+        costUsd: board.cloud.costUsd + board.local.costUsd,
+        aiCalls: board.cloud.executions + board.local.executions,
+        cacheHits: board.cloud.cachedExecutions + board.local.cachedExecutions,
+        costUnknown: board.cloud.costUnknown || board.local.costUnknown,
+      };
+      usageRows = board.byProvider.map((row) => ({
+        provider: row.provider,
+        tokensTotal: row.totalTokens,
+      }));
+      usageSource = 'DURABLE_USAGE_LEDGER';
+      durableChecked = true;
+    } else {
+      const snapshot = this.ledger.compute(this.traceStore, { userId, limit: 1000 });
+      totals = {
+        tokensUsed: snapshot.totals.tokensTotal,
+        costUsd: snapshot.totals.costUsd,
+        aiCalls: snapshot.totals.aiCalls,
+        cacheHits: snapshot.totals.cacheHits,
+        costUnknown: snapshot.byProvider.some((row) => row.costUsd === 0 && row.calls > 0),
+      };
+      usageRows = snapshot.byProvider.map((row) => ({
+        provider: row.provider,
+        tokensTotal: row.tokensTotal,
+      }));
+      usageSource = 'TRACE_LEDGER';
+      durableChecked = false;
     }
-    const freePercent = totalTokens > 0 ? Math.round((freeTokens / totalTokens) * 100) : 0;
+
+    const remaining = resolveRemainingCapacity(totals.tokensUsed, budget);
 
     return {
-      tokensUsed: snapshot.totals.tokensTotal,
-      tokenBudget,
-      costUsd: snapshot.totals.costUsd,
-      aiCalls: snapshot.totals.aiCalls,
-      cacheHits: snapshot.totals.cacheHits,
-      freePercent,
+      tokensUsed: totals.tokensUsed,
+      ...(budget.amountTokens !== undefined ? { tokenBudget: budget.amountTokens } : {}),
+      budgetSource: budget.source,
+      ...(budget.configuredAt !== undefined ? { budgetConfiguredAt: budget.configuredAt } : {}),
+      ...(remaining.remainingTokens !== undefined
+        ? { remainingTokens: remaining.remainingTokens }
+        : {}),
+      budgetBasis: remaining.basis,
+      costUsd: totals.costUsd,
+      aiCalls: totals.aiCalls,
+      cacheHits: totals.cacheHits,
+      costUnknown: totals.costUnknown,
+      freePercent: freePercentOf(usageRows),
+      usageSource,
+      durableChecked,
       budgetPolicy: prefs.budgetPolicy,
       budgets: prefs.budgets,
     };

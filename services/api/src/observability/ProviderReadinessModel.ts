@@ -166,6 +166,20 @@ export interface ReadinessInput {
   quotaUsedPercent?: number;
   /** Last known runtime health status from the registry. */
   healthStatus?: string;
+  /**
+   * Provenance of `healthStatus` (ProviderHealthSource; absent ⇒ 'SEED').
+   *
+   * ONLY a 'MEASURED' record is evidence: it was written by a runtime health
+   * sample. A 'SEED' record is catalog data whose status/score/latency were
+   * never measured here, and the catalog stamps `lastCheckedAt` with its own
+   * build time — so a seeded 'healthy' must never be read as a live check, and
+   * a seeded 'down'/'degraded' is no more a measurement of THIS deployment
+   * than the healthy one. Seed health is therefore ignored as evidence
+   * entirely (readiness then rests on the credential, the last real execution
+   * outcome and the provider-reported quota) and is only ever SHOWN, labelled
+   * as a catalog estimate.
+   */
+  healthSource?: 'SEED' | 'MEASURED';
   /** Last REAL execution outcome recorded by the runtime. */
   lastExecution?: { ok: boolean; failureKind?: string; at: number };
   local?: boolean;
@@ -174,14 +188,16 @@ export interface ReadinessInput {
   now?: number;
   /** Evidence older than this is no longer trusted for readiness. */
   staleAfterMs?: number;
-}
-
-/**
+} /**
  * Derive the honest readiness view from real runtime evidence.
  *
  * Ordering is deliberate and matches precedence in the state machine:
  *   DISABLED → NOT_CONFIGURED → FAILED/AUTH_REQUIRED → QUOTA_EXHAUSTED →
  *   RATE_LIMITED → UNAVAILABLE → DEGRADED → READY
+ *
+ * Provenance matters: `healthStatus` only counts when `healthSource` is
+ * 'MEASURED' (see ReadinessInput.healthSource), so the registry's catalog
+ * seed — including its 'healthy' — can never be mistaken for a live check.
  */
 export function deriveProviderReadiness(input: ReadinessInput): ProviderReadinessView {
   const configured = input.credentialSource !== 'NONE';
@@ -268,10 +284,16 @@ export function deriveProviderReadiness(input: ReadinessInput): ProviderReadines
   // Health is a SEPARATE fact from readiness: it can only DOWNGRADE the view,
   // never upgrade it. The provider registry reports the canonical `@vedmoulya/ai`
   // `ProviderStatus` vocabulary ('healthy' | 'degraded' | 'unstable' | 'down').
-  if (input.healthStatus === 'down' || input.healthStatus === 'unstable') {
+  //
+  // EVIDENCE ONLY WHEN MEASURED: a catalog SEED record (the registry default —
+  // see ProviderHealthSource) was never produced by a check of this deployment,
+  // so it is ignored here in BOTH directions. The seeded 'healthy' cannot pass
+  // as a verification, and a seeded 'down' cannot fabricate a failure.
+  const health = input.healthSource === 'MEASURED' ? input.healthStatus : undefined;
+  if (health === 'down' || health === 'unstable') {
     return build('UNAVAILABLE', false, false, quotaReported ? true : null, 'Reported unhealthy.');
   }
-  if (input.healthStatus === 'degraded') {
+  if (health === 'degraded') {
     return build(
       'DEGRADED',
       true,
@@ -280,18 +302,18 @@ export function deriveProviderReadiness(input: ReadinessInput): ProviderReadines
       'Running in a degraded state.',
     );
   }
-  // FAIL-CLOSED (F-U1). This seam accepts a plain string, so an unrecognized
-  // value — a future vocabulary member, a cross-vocabulary literal such as
-  // 'unhealthy', or a typo — must never fall through to READY. Only an explicit
-  // 'healthy' (or NO report at all, which is the absence of evidence rather than
-  // evidence of trouble) may continue to the ready path below.
-  if (input.healthStatus !== undefined && input.healthStatus !== 'healthy') {
+  // FAIL-CLOSED (F-U1). This seam accepts a plain string, so a MEASURED but
+  // unrecognized value — a future vocabulary member, a cross-vocabulary literal
+  // such as 'unhealthy', or a typo — must never fall through to READY. Only an
+  // explicit 'healthy' (or NO evidence at all, which is the absence of evidence
+  // rather than evidence of trouble) may continue to the ready path below.
+  if (health !== undefined && health !== 'healthy') {
     return build(
       'UNAVAILABLE',
       false,
       false,
       quotaReported ? true : null,
-      `Unrecognized health status '${input.healthStatus}' — readiness cannot be confirmed.`,
+      `Unrecognized health status '${health}' — readiness cannot be confirmed.`,
     );
   }
   if (input.mock === true) {

@@ -42,10 +42,20 @@ export const ProviderMapper = {
         successCount: health.successCount,
         failureCount: health.failureCount,
         quotaUsedPercent: health.quotaUsedPercent,
+        // Provenance is part of the payload: a consumer must be able to tell a
+        // seed constant from a provider-reported measurement. Absent ⇒ SEED.
+        quotaSource: health.quotaSource ?? 'SEED',
+        // Provenance of the record itself: absent ⇒ SEED (unproven). A seed
+        // status/score/latency pair must never be read as a live check.
+        healthSource: health.healthSource ?? 'SEED',
         rateLimitRemaining: health.rateLimitRemaining,
         lastSuccessAt: health.lastSuccessAt,
         lastFailureAt: health.lastFailureAt,
         lastCheckedAt: health.lastCheckedAt,
+        // Genuine provider-reported account metrics (tokens/cost/credits/quota),
+        // carried verbatim. Absent ⇒ never retrieved — a consumer must render
+        // "Unavailable from provider", never zero.
+        ...(health.accountUsage !== undefined ? { accountUsage: health.accountUsage } : {}),
       },
       lifecycleStatus: provider.lifecycleStatus.value,
       version: provider.version.toString(),

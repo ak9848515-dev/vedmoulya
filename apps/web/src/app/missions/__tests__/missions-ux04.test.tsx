@@ -421,4 +421,120 @@ describe('UX-04 — every mission state has an honest presentation', () => {
     );
     expect(document.body.textContent ?? '').toMatch(/working|running|in progress/i);
   });
+
+  it('explains why the current step is next from the real objective reason', () => {
+    render(
+      React.createElement(MissionDetailTabs, {
+        status: statusView({
+          state: 'RUNNING',
+          currentObjective: {
+            objectiveId: 'o1',
+            title: 'Draft the plan',
+            state: 'RUNNING',
+            reason: 'Highest priority: unblocks the remaining work',
+            evidence: [],
+            retryCount: 0,
+          },
+          objectives: [
+            {
+              objectiveId: 'o1',
+              title: 'Draft the plan',
+              state: 'RUNNING',
+              reason: 'Highest priority: unblocks the remaining work',
+              evidence: [],
+              retryCount: 0,
+            },
+          ] as MissionStatusView['objectives'],
+        }),
+        onStart: noop,
+        onPause: noop,
+        onResume: noop,
+        onCancel: noop,
+        onApprove: noop,
+        onReject: noop,
+        loopPending: false,
+      }),
+    );
+    expect(screen.getByTestId('overview-why-next').textContent).toContain(
+      'Highest priority: unblocks the remaining work',
+    );
+  });
+
+  it('labels objectives Verified vs Not yet verified with method and evidence', () => {
+    render(
+      React.createElement(MissionDetailTabs, {
+        status: statusView({
+          state: 'COMPLETED',
+          objectives: [
+            {
+              objectiveId: 'o1',
+              title: 'Done work',
+              state: 'VERIFIED',
+              reason: 'Finished',
+              evidence: ['workspace_read ok'],
+              verifiedAt: '2026-09-06T00:01:00.000Z',
+              verificationMethod: 'workspace_readback',
+              retryCount: 0,
+            },
+            {
+              objectiveId: 'o2',
+              title: 'Pending work',
+              state: 'PENDING',
+              reason: 'Not started',
+              evidence: [],
+              retryCount: 0,
+            },
+          ] as MissionStatusView['objectives'],
+        }),
+        onStart: noop,
+        onPause: noop,
+        onResume: noop,
+        onCancel: noop,
+        onApprove: noop,
+        onReject: noop,
+        loopPending: false,
+      }),
+    );
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Result' }));
+    expect(screen.getByTestId('objective-result-label-o1').textContent).toBe('Verified');
+    expect(screen.getByTestId('objective-result-label-o2').textContent).toBe('Not yet verified');
+    expect(document.body.textContent ?? '').toContain('workspace_readback');
+    expect(document.body.textContent ?? '').toContain('workspace_read ok');
+  });
+
+  it('offers a continuation path on terminal missions', () => {
+    render(
+      React.createElement(MissionDetailTabs, {
+        status: statusView({ state: 'FAILED', outcomeReason: 'Provider unavailable' }),
+        onStart: noop,
+        onPause: noop,
+        onResume: noop,
+        onCancel: noop,
+        onApprove: noop,
+        onReject: noop,
+        loopPending: false,
+      }),
+    );
+    expect(screen.getByTestId('overview-continue-panel')).toBeDefined();
+    expect(screen.getByText(/Ask VedMoulya what's next/)).toBeDefined();
+  });
+
+  it('represents a cancelled mission honestly as Cancelled, never Failed', () => {
+    render(
+      React.createElement(MissionDetailTabs, {
+        status: statusView({ state: 'CANCELLED' }),
+        onStart: noop,
+        onPause: noop,
+        onResume: noop,
+        onCancel: noop,
+        onApprove: noop,
+        onReject: noop,
+        loopPending: false,
+      }),
+    );
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Result' }));
+    expect(screen.getByText('Mission Cancelled')).toBeDefined();
+    expect(screen.queryByText('Mission Failed')).toBeNull();
+    expect(screen.getByText(/You cancelled this mission before it finished/)).toBeDefined();
+  });
 });

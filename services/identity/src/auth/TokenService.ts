@@ -17,6 +17,10 @@ export interface RefreshTokenPayload {
   sub: string; // User ID
   jti: string; // Token ID (for revocation)
   type: 'refresh';
+  /** Expiry as NumericDate (seconds since epoch), when the JWT carries it. */
+  exp?: number;
+  /** Issued-at as NumericDate (seconds since epoch), when present. */
+  iat?: number;
 }
 
 export interface TokenPair {
@@ -116,6 +120,8 @@ export class TokenService {
         sub: payload.sub,
         jti: payload.jti,
         type: 'refresh',
+        exp: typeof payload.exp === 'number' ? payload.exp : undefined,
+        iat: typeof payload.iat === 'number' ? payload.iat : undefined,
       };
     } catch (error) {
       logger.warn('Refresh token verification failed', { error });

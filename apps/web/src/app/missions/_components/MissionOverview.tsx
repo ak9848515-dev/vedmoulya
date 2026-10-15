@@ -13,6 +13,7 @@ import { Button } from '@vedmoulya/ui';
 import type { MissionStatusView } from '../../../lib/api-client.js';
 import { ObjectiveTimeline } from '../../autonomous-builder/ObjectiveTimeline.js';
 import { Target, Activity, ArrowRight } from 'lucide-react';
+import { useUIStore } from '../../../stores/ui-store.js';
 
 // ── Test id namespacing (G8 regression) ──────────────────────────────────────
 // MissionDetailTabs' Overview tab renders THIS summary AND the production
@@ -79,6 +80,8 @@ export function MissionOverview({
   isTerminal,
 }: MissionOverviewProps): React.JSX.Element {
   const [busy, setBusy] = useState(false);
+  const setAiPanelOpen = useUIStore((s) => s.setAiPanelOpen);
+  const setPendingQuestion = useUIStore((s) => s.setPendingQuestion);
   const stateMeta = STATE_LABELS[status.state] ?? {
     label: status.state,
     badge: 'bg-slate-100 text-slate-700',
@@ -194,6 +197,20 @@ export function MissionOverview({
         />
       </div>
 
+      {status.currentObjective?.reason ? (
+        <div
+          className="rounded-lg border border-[#2B5FD9]/20 bg-[#EFF4FE] p-4 dark:border-[#2B5FD9]/40 dark:bg-[#1E3A8A]/20"
+          data-testid="overview-why-next"
+        >
+          <h2 className="mb-1 text-[13px] font-semibold text-[#2B5FD9] dark:text-[#6B8FEF]">
+            Why this step is next
+          </h2>
+          <p className="text-[13px] leading-relaxed text-[#374151] dark:text-[#E2E8F0]">
+            {status.currentObjective.reason}
+          </p>
+        </div>
+      ) : null}
+
       <div>
         <h2 className="mb-3 flex items-center gap-2 text-[15px] font-semibold text-[#111827] dark:text-[#F8FAFC]">
           <Target className="h-4 w-4 text-[#2B5FD9]" />
@@ -264,6 +281,34 @@ export function MissionOverview({
               Reason: {status.outcomeReason}
             </p>
           ) : null}
+        </div>
+      ) : null}
+
+      {isTerminal ? (
+        <div
+          className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50"
+          data-testid="overview-continue-panel"
+        >
+          <h3 className="text-sm font-semibold text-[#111827] dark:text-[#F8FAFC]">
+            What would you like to do next?
+          </h3>
+          <p className="mt-1 text-[13px] text-[#64748B] dark:text-slate-400">
+            {status.state === 'FAILED'
+              ? 'This mission did not finish. Ask VedMoulya to try a revised goal — your words become the next mission.'
+              : 'This mission has ended. Ask VedMoulya to start a follow-up from your next goal.'}
+          </p>
+          <Button
+            variant="secondary"
+            size="md"
+            className="mt-3"
+            onClick={() => {
+              setPendingQuestion(`Follow up on "${status.title}": `);
+              setAiPanelOpen(true);
+            }}
+          >
+            Ask VedMoulya what&apos;s next
+            <ArrowRight className="ml-1 h-4 w-4" />
+          </Button>
         </div>
       ) : null}
 

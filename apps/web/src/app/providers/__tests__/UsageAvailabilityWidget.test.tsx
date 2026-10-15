@@ -23,12 +23,16 @@ import {
 } from '../UsageAvailabilityWidget.js';
 import { providerReadiness, PROVIDER_QUOTA_DISCLAIMER } from '../provider-readiness.js';
 
+// The fixture is a PROVIDER-REPORTED quota: the percentage below only ever
+// means account usage when the provenance says so (a registry seed figure is
+// rendered as "Unavailable from provider" — see the dedicated test).
 function row(overrides: Partial<UsageWidgetRow>): UsageWidgetRow {
   return {
     providerId: 'google',
     name: 'Gemini',
     readiness: providerReadiness('CONFIGURED', true),
     quotaUsedPercent: 30,
+    quotaSource: 'PROVIDER_REPORTED',
     ...overrides,
   };
 }
@@ -70,6 +74,27 @@ describe('UsageAvailabilityWidget', () => {
     const unavailable = screen.getAllByText('Usage unavailable');
     expect(unavailable.length).toBeGreaterThan(0);
     expect(screen.queryByText(/^\d+% remaining$/)).toBeNull();
+  });
+
+  it('shows "Unavailable from provider" for a REGISTRY SEED quota — never a percentage', () => {
+    const rows: UsageWidgetRow[] = [
+      row({ providerId: 'openai', name: 'OpenAI', quotaUsedPercent: 45, quotaSource: 'SEED' }),
+      row({
+        providerId: 'anthropic',
+        name: 'Anthropic',
+        quotaUsedPercent: 38,
+        quotaSource: 'SEED',
+      }),
+    ];
+    render(<UsageAvailabilityWidget rows={rows} summary={summary} updatedAt={null} />);
+
+    // The catalog constants (45 / 38 …) must not leak into the UI as usage.
+    expect(screen.getAllByText('Unavailable from provider').length).toBe(2);
+    expect(screen.queryByText(/Provider usage ·/)).toBeNull();
+    expect(screen.queryByText(/\d+% remaining/)).toBeNull();
+    // …and no provider-level number is claimed, so no percentages are
+    // presented at all for these rows.
+    expect(screen.queryByText(/not your account balance/)).toBeNull();
   });
 
   it('shows the honest provider-level disclaimer when percentages appear', () => {
@@ -134,7 +159,10 @@ describe('UsageAvailabilityWidget', () => {
         providerId: 'bad',
         name: 'Broken',
         readiness: { key: 'green', label: 'Configured and enabled' },
+        // A malformed PROVIDER-REPORTED value (not a registry seed): unusable,
+        // so the row must read "Usage unavailable" rather than a number.
         quotaUsedPercent: NaN,
+        quotaSource: 'PROVIDER_REPORTED',
       },
     ];
     render(<UsageAvailabilityWidget rows={rows} summary={summary} updatedAt={null} />);

@@ -162,6 +162,19 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
     },
   },
+  // S024-4A token denylist: the in-memory store implements the async
+  // RefreshTokenDenylistStore contract (Promise-returning revoke/isRevoked/
+  // revokeForUser/isUserRevoked/cleanup). The `async` keyword is REQUIRED for
+  // interface conformance even though the Map-backed bodies never await —
+  // removing it would break the store contract (same rationale as the
+  // InMemory*.ts overrides above). The Postgres implementation in the same
+  // file genuinely awaits its queries.
+  {
+    files: ['services/identity/src/infrastructure/persistence/RefreshTokenDenylistStore.ts'],
+    rules: {
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
   // BLD-022 mission-runtime adapters implement ASYNC port/store contracts
   // (MissionStore/CheckpointStore/RepositoryInspectionPort/VerificationPort/
   // FailureClassificationPort) whose bodies are synchronous by design — the
@@ -493,6 +506,11 @@ export default tseslint.config(
       // Root-level ad-hoc coverage/analysis scratch (same category as the
       // .tmp-*.mjs probes excluded below); never part of the source tree.
       '_*.mjs',
+      // Ad-hoc debug scripts under scripts/ — gitignored by `/scripts/_*.ts`
+      // (never part of the tracked source tree), so the root lint scope must
+      // not walk them. The intentionally tracked `scripts/_*probe.mjs` helpers
+      // and every real `scripts/live-*.ts` harness stay linted.
+      'scripts/_*.ts',
       // Generated build output (never authored, never linted):
       'apps/web/out/**', // Next.js static export
       'apps/web/android/**', // Capacitor wrapper incl. copied web assets

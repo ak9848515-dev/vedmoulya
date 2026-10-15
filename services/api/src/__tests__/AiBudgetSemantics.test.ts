@@ -96,16 +96,35 @@ describe('resolveProviderQuotaView — UNKNOWN stays UNKNOWN', () => {
   });
 
   it('exposes a real reported percentage WITHOUT fabricating a token count', () => {
-    const quota = resolveProviderQuotaView('openai', 42, false);
+    // Account usage exists ONLY for a provider-reported sample (provenance).
+    const quota = resolveProviderQuotaView('openai', 42, false, 'PROVIDER_REPORTED');
     expect(quota.quotaKnown).toBe(true);
     expect(quota.usedPercent).toBe(42);
     expect(quota.remainingTokens).toBeUndefined();
     expect(quota.source).toBe('PROVIDER_ACCOUNT');
   });
 
+  it('refuses to call a REGISTRY SEED percentage provider-reported account usage', () => {
+    // This is the fabricated-quota defect: the catalog constant must never
+    // become a quota, a remaining balance or a "% used" figure.
+    const seed = resolveProviderQuotaView('openai', 42, false, 'SEED');
+    expect(seed.quotaKnown).toBe(false);
+    expect(seed.usedPercent).toBeUndefined();
+    expect(seed.remainingTokens).toBeUndefined();
+    expect(seed.source).toBe('UNKNOWN');
+    // The estimate itself stays available — explicitly labelled as an estimate.
+    expect(seed.registryEstimatePercent).toBe(42);
+    expect(seed.note).toMatch(/seed estimate/i);
+
+    // An ABSENT provenance is a seed too (persisted/legacy records are unproven).
+    expect(resolveProviderQuotaView('openai', 42, false).quotaKnown).toBe(false);
+  });
+
   it('clamps a reported percentage into 0..100', () => {
-    expect(resolveProviderQuotaView('x', 150, false).usedPercent).toBe(100);
-    expect(resolveProviderQuotaView('x', -5, false).quotaKnown).toBe(false);
+    expect(resolveProviderQuotaView('x', 150, false, 'PROVIDER_REPORTED').usedPercent).toBe(100);
+    expect(resolveProviderQuotaView('x', -5, false, 'PROVIDER_REPORTED').quotaKnown).toBe(false);
+    // A seed with no figure at all exposes no estimate either.
+    expect(resolveProviderQuotaView('x', 0, false, 'SEED').registryEstimatePercent).toBeUndefined();
   });
 
   it('treats local AI as unmetered by cloud quota', () => {

@@ -58,6 +58,12 @@ export interface UsageWidgetRow {
   readiness: ProviderReadiness;
   /** Registry health snapshot quota (0 = provider reports none). */
   quotaUsedPercent: number;
+  /**
+   * Provenance of the quota (absent ⇒ 'SEED'). A seed figure is a catalog
+   * constant, never account usage, so it renders as "Unavailable from
+   * provider" instead of a percentage.
+   */
+  quotaSource?: 'SEED' | 'PROVIDER_REPORTED';
   /** Local provider (ollama / lm-studio / local) — no metered quota. */
   local?: boolean;
   /** Deterministic mock runtime active — no metered quota. */
@@ -87,6 +93,7 @@ function usageDisplay(row: UsageWidgetRow): ProviderUsageDisplay {
     return deriveProviderUsage({
       readiness: row.readiness,
       quotaUsedPercent: row.quotaUsedPercent,
+      quotaSource: row.quotaSource,
       local: row.local,
       mock: row.mock,
     });

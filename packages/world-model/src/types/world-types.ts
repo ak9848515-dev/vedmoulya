@@ -464,11 +464,31 @@ export interface OpportunityPipelineEntry {
   score: number;
   capitalMode: CapitalMode;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
+  /** Non-numeric record label (kept for compatibility) — never used as a number. */
   estimatedCost?: { label: string; status: ObservationStatus };
   estimatedValue?: { label: string; status: ObservationStatus };
   firstStep?: string;
   approvalRequired: boolean;
   evidence: string[];
+  // ── S8 — evidence-backed revenue valuation (never a promise) ────────────
+  /** Evidence-backed numeric expected value. Absent ⇒ UNKNOWN (never 0). */
+  expectedValue?: { value: number; status: ObservationStatus; evidence: string[] };
+  /** Evidence-backed numeric expected cost. Absent ⇒ UNKNOWN (never 0). */
+  expectedCost?: { value: number; status: ObservationStatus; evidence: string[] };
+  /** Advisory margin (value−cost)/value — only when BOTH sides have evidence. */
+  expectedMargin?: number;
+  /** Advisory ROI multiple (value−cost)/cost — only when BOTH sides and cost > 0. */
+  expectedRoi?: number;
+  /** Margin-aware rank score (0..10) — undefined without both sides. */
+  rankScore?: number;
+  /** Honest provenance of the numeric valuation. */
+  valuationProvenance?: 'OUTCOME_EVIDENCE' | 'RECORD_LABEL' | 'NONE';
+  /** Exposed reasoning for this entry's ranking — never hidden arithmetic. */
+  reasoning?: string[];
+  /** Bounded verified-outcome adjustments (Δ ≤ FEEDBACK_DELTA_MAX per record). */
+  boundedFeedback?: OutcomeFeedbackResult['adjustments'];
+  /** Structural — the pipeline is advisory and never authorizes work. */
+  advisory?: true;
 }
 
 // ── World signal interface (interfaces ONLY — never fabricated data) ────────

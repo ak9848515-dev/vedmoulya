@@ -16,7 +16,7 @@ import type {
   MissionObjective,
   MissionOutcome,
 } from '../types/mission-types.js';
-import { transition, isTerminal } from '../domain/mission-state-machine.js';
+import { transition, canTransition, isTerminal } from '../domain/mission-state-machine.js';
 import {
   checkBudget,
   createDefaultBudget,
@@ -72,6 +72,54 @@ const MAX_DIAGNOSIS_EVIDENCE_HISTORY = 3;
 
 /** BLD-025 — bounded durable activity trail per mission. */
 export const DEFAULT_MAX_ACTIVITY_EVENTS = 200;
+
+/** S10 — bounded attempts for a REQUIRED (durability-barrier) mission write. */
+export const DEFAULT_PERSISTENCE_ATTEMPTS = 3;
+
+/** S10 — base backoff between required-write attempts (doubles, bounded). */
+export const DEFAULT_PERSISTENCE_BASE_DELAY_MS = 20;
+
+/**
+ * S10 — thrown when a REQUIRED mission write could not be made durable within
+ * the bounded retry budget. It exists so a durability barrier can NEVER be
+ * confused with success: the caller must either hold the mission honestly or
+ * revert the unacknowledged transition. It is never thrown for best-effort
+ * writes (those keep the frozen fire-and-forget semantics).
+ */
+export class RequiredPersistenceError extends Error {
+  /** The final underlying write failure (named `lastError`: `cause` is reserved
+   *  by `Error` and would need an `override` modifier). */
+  readonly lastError: unknown;
+
+  constructor(operation: string, attempts: number, lastError: unknown) {
+    super(
+      `Required mission persistence failed for ${operation} after ${String(attempts)} attempt(s): ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`,
+    );
+    this.name = 'RequiredPersistenceError';
+    this.operation = operation;
+    this.attempts = attempts;
+    this.lastError = lastError;
+  }
+
+  readonly operation: string;
+  readonly attempts: number;
+}
+
+/**
+ * S10 — the transitions that ACKNOWLEDGE an irreversible outcome and therefore
+ * require durable persistence before the acknowledgement is returned:
+ *   - an objective reaching VERIFIED (its side effects already happened),
+ *   - a Mission reaching a terminal state.
+ * Everything else keeps the frozen best-effort write behavior.
+ */
+const TERMINAL_COMMANDS: ReadonlySet<MissionCommand['type']> = new Set([
+  'COMPLETE',
+  'FAIL',
+  'CANCEL',
+  'REJECT_APPROVAL',
+]);
 
 /** BLD-025 — durable activity kind for each state-machine command. */
 const BLD_025_COMMAND_ACTIVITY: Record<MissionCommand['type'], string> = {
@@ -174,6 +222,15 @@ export interface MissionControllerOptions {
     error: string,
     failureClass: string,
   ) => Promise<boolean> | boolean;
+  /**
+   * S10 — bounded retry policy for REQUIRED (durability-barrier) mission
+   * writes. Defaults to `DEFAULT_PERSISTENCE_ATTEMPTS` attempts with an
+   * exponential delay from `DEFAULT_PERSISTENCE_BASE_DELAY_MS` (20/40/…ms,
+   * bounded by the attempt count). A best-effort write is never retried: it
+   * keeps the frozen fire-and-forget semantics. Exhausting the budget does
+   * NOT fabricate success — the transition is held or reverted honestly.
+   */
+  persistenceRetry?: { attempts?: number; baseDelayMs?: number };
   /** BLD-025 — durable objective ownership lease TTL (defaults to 60s). */
   leaseTtlMs?: number;
   /** BLD-025 — bounded durable activity trail length (defaults to 200). */
@@ -243,8 +300,19 @@ export interface AbandonedExecutionReconciliationResult {
 
 export class MissionControllerService {
   private readonly objectivesInFlight = new Set<string>();
+  private readonly persistenceAttempts: number;
+  private readonly persistenceBaseDelayMs: number;
 
-  constructor(private readonly options: MissionControllerOptions) {}
+  constructor(private readonly options: MissionControllerOptions) {
+    this.persistenceAttempts = Math.max(
+      1,
+      options.persistenceRetry?.attempts ?? DEFAULT_PERSISTENCE_ATTEMPTS,
+    );
+    this.persistenceBaseDelayMs = Math.max(
+      0,
+      options.persistenceRetry?.baseDelayMs ?? DEFAULT_PERSISTENCE_BASE_DELAY_MS,
+    );
+  }
 
   async createMission(input: CreateMissionInput): Promise<Mission> {
     const { clock, idGenerator, store } = this.options;
@@ -340,10 +408,18 @@ export class MissionControllerService {
 
   async resumeMission(missionId: string): Promise<Mission> {
     const mission = await this.getMission(missionId);
+    // S10 — a BLOCKED mission is cleared with the state machine's OWN declared
+    // transition for it (BLOCKED → RUNNING is `UNBLOCK`). `UNBLOCK` was never
+    // dispatched by any caller, so resuming a BLOCKED mission used to raise
+    // "Illegal mission transition: BLOCKED -> RESUME" — which made the operator
+    // action the recovery policy documents impossible to perform. No gate is
+    // changed: the caller already treated BLOCKED as resumable.
     const command =
       mission.state === 'WAITING_FOR_PROVIDER'
         ? ({ type: 'PROVIDER_AVAILABLE' } as const)
-        : ({ type: 'RESUME' } as const);
+        : mission.state === 'BLOCKED'
+          ? ({ type: 'UNBLOCK' } as const)
+          : ({ type: 'RESUME' } as const);
     return this.applyCommand(mission, command);
   }
 
@@ -572,7 +648,29 @@ export class MissionControllerService {
     }
     mission.updatedAt = this.options.clock.now();
     this.recordActivity(mission, 'OBJECTIVE_STARTED', `Objective running: ${objective.title}`);
-    await this.options.store.save(mission);
+    // ── S10 — DURABILITY BARRIER (objective start). ────────────────────────
+    //    The durable snapshot must record RUNNING + its ownership lease BEFORE
+    //    any side effect can happen. This write used to be best-effort: if the
+    //    lease never became durable, a crash could not be distinguished from
+    //    "never ran", and recovery would BLINDLY RE-EXECUTE an objective that
+    //    had already started causing side effects. Nothing has executed yet at
+    //    this point, so an exhausted barrier is safe to hold.
+    try {
+      await this.persistRequired(
+        `objective_start:${objective.objectiveId}`,
+        () =>
+          this.options.store.saveRequired
+            ? this.options.store.saveRequired(mission)
+            : this.options.store.save(mission),
+        mission,
+      );
+    } catch (error) {
+      return this.holdAfterPersistenceFailure(
+        mission,
+        `objective_start:${objective.objectiveId}`,
+        error,
+      );
+    }
 
     // ── Execute (plan + AI execution) with honest, bounded error handling ──
     //    A provider/planner/executor throw must NEVER leave the mission stuck
@@ -960,7 +1058,24 @@ export class MissionControllerService {
     mission.budgetUsage.tokensConsumed += executionResult.usage.tokens;
     mission.budgetUsage.costUsdConsumed += executionResult.usage.costUsd;
 
-    const checkpoint = await this.createCheckpoint(mission, objective);
+    // S10 — a VERIFIED objective's checkpoint is its durable WITNESS: it is
+    // what lets a lost/rolled-back mission document be reconciled without
+    // blindly re-executing the objective. It therefore takes the barrier too;
+    // every other checkpoint keeps the frozen best-effort write.
+    let checkpoint: MissionCheckpoint;
+    try {
+      checkpoint = await this.createCheckpoint(mission, objective, {
+        required: isHonestCompletion,
+      });
+    } catch (error) {
+      // The witness for a VERIFIED objective could not be made durable: hold
+      // honestly instead of acknowledging an unpersisted result.
+      return this.holdAfterPersistenceFailure(
+        mission,
+        `checkpoint:${objective.objectiveId}`,
+        error,
+      );
+    }
     mission.checkpoints.push(checkpoint);
     this.recordActivity(
       mission,
@@ -969,28 +1084,65 @@ export class MissionControllerService {
     );
 
     if (isHonestCompletion) {
-      await this.options.executionMemory.recordVerifiedOutcome(
-        mission.missionId,
-        objective.objectiveId,
-        {
-          success: executionResult.success,
-          verified: verificationResult.verified,
-          output: executionResult.output,
-          evidence: verificationResult.evidence,
-        },
-      );
+      // S10 — ADVISORY ISOLATION. Execution learning is advisory: a memory
+      // persistence failure must NEVER destroy the objective's verified result
+      // or prevent its durable acknowledgement. The failure path already
+      // isolates itself the same way; the success path now matches it and the
+      // absence is recorded honestly instead of thrown.
+      try {
+        await this.options.executionMemory.recordVerifiedOutcome(
+          mission.missionId,
+          objective.objectiveId,
+          {
+            success: executionResult.success,
+            verified: verificationResult.verified,
+            output: executionResult.output,
+            evidence: verificationResult.evidence,
+          },
+        );
+      } catch {
+        this.recordActivity(
+          mission,
+          'OBJECTIVE_VERIFIED',
+          `Execution learning for ${objective.objectiveId} could not be recorded (advisory) — the verified result is unaffected`,
+        );
+      }
     }
 
     if (objective.verifiedOutcome) {
-      await this.options.experienceOptimization.getAdvisorySignal(objective.objective, {
-        missionId: mission.missionId,
-        objectiveId: objective.objectiveId,
-        userId: mission.userId,
-      });
+      try {
+        await this.options.experienceOptimization.getAdvisorySignal(objective.objective, {
+          missionId: mission.missionId,
+          objectiveId: objective.objectiveId,
+          userId: mission.userId,
+        });
+      } catch {
+        // Advisory only — an experience signal can never change the outcome.
+      }
     }
 
     mission.updatedAt = this.options.clock.now();
-    await this.options.store.save(mission);
+    // ── S10 — DURABILITY BARRIER (objective result). ───────────────────────
+    //    This single write acknowledges the objective result (VERIFIED / FAILED
+    //    + retry counters + the checkpoint reference). It must not be returned
+    //    as success while it is still only a queued write: a crash then loses a
+    //    verified objective and recovery would run it again.
+    try {
+      await this.persistRequired(
+        `objective_result:${objective.objectiveId}:${objective.state}`,
+        () =>
+          this.options.store.saveRequired
+            ? this.options.store.saveRequired(mission)
+            : this.options.store.save(mission),
+        mission,
+      );
+    } catch (error) {
+      return this.holdAfterPersistenceFailure(
+        mission,
+        `objective_result:${objective.objectiveId}:${objective.state}`,
+        error,
+      );
+    }
 
     return mission;
   }
@@ -1042,6 +1194,35 @@ export class MissionControllerService {
       return mission;
     }
     if (mission.objectives.length === 0) return mission;
+
+    // ── S10 — CHECKPOINT FIDELITY. ────────────────────────────────────────
+    //    A resume used to only check that a checkpoint EXISTS. The checkpoint
+    //    is the durable WITNESS of what was verified, so its supported fields
+    //    are restored when — and only when — the mission document does not
+    //    already record them. Restore is PROMOTE-ONLY: an older checkpoint can
+    //    never weaken, demote or duplicate newer durable state, and it never
+    //    touches leases or budget counters other than the verified count it
+    //    caused to be missing.
+    if (this.restoreVerifiedFromCheckpoint(mission, latest)) {
+      mission.updatedAt = this.options.clock.now();
+      try {
+        await this.persistRequired(
+          `checkpoint_restore:${missionId}:${latest.checkpointId}`,
+          () =>
+            this.options.store.saveRequired
+              ? this.options.store.saveRequired(mission)
+              : this.options.store.save(mission),
+          mission,
+        );
+      } catch (error) {
+        return this.holdAfterPersistenceFailure(
+          mission,
+          `checkpoint_restore:${missionId}:${latest.checkpointId}`,
+          error,
+        );
+      }
+    }
+
     // Advance to the next non-terminal objective. Verified objectives are
     // never re-run — checkpoints guard against duplicate execution.
     const pendingObjective = mission.objectives.find(
@@ -1049,6 +1230,45 @@ export class MissionControllerService {
     );
     if (pendingObjective) return this.runNextObjective(mission.missionId);
     return this.applyCommand(mission, { type: 'COMPLETE' });
+  }
+
+  /**
+   * S10 — restore the fields the checkpoint is authoritative for.
+   *
+   * Only ONE promotion is possible: an objective the checkpoint records as
+   * VERIFIED (with a real verified outcome) that the mission document does not
+   * record as verified. That is exactly the "verification succeeded but the
+   * mission write was lost" window, and restoring it prevents a re-execution
+   * of work that already happened. Nothing else is ever taken from the
+   * checkpoint — in particular the mission document's newer state is never
+   * overwritten and a lease is never resurrected.
+   *
+   * Returns true when the mission was changed.
+   */
+  private restoreVerifiedFromCheckpoint(mission: Mission, checkpoint: MissionCheckpoint): boolean {
+    if (checkpoint.state !== 'VERIFIED') return false;
+    const outcome = checkpoint.verifiedOutcome;
+    if (!outcome?.achieved || outcome.evidence.length === 0) return false;
+    const objective = mission.objectives.find((o) => o.objectiveId === checkpoint.objectiveId);
+    if (!objective) return false;
+    // Promote-only: the mission document always wins when it already records
+    // the verified result.
+    if (objective.state === 'VERIFIED' || objective.verifiedOutcome) return false;
+    objective.state = 'VERIFIED';
+    objective.stateHistory.push('VERIFIED');
+    objective.lease = undefined;
+    objective.verifiedOutcome = outcome;
+    objective.completedAt = outcome.verifiedAt;
+    objective.updatedAt = this.options.clock.now();
+    // The verified count is incremented exactly where VERIFIED is set, so a
+    // missing verified result means the count was never taken either.
+    mission.budgetUsage.objectivesCompleted += 1;
+    this.recordActivity(
+      mission,
+      'CHECKPOINT_RESTORED',
+      `Verified result for objective ${objective.objectiveId} restored from durable checkpoint ${checkpoint.checkpointId} (the mission document had not recorded it)`,
+    );
+    return true;
   }
 
   status(missionId: string): MissionStatusDTO {
@@ -1086,6 +1306,12 @@ export class MissionControllerService {
   private async applyCommand(mission: Mission, command: MissionCommand): Promise<Mission> {
     const { clock, store } = this.options;
     const fromState = mission.state;
+    // S10 — a TERMINAL transition acknowledges an irreversible outcome (the
+    // mission is finished), so it takes the durability barrier. Every other
+    // command keeps the frozen best-effort write: the brief forbids globally
+    // converting best-effort writes into blocking ones.
+    const required = TERMINAL_COMMANDS.has(command.type);
+    const before = required ? structuredClone(mission) : undefined;
     const newState = transition(mission.state, command);
     mission.state = newState;
     mission.stateHistory.push(newState);
@@ -1123,8 +1349,42 @@ export class MissionControllerService {
       `${fromState} → ${newState}${commandReason ? ` — ${commandReason}` : ''}`,
     );
 
-    await store.save(mission);
-    return mission;
+    if (!required) {
+      await store.save(mission);
+      return mission;
+    }
+
+    // ── S10 — DURABILITY BARRIER (terminal transition). ───────────────────
+    //    A terminal mission must not be REPORTED as finished while its
+    //    completion is still only a queued write. On exhaustion the
+    //    acknowledgement is withdrawn rather than fabricated: the in-memory
+    //    claim is reverted (state, outcome fields and the just-recorded
+    //    lifecycle event) so memory and the durable snapshot agree, and the
+    //    mission is held honestly.
+    try {
+      await this.persistRequired(
+        `terminal:${command.type}`,
+        () =>
+          this.options.store.saveRequired
+            ? this.options.store.saveRequired(mission)
+            : this.options.store.save(mission),
+        mission,
+      );
+      return mission;
+    } catch (error) {
+      if (before) {
+        mission.state = before.state;
+        mission.stateHistory = before.stateHistory;
+        mission.outcome = before.outcome;
+        mission.outcomeReason = before.outcomeReason;
+        mission.finishedAt = before.finishedAt;
+        mission.error = before.error;
+        mission.startedAt = before.startedAt;
+        mission.activity = before.activity;
+        mission.updatedAt = before.updatedAt;
+      }
+      return this.holdAfterPersistenceFailure(mission, `terminal:${command.type}`, error);
+    }
   }
 
   private determineOutcome(mission: Mission): MissionOutcome {
@@ -1148,9 +1408,102 @@ export class MissionControllerService {
     return mission;
   }
 
+  // ── S10 — Durability barrier ──────────────────────────────────────────
+
+  /**
+   * S10 — persist a transition that ACKNOWLEDGES an irreversible outcome, with
+   * a BOUNDED retry/backoff budget.
+   *
+   * Unlike the frozen best-effort `store.save()` — which resolves as soon as
+   * the synchronous mirror is written and silently re-queues a failed database
+   * write — this awaits the store's required-persistence mechanism and THROWS
+   * `RequiredPersistenceError` when the write could not be made durable within
+   * the budget. A durability barrier can therefore never be mistaken for
+   * success, and an exhausted budget never fabricates a durable transition.
+   *
+   * Bounded by construction: at most `persistenceAttempts` attempts (default 3)
+   * with exponential backoff. No unbounded loop, no unbounded queue.
+   */
+  private async persistRequired(
+    operation: string,
+    write: () => Promise<void>,
+    mission?: Mission,
+  ): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.persistenceAttempts; attempt += 1) {
+      try {
+        await write();
+        if (attempt > 1 && mission) {
+          this.recordActivity(
+            mission,
+            'PERSISTENCE_RETRIED',
+            `Required persistence for ${operation} succeeded on attempt ${String(attempt)}`,
+          );
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < this.persistenceAttempts && this.persistenceBaseDelayMs > 0) {
+          await this.sleep(this.persistenceBaseDelayMs * 2 ** (attempt - 1));
+        }
+      }
+    }
+    throw new RequiredPersistenceError(operation, this.persistenceAttempts, lastError);
+  }
+
+  /** S10 — bounded backoff sleep (only ever used by the barrier). */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  /**
+   * S10 — the honest outcome of an exhausted durability barrier. The
+   * acknowledgement is NEVER returned as success:
+   *   - the failed operation is recorded on the bounded activity trail,
+   *   - `outcomeReason` states what could not be recorded and what the operator
+   *     must do,
+   *   - the mission is HELD in the recoverable BLOCKED state when the frozen
+   *     state machine permits it (RUNNING → BLOCK, so the autonomous loop stops
+   *     rather than continuing on unpersisted state). Every other state is left
+   *     exactly as it was: no fabricated terminal outcome, no blind re-run.
+   * The hold itself is a best-effort write; if that cannot be persisted either,
+   * the last durable snapshot stays authoritative and recovery re-derives the
+   * outcome from durable state instead of trusting memory.
+   */
+  private async holdAfterPersistenceFailure(
+    mission: Mission,
+    operation: string,
+    error: unknown,
+  ): Promise<Mission> {
+    const reason = `Durability barrier: ${operation} could not be persisted after ${String(
+      this.persistenceAttempts,
+    )} attempt(s) (${
+      error instanceof Error ? error.message : String(error)
+    }) — the outcome is NOT acknowledged as durable; resume after persistence recovers.`;
+    mission.outcomeReason = reason;
+    const blockCommand = { type: 'BLOCK', reason } as const;
+    if (canTransition(mission.state, blockCommand)) {
+      mission.state = transition(mission.state, blockCommand);
+      mission.stateHistory.push(mission.state);
+      this.recordActivity(mission, BLD_025_COMMAND_ACTIVITY.BLOCK, reason);
+    }
+    this.recordActivity(mission, 'PERSISTENCE_FAILED', reason);
+    mission.updatedAt = this.options.clock.now();
+    await this.options.store.save(mission);
+    return mission;
+  }
+
+  /**
+   * S10 — build + persist a checkpoint. `required` promotes the write to the
+   * durability barrier (used for the CHECKPOINT THAT WITNESSES a verified
+   * objective). Every other checkpoint keeps the frozen best-effort write.
+   */
   private async createCheckpoint(
     mission: Mission,
     objective: MissionObjective,
+    options: { required?: boolean } = {},
   ): Promise<MissionCheckpoint> {
     const { clock, idGenerator, checkpointStore } = this.options;
     const now = clock.now();
@@ -1185,7 +1538,18 @@ export class MissionControllerService {
       },
       timestamp: now,
     };
-    await checkpointStore.save(checkpoint);
+    if (options.required) {
+      await this.persistRequired(
+        `checkpoint:${checkpoint.checkpointId}`,
+        () =>
+          checkpointStore.saveRequired
+            ? checkpointStore.saveRequired(checkpoint)
+            : checkpointStore.save(checkpoint),
+        mission,
+      );
+    } else {
+      await checkpointStore.save(checkpoint);
+    }
     return checkpoint;
   }
 

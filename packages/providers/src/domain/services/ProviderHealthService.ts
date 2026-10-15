@@ -8,6 +8,7 @@
 
 import type { ProviderStatus as ProviderHealthStatus } from '@vedmoulya/ai';
 import type { Provider } from '../entities/Provider.js';
+import type { ProviderHealthSource, ProviderQuotaSource } from '../../types/provider-types.js';
 
 export interface ProviderHealthSnapshotView {
   providerId: string;
@@ -18,6 +19,10 @@ export interface ProviderHealthSnapshotView {
   successCount: number;
   failureCount: number;
   quotaUsedPercent: number;
+  /** Provenance of the quota (absent ⇒ 'SEED' — not provider-reported). */
+  quotaSource?: ProviderQuotaSource;
+  /** Provenance of the record (absent ⇒ 'SEED' — not a live check). */
+  healthSource?: ProviderHealthSource;
   lastCheckedAt: string;
 }
 
@@ -50,6 +55,8 @@ export class ProviderHealthService {
         successCount: health.successCount,
         failureCount: health.failureCount,
         quotaUsedPercent: health.quotaUsedPercent,
+        quotaSource: health.quotaSource ?? 'SEED',
+        healthSource: health.healthSource ?? 'SEED',
         lastCheckedAt: health.lastCheckedAt,
       };
     });

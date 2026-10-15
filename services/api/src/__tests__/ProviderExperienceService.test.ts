@@ -298,9 +298,12 @@ describe('ProviderExperienceService — view model', () => {
         health: { ...providerDTO().health, status: 'degraded' },
         models: [],
       }),
+      // A PROVIDER-REPORTED quota near its limit limits availability. A SEED
+      // quota (the catalog constant) must NOT move availability — proven in
+      // ProviderUsageDetail.test.ts.
       providerDTO({
         id: 'quota',
-        health: { ...providerDTO().health, quotaUsedPercent: 95 },
+        health: { ...providerDTO().health, quotaUsedPercent: 95, quotaSource: 'PROVIDER_REPORTED' },
         models: [],
       }),
       providerDTO({ id: 'disabled-provider', models: [] }),

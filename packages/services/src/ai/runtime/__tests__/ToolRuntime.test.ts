@@ -486,3 +486,99 @@ describe('ToolRegistry — NO dangerous surface (C-04 security invariants)', () 
     expect(ToolTimeoutError).toBeTypeOf('function');
   });
 });
+
+// ──────────────────────────────────────────────────────────────────
+// Sprint 022–025 closure, Phase 5 — TOOL/ACTION FAILURES
+//
+// An AUTHORIZED tool whose handler FAILS at runtime must produce a typed,
+// honest failure: never a crash, never a fabricated success, no partial
+// payload, no leaked internals — and the attempt must still be audited.
+// ──────────────────────────────────────────────────────────────────
+describe('ToolRegistry — authorized handler failure is typed and honest', () => {
+  const throwingTool: ToolDefinition = {
+    name: 'flaky_action',
+    description: 'An allowed tool whose handler fails at runtime.',
+    capability: 'reasoning',
+    inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
+    handler: () => {
+      throw new Error('downstream action failed: connection reset by peer');
+    },
+  };
+
+  function registryWith(tool: ToolDefinition): ToolRegistry {
+    const registry = new ToolRegistry({ grantedCapabilities: ['reasoning'] });
+    registry.register(tool);
+    return registry;
+  }
+
+  it('returns a typed internal_error outcome (no throw, no success, no data)', async () => {
+    const registry = registryWith(throwingTool);
+    const result = await registry.execute({
+      toolName: 'flaky_action',
+      arguments: { value: 'x' },
+      userId: 'user-a',
+    });
+
+    // Honest failure — the call is NOT denied (it was authorized) and NOT ok.
+    expect(result.ok).toBe(false);
+    expect(result.denied).toBe(false);
+    expect(result.outcome).toBe('internal_error');
+    // No fabricated payload: a failed action never returns data as if it worked.
+    expect(result.data).toBeUndefined();
+    expect(typeof result.error).toBe('string');
+    expect(result.error ?? '').not.toBe('');
+  });
+
+  it('audits the failed attempt with the same identity + outcome', async () => {
+    const registry = registryWith(throwingTool);
+    await registry.execute({
+      toolName: 'flaky_action',
+      arguments: { value: 'x' },
+      userId: 'user-a',
+    });
+    const event = registry.getAuditTrail().find((e) => e.toolName === 'flaky_action');
+    expect(event).toBeDefined();
+    expect(event?.outcome).toBe('internal_error');
+    expect(event?.denied).toBe(false);
+    expect(event?.userId).toBe('user-a');
+  });
+
+  it('keeps the failure isolated per principal and never leaks handler internals to results', async () => {
+    const leaky: ToolDefinition = {
+      ...throwingTool,
+      name: 'leaky_action',
+      handler: () => {
+        throw new Error('boom: internal key sk-proj-secret-1234567890 at /srv/app/db.ts:42');
+      },
+    };
+    const registry = registryWith(leaky);
+    const failed = await registry.execute({
+      toolName: 'leaky_action',
+      arguments: { value: 'x' },
+      userId: 'user-a',
+    });
+    expect(failed.ok).toBe(false);
+    expect(failed.outcome).toBe('internal_error');
+    // The typed result never carries the raw secret-shaped handler message.
+    expect(JSON.stringify(failed)).not.toMatch(/sk-proj-secret-1234567890/);
+
+    // A DIFFERENT principal can still use the registry: one failing action does
+    // not wedge the runtime for anyone else.
+    const other: ToolDefinition = {
+      name: 'ok_action',
+      description: 'ok',
+      capability: 'reasoning',
+      inputSchema: { type: 'object', properties: {} },
+      handler: () => ({ done: true }),
+    };
+    registry.register(other);
+    const ok = await registry.execute({
+      toolName: 'ok_action',
+      arguments: {},
+      userId: 'user-b',
+    });
+    expect(ok.ok).toBe(true);
+    expect(ok.outcome).toBe('success');
+    expect((ok.data as { done?: boolean }).done).toBe(true);
+  });
+});

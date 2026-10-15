@@ -19,9 +19,14 @@
    (the newest tag currently in the repository is `v1.0.3`; no tag has been
    deployed yet, so there is no previously deployed production version),
    rebuild, and deploy via the [Deployment Guide](./DEPLOYMENT_GUIDE.md).
-4. **Roll back migrations** — if the release applied DB migrations, run the
-   corresponding down-migrations against each service database (or restore
-   from the pre-deploy backup).
+4. **Roll back schema changes** — this repository has **no down-migration
+   framework** (no Prisma, no Drizzle Kit, no `_migrations` table; all DDL is
+   startup-idempotent `IF NOT EXISTS`). If the release applied a destructive
+   schema change, **restore the pre-deploy backup** (step 4 of the
+   [backup-restore runbook](../runbooks/backup-restore-runbook.md#2-restore-procedure)),
+   then redeploy the previous code so its `ensureTable()` matches the restored
+   schema. Additive `IF NOT EXISTS` changes need no rollback — the next boot
+   re-runs them safely.
 5. **Verify** — health endpoints return `status: ok`; key user flows
    (auth, dashboard, search) pass smoke tests.
 6. **Post-incident** — open an issue with the root cause; add a regression
@@ -30,8 +35,9 @@
 ## Migration Safety
 
 - One database per service (`*_DATABASE_URL`).
-- Release migration order must be documented per service; down-migrations
-  must be reversible for the last N releases.
+- The repository does **not** use Prisma, Drizzle Kit, or a `_migrations` version table — there are **no down-migration scripts to retain**. All schema changes are startup-idempotent DDL (`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`) executed by each repository's `ensureTable()`.
+- **Schema rollback = restore from the pre-deploy backup** (see [backup-restore-runbook §3](../runbooks/backup-restore-runbook.md#3-schema-rollback)) — the dump predates the breaking change; redeploy the previous code afterwards so the older `ensureTable()` matches.
+- Exception: `@vedmoulya/rag` ships a programmatic `down()` for its own table only (package API, not a CLI).
 - Snapshot databases before each production deployment when possible.
 
 ## Data Integrity

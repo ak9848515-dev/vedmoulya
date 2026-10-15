@@ -13,8 +13,12 @@ import type {
   ProviderHealthSnapshot,
   ProviderLatencyProfile,
   ProviderLifecycleStatus as ProviderLifecycleStatusValue,
+  ProviderHealthSource,
   ProviderModel,
+  ProviderQuotaSource,
   ProviderRateLimits,
+  ProviderAccountMetric,
+  ProviderAccountUsageMetric,
   CustomProviderConfig,
 } from '../../types/provider-types.js';
 import type { ProviderId } from '../value-objects/ProviderId.js';
@@ -25,6 +29,10 @@ import { ProviderVersion } from '../value-objects/ProviderVersion.js';
 // (provider-types.ts); re-exported here so catalog/consumers keep a single
 // import surface from the domain entity.
 export type { ProviderCapabilityMatrixEntry } from '../../types/provider-types.js';
+/** Provenance of a provider health quota percentage (see ProviderHealth). */
+export type { ProviderQuotaSource } from '../../types/provider-types.js';
+/** Provenance of the health record itself (see ProviderHealth). */
+export type { ProviderHealthSource } from '../../types/provider-types.js';
 
 // ── Health (mutable inside the entity) ─────────────────────────────────────
 
@@ -35,11 +43,44 @@ export interface ProviderHealth {
   successCount: number;
   failureCount: number;
   quotaUsedPercent: number;
+  /**
+   * WHERE `quotaUsedPercent` came from — the provenance flag consumers MUST
+   * read before presenting a quota:
+   *   'SEED'              → a registry/catalog constant. It is NOT a
+   *                         measurement, is never refreshed by a runtime
+   *                         request, and must never be shown as the
+   *                         provider's account usage or remaining balance.
+   *   'PROVIDER_REPORTED' → the provider itself reported usage that was
+   *                         ingested through `recordHealthSample`.
+   * ABSENT (undefined) means 'SEED'. It defaults to SEED deliberately: a quota
+   * is only ever promoted to provider-reported by an explicit ingested sample,
+   * never by time passing, and every legacy/persisted record stays unproven.
+   */
+  quotaSource?: ProviderQuotaSource;
+  /**
+   * WHERE this health record came from — the provenance flag consumers MUST
+   * read before presenting status/score/latency as a check:
+   *   'SEED'     → catalog data. NOT a measurement of this deployment, and the
+   *                catalog stamps `lastCheckedAt` with its own build time, so
+   *                neither the status nor that timestamp may be shown as
+   *                evidence that the provider was just checked.
+   *   'MEASURED' → a runtime sample was written through `recordHealthSample`.
+   * ABSENT (undefined) means 'SEED'. It is only promoted by a real runtime
+   * write, never by time passing — so a legacy/persisted record stays unproven.
+   */
+  healthSource?: ProviderHealthSource;
   rateLimitRemaining: number;
   rateLimitResetAt: string | null;
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
   lastCheckedAt: string;
+  /**
+   * The most recent GENUINE provider-reported account metrics, keyed by metric
+   * (account tokens / account cost / account credits / bounded-quota-used).
+   * Distinct from runtime tokens and estimated cost; absent key ⇒ never
+   * retrieved (the UI says "Unavailable from provider", never zero).
+   */
+  accountUsage?: Partial<Record<ProviderAccountMetric, ProviderAccountUsageMetric>>;
 }
 
 // ── Entity ────────────────────────────────────────────────────────────────
@@ -299,8 +340,18 @@ export class Provider {
     rateLimitRemaining?: number;
     rateLimitResetAt?: string | null;
     checkedAt?: string;
+    /**
+     * GENUINE provider-reported account metrics to persist verbatim (account
+     * tokens / account cost / account credits / bounded-quota-used). Each is
+     * keyed by its metric and stored on the health snapshot — never conflated
+     * with quotaUsedPercent or with runtime tokens.
+     */
+    accountUsage?: ProviderAccountUsageMetric[];
   }): void {
     const now = sample.checkedAt ?? new Date().toISOString();
+    // A runtime sample IS the measurement: from here on the record is no longer
+    // catalog seed data, so status/score/latency may be presented as checked.
+    this._health.healthSource = 'MEASURED';
     if (sample.ok) {
       this._health.successCount += 1;
       this._health.lastSuccessAt = now;
@@ -315,12 +366,42 @@ export class Provider {
           ? sample.latencyMs
           : 0.7 * sample.latencyMs + 0.3 * this._health.latencyMs;
     }
-    if (sample.quotaUsedPercent !== undefined)
+    if (sample.quotaUsedPercent !== undefined) {
+      // ONLY an ingested, provider-reported sample promotes the quota. A seed
+      // constant keeps `quotaSource: 'SEED'` forever, so nothing downstream can
+      // mistake catalog data for account usage.
       this._health.quotaUsedPercent = sample.quotaUsedPercent;
+      this._health.quotaSource = 'PROVIDER_REPORTED';
+    }
     if (sample.rateLimitRemaining !== undefined)
       this._health.rateLimitRemaining = sample.rateLimitRemaining;
     if (sample.rateLimitResetAt !== undefined)
       this._health.rateLimitResetAt = sample.rateLimitResetAt;
+    if (sample.accountUsage !== undefined && sample.accountUsage.length > 0) {
+      // IDEMPOTENT, per-metric persistence. A metric is replaced only when the
+      // incoming sample is at least as fresh as the stored one, so a replayed or
+      // out-of-order ingest pass cannot overwrite a newer reading with an older
+      // one and cannot create duplicate entries (one slot per metric).
+      const next: Partial<Record<ProviderAccountMetric, ProviderAccountUsageMetric>> = {
+        ...(this._health.accountUsage ?? {}),
+      };
+      for (const metric of sample.accountUsage) {
+        if (metric.provider !== this._family) continue;
+        const existing = next[metric.metric];
+        if (
+          existing !== undefined &&
+          Date.parse(existing.retrievedAt) > Date.parse(metric.retrievedAt)
+        ) {
+          continue;
+        }
+        next[metric.metric] = { ...metric };
+      }
+      // Never create an empty `accountUsage` map: absence means "never
+      // retrieved" and must stay distinguishable from a stored (even empty) map.
+      if (Object.keys(next).length > 0) {
+        this._health.accountUsage = next;
+      }
+    }
     this._health.lastCheckedAt = now;
 
     const total = this._health.successCount + this._health.failureCount;

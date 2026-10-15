@@ -62,6 +62,13 @@ export interface MissionStore {
 // -- Checkpoint Persistence ----------------------------------------
 export interface CheckpointStore {
   save(checkpoint: MissionCheckpoint): Promise<void>;
+  /**
+   * S10 — durability barrier for the checkpoint that WITNESSES a verified
+   * objective. Stores that can guarantee the write must THROW when it fails;
+   * stores that cannot provide it may omit the method (the controller then
+   * falls back to `save`, exactly the pre-S10 behavior).
+   */
+  saveRequired?(checkpoint: MissionCheckpoint): Promise<void>;
   getLatestForMission(missionId: string): Promise<MissionCheckpoint | undefined>;
   listForMission(missionId: string): Promise<MissionCheckpoint[]>;
 }

@@ -12,7 +12,10 @@ import {
   testProviderConnection,
   type TestableProviderFamily,
 } from '../services/ProviderConnectionTester.js';
-import type { OpenAIOrgPeriod } from '../services/ProviderUsageIngestor.js';
+import type {
+  OpenAIOrgPeriod,
+  ProviderUsageIngestStatus,
+} from '../services/ProviderUsageIngestor.js';
 import type { AiControlCenterService } from '../observability/AiControlCenter.js';
 import {
   ProviderSetupOrchestrator,
@@ -207,6 +210,26 @@ export interface ProvidersHandlers {
     input: { userId: string; timezone?: string },
     _ctx: TRPCContext,
   ) => Promise<ApiResponse>;
+  /**
+   * Provider-usage ingestion status (DEPLOYMENT-scoped, never owner data).
+   *
+   * The provider-account usage endpoints are reached by the gateway's scheduled
+   * ingest pass, so this read answers the question the usage UI leaves open:
+   * is anything actually checking provider usage, and what did the last pass
+   * really find? Outcomes are per family and verbatim (quota written / checked /
+   * no usage endpoint / probe failed / no credential) — nothing is inferred, and
+   * with no scheduled pass and no pass in this process it reports exactly that.
+   */
+  getUsageIngestStatus: (input: { userId: string }, _ctx: TRPCContext) => Promise<ApiResponse>;
+}
+
+/**
+ * The deployment-scoped ingest status source. Supplied by the gateway (which
+ * owns the ingestor); absent in slim embedders/tests, where the status read
+ * reports "not scheduled, never ran" instead of inventing a pass.
+ */
+export interface ProviderUsageIngestStatusSource {
+  status(): ProviderUsageIngestStatus;
 }
 
 export function createProvidersRouter(
@@ -215,6 +238,7 @@ export function createProvidersRouter(
   credentialService?: ProviderCredentialService,
   setupOrchestrator?: ProviderSetupOrchestrator,
   controlCenterService?: AiControlCenterService,
+  usageIngest?: ProviderUsageIngestStatusSource,
 ): ProvidersHandlers {
   const svc = providersService;
   const exp = experienceService;
@@ -406,6 +430,20 @@ export function createProvidersRouter(
       fromServiceResult(await experience().getUsageDetail(input.userId)),
     getOpenAIOrgUsage: async (input, _ctx) =>
       fromServiceResult(await experience().getOpenAIOrgUsage(input.period)),
+    // DEPLOYMENT-scoped: whether the usage ingest is scheduled, and what the
+    // most recent pass really did per family. No fabricated report when nothing
+    // has run — the absence IS the answer.
+    getUsageIngestStatus: async (_input, _ctx) =>
+      Promise.resolve(
+        successResponse(
+          usageIngest?.status() ?? {
+            scheduleEnabled: false,
+            entries: [],
+            quotaSamplesWritten: 0,
+            checkedSamplesWritten: 0,
+          },
+        ),
+      ),
     explainModelSelection: async (input, _ctx) =>
       fromServiceResult(
         await experience().explainModelSelection(

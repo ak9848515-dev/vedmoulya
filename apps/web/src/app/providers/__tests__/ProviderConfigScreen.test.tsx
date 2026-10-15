@@ -421,8 +421,14 @@ describe('ProviderConfigScreen (simplified Configure AI)', () => {
     });
     fireEvent.click(screen.getByTestId('provider-test-connection'));
 
+    // A failed probe moves focus to the alert so screen-reader users are told
+    // and keyboard users land on Try Again. `waitFor` polls (act-wrapped) so
+    // this holds for the effect's commit — never a bare assertion on the
+    // first observation, which is a scheduling race rather than a defect.
     const error = await waitFor(() => screen.getByTestId('provider-connection-error'));
-    expect(document.activeElement).toBe(error);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(error);
+    });
   });
 
   it('runs the connection test when the key field is submitted (Enter)', async () => {

@@ -306,7 +306,24 @@ describe('createAuthRouter', () => {
         headers: { Authorization: 'Bearer token-1' },
       });
       expect(res.status).toBe(200);
-      expect(service.signOut).toHaveBeenCalledWith('u1');
+      expect(service.signOut).toHaveBeenCalledWith('u1', undefined);
+    });
+
+    it('forwards the presented refresh token for explicit JTI revocation (S024-4A)', async () => {
+      const service = mockAuthService();
+      (service.verifySession as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sub: 'u1',
+        email: 'a@b.com',
+        role: 'user',
+        type: 'access',
+      });
+      const res = await app(service).request('/sign-out', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token-1', 'content-type': 'application/json' },
+        body: JSON.stringify({ refreshToken: 'rt-presented' }),
+      });
+      expect(res.status).toBe(200);
+      expect(service.signOut).toHaveBeenCalledWith('u1', 'rt-presented');
     });
   });
 

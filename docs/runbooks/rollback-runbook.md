@@ -131,16 +131,24 @@ psql $DATABASE_URL < restore.sql
 
 ### Schema Rollback (if schema changed)
 
-```bash
-# 1. Run previous migration down
-npx drizzle-kit drop # Or equivalent rollback command
+> ⚠️ **Reality check (S12 Blocker C audit):** the repository does **not** use Drizzle Kit, Prisma, or a `_migrations` version table. Do **not** run `npx drizzle-kit drop` or query `SELECT version FROM _migrations` — both are nonexistent here. There is no `drizzle-kit` CLI and no `_migrations` table in any service database.
 
-# 2. Verify schema version
-psql $DATABASE_URL -c "SELECT version FROM _migrations ORDER BY applied_at DESC LIMIT 1;"
+The actual schema-rollback path is **restore from the pre-deploy backup**, then redeploy the previous code:
+
+```bash
+# 1. Restore the pre-deploy backup (destructive — §2 of the backup runbook)
+psql "$DATABASE_URL" < pre-deploy-restore.sql
+
+# 2. Redeploy the previous release's code so its ensureTable() matches the schema
+
+# 3. Verify readiness + row counts / key invariants against the backup
+curl -fsS "$URL/health/ready"    # must return HTTP 200 {"status":"ready"}
 ```
 
-**Time to complete:** 1-5 minutes
-**Downtime:** Minimal
+**Time to complete:** 10–30 minutes (dominated by the restore)
+**Downtime:** Full downtime during restore
+
+**Exception:** `@vedmoulya/rag` has a programmatic `down()` (`rollbackRagMigrations(sql)` → drops `rag_chunks` + indexes) — invoked via the package API, not a CLI, and only for that one table. See [backup-restore-runbook §3](./backup-restore-runbook.md#3-schema-rollback) for the full reality check.
 
 ---
 

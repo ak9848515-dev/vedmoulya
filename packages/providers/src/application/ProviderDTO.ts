@@ -16,6 +16,10 @@ import type {
   ProviderBenchmarkCategory,
   ProviderBenchmarkDefinition,
   ProviderLifecycleStatus,
+  ProviderHealthSource,
+  ProviderQuotaSource,
+  ProviderAccountMetric,
+  ProviderAccountUsageMetric,
   CustomProviderConfig,
 } from '../types/provider-types.js';
 
@@ -150,10 +154,29 @@ export interface ProviderDTO {
     successCount: number;
     failureCount: number;
     quotaUsedPercent: number;
+    /**
+     * Provenance of `quotaUsedPercent` (absent ⇒ 'SEED'). 'SEED' figures are
+     * registry constants, never measurements — a consumer must not present
+     * them as provider-reported account usage or as a remaining balance.
+     */
+    quotaSource: ProviderQuotaSource;
+    /**
+     * Provenance of the health RECORD (absent ⇒ 'SEED'). A 'SEED' record is
+     * catalog data: status/score/latency were never measured here and
+     * `lastCheckedAt` is the catalog build time — it must never be rendered as
+     * a live check, a connection state or a verified provider.
+     */
+    healthSource: ProviderHealthSource;
     rateLimitRemaining: number;
     lastSuccessAt: string | null;
     lastFailureAt: string | null;
     lastCheckedAt: string;
+    /**
+     * GENUINE provider-reported account metrics (account tokens / cost / credits
+     * / bounded-quota-used), keyed by metric. Absent key ⇒ never retrieved.
+     * Distinct from runtime tokens and estimated cost; never fabricated.
+     */
+    accountUsage?: Partial<Record<ProviderAccountMetric, ProviderAccountUsageMetric>>;
   };
   lifecycleStatus: ProviderLifecycleStatus;
   version: string;
@@ -211,6 +234,10 @@ export interface ProviderFleetHealthDTO {
     successCount: number;
     failureCount: number;
     quotaUsedPercent: number;
+    /** See ProviderQuotaSource — absent ⇒ 'SEED' (never provider-reported). */
+    quotaSource?: ProviderQuotaSource;
+    /** See ProviderHealthSource — absent ⇒ 'SEED' (never a live check). */
+    healthSource?: ProviderHealthSource;
     lastCheckedAt: string;
   }>;
 }
