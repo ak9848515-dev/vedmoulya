@@ -126,19 +126,26 @@ export async function checkIdentitySchemaGate(
     // no network I/O until a query runs. Without this a direct caller (a test,
     // a worker) that never composed the gateway would report `unavailable`
     // merely because no one had opened the pool yet.
-    identity.initializeDatabase();
+    //
+    // `initializeDatabase()` RETURNS the pool, and the migration gate functions
+    // operate on a `MigrationExecutor` — the argument is REQUIRED. Passing the
+    // pool explicitly is what makes the gate reachable at all: omitting it made
+    // both `assertIdentitySchemaCurrent`/`pendingMigrations` throw
+    // (TypeError: cannot read properties of undefined), so an ENABLED gate
+    // always reported `unavailable` and `/health/ready` was permanently 503.
+    const db = identity.initializeDatabase();
 
     const run = async (): Promise<IdentitySchemaGateResult> => {
       try {
         // The SINGLE definition of "current" — the same gate the migration
         // layer exports, so readiness and the boot path can never disagree
         // about what up-to-date means.
-        const version = await identity.assertIdentitySchemaCurrent();
+        const version = await identity.assertIdentitySchemaCurrent(db);
         return { status: 'current', version };
       } catch (error) {
         // The gate rejected: distinguish "behind the code" from "cannot tell".
         try {
-          const pending = await identity.pendingMigrations();
+          const pending = await identity.pendingMigrations(db);
           if (pending.length > 0) {
             return {
               status: 'pending',

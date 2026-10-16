@@ -162,6 +162,28 @@ execution surface (`AI_OPENAI_API_KEY`, `AI_GOOGLE_API_KEY`,
 > configured and fail-fast validated independently — setting one never
 > satisfies the other, and OAuth working says nothing about Gemini.
 
+#### Live-provider verification (operator release gate)
+
+Two operator-run verifiers exercise the REAL provider path; no mock substitutes
+for the live leg. Both are provider-configurable and **default to Google
+Gemini**, the family this deployment funds:
+
+```bash
+npm run ai:production:verify   # scripts/ai-production-verify.ts
+npm run ai:critique:verify     # scripts/ai-critique-verify.ts
+```
+
+- `AI_PRODUCTION_VERIFY_PROVIDER=google|openai` (default `google`) selects the
+  family; `AI_PRODUCTION_MODEL` selects the model (per-family default
+  `gemini-3.5-flash` / `gpt-4o-mini`).
+- The key is resolved through the deployment's own resolvers — `AI_GOOGLE_API_KEY`
+  for Google, `AI_OPENAI_API_KEY` (or the legacy `OPENAI_API_KEY`) for OpenAI —
+  so a run describes this deployment's configuration rather than a hand-picked
+  key. No credential value is ever printed.
+- Exit codes: **0** = all checks passed against a real provider · **2** = no key
+  · **3** = provider reachable but quota/billing blocked · **1** = implementation
+  defect. Exit 3 is a funding state, never reported as a pass.
+
 ### Database bootstrap
 
 Repositories apply their own **idempotent** DDL (`CREATE TABLE/INDEX IF NOT
@@ -248,6 +270,25 @@ string, host, port, database name, user, env var name or token can appear in a
 response. `/health/check` reports aggregate pool counters only (no host, port,
 user or database name). Readiness is never relaxed to make a probe pass.
 
+#### Identity schema drift gate — OPT-IN (`IDENTITY_SCHEMA_READINESS_GATE`)
+
+`/health/ready` additionally refuses to report ready when the identity database
+is **behind** the deployed migrations — but only when an operator opts in.
+
+- **Unset (default)** — the gate is absent. `/health/ready` performs no schema
+  I/O and its response is byte-identical to the contract above.
+- **`IDENTITY_SCHEMA_READINESS_GATE=1`** (also `true`/`yes`/`on`) — a database
+  that is behind the deployed code, or whose schema state cannot be determined
+  (unreachable database, timeout), makes `/health/ready` return **503**.
+
+This is an explicit operator decision, not a silent default: turning "the
+database is behind" into a 503 changes runtime behaviour on a release-gated
+system. Boot already applies every pending migration before traffic can arrive,
+so the gate specifically covers a database that drifts **after** boot — a restore
+from an older backup, or a table dropped out of band. Enable it only after
+confirming the deployed database is at the current identity schema version
+(`005_timestamptz_instants`).
+
 ### Complete environment variable inventory
 
 Required secrets (values never committed — set them in the platform env):
@@ -260,6 +301,11 @@ Required when the corresponding feature is enabled:
 `SMTP_USER` / `SMTP_PASS` (when the relay authenticates) · `GOOGLE_CLIENT_ID` ·
 `GOOGLE_CLIENT_SECRET` · `GOOGLE_REDIRECT_URI` (when
 `FF_SOCIAL_LOGIN_ENABLED=true` — all non-loopback).
+
+Operational switches (change how the platform ENFORCES something, not which
+surface is visible). Both are reported by `describeServerEnv` so their presence
+is observable: `RATE_LIMIT_BACKEND` · `IDENTITY_SCHEMA_READINESS_GATE`
+(the latter is OPT-IN — see the readiness contract above).
 
 Required for user-owned provider credentials: `AI_CREDENTIAL_ENCRYPTION_KEY` —
 a strong, non-blank secret of at least 16 characters. When it is absent, a
@@ -277,7 +323,9 @@ one): `AI_MAX_INPUT_TOKENS` ·
 `AI_EXECUTION_MAX_LATENCY_MS` · `MISSION_WORKSPACE_ROOT` ·
 `MISSION_WATCHDOG_ENABLED` / `_INTERVAL_MS` / `_MAX_INTERVAL_MS` ·
 `AI_WORLD_CADENCE_ENABLED` / `_INTERVAL_MS` / `_REFRESH_INTELLIGENCE` ·
-`OS_HEALTH_SCHEDULER_ENABLED` / `OS_HEALTH_INTERVAL_MS` · `OPS_OPERATOR_IDS`
+`OS_HEALTH_SCHEDULER_ENABLED` / `OS_HEALTH_INTERVAL_MS` · `OPS_OPERATOR_IDS` ·
+`AI_PRODUCTION_VERIFY_PROVIDER` / `AI_PRODUCTION_MODEL` (live-provider
+verifiers only — see above)
 (**absent = deny all**) · `WORLD_SIGNAL_BASE_URL` / `WORLD_SIGNAL_TOKEN` ·
 `VOICE_ENABLE_MOCK` · `VOICE_STT_BASE_URL` / `_MODEL` / `_API_KEY` ·
 `VOICE_TTS_BASE_URL` / `_MODEL` / `_VOICE` / `_FORMAT` / `_API_KEY` ·

@@ -41,7 +41,7 @@ npm run preflight:prod && npm run doctor:prod && npm run test:a11y
 ### 2. Provider Funding: Live Cloud AI Generation
 **Blocker ID:** S012-B / 4E
 **Owner:** Deployment Operator (AI Provider / Finance)
-**Dependency:** API billing credits must be deposited in primary provider accounts
+**Dependency:** A funded credential for the SUPPORTED provider. Per the 2026-10-16 owner decision the supported family is **Google Gemini** (`AI_GOOGLE_API_KEY`); OpenAI remains optional (`AI_OPENAI_API_KEY`).
 
 **Exact Evidence Required:**
 - Both verification scripts completing with exit code 0:
@@ -75,6 +75,20 @@ npx tsx scripts/ai-production-verify.ts && npx tsx scripts/ai-critique-verify.ts
 > probe reports "connected" with a credential that the very next real request
 > rejects, and that this checkout's `.env.local` holds a credential in the wrong
 > slot. Evidence: `docs/audits/2026-10-15-s12-b-live-provider/FINAL-REPORT.md`.
+
+> **Update — 2026-10-16 (owner decision · S012-B CLOSED).** The owner accepted
+> **Google Gemini as the supported provider for this acceptance journey.** The
+> two verifier scripts no longer hardcode OpenAI: they select the family from
+> `AI_PRODUCTION_VERIFY_PROVIDER` (default `google`) and resolve the key through
+> the deployment's own resolvers. Run live against the funded Google family both
+> now **exit 0** — `ai-production-verify.ts` 15/15 checks (5 real Gemini
+> completions) and `ai-critique-verify.ts` 7/7 checks with an executed live
+> critique. Two latent script defects that made the success path unreachable (an
+> unwired routing advisor in §C, and a `groundingRequired` request with no
+> `ragQuery` in §E) were corrected; no check was weakened and no mock substitutes
+> for the live leg. The `.env.local` credential-slot mismatch was neutralized
+> (the misplaced OpenAI key was removed from the OpenRouter slot, fail-closed).
+> Evidence: `docs/audits/2026-10-15-s12-b-live-provider/FINAL-REPORT.md` §8.
 
 ---
 

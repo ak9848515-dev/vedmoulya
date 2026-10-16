@@ -169,6 +169,23 @@ describe('identity schema gate — ENABLED, schema current', () => {
     expectNoLeak(raw);
   });
 
+  it('passes the initialized identity pool into the migration gate', async () => {
+    // Regression: the gate previously called `assertIdentitySchemaCurrent()` and
+    // `pendingMigrations()` with NO argument. Against the real module (which
+    // requires a `MigrationExecutor`) both threw, so an ENABLED gate ALWAYS
+    // reported `unavailable` and readiness was permanently 503. The stubbed
+    // module above hid that — this asserts the pool actually reaches the call.
+    vi.stubEnv(GATE_FLAG, '1');
+    const pool = { execute: vi.fn() };
+    stub.initializeDatabase.mockReturnValue(pool);
+
+    const { status } = await callReady();
+
+    expect(status).toBe(200);
+    expect(stub.initializeDatabase).toHaveBeenCalledTimes(1);
+    expect(stub.assertIdentitySchemaCurrent).toHaveBeenCalledWith(pool);
+  });
+
   it('does not require the flag in any particular NODE_ENV (the opt-in is itself the decision)', async () => {
     vi.stubEnv(GATE_FLAG, '1');
     vi.stubEnv('NODE_ENV', 'development');
@@ -222,6 +239,16 @@ describe('identity schema gate — ENABLED, schema BEHIND the code', () => {
     expect(checks.gateway).toMatchObject({ status: 'initialized' });
     expect(checks.database).toMatchObject({ status: 'healthy' });
     expect(status).toBe(503);
+  });
+
+  it('passes the initialized identity pool into the pending-migration read', async () => {
+    const pool = { execute: vi.fn() };
+    stub.initializeDatabase.mockReturnValue(pool);
+
+    const { status } = await callReady();
+
+    expect(status).toBe(503);
+    expect(stub.pendingMigrations).toHaveBeenCalledWith(pool);
   });
 });
 

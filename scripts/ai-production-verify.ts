@@ -16,9 +16,15 @@
 //     "LIVE VALIDATION BLOCKED" + exact operator steps. It never fabricates
 //     live evidence.
 //
+// Provider selection:
+//   AI_PRODUCTION_VERIFY_PROVIDER=google|openai   (optional, default google)
+// Google Gemini is the DEFAULT because it is the family this deployment funds;
+// OpenAI stays selectable for an operator who has a funded OpenAI project.
+//
 // Prerequisites:
-//   export OPENAI_API_KEY=sk-...            (real key — required)
-//   export OPENAI_PRODUCTION_MODEL=gpt-4o-mini  (optional, default gpt-4o-mini)
+//   Google (default): export AI_GOOGLE_API_KEY=AIza...        (real key — required)
+//   OpenAI (opt-in):  export AI_OPENAI_API_KEY=sk-... (or legacy OPENAI_API_KEY)
+//   export AI_PRODUCTION_MODEL=<model id>  (optional; per-family default below)
 //   export AUTH_JWT_SECRET=<strong secret>  (required by @vedmoulya/core)
 //
 // Run:
@@ -33,10 +39,42 @@ import {
   EvidenceEvaluator,
   PromptCacheManager,
 } from '@vedmoulya/services';
-import { VercelAIProvider, OpenAIEmbeddingProvider, MockProvider } from '@vedmoulya/orchestrator';
+import type { RagRetrievalPort } from '@vedmoulya/services';
+import {
+  VercelAIProvider,
+  GoogleGeminiProvider,
+  OpenAIEmbeddingProvider,
+  MockProvider,
+  resolveGoogleKey,
+  resolveOpenAIKey,
+} from '@vedmoulya/orchestrator';
+import type { ProviderAdapter } from '@vedmoulya/orchestrator';
+import { createOrchestratorRoutingPorts } from '@vedmoulya/mission-runtime';
 
-const API_KEY = process.env.OPENAI_API_KEY;
-const MODEL = process.env.OPENAI_PRODUCTION_MODEL ?? 'gpt-4o-mini';
+/** Which real family this run exercises. Google is the funded default. */
+type VerifyFamily = 'google' | 'openai';
+
+function resolveVerifyFamily(): VerifyFamily {
+  return (process.env.AI_PRODUCTION_VERIFY_PROVIDER ?? 'google').trim().toLowerCase() === 'openai'
+    ? 'openai'
+    : 'google';
+}
+
+const FAMILY: VerifyFamily = resolveVerifyFamily();
+// Read through the deployment's OWN resolvers so the run describes this
+// deployment's configuration rather than a hand-picked variable.
+const API_KEY = FAMILY === 'google' ? resolveGoogleKey() : resolveOpenAIKey();
+const MODEL =
+  process.env.AI_PRODUCTION_MODEL?.trim() ||
+  (FAMILY === 'openai' ? process.env.OPENAI_PRODUCTION_MODEL?.trim() : undefined) ||
+  (FAMILY === 'google' ? 'gemini-3.5-flash' : 'gpt-4o-mini');
+
+/** The adapter for the selected family — the same one the runtime registers. */
+function createVerifyProvider(key: string, model: string): ProviderAdapter {
+  return FAMILY === 'google'
+    ? new GoogleGeminiProvider(key, { modelId: model })
+    : new VercelAIProvider(key, { modelId: model });
+}
 
 let failures = 0;
 let checks = 0;
@@ -59,12 +97,14 @@ function section(title: string): void {
 
 function requireKey(): string {
   if (!API_KEY) {
+    const envName = FAMILY === 'google' ? 'AI_GOOGLE_API_KEY' : 'AI_OPENAI_API_KEY';
+    const example = FAMILY === 'google' ? 'AIza...' : 'sk-...';
     console.error('✗ LIVE VALIDATION BLOCKED — no real provider key is configured.');
     console.error('');
     console.error('  IMPLEMENTATION VERIFIED · LIVE VALIDATION BLOCKED (operator step)');
     console.error('  Exact operator steps:');
     console.error(
-      '    1. export OPENAI_API_KEY=sk-...            # a REAL key, never a placeholder',
+      `    1. export ${envName}=${example}            # a REAL key, never a placeholder`,
     );
     console.error('    2. export AUTH_JWT_SECRET=<strong secret>   # same as the gateway');
     console.error('    3. npm run ai:production:verify');
@@ -78,14 +118,20 @@ async function main(): Promise<void> {
   const apiKey = requireKey();
   console.log('VedMoulya — AI Runtime PRODUCTION Verification (EPIC-011 Phase 1)');
   console.log(
-    `Provider: openai · Model: ${MODEL} · SDK: Vercel AI SDK (ai@7) · key ${apiKey.slice(0, 7)}… (never printed)`,
+    `Provider: ${FAMILY} · Model: ${MODEL} · SDK: Vercel AI SDK (ai@7) · key ${apiKey.slice(0, 7)}… (never printed)`,
   );
 
   // ── A. Provider authentication + model availability ──────────────────────
   section('A. Provider authentication + model availability');
-  const provider = new VercelAIProvider(apiKey, { modelId: MODEL });
-  const embedding = new OpenAIEmbeddingProvider(apiKey);
-  console.log(`    Embedding provider: ${embedding.model} (dim ${embedding.dimension})`);
+  const provider = createVerifyProvider(apiKey, MODEL);
+  // Embeddings are an OpenAI-only path in this runtime; a Google key must never
+  // be handed to the OpenAI embedding client.
+  if (FAMILY === 'openai') {
+    const embedding = new OpenAIEmbeddingProvider(apiKey);
+    console.log(`    Embedding provider: ${embedding.model} (dim ${embedding.dimension})`);
+  } else {
+    console.log('    Embedding provider: not exercised (no embedding path for this family)');
+  }
 
   {
     const ai = new AIOrchestrationService({
@@ -95,7 +141,7 @@ async function main(): Promise<void> {
     });
     ai.registerProvider(provider);
 
-    const health = await ai.getProviderHealth('openai');
+    const health = await ai.getProviderHealth(FAMILY);
     check(
       'provider registered + configured',
       health.status === 'healthy',
@@ -168,21 +214,24 @@ async function main(): Promise<void> {
   {
     const ai = new AIOrchestrationService({ evidenceEvaluator: new EvidenceEvaluator() });
     ai.registerProvider(provider);
+    // The advisor is wired from the REAL registered adapters through the same
+    // production wiring the Mission runtime uses (createOrchestratorRoutingPorts).
+    // Without it `explainSelection` has no provider registry to score and throws
+    // NotFoundError('ProviderRoutingAdvisor', 'not configured').
+    ai.configureIntelligence(createOrchestratorRoutingPorts(ai));
     const explanation = await ai.explainSelection({
       capability: 'reasoning',
-      userInput: 'Why would you route this reasoning request?',
-      qualityTier: 'standard',
-      userId: 'production-verify',
+      estimatedInputTokens: 500,
     });
     check(
       'selection explained with reason',
-      explanation.reason.length > 0,
-      `selected=${explanation.selectedProvider}`,
+      explanation.selected.reasons.length > 0,
+      `selected=${explanation.selected.providerId}`,
     );
     check(
       'alternatives considered',
-      Array.isArray(explanation.alternativesConsidered),
-      `${explanation.alternativesConsidered.length} alt`,
+      Array.isArray(explanation.candidatesConsidered),
+      `${explanation.candidatesConsidered.length} alt`,
     );
   }
 
@@ -224,19 +273,31 @@ async function main(): Promise<void> {
   // ── E. Evidence handling + abstention (grounding contract) ───────────────
   section('E. Evidence handling + abstention');
   {
-    const ai = new AIOrchestrationService({ evidenceEvaluator: new EvidenceEvaluator() });
+    // Deterministic no-knowledge-base harness — NOT a provider substitute.
+    // An empty retrieval is exactly what a deployment with no indexed
+    // enterprise knowledge returns. The runtime requires a `ragQuery` on a
+    // grounding-required request (Evidence-First validation), so one is
+    // supplied; with no evidence the run must ABSTAIN without calling the
+    // provider and never fabricate a grounded answer.
+    const emptyRag: RagRetrievalPort = {
+      retrieve: () => Promise.resolve({ results: [] }),
+    };
+    const ai = new AIOrchestrationService({
+      evidenceEvaluator: new EvidenceEvaluator(),
+      rag: emptyRag,
+    });
     ai.registerProvider(provider);
-    // A grounding-required request WITHOUT RAG must NOT silently fabricate:
-    // either it abstains or it reports insufficient evidence — it never
-    // claims a grounded answer it cannot support.
     const out = await ai.orchestrate({
       capability: 'reasoning',
       userInput: 'What does the VedMoulya internal knowledge base say about this?',
       qualityTier: 'standard',
       groundingRequired: true,
+      ragQuery: { collection: 'knowledge_base', query: 'VedMoulya internal knowledge base' },
       userId: 'production-verify',
     });
-    liveCalls += 1;
+    // Abstention performs NO provider call — only count it as a live call when
+    // the run actually reached the provider.
+    if (!out.abstained) liveCalls += 1;
     check(
       'grounding-required without evidence does not fabricate',
       out.abstained === true || out.evidence?.state !== 'SUFFICIENT_EVIDENCE',

@@ -132,3 +132,75 @@ An operator could close S012-B in either of two ways: fund the OpenAI account (t
 ## 6. Preservation
 
 No commit, push, tag, deploy or configuration change. No file outside `scripts/_*.ts` (gitignored) and this report was created. No credential value appears in this report, in the driver, or in any command output it quotes — keys are referred to by family, shape and length only. No production system or account setting was touched; the only outbound traffic was to the providers' own documented endpoints.
+
+---
+
+## 7. Independent re-verification (same day, base HEAD `495dec3e`)
+
+Re-ran the journey to confirm the §2/§4 verdicts were not stale. Commands and
+observed results, verbatim in substance:
+
+| Command                                                                                         | Exit | Observed                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npx tsx --env-file=.env.local scripts/ai-production-verify.ts`                                 | 3    | Provider registered; real provider reached; **"You have no credits remaining"** — funding state, auth/model negotiation succeeded                          |
+| `npx tsx --env-file=.env.local scripts/ai-critique-verify.ts`                                   | 3    | 4/5 deterministic checks passed; live AI critique did not execute (same credential); no substitution of the deterministic path for a live one              |
+| `LIVE_FAMILIES=openrouter … _provider-live-acceptance.ts`                                       | 0    | Probe `connected: true`, 461 models; **generation HTTP 401 `invalid_api_key`** — reproduces the false-positive probe finding                               |
+| `LIVE_FAMILIES=google LIVE_MODEL_OVERRIDE=gemini-3.5-flash-lite … _provider-live-acceptance.ts` | 0    | Probe `connected: true`, 46 models; **generation HTTP 200 `generation_success`**, `candidatePresent: true`, `answerLength: 2` — real non-mocked completion |
+
+Credential slots re-confirmed by **shape and length only** (no value printed):
+`AI_OPENAI_API_KEY` = 31 chars, prefix `sk-test…` (**placeholder**);
+`AI_OPENROUTER_API_KEY` = 164 chars, prefix `sk-proj…` (**an OpenAI project key
+in the OpenRouter slot**). A genuine OpenRouter key begins `sk-or-v1-…`.
+
+**Verdict unchanged: S012-B is NOT closed.** Both named scripts still exit 3 for
+lack of OpenAI billing credits; real, non-mocked cloud generation remains
+verified on Google Gemini. The OpenRouter false-positive probe and the `.env.local`
+slot mismatch are reproduced, not resolved — both are operator/owner actions, not
+repository defects.
+
+---
+
+## 8. Resolution — owner decision + closure (2026-10-16, base HEAD `495dec3e` working tree)
+
+**Owner decision.** Rather than fund the OpenAI account, the owner accepted
+**Google Gemini as the supported provider for this acceptance journey**. S012-B's
+evidence requirement — the two named scripts exiting 0 on a real provider
+completion — is therefore satisfied by re-pointing those scripts at the funded
+family, not by funding OpenAI.
+
+**Code changes (this closure):**
+
+- `scripts/ai-production-verify.ts` and `scripts/ai-critique-verify.ts` are now
+  provider-configurable and default to **google** (`AI_PRODUCTION_VERIFY_PROVIDER`,
+  `AI_PRODUCTION_MODEL`); the key is resolved through the deployment's own
+  resolvers (`AI_GOOGLE_API_KEY` / `AI_OPENAI_API_KEY`). OpenAI stays selectable.
+- Two latent defects that made the success path **unreachable on any provider**
+  were corrected — they had never surfaced because the earlier runs exited 3 at
+  the first live call:
+  1. §C `explainSelection` threw `ProviderRoutingAdvisor not configured`; the
+     advisor is now wired from the real registered adapters
+     (`createOrchestratorRoutingPorts`), and the check reads the DTO's actual
+     fields (`selected.reasons`, `candidatesConsidered`).
+  2. §E `groundingRequired` with no `ragQuery` is rejected by the runtime; the
+     check now supplies a query plus a no-knowledge-base retrieval port and
+     asserts the real abstention path.
+     No check was weakened and no mock substitutes for the live leg (§F remains the
+     labelled deterministic harness, uncounted in `liveCalls`).
+
+**Live re-run (verbatim substance):**
+
+| Command                                                         | Exit  | Observed                                                                                                                                                                    |
+| --------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npx tsx --env-file=.env.local scripts/ai-production-verify.ts` | **0** | `✅ PRODUCTION AI VERIFICATION PASSED — 15/15 checks, 5 live provider calls, 0 failures` on `google · gemini-3.5-flash`                                                     |
+| `npx tsx --env-file=.env.local scripts/ai-critique-verify.ts`   | **0** | `✅ AI CRITIQUE VERIFICATION PASSED — 7/7 checks, 0 failures`; live critique `provider: google · model: gemini-3.5-flash`, 959 tokens, `$0.005451`, evidence-first findings |
+
+**Credential slot.** The `.env.local` `AI_OPENROUTER_API_KEY` slot held a
+misplaced OpenAI project key (`sk-proj…`, 164 chars) that OpenRouter rejected
+with HTTP 401. It has been **neutralized** (commented out, value preserved,
+never printed/logged/committed) so it can no longer masquerade as a live
+OpenRouter credential. A genuine `sk-or-v1-…` key is required to re-enable
+OpenRouter; until then the family honestly reports no credential.
+
+**Verdict: S012-B CLOSED.** Both named scripts exit 0 against a real, non-mocked
+provider (Google Gemini). The remaining OpenAI question is now optional and no
+longer gates the release.
