@@ -324,6 +324,22 @@ export function deriveProviderState(input: ProviderStateInput): ProviderState {
   const verification = input.lastVerification;
   if (verification && !verification.ok) {
     const kind = verification.failureKind;
+    // BUGFIX (quota vs. throttle) — an exhausted balance is NOT transient. The
+    // retry wording below ("it may work if you try again") is false until the
+    // account is funded, and the credential wording below would blame a key the
+    // provider accepted. Only funding fixes it, so the state names that.
+    if (kind === 'quota_exhausted') {
+      return state(
+        'FAILED',
+        true,
+        true,
+        'No credits',
+        '⚠',
+        ATTENTION_TONE,
+        'This AI account has no remaining credits. Add credits, then reconnect.',
+        'reconnect',
+      );
+    }
     if (kind !== undefined && TRANSIENT_FAILURE_KINDS.has(kind)) {
       return state(
         'DEGRADED',

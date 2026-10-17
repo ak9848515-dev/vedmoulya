@@ -13,8 +13,13 @@
 // BLOCKED) — it never fabricates live critique evidence. The deterministic
 // critic still runs and is reported separately.
 //
+// Provider selection:
+//   AI_PRODUCTION_VERIFY_PROVIDER=google|openai   (optional, default google)
+// Google Gemini is the DEFAULT because it is the family this deployment funds.
+//
 // Prerequisites:
-//   export OPENAI_API_KEY=sk-...            (real key — required for live AI)
+//   Google (default): export AI_GOOGLE_API_KEY=AIza...  (real key — required for live AI)
+//   OpenAI (opt-in):  export AI_OPENAI_API_KEY=sk-... (or legacy OPENAI_API_KEY)
 //   export AUTH_JWT_SECRET=<strong secret>  (required by @vedmoulya/core)
 //
 // Run:
@@ -23,13 +28,41 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { AIOrchestrationService, EvidenceEvaluator } from '@vedmoulya/services';
-import { VercelAIProvider } from '@vedmoulya/orchestrator';
+import {
+  VercelAIProvider,
+  GoogleGeminiProvider,
+  resolveGoogleKey,
+  resolveOpenAIKey,
+} from '@vedmoulya/orchestrator';
+import type { ProviderAdapter } from '@vedmoulya/orchestrator';
 import { AIOrchestratorSpecialistPort } from '@vedmoulya/loop-engine';
 import { VisualCriticEngine, DesignSystemEngine, UIBlueprintEngine } from '@vedmoulya/experience';
 import type { AICritiquePort, AICritiqueResult } from '@vedmoulya/experience';
 
-const API_KEY = process.env.OPENAI_API_KEY;
-const MODEL = process.env.OPENAI_PRODUCTION_MODEL ?? 'gpt-4o-mini';
+/** Which real family this run exercises. Google is the funded default. */
+type VerifyFamily = 'google' | 'openai';
+
+function resolveVerifyFamily(): VerifyFamily {
+  return (process.env.AI_PRODUCTION_VERIFY_PROVIDER ?? 'google').trim().toLowerCase() === 'openai'
+    ? 'openai'
+    : 'google';
+}
+
+const FAMILY: VerifyFamily = resolveVerifyFamily();
+// Read through the deployment's OWN resolvers so the run describes this
+// deployment's configuration rather than a hand-picked variable.
+const API_KEY = FAMILY === 'google' ? resolveGoogleKey() : resolveOpenAIKey();
+const MODEL =
+  process.env.AI_PRODUCTION_MODEL?.trim() ||
+  (FAMILY === 'openai' ? process.env.OPENAI_PRODUCTION_MODEL?.trim() : undefined) ||
+  (FAMILY === 'google' ? 'gemini-3.5-flash' : 'gpt-4o-mini');
+
+/** The adapter for the selected family — the same one the runtime registers. */
+function createVerifyProvider(key: string, model: string): ProviderAdapter {
+  return FAMILY === 'google'
+    ? new GoogleGeminiProvider(key, { modelId: model })
+    : new VercelAIProvider(key, { modelId: model });
+}
 
 let failures = 0;
 let checks = 0;
@@ -194,7 +227,9 @@ function parseFindings(content: string): AICritiqueResult['findings'] {
 
 async function main(): Promise<void> {
   console.log('VedMoulya — Live AI Critique Verification (EPIC-011 Phase 3)');
-  console.log(`Provider: openai · Model: ${MODEL} · seam: AICritiquePort over the frozen runtime`);
+  console.log(
+    `Provider: ${FAMILY} · Model: ${MODEL} · seam: AICritiquePort over the frozen runtime`,
+  );
 
   // ── 1. Deterministic critic first (always runs — no provider needed). ─────
   section('1. Deterministic critic (baseline, no AI)');
@@ -236,9 +271,10 @@ async function main(): Promise<void> {
   // ── 2. Live AI critique (requires a real key). ────────────────────────────
   section('2. Live AI critique (EPIC-010 seam)');
   if (!API_KEY) {
+    const envName = FAMILY === 'google' ? 'AI_GOOGLE_API_KEY=AIza...' : 'AI_OPENAI_API_KEY=sk-...';
     console.error('  ✗ LIVE VALIDATION BLOCKED — no real provider key is configured.');
     console.error('    Operator steps:');
-    console.error('      1. export OPENAI_API_KEY=sk-...');
+    console.error(`      1. export ${envName}`);
     console.error('      2. export AUTH_JWT_SECRET=<strong secret>');
     console.error('      3. npm run ai:critique:verify');
     console.error('    The deterministic critic above is IMPLEMENTATION-VERIFIED; the live AI');
@@ -248,7 +284,7 @@ async function main(): Promise<void> {
     process.exitCode = 2;
   } else {
     const ai = new AIOrchestrationService({ evidenceEvaluator: new EvidenceEvaluator() });
-    ai.registerProvider(new VercelAIProvider(API_KEY, { modelId: MODEL }));
+    ai.registerProvider(createVerifyProvider(API_KEY, MODEL));
     const port = liveCritiquePort(ai);
 
     const t0 = Date.now();
@@ -336,7 +372,7 @@ async function main(): Promise<void> {
     console.error('   IMPLEMENTATION VERIFIED · LIVE AI VALIDATION BLOCKED (operator step).');
     console.error('   Exact operator steps:');
     console.error(
-      '     1. Configure a real provider key (OPENAI_API_KEY=sk-...) with billing credits',
+      `     1. Configure a real provider key (${FAMILY === 'google' ? 'AI_GOOGLE_API_KEY' : 'AI_OPENAI_API_KEY'}) with billing credits`,
     );
     console.error('     2. export AUTH_JWT_SECRET=<strong secret>');
     console.error('     3. npm run ai:critique:verify');

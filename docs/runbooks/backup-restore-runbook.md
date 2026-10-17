@@ -78,16 +78,32 @@ bash scripts/backup.sh --db identity --out ./backups
 
 ## 3. Schema Rollback
 
-If a release applied destructive migrations:
+> ⚠️ **Reality check (S12 Blocker C audit):** this repository does **not** use
+> Drizzle Kit, Prisma, or a `_migrations` version table. Do **not** run
+> `npx prisma migrate resolve` or `npx drizzle-kit drop`, and do not query
+> `SELECT version FROM _migrations` — none of those exist here. Every service
+> bootstraps its schema idempotently (`CREATE TABLE IF NOT EXISTS` +
+> `ADD COLUMN IF NOT EXISTS` + indexes); the identity service additionally runs
+> versioned, ledger-tracked migrations (`identity_schema_migrations`) with **no
+> down-migrations**.
+
+The actual schema-rollback path is **restore from the pre-deploy backup**, then
+redeploy the previous release's code so its startup DDL matches the schema:
 
 ```bash
-# Run the previous release's down-migrations per service
-npx prisma migrate resolve --rolled-back 2>/dev/null   # if Prisma
-# or execute the documented SQL down-migrations for the last release
+# 1. Restore the pre-deploy backup (destructive — §2 of this runbook)
+psql "$DATABASE_URL" < pre-deploy-restore.sql
+
+# 2. Redeploy the previous release's code (startup DDL is idempotent, forward-only)
+
+# 3. Verify readiness + row counts / key invariants against the backup
+curl -fsS "$URL/health/ready"    # must return HTTP 200 {"status":"ready"}
 ```
 
-Migration down-scripts for the last N releases must be retained and
-documented per service.
+**Exception:** `@vedmoulya/rag` exposes a programmatic `down()`
+(`rollbackRagMigrations(sql)` → drops `rag_chunks` + indexes), invoked through
+the package API — not a CLI — and only for that one table. See the
+[rollback runbook](./rollback-runbook.md) for the same reality check.
 
 ## 4. Environment Recovery
 

@@ -398,6 +398,9 @@ const ERROR_HINTS: Record<string, string> = {
   unauthorized: "This credential isn't authorised for this AI. Check your API key and try again.",
   unreachable: 'The AI could not be reached. Check your connection and try again.',
   rate_limited: 'The AI is busy right now. Wait a moment and try again.',
+  // Not a busy signal: the account cannot pay, so waiting changes nothing.
+  quota_exhausted:
+    'This AI account has no remaining credits. Add credits to the account, then try again.',
   unavailable: 'The AI is temporarily unavailable. Try again shortly.',
   not_found: 'The AI did not recognise this request. Check your API key and try again.',
   bad_request: 'Something about that request was not accepted. Check your API key and try again.',

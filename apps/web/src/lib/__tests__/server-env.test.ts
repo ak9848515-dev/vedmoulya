@@ -207,6 +207,17 @@ describe('SERVER_ENV_KEYS contract', () => {
     const all = Object.values(SERVER_ENV_KEYS).flat() as readonly string[];
     expect(all.some((name) => name.startsWith('NEXT_PUBLIC_'))).toBe(false);
   });
+
+  it('documents the operational switches an operator has to be able to see', () => {
+    expect(SERVER_ENV_KEYS.operationalSwitches).toContain('IDENTITY_SCHEMA_READINESS_GATE');
+    expect(SERVER_ENV_KEYS.operationalSwitches).toContain('RATE_LIMIT_BACKEND');
+    // Presence reporting must cover them, or an operator cannot tell whether
+    // the identity schema gate is switched on in a deployment.
+    expect(describeServerEnv({ IDENTITY_SCHEMA_READINESS_GATE: '1' }).present).toContain(
+      'IDENTITY_SCHEMA_READINESS_GATE',
+    );
+    expect(describeServerEnv({}).missing).toContain('IDENTITY_SCHEMA_READINESS_GATE');
+  });
 });
 
 describe('describeServerEnv', () => {

@@ -65,12 +65,20 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
 
   it('preset default endpoints match the endpoints the connection tester actually probes', async () => {
     const captured: Array<{ family: string; url: string }> = [];
+    // OpenRouter's model catalog is PUBLIC, so its probe authenticates against
+    // the provider's own key endpoint FIRST. That call answers with the key's
+    // RECORD (a `data` object) — unlike the catalog's `data` array, which
+    // proves nothing about a credential.
+    const openRouterKeyUrl = `${PROVIDER_PRESETS.openrouter.defaultEndpoint}/key`;
     const fetchFn = vi.fn().mockImplementation(async (url: string | URL | Request) => {
-      captured.push({
-        family: 'x',
-        url: typeof url === 'string' ? url : String(url),
-      });
-      return new Response(JSON.stringify({ data: [], models: [] }), { status: 200 });
+      const href = typeof url === 'string' ? url : String(url);
+      captured.push({ family: 'x', url: href });
+      return new Response(
+        JSON.stringify(
+          href === openRouterKeyUrl ? { data: { label: 'k' } } : { data: [], models: [] },
+        ),
+        { status: 200 },
+      );
     }) as unknown as typeof fetch;
 
     const cases: Array<{
@@ -93,6 +101,9 @@ describe('ProviderPresetsAlignment (FINAL-02 contract)', () => {
       `${PROVIDER_PRESETS.openai.defaultEndpoint}/models`,
       `${PROVIDER_PRESETS.deepseek.defaultEndpoint}/models`,
       `${PROVIDER_PRESETS.anthropic.defaultEndpoint}/v1/models`,
+      // Authenticated credential check (the catalog endpoint is public), then
+      // the catalog itself for real model discovery.
+      `${PROVIDER_PRESETS.openrouter.defaultEndpoint}/key`,
       `${PROVIDER_PRESETS.openrouter.defaultEndpoint}/models`,
       `${PROVIDER_PRESETS.ollama.defaultEndpoint}/api/tags`,
     ]);

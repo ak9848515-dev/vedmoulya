@@ -5,7 +5,7 @@
 // family, expiries and cleanup behave, failures fail closed upstream.
 // ──────────────────────────────────────────────────────────────────
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   InMemoryRefreshTokenDenylistStore,
   hashRefreshJti,
@@ -58,5 +58,59 @@ describe('RefreshTokenDenylistStore (in-memory)', () => {
     const store = new InMemoryRefreshTokenDenylistStore();
     expect(await store.isRevoked('never-seen')).toBe(false);
     expect(await store.isUserRevoked('ghost-user')).toBe(false);
+  });
+
+  // ── remediation A: atomic claim + time-scoped family markers ──────────
+
+  it('claim is the atomic single-use arbiter: exactly one caller wins', async () => {
+    const store = new InMemoryRefreshTokenDenylistStore();
+    const [first, second] = await Promise.all([
+      store.claim('rt_race', 'usr_1', FUTURE()),
+      store.claim('rt_race', 'usr_1', FUTURE()),
+    ]);
+    expect([first, second].filter(Boolean)).toHaveLength(1);
+    // A claimed JTI is revoked evidence — it can never be claimed again.
+    expect(await store.isRevoked('rt_race')).toBe(true);
+    expect(await store.claim('rt_race', 'usr_1', FUTURE())).toBe(false);
+    // Independent JWTs are unaffected by another token's claim.
+    expect(await store.claim('rt_other', 'usr_1', FUTURE())).toBe(true);
+  });
+
+  it('familyRevokedAt is a timestamp, not a blanket boolean', async () => {
+    const store = new InMemoryRefreshTokenDenylistStore();
+    expect(await store.familyRevokedAt('usr_1')).toBeNull();
+
+    await store.revokeForUser('usr_1');
+    const first = await store.familyRevokedAt('usr_1');
+    expect(first).toBeInstanceOf(Date);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await store.revokeForUser('usr_1');
+    const second = await store.familyRevokedAt('usr_1');
+    // The LATEST logout is authoritative — an earlier marker cannot shadow it.
+    expect(second!.getTime()).toBeGreaterThanOrEqual(first!.getTime());
+    expect(await store.familyRevokedAt('usr_2')).toBeNull();
+  });
+
+  describe('family marker expiry (documented bound: equal to the 7d refresh lifetime)', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('an expired marker stops blocking and is dropped', async () => {
+      const store = new InMemoryRefreshTokenDenylistStore();
+      await store.revokeForUser('usr_1');
+      expect(await store.familyRevokedAt('usr_1')).toBeInstanceOf(Date);
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(Date.now() + 8 * 24 * 60 * 60 * 1000));
+      expect(await store.familyRevokedAt('usr_1')).toBeNull();
+      expect(await store.isUserRevoked('usr_1')).toBe(false);
+      vi.useRealTimers();
+
+      // Any refresh token minted before that instant has itself expired by
+      // then (AUTH_REFRESH_EXPIRES_IN=7d), so the bound is not a replay hole.
+      expect(await store.isRevoked('rt_never_claimed')).toBe(false);
+    });
   });
 });

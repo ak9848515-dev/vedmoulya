@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { getDatabase } from './DatabaseConnection.js';
+import { EMAIL_VERIFICATIONS_SCHEMA_STATEMENTS, executeStatements } from './identitySchema.js';
 
 export interface VerificationTokenRecord {
   id: string;
@@ -16,6 +17,25 @@ export interface VerificationTokenRecord {
   tokenHash: string;
   expiresAt: Date;
   consumedAt: Date | null;
+}
+
+/** Shape of a row returned by the verification-token read. */
+interface VerificationRow {
+  id?: string | null;
+  user_id?: string | null;
+  token_hash?: string | null;
+  expires_at?: Date | string | null;
+  consumed_at?: Date | string | null;
+}
+
+/**
+ * Decode a read-back instant. SQL already normalised it to an absolute
+ * instant (`AT TIME ZONE current_setting('TimeZone')`), so this only has to
+ * turn the driver's `Date` (or a string form) into a `Date`.
+ */
+function toInstant(value: Date | string | null | undefined): Date | null {
+  if (value === null || value === undefined) return null;
+  return value instanceof Date ? value : new Date(value);
 }
 
 export interface VerificationTokenStore {
@@ -34,39 +54,39 @@ export interface VerificationTokenStore {
 
 // ── Postgres ─────────────────────────────────────────────────────────────
 
+type IdentityDatabase = ReturnType<typeof getDatabase>;
+
 export class PostgresVerificationTokenStore implements VerificationTokenStore {
+  /**
+   * `db` is injectable so real-engine tests can run against a dedicated
+   * pool; production wiring passes nothing and shares the process-wide
+   * identity pool (unchanged behaviour).
+   */
+  constructor(private readonly injectedDb?: IdentityDatabase) {}
+
+  private database(): IdentityDatabase {
+    return this.injectedDb ?? getDatabase();
+  }
+
   /**
    * Idempotent schema bootstrap — the estate-wide convention (CREATE TABLE
    * IF NOT EXISTS on startup, wired alongside the identity `users` table).
    */
   async ensureTable(): Promise<void> {
-    const db = getDatabase();
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS email_verifications (
-        id varchar(64) PRIMARY KEY,
-        user_id varchar(64) NOT NULL,
-        token_hash varchar(64) NOT NULL,
-        expires_at timestamp NOT NULL,
-        consumed_at timestamp,
-        created_at timestamp NOT NULL DEFAULT now()
-      );
-    `);
-    await db.execute(
-      sql`CREATE UNIQUE INDEX IF NOT EXISTS ev_user_id_idx ON email_verifications (user_id)`,
-    );
-    await db.execute(
-      sql`CREATE UNIQUE INDEX IF NOT EXISTS ev_token_hash_idx ON email_verifications (token_hash)`,
-    );
-    await db.execute(
-      sql`CREATE INDEX IF NOT EXISTS ev_expires_at_idx ON email_verifications (expires_at)`,
-    );
+    // Statements come from `identitySchema.ts`, the same source the versioned
+    // migration `004_email_verifications` uses (remediation B).
+    await executeStatements(this.database(), EMAIL_VERIFICATIONS_SCHEMA_STATEMENTS);
   }
 
   async save(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
-    const db = getDatabase();
+    const db = this.database();
     await db.execute(sql`
       INSERT INTO email_verifications (id, user_id, token_hash, expires_at, consumed_at, created_at)
-      VALUES (${sql.param(randomUUID())}, ${sql.param(userId)}, ${sql.param(tokenHash)}, ${sql.param(expiresAt)}, NULL, now())
+      -- expires_at is bound as an ISO-8601 string with an explicit cast:
+      -- passing a JS Date made postgres-js reject it (ERR_INVALID_ARG_TYPE),
+      -- which made verification-token issuance throw in production/staging.
+      -- Covered by identity-stores.postgres.test.ts.
+      VALUES (${sql.param(randomUUID())}, ${sql.param(userId)}, ${sql.param(tokenHash)}, ${expiresAt.toISOString()}::timestamptz, NULL, now())
       ON CONFLICT (user_id) DO UPDATE SET
         token_hash = EXCLUDED.token_hash,
         expires_at = EXCLUDED.expires_at,
@@ -75,33 +95,54 @@ export class PostgresVerificationTokenStore implements VerificationTokenStore {
   }
 
   async findByHash(tokenHash: string): Promise<VerificationTokenRecord | null> {
-    const db = getDatabase();
-    const rows = await db.execute(sql`
-      SELECT id, user_id, token_hash, expires_at, consumed_at
+    const db = this.database();
+    // TIME-ZONE CORRECTNESS (real-engine defect, fixed 2026-10-15): the
+    // `::timestamptz` casts are load-bearing, not decoration. `expiresAt` is
+    // compared in JS against Date.now(), and a value read without a zone
+    // crossing shifts by (Node zone − DB session zone) — measured at 330
+    // minutes on this machine — which in a late-running zone would have
+    // ACCEPTED EXPIRED verification tokens.
+    //
+    // The cast is deliberately the TYPE-AGNOSTIC form so this read is correct
+    // both before and after migration 005 converts these columns to
+    // `timestamptz`:
+    //   • `timestamp`    → interpreted in the session zone, which is exactly
+    //                      how the value was stored, recovering the instant;
+    //   • `timestamptz`  → already an absolute instant, so the cast is a no-op.
+    // (`col AT TIME ZONE zone` would be WRONG for the second shape: on a
+    // tz-aware column it returns a naive wall clock.)
+    const rows = (await db.execute(sql`
+      SELECT id, user_id, token_hash,
+             expires_at::timestamptz AS expires_at,
+             consumed_at::timestamptz AS consumed_at
       FROM email_verifications
       WHERE token_hash = ${sql.param(tokenHash)}
       LIMIT 1
-    `);
+    `)) as VerificationRow[];
     const row = rows[0];
     if (!row) return null;
+    // `expires_at` is NOT NULL, so a missing value cannot describe a real
+    // token: fail closed (not found) rather than invent an expiry.
+    const expiresAt = toInstant(row.expires_at);
+    if (expiresAt === null) return null;
     return {
       id: String(row.id),
       userId: String(row.user_id),
       tokenHash: String(row.token_hash),
-      expiresAt: new Date(row.expires_at as string),
-      consumedAt: row.consumed_at ? new Date(row.consumed_at as string) : null,
+      expiresAt,
+      consumedAt: toInstant(row.consumed_at),
     };
   }
 
   async markConsumed(id: string): Promise<void> {
-    const db = getDatabase();
+    const db = this.database();
     await db.execute(sql`
       UPDATE email_verifications SET consumed_at = now() WHERE id = ${sql.param(id)}
     `);
   }
 
   async revokeForUser(userId: string): Promise<void> {
-    const db = getDatabase();
+    const db = this.database();
     await db.execute(sql`
       UPDATE email_verifications SET consumed_at = now() WHERE user_id = ${sql.param(userId)}
     `);

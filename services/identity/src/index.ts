@@ -79,6 +79,34 @@ export {
 } from './infrastructure/persistence/OAuthStateStore.js';
 export type { OAuthStateStore } from './infrastructure/persistence/OAuthStateStore.js';
 
+// ── Persistence — versioned schema migrations (remediation B) ──────────────
+// The versioned DDL path for every identity table, plus the process-wide
+// single-flight bootstrap (`ensureIdentitySchema`) that boot paths await so a
+// query can never observe a half-created identity schema.
+export {
+  MIGRATION_LEDGER_TABLE,
+  IDENTITY_MIGRATIONS,
+  MIGRATION_001_USERS,
+  MIGRATION_002_REFRESH_TOKEN_DENYLIST,
+  MIGRATION_003_OAUTH_STATES,
+  MIGRATION_004_EMAIL_VERIFICATIONS,
+  MIGRATION_005_TIMESTAMPTZ_INSTANTS,
+  runIdentityMigrations,
+  rollbackIdentityMigrations,
+  migrationStatus,
+  schemaVersion,
+  assertIdentitySchemaCurrent,
+  appliedMigrationIds,
+  pendingMigrations,
+  ensureIdentitySchema,
+} from './infrastructure/persistence/migrations.js';
+export type {
+  IdentityMigration,
+  MigrationRunResult,
+  MigrationStatusEntry,
+  MigrationExecutor,
+} from './infrastructure/persistence/migrations.js';
+
 // ── Authorization ─────────────────────────────────────────────────────────
 export { AuthorizationService } from './authorization/AuthorizationService.js';
 export type { AuthorizeParams, AuthorizationResult } from './authorization/AuthorizationService.js';

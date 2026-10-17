@@ -849,6 +849,7 @@ export interface ProviderConnectionResultDTO {
     | 'unauthorized'
     | 'unreachable'
     | 'rate_limited'
+    | 'quota_exhausted'
     | 'unavailable'
     | 'not_found'
     | 'bad_request'

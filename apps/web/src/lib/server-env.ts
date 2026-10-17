@@ -243,6 +243,19 @@ export const SERVER_ENV_KEYS = {
   oauth: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI'],
   /** Feature flags that gate server-side behaviour. */
   features: ['FF_SOCIAL_LOGIN_ENABLED', 'FF_AI_ASSISTANT_ENABLED', 'FF_MARKETPLACE_ENABLED'],
+  /**
+   * Operational switches that change how the platform ENFORCES something, as
+   * opposed to which product surface is visible. Listed here (rather than under
+   * `features`) because they are deployment decisions an operator makes and
+   * later has to be able to see: `describeServerEnv` reports their presence.
+   *
+   * `IDENTITY_SCHEMA_READINESS_GATE` is OPT-IN. When it is enabled, a database
+   * that is behind the deployed identity migrations makes /health/ready return
+   * 503 instead of serving traffic against an incomplete schema (see
+   * `src/lib/identity-schema-gate.ts`). Unset means the gate is absent and the
+   * readiness response is unchanged.
+   */
+  operationalSwitches: ['RATE_LIMIT_BACKEND', 'IDENTITY_SCHEMA_READINESS_GATE'],
   /** Optional delivery + observability configuration. */
   optional: [
     'SMTP_HOST',
@@ -274,6 +287,7 @@ export function describeServerEnv(env: Record<string, string | undefined> = proc
     SERVER_ENV_KEYS.aiProviders,
     SERVER_ENV_KEYS.oauth,
     SERVER_ENV_KEYS.features,
+    SERVER_ENV_KEYS.operationalSwitches,
   ];
   for (const group of groups) {
     for (const name of group) {

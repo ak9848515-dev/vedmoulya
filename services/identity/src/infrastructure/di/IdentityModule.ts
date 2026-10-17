@@ -3,7 +3,7 @@
 // Registers all identity infrastructure services with DI container
 // ──────────────────────────────────────────────────────────────────
 
-import { container, moduleRegistry } from '@vedmoulya/core';
+import { container, logger, moduleRegistry } from '@vedmoulya/core';
 import type { ModuleDefinition } from '@vedmoulya/core';
 import type { IdentityRepository } from '@vedmoulya/domain';
 import { PostgresIdentityRepository } from '../persistence/PostgresIdentityRepository.js';
@@ -28,6 +28,35 @@ import {
   type RefreshTokenDenylistStore,
   createRefreshTokenDenylistStore,
 } from '../persistence/RefreshTokenDenylistStore.js';
+import { ensureIdentitySchema } from '../persistence/migrations.js';
+
+/**
+ * Defensive schema bootstrap for the identity stores (remediation B).
+ *
+ * The authoritative path is the AWAITED boot pass
+ * (`awaitAllEngineEnsureTables()` → the versioned identity migrations), so by
+ * the time traffic can arrive the schema already exists. This remains for the
+ * paths that resolve a Postgres store without that pass (direct service
+ * construction, background workers).
+ *
+ * Two deliberate changes from the previous per-store DDL:
+ *   • ONE single-flight migration run covers all four identity tables instead
+ *     of three independent DDL passes that could interleave;
+ *   • a failure is reported through the platform logger with its reason
+ *     instead of a swallowed `console.warn`, because it means every sign-in,
+ *     refresh and verification call is about to fail.
+ *
+ * In dev/test the env-driven factory returns the in-memory store, which has no
+ * `ensureTable`; nothing is bootstrapped there (no database is involved).
+ */
+function bootstrapIdentitySchemaIfPostgres(store: object): void {
+  if (typeof (store as { ensureTable?: unknown }).ensureTable !== 'function') return;
+  void ensureIdentitySchema().catch((error: unknown) => {
+    logger.error('Identity schema bootstrap failed — identity writes will fail until resolved', {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
 
 /** Register all identity infrastructure services with the DI container */
 export function registerIdentityServices(): void {
@@ -71,39 +100,19 @@ export function registerIdentityServices(): void {
 
   container.register<VerificationTokenStore>('identity.verification-token-store', () => {
     const store = createVerificationTokenStore();
-    // SPRINT-045 — bootstrap the email-verification token table idempotently
-    // (estate convention). Fire-and-forget: in production/staging the Postgres
-    // store is used and the DDL is required; in dev/test the in-memory store
-    // is used and ensureTable is a no-op-safe optional call.
-    const withEnsure = store as VerificationTokenStore & { ensureTable?(): Promise<void> };
-    void withEnsure.ensureTable?.().catch((error: unknown) => {
-      console.warn('Verification token table creation failed', error);
-    });
+    bootstrapIdentitySchemaIfPostgres(store);
     return store;
   });
 
   container.register<OAuthStateStore>('identity.oauth-state-store', () => {
     const store = createOAuthStateStore();
-    // Idempotent bootstrap of the OAuth state table (estate convention).
-    // Fire-and-forget: production/staging uses the Postgres store; dev/test
-    // uses the in-memory store where ensureTable is an optional no-op.
-    const withEnsure = store as OAuthStateStore & { ensureTable?(): Promise<void> };
-    void withEnsure.ensureTable?.().catch((error: unknown) => {
-      console.warn('OAuth state table creation failed', error);
-    });
+    bootstrapIdentitySchemaIfPostgres(store);
     return store;
   });
 
   container.register<RefreshTokenDenylistStore>('identity.refresh-token-denylist', () => {
     const store = createRefreshTokenDenylistStore();
-    // Idempotent bootstrap of the refresh-token denylist table (estate
-    // convention, S024-4A). Fire-and-forget: production/staging uses the
-    // Postgres store; dev/test uses the in-memory store where ensureTable
-    // is an optional no-op.
-    const withEnsure = store as RefreshTokenDenylistStore & { ensureTable?(): Promise<void> };
-    void withEnsure.ensureTable?.().catch((error: unknown) => {
-      console.warn('Refresh token denylist table creation failed', error);
-    });
+    bootstrapIdentitySchemaIfPostgres(store);
     return store;
   });
 
