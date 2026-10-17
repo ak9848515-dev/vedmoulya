@@ -48,8 +48,16 @@ function row(overrides: Partial<ProviderExperienceRow> = {}): ProviderExperience
   } as ProviderExperienceRow;
 }
 
+// The Control Center reads runtime evidence with real Date.now() when no clock
+// is injected. Tests that inject a fixed `now` into the health service MUST
+// inject the same clock here, or `buildReadinessOverrides` treats the fixed
+// evidence as stale, discards it, and readiness silently falls back to READY —
+// a real failure looks like it never happened.
+const controlCenter = (health: ExecutionHealthService, now: number = NOW): AiControlCenterService =>
+  new AiControlCenterService(new AiUsageRecorder(new InMemoryAiUsageStore()), health, () => now);
+
 function service(health: ExecutionHealthService): AiControlCenterService {
-  return new AiControlCenterService(new AiUsageRecorder(new InMemoryAiUsageStore()), health);
+  return controlCenter(health);
 }
 
 /** Read one provider's readiness out of the Control Center board. */
@@ -137,7 +145,7 @@ describe('Phase 1 — real execution evidence reaches the Control Center', () =>
     // The same service is read LONG after the failure: the evidence is stale.
     const later = makeHealth(NOW);
     later.recordExecution({ providerId: 'openai', ok: false, failureReason: 'timeout' });
-    const view = await service(later).getControlCenter('owner-1', [row()], {}, 'UTC');
+    const view = await controlCenter(later).getControlCenter('owner-1', [row()], {}, 'UTC');
     // Whatever the verdict, the board must never invent a number for it.
     const p = view.providers[0];
     expect(p?.readiness.state).toBeTruthy();

@@ -128,6 +128,14 @@ export class AiControlCenterService {
      * every existing construction site stays valid.
      */
     private readonly executionHealth?: ExecutionHealthEvidenceSource,
+    /**
+     * Optional clock for evidence FRESHNESS. Defaults to `Date.now`. A caller
+     * that feeds evidence recorded against a fixed clock (tests, replay) must
+     * inject the same clock here, or `buildReadinessOverrides` measures the
+     * evidence as stale and silently discards it — a real failure would look
+     * like it never happened.
+     */
+    private readonly now: () => number = (): number => Date.now(),
   ) {}
 
   /**
@@ -161,6 +169,7 @@ export class AiControlCenterService {
         ? buildReadinessOverrides(
             providers.map((p) => p.providerId),
             (id) => this.executionHealth?.getProviderHealth(id),
+            { now: this.now() },
           )
         : {};
     const overrides: ReadinessEvidenceOverrides = { ...runtimeEvidence, ...readinessOverrides };
@@ -172,6 +181,9 @@ export class AiControlCenterService {
       // Readiness is derived from REAL evidence (credential + health + reported
       // quota + last runtime outcome) — never from `enabled && configured`.
       const readiness = deriveProviderReadiness({
+        // Freshness must be measured against the SAME clock that produced the
+        // evidence, or a fixed-clock caller's fresh evidence reads as stale.
+        now: this.now(),
         ...(overrides[p.providerId] ?? {}),
         providerId: p.providerId,
         enabled: p.enabled,
