@@ -125,7 +125,12 @@ describe('identity schema gate — DISABLED (default)', () => {
     expect(stub.assertIdentitySchemaCurrent).not.toHaveBeenCalled();
     expect(stub.pendingMigrations).not.toHaveBeenCalled();
     expectNoLeak(raw);
-  });
+    // The FIRST `callReady()` in this file is the only one that pays the
+    // one-time cost of loading the route module graph (it reaches the
+    // `@vedmoulya/api` barrel). Under a fully loaded worker pool that cold
+    // import can exceed the 5s default and fail the test on import time alone,
+    // never on an assertion — so the budget is stated explicitly here.
+  }, 20_000);
 
   it.each(['', '0', 'false', 'no', 'off', 'please-do-not', '   '])(
     'treats %j as NOT opted in (an unreadable opt-in must never activate a fail-closed check)',
