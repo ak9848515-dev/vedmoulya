@@ -237,6 +237,15 @@ describe('friendly failures (no raw technical text)', () => {
     expect(friendlyConnectionError('OpenAI', 'rate_limited').hint).toMatch(/busy|wait/i);
   });
 
+  // BUGFIX (quota vs. throttle) — an unfunded account must not be described as
+  // busy, and a busy provider must not be described as out of credits.
+  it('separates an out-of-credit account from a busy provider', () => {
+    const quota = friendlyConnectionError('OpenAI', 'quota_exhausted');
+    expect(quota.hint).toMatch(/no remaining credits/i);
+    expect(quota.hint).not.toMatch(/busy|wait a moment/i);
+    expect(friendlyConnectionError('OpenAI', 'rate_limited').hint).not.toMatch(/credits/i);
+  });
+
   it('falls back to retry guidance for unknown and missing kinds', () => {
     expect(friendlyConnectionError('DeepSeek').hint).toMatch(/check your api key/i);
     expect(friendlyConnectionError('DeepSeek', 'something_else').title).toMatch(/deepseek/i);

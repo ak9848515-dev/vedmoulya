@@ -30,6 +30,11 @@ const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com';
 // OpenRouter speaks the OpenAI chat-completions contract on its own base URL.
 // Wired through the SHARED OpenAI-compatible path — no provider-specific branch.
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1';
+// OpenRouter serves its model CATALOG anonymously (GET /models answers 200 for a
+// missing, malformed or revoked key), so the catalog can never authenticate a
+// credential. GET /key is the provider's documented credential endpoint: it
+// returns the key's OWN record and answers 401 for an invalid key.
+const OPENROUTER_KEY_ENDPOINT = `${OPENROUTER_ENDPOINT}/key`;
 // Same default OllamaProvider/OllamaLocalModelDiscovery use.
 const OLLAMA_DEFAULT_ENDPOINT = 'http://localhost:11434';
 
@@ -65,6 +70,15 @@ export type ProviderConnectionErrorKind =
   | 'unauthorized'
   | 'unreachable'
   | 'rate_limited'
+  /**
+   * BUGFIX (quota vs. throttle) — the provider answered 429 because this
+   * ACCOUNT CANNOT PAY (its own error envelope says so), not because it is
+   * busy. The status code alone cannot tell the two apart, which is why an
+   * out-of-credit account used to be classified as `rate_limited` and the UI
+   * told the user to “try again” — an action that can never succeed until the
+   * account is funded. Separated so the surfaces can say what is really wrong.
+   */
+  | 'quota_exhausted'
   | 'unavailable'
   | 'not_found'
   | 'bad_request'
@@ -317,10 +331,26 @@ const SAFE_PROVIDER_STATUS_REASONS: readonly string[] = [
   'permission_error',
   'not_found_error',
   'rate_limit_error',
+  // Funding signals — a 429 whose body names the ACCOUNT's balance rather than
+  // a throttle. Allow-listed so the diagnostic log can name the real cause:
+  // these tokens were previously dropped, which is exactly why an out-of-credit
+  // account was indistinguishable from a transient rate limit in production.
+  'insufficient_quota',
+  'credit_balance_exhausted',
   'api_error',
   'overloaded_error',
   'timeout_error',
 ];
+
+/**
+ * 429 error tokens that mean "this account cannot pay", as opposed to "slow
+ * down and retry". Only these two readings of a 429 exist, and only the
+ * provider's own allow-listed token can separate them.
+ */
+const QUOTA_EXHAUSTED_STATUS_REASONS: ReadonlySet<string> = new Set([
+  'insufficient_quota',
+  'credit_balance_exhausted',
+]);
 
 /**
  * PROD-DIAG — extract a provider status token if (and only if) it is on the
@@ -436,6 +466,12 @@ async function readSafeProviderStatusReason(response: Response): Promise<string 
 function mapHttpFailure(
   status: number,
   statusText: string,
+  /**
+   * The provider's own allow-listed error token, when one was read from a
+   * non-OK body (see `readSafeProviderStatusReason`). Optional so every call
+   * site that has no body keeps the previous behaviour EXACTLY.
+   */
+  providerStatusReason?: string,
 ): {
   message: string;
   errorKind: ProviderConnectionErrorKind;
@@ -451,6 +487,21 @@ function mapHttpFailure(
     return { message: 'Endpoint not found — verify the server URL.', errorKind: 'not_found' };
   }
   if (status === 429) {
+    // A 429 has TWO meanings and the status code cannot tell them apart: a
+    // THROTTLE clears on its own, an exhausted balance never does. Reporting
+    // both as rate-limited is what made an out-of-credit OpenAI account read as
+    // a temporary outage with a futile retry, so the provider's own error token
+    // (and nothing else) decides which one this is.
+    if (
+      providerStatusReason !== undefined &&
+      QUOTA_EXHAUSTED_STATUS_REASONS.has(providerStatusReason)
+    ) {
+      return {
+        message:
+          'This provider account has no remaining credits — add credits to the account, then try again.',
+        errorKind: 'quota_exhausted',
+      };
+    }
     return {
       message: 'Rate limit or quota exceeded — wait a moment and try again.',
       errorKind: 'rate_limited',
@@ -867,7 +918,14 @@ export async function validateProviderGeneration(
           errorKind: 'model_unavailable',
         };
       }
-      const { message, errorKind } = mapHttpFailure(response.status, response.statusText);
+      // The SAME allow-listed token that is logged decides the user-facing
+      // classification, so the diagnostic and the screen can never disagree
+      // about what the provider said.
+      const { message, errorKind } = mapHttpFailure(
+        response.status,
+        response.statusText,
+        providerStatusReason,
+      );
       emitGenerationDiagnostic(input.onDiagnostic, {
         providerFamily: input.family,
         stage: 'validate',
@@ -997,10 +1055,101 @@ const PROVIDER_LABELS: Record<TestableProviderFamily, string> = {
   'openai-compatible': 'the endpoint',
 };
 
+/**
+ * A credential-verification call that must SUCCEED before a family's discovery
+ * response is trusted.
+ *
+ * Why this exists: some providers serve their model CATALOG to anonymous
+ * callers. OpenRouter's `GET /api/v1/models` is public — it answers 200 for a
+ * missing, malformed or revoked key, so probing the catalog reported
+ * `connected: true` for an invalid credential (the deployment's generation
+ * validation was the only thing that ever caught it). A family whose catalog is
+ * public therefore declares a SEPARATE authenticated call plus a predicate that
+ * proves the response really carried the credential's own record, because an
+ * HTTP 200 status is not the same thing as a confirmed credential.
+ *
+ * SECURITY CONTRACT: the headers carry the resolved credential for THIS request
+ * only; the response body is used solely by `confirmsCredential` and is never
+ * logged, echoed or returned.
+ */
+interface ProbeAuthCheck {
+  url: string;
+  headers: Record<string, string>;
+  /** True when the body really carries the provider's credential record. */
+  confirmsCredential: (body: unknown) => boolean;
+}
+
 interface ProbePlan {
   url: string;
   headers: Record<string, string>;
+  /**
+   * Present ONLY for families whose catalog endpoint is anonymous (see
+   * `ProbeAuthCheck`). A family declared here must authenticate before its
+   * discovered models are reported as a connection.
+   */
+  authCheck?: ProbeAuthCheck;
   parse: (body: unknown) => DiscoveredProviderModel[];
+}
+
+/**
+ * OpenRouter credential confirmation — the provider answered `GET /key` with a
+ * `data` record describing the key itself. Read defensively (unknown shape) and
+ * never interpret a missing/error envelope as success.
+ */
+export function confirmsOpenRouterCredential(body: unknown): boolean {
+  if (body === null || typeof body !== 'object') return false;
+  const data = (body as { data?: unknown }).data;
+  // `data` must be the key's RECORD — an array (the catalog's shape) or a
+  // missing field proves nothing about the credential.
+  return data !== null && typeof data === 'object' && !Array.isArray(data);
+}
+
+/**
+ * Run ONE family's authenticated credential check.
+ *
+ * Returns `undefined` when the provider really confirmed the credential, or the
+ * friendly failure (`message` + `errorKind`) when it did not. A provider refusal
+ * is mapped through the SAME taxonomy as discovery, so an invalid key, a rate
+ * limit and an outage read identically wherever they happen; an unreadable or
+ * record-less 200 is reported as `unavailable` rather than as a connection.
+ */
+async function runCredentialCheck(
+  check: ProbeAuthCheck,
+  fetchFn: typeof fetch,
+  timeoutMs: number,
+): Promise<{ message: string; errorKind: ProviderConnectionErrorKind } | undefined> {
+  let response: Response;
+  try {
+    response = await fetchFn(check.url, {
+      method: 'GET',
+      headers: check.headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    return mapNetworkError(error, timeoutMs);
+  }
+  if (!response.ok) {
+    // Same 429 distinction as discovery: the provider's own token decides
+    // whether this is a throttle or an unfunded account. Read through the
+    // shared allow-list reader, which never touches the raw body text.
+    const providerStatusReason = await readSafeProviderStatusReason(response);
+    return mapHttpFailure(response.status, response.statusText, providerStatusReason);
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    // A 200 with an unreadable body confirms nothing.
+    body = undefined;
+  }
+  if (!check.confirmsCredential(body)) {
+    return {
+      message:
+        'The provider accepted the request but did not confirm this credential — try again shortly.',
+      errorKind: 'unavailable',
+    };
+  }
+  return undefined;
 }
 
 function probeFor(
@@ -1029,13 +1178,24 @@ function probeFor(
         headers: { Authorization: `Bearer ${apiKey ?? ''}`, Accept: 'application/json' },
         parse: parseOpenAIModels,
       };
-    case 'openrouter':
+    case 'openrouter': {
+      const headers = { Authorization: `Bearer ${apiKey ?? ''}`, Accept: 'application/json' };
       return {
-        // OpenRouter exposes its real catalog at GET /api/v1/models.
+        // OpenRouter exposes its real catalog at GET /api/v1/models — but that
+        // endpoint is PUBLIC, so it is only ever used for discovery, never as
+        // proof of a credential.
         url: `${OPENROUTER_ENDPOINT}/models`,
-        headers: { Authorization: `Bearer ${apiKey ?? ''}`, Accept: 'application/json' },
+        headers,
+        // The credential is verified separately against the provider's own key
+        // endpoint, which is the only call that rejects an invalid key.
+        authCheck: {
+          url: OPENROUTER_KEY_ENDPOINT,
+          headers,
+          confirmsCredential: confirmsOpenRouterCredential,
+        },
         parse: parseOpenAIModels,
       };
+    }
     case 'anthropic':
       return {
         url: `${ANTHROPIC_ENDPOINT}/v1/models`,
@@ -1122,9 +1282,30 @@ export async function testProviderConnection(
     };
   }
 
-  const { url, headers, parse } = probeFor(input, apiKey, env);
+  const { url, headers, authCheck, parse } = probeFor(input, apiKey, env);
   const startedAt = Date.now();
   try {
+    // ── Step 1: authenticate (families whose catalog is anonymous) ──────────
+    // Runs BEFORE discovery and short-circuits on failure, so an invalid
+    // credential can never be reported as a connection just because the public
+    // catalog answered. `latencyMs` below therefore covers the WHOLE probe.
+    if (authCheck !== undefined) {
+      const authFailure = await runCredentialCheck(authCheck, fetchFn, timeoutMs);
+      if (authFailure !== undefined) {
+        return {
+          connected: false,
+          status: 'failed',
+          message: redactKey(authFailure.message, apiKey),
+          errorKind: authFailure.errorKind,
+          latencyMs: Date.now() - startedAt,
+          testedAt,
+          credentialSource,
+          serverManagedKey,
+          ...runtime,
+        };
+      }
+    }
+    // ── Step 2: discover the provider's REAL models ─────────────────────────
     const response = await fetchFn(url, {
       method: 'GET',
       headers,
@@ -1157,7 +1338,15 @@ export async function testProviderConnection(
           ...runtime,
         };
       }
-      const { message, errorKind } = mapHttpFailure(response.status, response.statusText);
+      // Discovery keeps the same 429 distinction: an unfunded account must not
+      // be reported as a throttle (nor the reverse) just because the probe hit a
+      // different endpoint than the generation validation did.
+      const providerStatusReason = await readSafeProviderStatusReason(response);
+      const { message, errorKind } = mapHttpFailure(
+        response.status,
+        response.statusText,
+        providerStatusReason,
+      );
       return {
         connected: false,
         status: 'failed',

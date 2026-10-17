@@ -462,6 +462,36 @@ describe('ProviderSetupOrchestrator', () => {
       expect(result.recovery?.kind).toBe('retry');
     });
 
+    // BUGFIX (quota vs. throttle) — an unfunded account is not a temporary
+    // outage. Reporting it as one gave the user a retry that can never succeed
+    // until money is added elsewhere, which is precisely what the live OpenAI
+    // account ("You have no credits remaining") triggered in the provider UI.
+    it('reports an out-of-credit account as ACTION_REQUIRED, never as a temporary outage', async () => {
+      credentials.resolve.mockResolvedValue({ source: 'NONE' });
+      probe.mockResolvedValue({
+        connected: false,
+        errorKind: 'quota_exhausted',
+        message: 'This provider account has no remaining credits.',
+        credentialSource: 'USER',
+      });
+
+      const result = await orchestrator.setup({
+        userId: 'user-1',
+        family: 'openai',
+        apiKey: 'sk-1',
+      });
+
+      expect(result.outcome).toBe('ACTION_REQUIRED');
+      expect(result.connected).toBe(false);
+      expect(result.message).toBe(
+        'OpenAI has no remaining credits. Add credits to your account, then press Try again.',
+      );
+      // The transient claim must be absent, and the action must still really
+      // retry — it becomes usable the moment the account is funded.
+      expect(result.message).not.toMatch(/temporarily unavailable/i);
+      expect(result.recovery?.kind).toBe('retry');
+    });
+
     it('keeps a provider\u2019s own message for an unclassified failure', async () => {
       credentials.resolve.mockResolvedValue({ source: 'NONE' });
       probe.mockResolvedValue({

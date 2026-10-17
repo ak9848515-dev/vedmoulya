@@ -86,6 +86,23 @@ describe('deriveProviderState — the one lifecycle', () => {
     expect(rejected.nextAction).toBe('reconnect');
   });
 
+  // BUGFIX (quota vs. throttle) — an exhausted balance is not a reachability
+  // problem: DEGRADED's "it may work if you try again" is false until the
+  // account is funded, and the rejected-credential wording would blame a key the
+  // provider accepted.
+  it('an out-of-credit account is a funding failure, not a transient one', () => {
+    const state = deriveProviderState({
+      runtimeStatus: 'CONFIGURED',
+      enabled: true,
+      lastVerification: { ok: false, failureKind: 'quota_exhausted' },
+    });
+    expect(state.lifecycle).toBe('FAILED');
+    expect(state.nextAction).toBe('reconnect');
+    expect(state.hint).toMatch(/no remaining credits/i);
+    expect(state.hint).not.toMatch(/may work if you try again/i);
+    expect(state.ready).toBe(false);
+  });
+
   it('a last verification that SUCCEEDED does not block READY', () => {
     const state = deriveProviderState({
       runtimeStatus: 'CONFIGURED',

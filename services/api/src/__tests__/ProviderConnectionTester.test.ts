@@ -15,6 +15,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   testProviderConnection,
+  confirmsOpenRouterCredential,
   type TestProviderConnectionInput,
 } from '../services/ProviderConnectionTester.js';
 
@@ -25,6 +26,30 @@ function okFetch(body: unknown): typeof fetch {
       headers: { 'content-type': 'application/json' },
     }),
   ) as unknown as typeof fetch;
+}
+
+/**
+ * Route-aware fetch double: answers each probed URL with the body THAT provider
+ * really returns, so a multi-step probe (authenticate → discover) is
+ * observable and its call ORDER can be asserted. An unexpected URL throws with
+ * the URL, so a drifted probe fails loudly instead of silently passing.
+ */
+function routedFetch(routes: Record<string, unknown>): typeof fetch {
+  return vi.fn().mockImplementation(async (url: string | URL | Request) => {
+    const href = typeof url === 'string' ? url : String(url);
+    if (!(href in routes)) throw new Error(`unexpected fetch: ${href}`);
+    return new Response(JSON.stringify(routes[href]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as unknown as typeof fetch;
+}
+
+/** The URLs a fetch double was actually called with, in order. */
+function calledUrls(fetchFn: typeof fetch): string[] {
+  return ((fetchFn as ReturnType<typeof vi.fn>).mock.calls as [string | URL | Request][]).map(
+    (call) => String(call[0]),
+  );
 }
 
 const ENV_EMPTY: Record<string, string | undefined> = {};
@@ -167,6 +192,59 @@ describe('ProviderConnectionTester (FINAL-02 — connection + model discovery)',
       expect(result.message).toMatch(/rate limit or quota/i);
     });
 
+    // BUGFIX (quota vs. throttle) — a 429 is the SAME status for "you are too
+    // fast" and "your account cannot pay", and the provider's own error token is
+    // the only thing that separates them. The live OpenAI account in this
+    // repository answers exactly this envelope (type `insufficient_quota`, code
+    // `credit_balance_exhausted`), and reading it as a throttle is what told an
+    // out-of-credit user to "try again" forever.
+    it('maps a 429 that names an exhausted balance to the funding verdict, not a rate limit', async () => {
+      const fetchFn = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'You have no credits remaining.',
+              type: 'insufficient_quota',
+              code: 'credit_balance_exhausted',
+            },
+          }),
+          { status: 429, headers: { 'content-type': 'application/json' } },
+        ),
+      ) as unknown as typeof fetch;
+      const result = await run({ family: 'openai', apiKey: 'k', fetchFn });
+
+      expect(result.connected).toBe(false);
+      expect(result.errorKind).toBe('quota_exhausted');
+      expect(result.message).toMatch(/no remaining credits/i);
+      // The transient wording must be gone: waiting cannot fund an account.
+      expect(result.message).not.toMatch(/wait a moment/i);
+    });
+
+    it('keeps a genuine throttle a rate limit when the provider says so', async () => {
+      const fetchFn = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { type: 'rate_limit_error' } }), {
+          status: 429,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ) as unknown as typeof fetch;
+      const result = await run({ family: 'openai', apiKey: 'k', fetchFn });
+
+      expect(result.errorKind).toBe('rate_limited');
+      expect(result.message).toMatch(/rate limit or quota/i);
+    });
+
+    it('keeps the conservative rate-limit reading when a 429 body cannot be read', async () => {
+      const fetchFn = vi
+        .fn()
+        .mockResolvedValue(
+          new Response('<html>too many requests</html>', { status: 429 }),
+        ) as unknown as typeof fetch;
+      const result = await run({ family: 'openai', apiKey: 'k', fetchFn });
+
+      // An unreadable body proves nothing about funding, so nothing is claimed.
+      expect(result.errorKind).toBe('rate_limited');
+    });
+
     it('maps 5xx to a provider-unavailable message', async () => {
       const fetchFn = vi
         .fn()
@@ -301,9 +379,14 @@ describe('ProviderConnectionTester (FINAL-02 — connection + model discovery)',
     it('names the ACTUAL family for a platform credential (never hardcodes Gemini)', async () => {
       // Regression: a deployment OpenRouter credential was reported as
       // "Connected to Google Gemini via this server's configured credential".
+      // The probe now authenticates against OpenRouter's key endpoint first, so
+      // the double answers both steps of the probe.
       const result = await testProviderConnection({
         family: 'openrouter',
-        fetchFn: okFetch({ data: [{ id: 'openrouter/model-x' }] }),
+        fetchFn: routedFetch({
+          'https://openrouter.ai/api/v1/key': { data: { label: 'server-key' } },
+          'https://openrouter.ai/api/v1/models': { data: [{ id: 'openrouter/model-x' }] },
+        }),
         env: { AI_OPENROUTER_API_KEY: 'server-key' },
       });
 
@@ -502,6 +585,173 @@ describe('ProviderConnectionTester (FINAL-02 — connection + model discovery)',
     });
   });
 });
+// ─────────────────────────────────────────────────────────────────────────────
+// BUGFIX (OpenRouter credential verification)
+//
+// The reported defect: `testProviderConnection('openrouter')` returned
+// `connected: true` for an INVALID credential. `GET /api/v1/models` is a PUBLIC
+// catalog — it answers 200 for a missing, malformed or revoked key — so the
+// probe authenticated nothing; the deployment's generation validation was the
+// only thing that ever caught a bad key.
+//
+// The fix authenticates against the provider's own credential endpoint
+// (`GET /api/v1/key`, which returns the key's record and answers 401 for an
+// invalid key) BEFORE discovery, and refuses to report a connection when that
+// call does not confirm the credential.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ProviderConnectionTester — OpenRouter credential verification (BUGFIX)', () => {
+  const KEY_URL = 'https://openrouter.ai/api/v1/key';
+  const MODELS_URL = 'https://openrouter.ai/api/v1/models';
+
+  it('rejects an INVALID key although the public catalog answers 200', async () => {
+    // Regression: this is exactly the shape that used to be reported as
+    // `connected: true` — the public catalog answers 200 for a revoked key.
+    const fetchFn = vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href === KEY_URL) {
+        return new Response(
+          JSON.stringify({ error: { code: 401, message: 'No auth credentials found' } }),
+          { status: 401 },
+        );
+      }
+      if (href === MODELS_URL) {
+        return new Response(JSON.stringify({ data: [{ id: 'openai/gpt-4o-mini' }] }), {
+          status: 200,
+        });
+      }
+      throw new Error(`unexpected fetch: ${href}`);
+    }) as unknown as typeof fetch;
+
+    const result = await run({ family: 'openrouter', apiKey: 'sk-or-revoked', fetchFn });
+
+    expect(result.connected).toBe(false);
+    expect(result.status).toBe('failed');
+    expect(result.errorKind).toBe('invalid_api_key');
+    expect(result.message).toMatch(/invalid api key/i);
+    expect(result.message).not.toContain('sk-or-revoked');
+    // The public catalog is never consulted once the credential is refused, so
+    // a false "connected" is structurally impossible.
+    expect(calledUrls(fetchFn)).toEqual([KEY_URL]);
+  });
+
+  it('does not treat a 200 without the key record as a confirmed credential', async () => {
+    const fetchFn = routedFetch({
+      [KEY_URL]: { error: { message: 'no auth credentials found' } },
+      [MODELS_URL]: { data: [{ id: 'openai/gpt-4o-mini' }] },
+    });
+
+    const result = await run({ family: 'openrouter', apiKey: 'sk-or-x', fetchFn });
+
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('unavailable');
+    expect(result.message).toMatch(/did not confirm this credential/i);
+    expect(calledUrls(fetchFn)).toEqual([KEY_URL]);
+  });
+
+  it('authenticates FIRST, then discovers the real models (order + Bearer header)', async () => {
+    const fetchFn = routedFetch({
+      [KEY_URL]: { data: { label: 'sk-or-...abc', limit: null, usage: 0 } },
+      [MODELS_URL]: {
+        data: [{ id: 'openai/gpt-4o-mini' }, { id: 'google/gemini-2.0-flash-001' }],
+      },
+    });
+
+    const result = await run({ family: 'openrouter', apiKey: 'sk-or-good-key', fetchFn });
+
+    expect(result.connected).toBe(true);
+    expect(result.errorKind).toBeUndefined();
+    expect(result.modelCount).toBe(2);
+    expect(result.models?.map((m) => m.id)).toEqual([
+      'openai/gpt-4o-mini',
+      'google/gemini-2.0-flash-001',
+    ]);
+
+    const calls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
+    expect(calls.map((c) => c[0])).toEqual([KEY_URL, MODELS_URL]);
+    // The credential is sent to the provider on BOTH calls, because the key's
+    // own endpoint is the one that must receive it.
+    expect((calls[0][1].headers as Record<string, string>).Authorization).toBe(
+      'Bearer sk-or-good-key',
+    );
+    expect((calls[1][1].headers as Record<string, string>).Authorization).toBe(
+      'Bearer sk-or-good-key',
+    );
+    // ...and is never handed back to the caller.
+    expect(JSON.stringify(result)).not.toContain('sk-or-good-key');
+  });
+
+  it('still reports latency over the WHOLE probe (both calls), never zero', async () => {
+    const fetchFn = routedFetch({
+      [KEY_URL]: { data: { label: 'k' } },
+      [MODELS_URL]: { data: [{ id: 'openai/gpt-4o-mini' }] },
+    });
+
+    const result = await run({ family: 'openrouter', apiKey: 'sk-or-k', fetchFn });
+
+    expect(typeof result.latencyMs).toBe('number');
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('maps a rate-limited credential check with the shared taxonomy', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('{"error":{"message":"slow down"}}', { status: 429 }),
+      ) as unknown as typeof fetch;
+
+    const result = await run({ family: 'openrouter', apiKey: 'sk-or-k', fetchFn });
+
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('rate_limited');
+    expect(result.message).toMatch(/rate limit/i);
+    expect(calledUrls(fetchFn)).toEqual([KEY_URL]);
+  });
+
+  it('maps an unreachable credential endpoint as unreachable (not as a connection)', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValue(new TypeError('fetch failed')) as unknown as typeof fetch;
+
+    const result = await run({ family: 'openrouter', apiKey: 'sk-or-k', fetchFn });
+
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('unreachable');
+    expect(calledUrls(fetchFn)).toEqual([KEY_URL]);
+  });
+
+  it('treats a 200 with an unreadable body as unconfirmed (never connected)', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(new Response('not json', { status: 200 })) as unknown as typeof fetch;
+
+    const result = await run({ family: 'openrouter', apiKey: 'sk-or-k', fetchFn });
+
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('unavailable');
+  });
+
+  it('refuses to probe at all without a credential (never an anonymous catalog call)', async () => {
+    const fetchFn = routedFetch({ [MODELS_URL]: { data: [{ id: 'openai/gpt-4o-mini' }] } });
+
+    const result = await run({ family: 'openrouter', fetchFn });
+
+    expect(result.connected).toBe(false);
+    expect(result.errorKind).toBe('no_credential');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('confirms a credential only from a key RECORD, never from a catalog shape', () => {
+    expect(confirmsOpenRouterCredential({ data: { label: 'k', limit: null } })).toBe(true);
+    // A catalog body (`data` is an array) proves nothing about a credential.
+    expect(confirmsOpenRouterCredential({ data: [{ id: 'openai/gpt-4o-mini' }] })).toBe(false);
+    expect(confirmsOpenRouterCredential({ data: null })).toBe(false);
+    expect(confirmsOpenRouterCredential({ error: { message: 'nope' } })).toBe(false);
+    expect(confirmsOpenRouterCredential(undefined)).toBe(false);
+    expect(confirmsOpenRouterCredential('ok')).toBe(false);
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BUGFIX (Ollama honesty) — the tester must distinguish measured states
 //

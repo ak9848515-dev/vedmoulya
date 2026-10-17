@@ -432,6 +432,22 @@ function mapFailure(
     };
   }
 
+  // BUGFIX (quota vs. throttle) — the provider answered, accepted the
+  // credential, and refused because the ACCOUNT cannot pay. Nothing inside
+  // VedMoulya resolves that and no amount of retrying changes it, so
+  // "temporarily unavailable" was both wrong and unfixable-by-the-user: it is
+  // what sent an out-of-credit OpenAI account into a retry loop. The missing
+  // step is outside the product (fund the account), which is ACTION_REQUIRED;
+  // the retry becomes meaningful the moment that step is done, so it stays the
+  // single action rather than a bare dead end.
+  if (errorKind === 'quota_exhausted') {
+    return {
+      outcome: 'ACTION_REQUIRED',
+      message: `${name} has no remaining credits. Add credits to your account, then press Try again.`,
+      recovery: { kind: 'retry', actionLabel: 'Try again' },
+    };
+  }
+
   if (errorKind === 'rate_limited' || errorKind === 'unavailable') {
     return {
       outcome: 'UNAVAILABLE',
