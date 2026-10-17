@@ -148,3 +148,61 @@ Production surface `npm audit --omit=dev` = **0**. All **12 high** advisories ar
 - **PUBLIC PRODUCTION — NO-GO.** Mandatory S012-A and S012-C are unresolved, CI G8 has not run for the commit, and staging readiness/smoke are unverified. No production readiness is claimed from local or CI-only evidence.
 
 **Stop conditions honored:** staging access/ownership, credentials, and paid services are unavailable/unauthorized; no push, deploy, migration, or infrastructure change was performed; the baseline was unchanged; no broad-breakage change was made.
+
+---
+
+## 17. Commit-state addendum (2026-10-17)
+
+**Why this section exists.** §16 above is a dated snapshot of the tree on
+2026-10-16. Its "no commit" and "all work is uncommitted" wording was accurate
+then and is **not** accurate now. Nothing above is rewritten; this addendum
+records the later commit state so the report stays internally auditable.
+
+| Field  | 2026-10-16 (§1/§16)  | 2026-10-17 (this addendum)                                                   |
+| ------ | -------------------- | ---------------------------------------------------------------------------- |
+| Branch | `main`               | `fix/s14-rc-closure`                                                         |
+| HEAD   | `8f08268a` (ahead 6) | `91003784` (ahead 11 of `origin/main`, local refs only — no fetch performed) |
+
+**Commits created locally (not pushed):**
+
+| Group | Commit     | Contents                                                                         |
+| ----- | ---------- | -------------------------------------------------------------------------------- |
+| A1    | `e25f2c71` | Provider probe, quota verdict, UI state and tests — 10 files                     |
+| A2    | `d75518c6` | Readiness-evidence clock injection and its test — 2 files                        |
+| A3    | `3c92c8c0` | Identity-gate cold-import timeout budget — 1 file                                |
+| B     | `22f6c505` | Secret-scan PowerShell counter shadowing fix — 1 file                            |
+| C1    | `91003784` | Identity database provisioning runbook, newly tracked — 1 file (385 lines added) |
+
+**Independently rerun local gates (2026-10-17, 04:36–05:09 UTC).** These were
+executed by the closure operator in this session against content byte-identical
+to the committed code in `e25f2c71`…`22f6c505`. They are **not** a CI result and
+**not** a rerun of §14.
+
+| Gate                       | Result                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| Format                     | exit 0 (full glob)                                                                 |
+| Typecheck                  | exit 0 — **incremental** (`tsc -b` cache)                                          |
+| Lint                       | exit 0 — `scopes=58 failed=0`                                                      |
+| Test suite                 | 995 passed \| 10 skipped files (1005) · 13 231 passed \| 48 skipped tests (13 279) |
+| Coverage                   | 28 / 28 workspaces                                                                 |
+| Build (`apps/web`)         | exit 0 — **reused existing `.next` cache**, not a clean build                      |
+| Bundle budgets             | exit 0 — largest page `providers/page.js` 130 kB                                   |
+| Accessibility              | 6 / 6 (UI gate only)                                                               |
+| Config contract            | exit 0                                                                             |
+| Dependency cycles          | exit 0 — 57 workspaces                                                             |
+| Benchmarks + quality gates | exit 0 — 18 / 18 checks                                                            |
+| Secret scan (repo script)  | exit 0 — `HIT_COUNT=20`, all fixtures/build output, 0 overlap with changed files   |
+
+**Evidence limitations.** Logs live in `/tmp/vm-gates/` outside this repository
+and are not durable. Typecheck was incremental and the web build reused the
+existing `.next` cache, so neither is a cold/clean run. The accessibility job
+printed non-fatal server env-validation warnings while passing 6/6. The
+`test-final.txt` file in the working tree is a truncated UTF-16 capture and was
+not used as evidence.
+
+**What this does not change.** CI has **not** run for this candidate — no
+workflow execution exists for `91003784` or for this branch — so the release
+candidate is **not established**. Preview/staging deployment, identity schema
+attestation, backup/PITR, restore validation, DR drill, observability, rollback
+rehearsal and release approval remain open. No push, deployment, environment
+change or approval has occurred.
