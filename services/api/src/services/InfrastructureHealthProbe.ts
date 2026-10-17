@@ -98,7 +98,12 @@ function pingRedis(url: string, timeoutMs: number, rejectUnauthorized: boolean):
     const start = performance.now();
 
     const socket = isTls
-      ? tls.connect({ host, port, servername: host, rejectUnauthorized })
+      ? tls.connect({
+          host,
+          port,
+          rejectUnauthorized,
+          ...(net.isIP(host) === 0 ? { servername: host } : {}),
+        })
       : net.connect({ host, port });
 
     const fail = (err: Error): void => {

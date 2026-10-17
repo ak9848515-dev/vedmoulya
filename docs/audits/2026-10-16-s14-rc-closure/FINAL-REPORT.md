@@ -151,6 +151,204 @@ Production surface `npm audit --omit=dev` = **0**. All **12 high** advisories ar
 
 ---
 
+## 12. Deployment reconciliation (2026-10-16, later the same day)
+
+**Why this section exists.** Sections 1–11 were written without reading the
+deployment metadata. This section reconciles them with the **actual** Vercel
+project and the **actual** running deployment, using metadata and live HTTP
+probes only. Nothing above is deleted: each claim that the evidence contradicts
+is corrected explicitly in §12.2, so the corrected reading is auditable.
+
+Safety: no push, deploy, promotion, environment-variable change or production
+setting was touched. **No secret value was read, printed or committed** —
+`vercel env ls` was used for **names only**, and the one credential used (the
+OpenAI diagnosis, §13) was read from the local process environment, passed
+in-process, and masked in every line of output.
+
+### 12.1 What the deployment actually is (read-only evidence)
+
+| Item                     | Evidence                                                                                                                                                                                                                                        | Observed                                                                                                                                                                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linked Vercel project    | `.vercel/project.json`                                                                                                                                                                                                                          | `vedmoulya-web` · project `prj_nMMrR7bL2T9nFTWhEzMUmGaMozEv` · team `ak9848515-devs-projects`                                                                                                                                           |
+| CLI identity             | `npx vercel whoami`                                                                                                                                                                                                                             | `ak9848515-dev` (Vercel CLI 62.2.0)                                                                                                                                                                                                     |
+| Deployments present      | `npx vercel ls`                                                                                                                                                                                                                                 | Production **and** Preview deployments exist; the most recent are `● Ready` (6d)                                                                                                                                                        |
+| Production deployment    | `npx vercel inspect https://vedmoulya-web.vercel.app`                                                                                                                                                                                           | `dpl_FpjHmWmb1ZLeyUERw3U2ZBvYtqPs` · target **production** · `● Ready` · created **2026-10-15 07:12 UTC** · aliases `vedmoulya-web.vercel.app`, `…-git-main-…`, `…-ak9848515-devs-projects.vercel.app`                                  |
+| Per-deployment URLs      | `curl` on a `…-ak9848515-devs-projects.vercel.app` URL                                                                                                                                                                                          | **HTTP 302** — “Protected by Vercel Authentication”; only the stable alias is publicly observable                                                                                                                                       |
+| Live readiness           | `curl https://vedmoulya-web.vercel.app/health/live` · `/health/ready` (2026-10-16 ~07:09 UTC)                                                                                                                                                   | **200** `{"status":"alive",…}` · **200** `{"status":"ready","uptime":1706,"checks":{"gateway":{"status":"initialized"},"database":{"status":"healthy","latencyMs":1290.44}}}`                                                           |
+| PostgreSQL provider      | `.neon` marker · `NEON_BRANCH` / `DATABASE_URL_UNPOOLED` in the local template · `config-inventory.json` (`NEON_DATABASE_URL`) · `docs/audits/2026-10-11-quality-sprint-004/STEP0-BASELINE.md` (“single configured DB, pointed at a Neon host”) | **Neon** (managed serverless PostgreSQL) — discovered from configuration, no value read                                                                                                                                                 |
+| Production env **names** | `npx vercel env ls production`                                                                                                                                                                                                                  | `AI_GOOGLE_API_KEY` · `AI_CREDENTIAL_ENCRYPTION_KEY` · `AUTH_JWT_SECRET` · **`IDENTITY_DATABASE_URL`** · `REDIS_URL`/`KV_*` · `APP_URL` · Google OAuth pair + `GOOGLE_REDIRECT_URI` · `FF_SOCIAL_LOGIN_ENABLED` · `SMTP_*`/`EMAIL_FROM` |
+| Preview env **names**    | `npx vercel env ls preview`                                                                                                                                                                                                                     | **only** `KV_*` and `REDIS_URL` — no `IDENTITY_DATABASE_URL`, no `AUTH_JWT_SECRET`, no AI key                                                                                                                                           |
+| Development env          | `npx vercel env ls development`                                                                                                                                                                                                                 | none                                                                                                                                                                                                                                    |
+| Custom domains           | `npx vercel domains ls` · `curl https://app.vedmoulya.com`                                                                                                                                                                                      | **0 domains attached** · `curl` exit 6 (`Could not resolve host`)                                                                                                                                                                       |
+
+### 12.2 Claim-level corrections to sections 1–11
+
+| Where                     | Claim as written                                                                           | What the evidence shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Disposition                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| §7                        | “No deployed service exists”                                                               | A production deployment is live and public; `/health/ready` answers **200**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | **FALSE — superseded by §12.1**                       |
+| §1 (tree row)             | “clean except the two pre-existing `lint-out.txt`, `lint-output.txt`”                      | The tree now also carries **uncommitted source changes** (the pre-existing `ProviderConnectionTester` diff plus this session's fix, §13/§14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | corrected (§14 lists the files)                       |
+| §6 / criterion 22         | “S012-A — BLOCKED: **no managed, non-localhost identity DB in any reachable environment**” | **Two independent facts contradict this.** (a) `IDENTITY_DATABASE_URL` is set in the Vercel **Production** environment. (b) The live process _proves_ it is present **and non-loopback**: `/health/ready`'s database check resolves `config.database.url` through the lazy config, whose first access calls `requireExternalUrl('IDENTITY_DATABASE_URL', …)` and **throws** for a missing/loopback value outside development (`packages/core/src/config/index.ts:132`; `DatabaseManager.ts:282`). That file is byte-identical at the deployed commit `81dd5f88` and at HEAD, so a production process that returns `database: healthy` after a real `SELECT 1` (1290 ms) has necessarily booted with a valid non-localhost identity URL in place | **SUPERSEDED — S012-A is no longer “no DB anywhere”** |
+| §4 (reuse argument)       | Code gates verified at `f50663af` are reused “by explicit commit reference”                | **No live evidence covers HEAD.** The production build was created **2026-10-15 07:12 UTC**; the newest commit older than that is `81dd5f88` (07:04 UTC — the last _pushed_ commit). The readiness-gate repair `f50663af` (2026-10-16 04:22 UTC) postdates it, so do the durable-revocation fixes (`f1dbce7f` 2026-10-15 11:24 UTC, `495dec3e`), and HEAD (`8f08268a`) is **6 commits ahead** of `origin/main` (`81dd5f88`), unpushed                                                                                                                                                                                                                                                                                                           | live evidence attests `81dd5f88`, not HEAD            |
+| §7 / criterion 24         | “Actual staging readiness / smoke: **NOT VERIFIED**”                                       | Partly verifiable and now measured on the production alias (200/200, §12.1). **Preview is not a staging substitute as configured**: it holds only `KV_*`/`REDIS_URL`, so a Preview build of the current source fails closed at boot (missing `IDENTITY_DATABASE_URL`; missing/short `AUTH_JWT_SECRET`)                                                                                                                                                                                                                                                                                                                                                                                                                                          | **PARTLY VERIFIED (production) / staging absent**     |
+| §8 (audits)               | 0 production vulnerabilities / exit 0 at `critical`                                        | Re-run on the current tree: `npm audit --omit=dev --audit-level=high` → **0 vulnerabilities** (exit 0); `npm audit --audit-level=critical` → exit 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | unchanged                                             |
+| §5 / criterion 21 (CI G8) | NOT RUN for the commit                                                                     | Unchanged: running it requires a push, which is not authorized                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | unchanged                                             |
+| new                       | `app.vedmoulya.com` is treated as the canonical production origin                          | It does not resolve (exit 6) and **no custom domain is attached** to the project; the source still allow-lists it (local-ai agent + a test name)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | factual mismatch, low severity                        |
+
+**What is deliberately NOT claimed:** that the reachable database is the _identity_
+database specifically (the readiness check samples the shared pool), and that its
+schema is **current** — see §12.3, where the attestation that would prove it is
+still switched off.
+
+### 12.3 The S012-A operator action, now narrow and exact
+
+`IDENTITY_SCHEMA_READINESS_GATE` is **not set** in Production (nor Preview), so
+`/health/ready` omits `checks.identitySchema` — by design: with the flag off the
+gate performs no I/O and the response stays byte-identical. The consequence is
+that production readiness does **not** yet attest that the identity schema
+matches the deployed code.
+
+1. Set `IDENTITY_SCHEMA_READINESS_GATE=1` in **Preview** first; redeploy a preview;
+   confirm `checks.identitySchema.status = "current"` **and** `200`.
+2. Then set it in Production and redeem the deployment; confirm the same.
+   (A pending/unreachable schema must answer `503` — that is the gate working.)
+3. Record the outcome in the evidence block of
+   `docs/runbooks/identity-database-provisioning-runbook.md` §10 (that runbook
+   already documents this flag, its opt-in contract and the `--skip-docker`
+   deviation for hosts without a Docker daemon).
+4. Additionally required for the evidence to describe the **current** source: a
+   deployment of HEAD (a push) — still not authorized.
+
+## 13. OpenAI “temporary unavailability” in the AI Providers UI — root cause and fix
+
+### 13.1 What was reported
+
+The AI Providers UI showed a **temporary-unavailability** error for **OpenAI**
+while **Gemini** worked. Diagnosed independently; the Gemini path was not touched.
+
+### 13.2 Root cause — reproduced, not inferred
+
+One 5-token request with the real credential in this environment (read from the
+process env, never printed; all output masked):
+
+```text
+POST https://api.openai.com/v1/chat/completions   (max_tokens 5)
+→ HTTP 429
+  error.type    : insufficient_quota
+  error.code    : credit_balance_exhausted
+  error.message : "You have no credits remaining. Add credits to continue using the API at …"
+```
+
+Through the repository's own path **before** the fix:
+
+```text
+validateProviderGeneration({ family: 'openai', modelId: 'gpt-4o-mini' })
+  errorKind  : rate_limited
+  message    : "Rate limit or quota exceeded — wait a moment and try again."
+  diag log   : {"classification":"generation_http_error","httpStatus":429,
+                "errorKind":"rate_limited"}      ← providerStatusReason ABSENT
+ProviderSetupOrchestrator.mapFailure('rate_limited')
+  outcome    : UNAVAILABLE
+  message    : "OpenAI is temporarily unavailable."
+  recovery   : { kind: 'retry', actionLabel: 'Try again' }
+```
+
+So the product told the user to retry a condition that retrying cannot change — a
+**permanent funding state** was presented as a **transient outage**. Two defects,
+both now fixed:
+
+1. A `429` has two meanings and the status code cannot separate them; the
+   classifier read both as a throttle.
+2. The token that names the real cause (`insufficient_quota`) was **not on the
+   diagnostic allow-list**, so production logs dropped it — the log could not
+   have revealed the funding state either.
+
+Context for the operator (both already documented in the S12-B report §2.1): the
+**Production** environment has no `AI_OPENAI_API_KEY` at all, and this checkout's
+`.env.local` slot holds a 31-character placeholder (`sk-test…` → `401
+invalid_api_key`). Those readings stay honest and distinct after the fix; the
+quota verdict appears whenever a real-but-unfunded credential is used.
+
+### 13.3 Fix (4 source files, no Gemini path touched)
+
+| File                                                             | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `services/api/src/services/ProviderConnectionTester.ts`          | New `quota_exhausted` error kind; `insufficient_quota` + `credit_balance_exhausted` added to the existing allow-list; `mapHttpFailure(status, statusText, providerStatusReason?)` decides a `429` **only** from that token (no readable body ⇒ conservative `rate_limited`); all three non-OK call sites (generation validation, discovery, OpenRouter credential check) pass it, so the diagnostic log and the user-facing verdict can never disagree |
+| `services/api/src/services/ProviderSetupOrchestrator.ts`         | `quota_exhausted` ⇒ `ACTION_REQUIRED` — “`<name>` has no remaining credits. Add credits to your account, then press Try again.” — with a _real_ retry (meaningful once funded) instead of a dead end or a false “temporarily unavailable”                                                                                                                                                                                                              |
+| `apps/web/src/lib/api-client.ts`                                 | The connection DTO union gains `quota_exhausted`, mirroring the service contract                                                                                                                                                                                                                                                                                                                                                                       |
+| `apps/web/src/app/providers/provider-ux.ts`, `provider-state.ts` | Honest copy (“no remaining credits…”) and a dedicated lifecycle branch (FAILED / “No credits” / reconnect) so an exhausted balance is never described as “busy” or “may work if you try again”                                                                                                                                                                                                                                                         |
+
+### 13.4 Verification of the fix
+
+| Check                                                 | Result                                                                                                                                                                                             |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live re-run, real credential, same endpoint           | `errorKind: quota_exhausted` · log `providerStatusReason: "insufficient_quota"` · “This provider account has no remaining credits — add credits to the account, then try again.”                   |
+| **Gemini control in the same run** (unchanged family) | `ok: true` · `generation_success` · `answerLength 2` — **the working provider path is intact**                                                                                                     |
+| Unit tests (4 affected files)                         | **154 passed** — new cases: quota vs. throttle vs. unreadable body; `ACTION_REQUIRED` + no “temporarily unavailable”; the funding lifecycle state; copy separation. No existing assertion weakened |
+| Harness                                               | `scripts/_openai-diagnose.ts` — temporary, **gitignored** (`/scripts/_*.ts`), uncommitted, prints no secret (keys masked)                                                                          |
+
+## 14. Verification executed on the current tree (exit codes preserved)
+
+| Command                                           | Exit | Result                                                                                                                                                                            |
+| ------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`                               | 0    | `tsc -b` + `tsc --noEmit -p services/api`                                                                                                                                         |
+| `npm run lint`                                    | 0    | `scopes=58 failed=0` (≈205 s)                                                                                                                                                     |
+| `npm run format`                                  | 0    | `prettier --check` clean                                                                                                                                                          |
+| `npm run test` (run alone, log kept)              | 0    | **995 passed / 10 skipped files (1005)** · **13 231 passed / 48 skipped tests (13 279)**                                                                                          |
+| 4 affected test files                             | 0    | 154 passed                                                                                                                                                                        |
+| `npm run deps:cycles`                             | 0    | no internal cycles (57 workspaces)                                                                                                                                                |
+| `npm run config:contract`                         | 0    | `CONFIGURATION CONTRACT: OK` (4 required documented)                                                                                                                              |
+| `npm audit --omit=dev --audit-level=high`         | 0    | 0 vulnerabilities                                                                                                                                                                 |
+| `npm audit --audit-level=critical`                | 0    | exit 0 (dev-only advisories, 0 critical)                                                                                                                                          |
+| `npm run build -w apps/web`                       | 0    | production build OK                                                                                                                                                               |
+| `npm run test:performance`                        | 0    | bundle budgets pass (largest page `providers/page.js` 130 kB)                                                                                                                     |
+| `npm run test:a11y`                               | 0    | **6/6**                                                                                                                                                                           |
+| `npm run benchmarks` (G7)                         | 0    | every benchmark suite passed · `QUALITY GATES VERIFICATION PASSED — 18/18 checks, 0 failures`                                                                                     |
+| `scripts/s56-secret-scan.ps1`                     | 0    | `HIT_COUNT=20` — every hit is a test fixture (e.g. `AKIA…EXAMPLE`) or a built bundle under `node_modules`/`.next*`; **none** in a changed file, none in shipped source (§15 note) |
+| `curl <prod alias>/health/live` · `/health/ready` | —    | 200 · 200 (§12.1)                                                                                                                                                                 |
+
+**One caveat, recorded rather than hidden.** A _first_ full-suite run executed
+concurrently with the 205-second lint run reported **1 failing test**
+(`packages/mission-runtime/…/final-04-process-restart.test.ts`, a real-OS-process
+test with a 90 s wait) plus 58 file-level failures. That test passes in isolation
+(1/1) and the suite passes 1005/0 when run alone — the earlier result is
+attributed to CPU contention, not to the change. The serial re-run reported in
+the table above is the result that stands.
+
+## 15. Re-scored dispositions
+
+| #   | Criterion                     | Was                                                      | Now                                  | Basis                                                                                                                                                                                                                                                         |
+| --- | ----------------------------- | -------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 21  | CI G8 production-mode E2E     | NOT RUN                                                  | **NOT RUN**                          | unchanged — requires a push                                                                                                                                                                                                                                   |
+| 22  | S012-A managed identity DB    | BLOCKED                                                  | **PARTIALLY SATISFIED — NOT CLOSED** | the platform holds a non-localhost identity DB and the live runtime proves it is reachable; the schema-currentness attestation is still switched off (§12.3) and no live evidence covers the current commit                                                   |
+| 23  | S012-C staging DR drill       | BLOCKED                                                  | **BLOCKED**                          | unchanged — no authorized staging, no backup artifacts                                                                                                                                                                                                        |
+| 24  | Staging readiness + smoke     | NOT VERIFIED                                             | **PARTLY VERIFIED (production)**     | live 200/200 on the production alias; Preview cannot boot as configured                                                                                                                                                                                       |
+| 25  | Backup schedule / PITR        | BLOCKED                                                  | **BLOCKED**                          | unchanged — operator/provider configuration                                                                                                                                                                                                                   |
+| 26  | Live observability / rollback | NOT RUN                                                  | **NOT RUN**                          | unchanged                                                                                                                                                                                                                                                     |
+| —   | OpenAI provider honesty (new) | (defect)                                                 | **FIXED + VERIFIED**                 | §13                                                                                                                                                                                                                                                           |
+| —   | Secret-scan gate output (new) | unusable count: `HIT_COUNT=System.Collections.Hashtable` | **FIXED + VERIFIED**                 | PowerShell's automatic case-insensitive `$Matches` silently shadowed the script's own `$matches` counter, so the gate could not report how many files it flagged. Renamed to `$matchCount`; the script now prints `HIT_COUNT=20` (all fixtures/built bundles) |
+
+## 16. Final release decision (this section governs; §11's wording is superseded only where these items are touched)
+
+- **LOCAL CANDIDATE — GO.** Re-verified on this tree: typecheck, lint (58/58),
+  format, tests 1005/0, deps, config contract, audits, build, bundle budgets,
+  a11y 6/6, plus the live provider control (§14). A **local** statement only.
+- **PREVIEW / STAGING — NO-GO as configured; CONDITIONAL GO after configuration.**
+  The Preview environment is missing `IDENTITY_DATABASE_URL` and
+  `AUTH_JWT_SECRET`, so a Preview deploy of this source fails closed at boot.
+  Add them (plus an AI key if the preview should exercise AI), redeploy, then
+  observe readiness + drift behaviour before treating it as staging evidence.
+- **PUBLIC PRODUCTION — NO-GO.** Unchanged in substance and now more precisely
+  scoped: S012-C is unresolved, CI G8 has not run for this commit, the identity
+  schema attestation has never been enabled, and the live deployment is **not**
+  the current commit.
+- **State of the tree:** no commit, no push, no deploy, no promotion, no
+  environment or production setting changed; the baseline `8f08268a` is intact.
+  All work is uncommitted (source fix, four test files, this report).
+
+---
+
+---
+
 ## 17. Commit-state addendum (2026-10-17)
 
 **Why this section exists.** §16 above is a dated snapshot of the tree on

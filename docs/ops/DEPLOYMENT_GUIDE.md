@@ -65,6 +65,11 @@ missing, placeholder and localhost configuration.
 | 11  | HTTPS certificate for the production domain                                        | TLS termination (Vercel-managed once DNS resolves to it)        | NOT PROVISIONED |
 | 12  | SMTP (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`/`SMTP_FROM`) + `APP_URL` | email-verification delivery (`EMAIL_DELIVERY_MODE=smtp`)        | NOT PROVISIONED |
 
+Prerequisite **5** is the one a platform owner can close on their own:
+[identity database provisioning & validation runbook](../runbooks/identity-database-provisioning-runbook.md)
+(S012-A) takes it from "database does not exist" to recorded evidence, and
+names the exact acceptance criteria and commands.
+
 Optional / operational: `OTEL_EXPORTER_OTLP_ENDPOINT` (plus the
 Prometheus/Grafana `observability` compose profile), `ERROR_REPORTING_ENDPOINT`,
 `MISSION_WORKSPACE_ROOT`, `AI_WORLD_CADENCE_ENABLED` (single-instance owner),
