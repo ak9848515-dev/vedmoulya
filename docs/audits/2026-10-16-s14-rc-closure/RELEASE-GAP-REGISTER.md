@@ -3,7 +3,7 @@
 **Reconciled date (UTC):** 2026-10-18
 **Scope:** `docs/audits/2026-10-16-s14-rc-closure`
 **Canonical release candidate / release target:** `08731d2287762299479ac8be738aa0089c433ce0` — **equal to `origin/main`**, CI-green (run `39039076592`), and proven to be the SHA running in production (see the 2026-10-18 Phase-2 closure review below)
-**Local HEAD (evidence layer, not the RC):** `27dc57e3c31efa41c2d2250b72673af731017f33` — `main` is **ahead 2** of `origin/main`; the two extra commits (`d1f8eeea`, `27dc57e3`) are documentation plus one test file and are deliberately excluded from the RC
+**Local HEAD (evidence layer, not the RC):** `07ca1056…` — `main` is **ahead 4** of `origin/main`; the four extra commits (`d1f8eeea`, `27dc57e3`, `7a1d81fd`, `07ca1056`) are documentation plus one test file and are deliberately excluded from the RC
 **Merged feature history:** PR #44 (`b8aa12bcdce095a1be2bdb649a80ff4c001741f2`) merged into `main`, followed by audit/hygiene consolidation commit `08731d22`
 **Basis:** Historical snapshot from a previously preserved `stash@{0}` untracked file plus current tracked state. The TLS SNI fix that lived in that stash was **applied into commit `08731d22`**, after which the stash was dropped; **zero stashes remain** (verified 2026-10-18: `git stash list` empty, no `refs/stash`). Nothing was restored from the stash during this reconciliation.
 **Safety:** No external database, environment, deployment, paid API, push, merge, or stash change was performed for this reconciliation. Secrets and credential values are excluded by policy.
@@ -77,7 +77,7 @@
 - **Stash inventory.** The historical text referred to five or six preserved stashes. On 2026-10-18 the repository contains **zero stashes** (`git stash list` empty; `refs/stash` unresolvable). The last known stash — whose untracked snapshot the register was based on — was applied into commit `08731d22` ("apply stashed tls fix") and dropped. No stash content is unreviewed or at risk.
 - **SHA precision.** _Superseded 2026-10-18._ CI run **`39039076592`** carries `headSha = 08731d2287762299479ac8be738aa0089c433ce0` — the **exact** release target — with `completed/success` on all nine jobs. The earlier statement that only the parent `afef0cb6` was CI-verified no longer applies. (History preserved: `39030531474` remains the parent-SHA run.)
 - **Deployment precision.** _Superseded 2026-10-18._ The deployment `dpl_FpjHmWmb1ZLeyUERw3U2ZBvYtqPs` (2026-10-15 07:12 UTC) has been replaced. The newest production deployment is `dpl_2Lqkq1PV6YqPtxQsLVbbV6St7VbF` (`vedmoulya-2yp3y6mv6-…vercel.app`, `● Ready`, created **2026-10-17 14:02:49 UTC**, alias `vedmoulya-web.vercel.app`), and the live app reports **`gitSha = 08731d2287762299479ac8be738aa0089c433ce0`** through `/api/trpc/health.version`. Production **is** running the release target.
-- **Working tree.** `main` is ahead 2 of `origin/main`; the only working-tree change is the uncommitted Phase-2 edit to `S14-RELEASE-CERTIFICATION-AND-HANDOFF.md`. All previously untracked audit material is committed in `d1f8eeea`/`27dc57e3`.
+- **Working tree.** At capture `main` was ahead 2 with one uncommitted Phase-2 documentation edit. That edit and the Phase-2 evidence set are now committed (`7a1d81fd`, `07ca1056`), so `main` is ahead 4 with a **clean tree**; all previously untracked audit material is tracked.
 
 ## GAP-S14-04 — CI G8 production-mode E2E
 
@@ -249,21 +249,21 @@ Implementation anchors verified in the current tree:
 
 **Status table (supersedes all earlier status columns in this register):**
 
-| Gap ID     | Status                     | Basis                                                                                                           |
-| :--------- | :------------------------- | :-------------------------------------------------------------------------------------------------------------- |
-| GAP-S14-01 | **CLOSED**                 | Fix merged; exact-SHA CI green                                                                                  |
-| GAP-S14-02 | **BLOCKED EXTERNAL**       | No isolated non-production identity DB; production DB exists and boots                                          |
-| GAP-S14-03 | **BLOCKED EXTERNAL**       | `vercel env ls preview` still shows only `KV_*` + `REDIS_URL`                                                   |
-| GAP-S14-04 | **CLOSED**                 | Run `39039076592` on the exact SHA, G8 E2E green                                                                |
-| GAP-S14-05 | **OPEN**                   | 43 open CodeQL alerts (42 high) on `main`                                                                       |
-| GAP-S14-06 | **CLOSED (local)**         | `s56-secret-scan.ps1` exit 0, `HIT_COUNT=20`, fixture/build-output only                                         |
-| GAP-S14-07 | **OPEN** (accepted risk)   | `npm audit --omit=dev --audit-level=high` → 0; dev-only highs remain                                            |
-| GAP-S14-08 | **BLOCKED EXTERNAL**       | Preview cannot boot; no staging deployment                                                                      |
-| GAP-S14-09 | **BLOCKED EXTERNAL**       | No authorized staging, no backup artifacts                                                                      |
-| GAP-S14-10 | **BLOCKED EXTERNAL**       | No schedule/retention evidence; provider console inaccessible here                                              |
-| GAP-S14-11 | **NOT RUN**                | Runbooks only; no deploy to observe or roll back                                                                |
-| GAP-S14-12 | **OPEN** (hygiene)         | `vercel domains ls` → 0 domains; `app.vedmoulya.com` does not resolve                                           |
-| GAP-S14-13 | **CLOSED WITH LIMITATION** | Phase-2 documentation committed as `7a1d81fd`; tree clean; the 3 local evidence commits stay unpushed by policy |
+| Gap ID     | Status                     | Basis                                                                                                                          |
+| :--------- | :------------------------- | :----------------------------------------------------------------------------------------------------------------------------- |
+| GAP-S14-01 | **CLOSED**                 | Fix merged; exact-SHA CI green                                                                                                 |
+| GAP-S14-02 | **BLOCKED EXTERNAL**       | No isolated non-production identity DB; production DB exists and boots                                                         |
+| GAP-S14-03 | **BLOCKED EXTERNAL**       | `vercel env ls preview` still shows only `KV_*` + `REDIS_URL`                                                                  |
+| GAP-S14-04 | **CLOSED**                 | Run `39039076592` on the exact SHA, G8 E2E green                                                                               |
+| GAP-S14-05 | **OPEN**                   | 43 open CodeQL alerts (42 high) on `main`                                                                                      |
+| GAP-S14-06 | **CLOSED (local)**         | `s56-secret-scan.ps1` exit 0, `HIT_COUNT=20`, fixture/build-output only                                                        |
+| GAP-S14-07 | **OPEN** (accepted risk)   | `npm audit --omit=dev --audit-level=high` → 0; dev-only highs remain                                                           |
+| GAP-S14-08 | **BLOCKED EXTERNAL**       | Preview cannot boot; no staging deployment                                                                                     |
+| GAP-S14-09 | **BLOCKED EXTERNAL**       | No authorized staging, no backup artifacts                                                                                     |
+| GAP-S14-10 | **BLOCKED EXTERNAL**       | No schedule/retention evidence; provider console inaccessible here                                                             |
+| GAP-S14-11 | **NOT RUN**                | Runbooks only; no deploy to observe or roll back                                                                               |
+| GAP-S14-12 | **OPEN** (hygiene)         | `vercel domains ls` → 0 domains; `app.vedmoulya.com` does not resolve                                                          |
+| GAP-S14-13 | **CLOSED WITH LIMITATION** | Phase-2 documentation committed as `7a1d81fd` and `07ca1056`; tree clean; the 4 local evidence commits stay unpushed by policy |
 
 **New evidence recorded this review:** exact-SHA CI run `39039076592` (`headSha` match, 9/9 jobs); local gate re-runs (typecheck, lint 58/0, 13,232 tests passed, config contract, dep cycles, quality gates 18/18, secret scan, both dependency audits); **62 real-engine PostgreSQL 16 tests**; production identity and health proven via `GET /api/trpc/health.version` (`gitSha` = release target), `/health/live` 200, `/health/ready` 200, `/health/check` 200, `/api/metrics` served.
 

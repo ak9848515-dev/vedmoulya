@@ -487,10 +487,12 @@ migration, restore, rollback, or infrastructure change. No secret read or printe
 (verified live with `git ls-remote origin refs/heads/main`), (b) the `headSha` of green CI run
 `39039076592`, and (c) the commit reported by the running production application.
 
-Local `HEAD` is `27dc57e3c31efa41c2d2250b72673af731017f33` (ahead 2). `git diff --name-only
+Local `HEAD` at capture was `27dc57e3c31efa41c2d2250b72673af731017f33` (ahead 2); after Phase 9 the
+Phase-2 documentation is committed as `7a1d81fd` and `07ca1056`, so `HEAD` is `07ca1056…` (ahead 4)
+with a clean tree. `git diff --name-only
 08731d22 27dc57e3` returns five audit documents plus
 `services/api/src/__tests__/InfrastructureHealthProbe.test.ts` — **no production source,
-configuration, or CI change** — so the two local commits are the evidence layer, not the RC.
+configuration, or CI change** — so the local commits are the evidence layer, not the RC.
 Promoting either would require an unauthorised push and a fresh CI run.
 
 ### 19.2 Deployed identity — production runs the RC

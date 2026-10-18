@@ -17,18 +17,19 @@
 
 All values captured read-only at the start of the certification sprint. No destructive commands were used.
 
-| Item                       | Value                                                                                                                                                                                                  |
-| :------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Working directory          | `D:\VedMoulya`                                                                                                                                                                                         |
-| Branch                     | `main`                                                                                                                                                                                                 |
-| HEAD SHA                   | `27dc57e3c31efa41c2d2250b72673af731017f33` (two certification commits ahead of the release target)                                                                                                     |
-| Release target SHA         | `08731d2287762299479ac8be738aa0089c433ce0` (= `origin/main`)                                                                                                                                           |
-| Upstream tracking          | `main...origin/main [ahead 2]` — the two certification commits are **local only, not pushed**                                                                                                          |     | Working tree at capture | **1 tracked modification** (this document — an uncommitted baseline-reconciliation edit carried into the session); no untracked files |
-| `git diff --stat`          | `1 file changed, 27 insertions(+), 11 deletions(-)` (documentation only)                                                                                                                               |
-| `git diff --check`         | Clean — no whitespace/conflict-marker errors                                                                                                                                                           |
-| `git stash list`           | **Empty — zero stashes**                                                                                                                                                                               |
-| HEAD == target SHA         | **NO** — HEAD is `27dc57e3`, a descendant of the target `08731d22`; the target itself is verified as `origin/main` via `git rev-parse origin/main`                                                     |
-| Working tree after Phase 9 | **Clean** — the Phase-2 documentation changes were committed as **`7a1d81fd7f3536713167ba78c904f9b993fddba2`**; `main` is now ahead 3 of `origin/main`, all three commits local and unpushed by policy |
+| Item                         | Value                                                                                                                                                                                                                                 |
+| :--------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Working directory            | `D:\VedMoulya`                                                                                                                                                                                                                        |
+| Branch                       | `main`                                                                                                                                                                                                                                |
+| HEAD SHA                     | `27dc57e3c31efa41c2d2250b72673af731017f33` (two certification commits ahead of the release target)                                                                                                                                    |
+| Release target SHA           | `08731d2287762299479ac8be738aa0089c433ce0` (= `origin/main`)                                                                                                                                                                          |
+| Upstream tracking at capture | `main...origin/main [ahead 2]` — the two certification commits are **local only, not pushed**                                                                                                                                         |
+| Working tree at capture      | **1 tracked modification** (this document — an uncommitted baseline-reconciliation edit carried into the session); no untracked files                                                                                                 |
+| `git diff --stat`            | `1 file changed, 27 insertions(+), 11 deletions(-)` (documentation only)                                                                                                                                                              |
+| `git diff --check`           | Clean — no whitespace/conflict-marker errors                                                                                                                                                                                          |
+| `git stash list`             | **Empty — zero stashes**                                                                                                                                                                                                              |
+| HEAD == target SHA           | **NO** — HEAD is `27dc57e3`, a descendant of the target `08731d22`; the target itself is verified as `origin/main` via `git rev-parse origin/main`                                                                                    |
+| Working tree after Phase 9   | **Clean** — the Phase-2 documentation changes were committed as **`7a1d81fd`** and **`07ca1056`**; `main` is now **ahead 4** of `origin/main` (`d1f8eeea`, `27dc57e3`, `7a1d81fd`, `07ca1056`), all four local and unpushed by policy |
 
 ### 1.0 Reconciliation of the certification baseline
 
@@ -57,6 +58,8 @@ These were present before the sprint and have since been committed intact (super
 | `08731d22` | chore(meta): complete repository audit, apply stashed TLS fix, audit evidence, clean workspace | **Yes — run `39039076592` (exact release target)** |
 | `d1f8eeea` | docs: finalize s14 rc certification evidence                                                   | **No** — documentation + one regression test only  |
 | `27dc57e3` | docs: close s14 exact-sha ci gaps via verified run                                             | **No** — documentation only                        |
+| `7a1d81fd` | docs: revalidate s14 rc via exact-sha ci and live deployment identity (Phase 2)                | **No** — documentation only                        |
+| `07ca1056` | docs: record the s14 phase-2 commit hash and clean tree                                        | **No** — documentation only                        |
 
 > The release target `08731d22` is CI-verified. The two documentation commits on top are **not** CI-verified, but neither changes production source behavior (one adds a regression test; the other edits audit docs).
 
@@ -139,7 +142,7 @@ The earlier table in this section used a **local 9-row numbering** that conflict
 | GAP-S14-10 | Backup schedule / retention at provider                         | High     | **BLOCKED EXTERNAL**       | Platform/DevOps + DB Owner                    |
 | GAP-S14-11 | Live observability + rollback rehearsal                         | Medium   | **NOT RUN**                | Rollback Authority + Platform Engineering     |
 | GAP-S14-12 | Canonical production origin `app.vedmoulya.com` mismatch        | Low      | **OPEN** (hygiene)         | DNS/Platform owner (safe to defer)            |
-| GAP-S14-13 | Release hygiene / traceability                                  | Medium   | **CLOSED WITH LIMITATION** | 2 unpushed local evidence commits             |
+| GAP-S14-13 | Release hygiene / traceability                                  | Medium   | **CLOSED WITH LIMITATION** | 4 unpushed local evidence commits             |
 
 > Two prior claims are corrected here: GAP-S14-05 was reported CLOSED in the register based on the G6 _job conclusion_ only; the alert inventory shows 43 open alerts, so it is **OPEN**. GAP-S14-02 was described as "no managed non-localhost identity DB **anywhere**" — production demonstrably has one and boots (see §12.3); the true gap is the absence of an **isolated non-production** environment for acceptance.
 
@@ -454,19 +457,19 @@ Also re-verified: `vercel domains ls` → **0 domains**; `https://app.vedmoulya.
 
 ## 13. Recovery and Rollback Gate Assessment (Phase 6)
 
-| Item                                    | Repository / provider evidence                                                                                                                               | Status                                           |
-| :-------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------- |
-| Objectives defined                      | `docs/runbooks/backup-restore-runbook.md`: **RPO ≤ 24 h**, **RTO ≤ 30 min** (full restore)                                                                   | DOCUMENTED                                       |
-| Backup procedure                        | `scripts/backup.sh` (`pg_dump --format=custom                                                                                                                | gzip`, per service), runbook's 02:00 UTC S3 path | DOCUMENTED, never executed |
-| Backup schedule / retention at provider | Nothing in-repo (no cron, no CI step); provider console evidence unavailable in this environment (`neonctl` not installed, no API key)                       | **NOT EVIDENCED — BLOCKED EXTERNAL**             |
-| Retention policy                        | Runbook: daily ≥ 30 d, monthly ≥ 12 mo, quarterly restore test                                                                                               | DOCUMENTED, not enforced                         |
-| PITR scope / recovery point             | Neon six-hour history/PITR window observed previously; **a window is not a scheduled backup**                                                                | PARTIAL                                          |
-| Restore procedure                       | Runbook §2 (stop writes → download → `psql < restore.sql` → invariants → readiness 200)                                                                      | DOCUMENTED                                       |
-| Restore verification                    | No drill has ever been run; no artifacts (`backups/`, `*.sql.gz`) exist                                                                                      | **NOT RUN**                                      |
-| RTO/RPO measurement                     | Requires a drill; no timestamps recorded                                                                                                                     | **NOT RUN**                                      |
-| Rollback procedure                      | `docs/runbooks/rollback-runbook.md` + `backup-restore-runbook.md` §3 (restore pre-deploy backup → redeploy previous release → verify readiness + invariants) | DOCUMENTED and internally consistent             |
-| Rollback authority                      | `PLATFORM-UNBLOCK-REQUEST.md` names _Platform Operations On-Call_ — reference still `PENDING`                                                                | **UNASSIGNED**                                   |
-| Required post-recovery checks           | readiness 200, row-count/key invariants, auth/dashboard/search smoke, post-mortem ≤ 48 h                                                                     | DOCUMENTED, never executed                       |
+| Item                                    | Repository / provider evidence                                                                                                                               | Status                               |
+| :-------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------- |
+| Objectives defined                      | `docs/runbooks/backup-restore-runbook.md`: **RPO ≤ 24 h**, **RTO ≤ 30 min** (full restore)                                                                   | DOCUMENTED                           |
+| Backup procedure                        | `scripts/backup.sh` (`pg_dump --format=custom \| gzip`, per service), runbook's 02:00 UTC S3 path                                                            | DOCUMENTED, never executed           |
+| Backup schedule / retention at provider | Nothing in-repo (no cron, no CI step); provider console evidence unavailable in this environment (`neonctl` not installed, no API key)                       | **NOT EVIDENCED — BLOCKED EXTERNAL** |
+| Retention policy                        | Runbook: daily ≥ 30 d, monthly ≥ 12 mo, quarterly restore test                                                                                               | DOCUMENTED, not enforced             |
+| PITR scope / recovery point             | Neon six-hour history/PITR window observed previously; **a window is not a scheduled backup**                                                                | PARTIAL                              |
+| Restore procedure                       | Runbook §2 (stop writes → download → `psql < restore.sql` → invariants → readiness 200)                                                                      | DOCUMENTED                           |
+| Restore verification                    | No drill has ever been run; no artifacts (`backups/`, `*.sql.gz`) exist                                                                                      | **NOT RUN**                          |
+| RTO/RPO measurement                     | Requires a drill; no timestamps recorded                                                                                                                     | **NOT RUN**                          |
+| Rollback procedure                      | `docs/runbooks/rollback-runbook.md` + `backup-restore-runbook.md` §3 (restore pre-deploy backup → redeploy previous release → verify readiness + invariants) | DOCUMENTED and internally consistent |
+| Rollback authority                      | `PLATFORM-UNBLOCK-REQUEST.md` names _Platform Operations On-Call_ — reference still `PENDING`                                                                | **UNASSIGNED**                       |
+| Required post-recovery checks           | readiness 200, row-count/key invariants, auth/dashboard/search smoke, post-mortem ≤ 48 h                                                                     | DOCUMENTED, never executed           |
 
 **Gate conclusion: OPEN.** A configured PITR window, a helper script, and a consistent runbook do not constitute recoverability. No restore or rollback was initiated against production, and none may be without an approved, isolated rehearsal.
 
