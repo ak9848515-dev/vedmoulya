@@ -249,21 +249,21 @@ Implementation anchors verified in the current tree:
 
 **Status table (supersedes all earlier status columns in this register):**
 
-| Gap ID     | Status                     | Basis                                                                                                                |
-| :--------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------- |
-| GAP-S14-01 | **CLOSED**                 | Fix merged; exact-SHA CI green                                                                                       |
-| GAP-S14-02 | **BLOCKED EXTERNAL**       | No isolated non-production identity DB; production DB exists and boots                                               |
-| GAP-S14-03 | **BLOCKED EXTERNAL**       | `vercel env ls preview` still shows only `KV_*` + `REDIS_URL`                                                        |
-| GAP-S14-04 | **CLOSED**                 | Run `39039076592` on the exact SHA, G8 E2E green                                                                     |
-| GAP-S14-05 | **OPEN**                   | 43 open CodeQL alerts (42 high) on `main`                                                                            |
-| GAP-S14-06 | **CLOSED (local)**         | `s56-secret-scan.ps1` exit 0, `HIT_COUNT=20`, fixture/build-output only                                              |
-| GAP-S14-07 | **OPEN** (accepted risk)   | `npm audit --omit=dev --audit-level=high` → 0; dev-only highs remain                                                 |
-| GAP-S14-08 | **BLOCKED EXTERNAL**       | Preview cannot boot; no staging deployment                                                                           |
-| GAP-S14-09 | **BLOCKED EXTERNAL**       | No authorized staging, no backup artifacts                                                                           |
-| GAP-S14-10 | **BLOCKED EXTERNAL**       | No schedule/retention evidence; provider console inaccessible here                                                   |
-| GAP-S14-11 | **NOT RUN**                | Runbooks only; no deploy to observe or roll back                                                                     |
-| GAP-S14-12 | **OPEN** (hygiene)         | `vercel domains ls` → 0 domains; `app.vedmoulya.com` does not resolve                                                |
-| GAP-S14-13 | **CLOSED WITH LIMITATION** | Only the Phase-2 documentation commit remains uncommitted at review time; 2 evidence commits stay unpushed by policy |
+| Gap ID     | Status                     | Basis                                                                                                           |
+| :--------- | :------------------------- | :-------------------------------------------------------------------------------------------------------------- |
+| GAP-S14-01 | **CLOSED**                 | Fix merged; exact-SHA CI green                                                                                  |
+| GAP-S14-02 | **BLOCKED EXTERNAL**       | No isolated non-production identity DB; production DB exists and boots                                          |
+| GAP-S14-03 | **BLOCKED EXTERNAL**       | `vercel env ls preview` still shows only `KV_*` + `REDIS_URL`                                                   |
+| GAP-S14-04 | **CLOSED**                 | Run `39039076592` on the exact SHA, G8 E2E green                                                                |
+| GAP-S14-05 | **OPEN**                   | 43 open CodeQL alerts (42 high) on `main`                                                                       |
+| GAP-S14-06 | **CLOSED (local)**         | `s56-secret-scan.ps1` exit 0, `HIT_COUNT=20`, fixture/build-output only                                         |
+| GAP-S14-07 | **OPEN** (accepted risk)   | `npm audit --omit=dev --audit-level=high` → 0; dev-only highs remain                                            |
+| GAP-S14-08 | **BLOCKED EXTERNAL**       | Preview cannot boot; no staging deployment                                                                      |
+| GAP-S14-09 | **BLOCKED EXTERNAL**       | No authorized staging, no backup artifacts                                                                      |
+| GAP-S14-10 | **BLOCKED EXTERNAL**       | No schedule/retention evidence; provider console inaccessible here                                              |
+| GAP-S14-11 | **NOT RUN**                | Runbooks only; no deploy to observe or roll back                                                                |
+| GAP-S14-12 | **OPEN** (hygiene)         | `vercel domains ls` → 0 domains; `app.vedmoulya.com` does not resolve                                           |
+| GAP-S14-13 | **CLOSED WITH LIMITATION** | Phase-2 documentation committed as `7a1d81fd`; tree clean; the 3 local evidence commits stay unpushed by policy |
 
 **New evidence recorded this review:** exact-SHA CI run `39039076592` (`headSha` match, 9/9 jobs); local gate re-runs (typecheck, lint 58/0, 13,232 tests passed, config contract, dep cycles, quality gates 18/18, secret scan, both dependency audits); **62 real-engine PostgreSQL 16 tests**; production identity and health proven via `GET /api/trpc/health.version` (`gitSha` = release target), `/health/live` 200, `/health/ready` 200, `/health/check` 200, `/api/metrics` served.
 

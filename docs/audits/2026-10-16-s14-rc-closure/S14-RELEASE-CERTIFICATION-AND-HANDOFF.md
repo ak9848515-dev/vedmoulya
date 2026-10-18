@@ -17,18 +17,18 @@
 
 All values captured read-only at the start of the certification sprint. No destructive commands were used.
 
-| Item               | Value                                                                                                                                              |
-| :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Working directory  | `D:\VedMoulya`                                                                                                                                     |
-| Branch             | `main`                                                                                                                                             |
-| HEAD SHA           | `27dc57e3c31efa41c2d2250b72673af731017f33` (two certification commits ahead of the release target)                                                 |
-| Release target SHA | `08731d2287762299479ac8be738aa0089c433ce0` (= `origin/main`)                                                                                       |
-| Upstream tracking  | `main...origin/main [ahead 2]` — the two certification commits are **local only, not pushed**                                                      |
-| Working tree       | **1 tracked modification** (this document — an uncommitted baseline-reconciliation edit carried into the session); no untracked files              |
-| `git diff --stat`  | `1 file changed, 27 insertions(+), 11 deletions(-)` (documentation only)                                                                           |
-| `git diff --check` | Clean — no whitespace/conflict-marker errors                                                                                                       |
-| `git stash list`   | **Empty — zero stashes**                                                                                                                           |
-| HEAD == target SHA | **NO** — HEAD is `27dc57e3`, a descendant of the target `08731d22`; the target itself is verified as `origin/main` via `git rev-parse origin/main` |
+| Item                       | Value                                                                                                                                                                                                  |
+| :------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Working directory          | `D:\VedMoulya`                                                                                                                                                                                         |
+| Branch                     | `main`                                                                                                                                                                                                 |
+| HEAD SHA                   | `27dc57e3c31efa41c2d2250b72673af731017f33` (two certification commits ahead of the release target)                                                                                                     |
+| Release target SHA         | `08731d2287762299479ac8be738aa0089c433ce0` (= `origin/main`)                                                                                                                                           |
+| Upstream tracking          | `main...origin/main [ahead 2]` — the two certification commits are **local only, not pushed**                                                                                                          |     | Working tree at capture | **1 tracked modification** (this document — an uncommitted baseline-reconciliation edit carried into the session); no untracked files |
+| `git diff --stat`          | `1 file changed, 27 insertions(+), 11 deletions(-)` (documentation only)                                                                                                                               |
+| `git diff --check`         | Clean — no whitespace/conflict-marker errors                                                                                                                                                           |
+| `git stash list`           | **Empty — zero stashes**                                                                                                                                                                               |
+| HEAD == target SHA         | **NO** — HEAD is `27dc57e3`, a descendant of the target `08731d22`; the target itself is verified as `origin/main` via `git rev-parse origin/main`                                                     |
+| Working tree after Phase 9 | **Clean** — the Phase-2 documentation changes were committed as **`7a1d81fd7f3536713167ba78c904f9b993fddba2`**; `main` is now ahead 3 of `origin/main`, all three commits local and unpushed by policy |
 
 ### 1.0 Reconciliation of the certification baseline
 
@@ -499,5 +499,6 @@ Also re-verified: `vercel domains ls` → **0 domains**; `https://app.vedmoulya.
 - No production restore, rollback, destructive test, or paid provider call was executed.
 - The uncommitted documentation edit that was present at session start was preserved and built upon, not discarded.
 - **Related documents (must agree with this one):** `RELEASE-GAP-REGISTER.md` · `FINAL-REPORT.md` (§19) · `PLATFORM-UNBLOCK-REQUEST.md` (action plan) · `IDENTITY-ACCEPTANCE-EVIDENCE-TEMPLATE.md`.
+- **Committed:** the Phase-2 documentation set was committed as `7a1d81fd7f3536713167ba78c904f9b993fddba2` (`docs(docs): revalidate s14 rc via exact-sha ci and live deployment identity`) — **not pushed**. The lint-staged hook's temporary backup stash was cleaned up automatically; `git stash list` is empty.
 
 **End of report.**
