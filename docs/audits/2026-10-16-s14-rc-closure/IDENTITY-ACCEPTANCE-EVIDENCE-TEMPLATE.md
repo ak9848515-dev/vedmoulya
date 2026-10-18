@@ -2,7 +2,7 @@
 
 **Scope:** `docs/audits/2026-10-16-s14-rc-closure`
 **Template status:** LOCAL-ONLY preparation artifact. This file records field names and local validation only. It is not deployed-environment evidence.
-**Approved deployment SHA under test:** `afef0cb6570f6e82aba0533c782b62019e73baff`
+**Approved deployment SHA under test:** `08731d2287762299479ac8be738aa0089c433ce0` (supersedes `afef0cb6` after audit consolidation)
 **Environment identifier:** LOCAL workstation only. No authorized target environment has been exercised in this sprint.
 **Authorization/ticket reference:** NONE RECEIVED. No external provisioning, environment change, redeploy, or paid operation is authorized by this file.
 
@@ -21,7 +21,7 @@ Local-only results must never be copied into a deployed-evidence field.
 
 | #   | Field                                              | Scope | Status  | Detail/evidence reference                                                                                                                  |
 | --- | -------------------------------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Approved deployment SHA                            | LOCAL | PASS    | `afef0cb6570f6e82aba0533c782b62019e73baff` verified with `git rev-parse HEAD` and `git rev-parse origin/main`                              |
+| 1   | Approved deployment SHA                            | LOCAL | PASS    | `08731d2287762299479ac8be738aa0089c433ce0` verified with `git rev-parse HEAD` and `git rev-parse origin/main`                              |
 | 2   | Environment identifier                             | LOCAL | PASS    | Local workstation; no target deployment URL assigned                                                                                       |
 | 3   | Authorization/ticket reference                     | LOCAL | BLOCKED | No written Platform/Identity approval received                                                                                             |
 | 4   | Production preflight exit code                     | LOCAL | BLOCKED | `npm run preflight:prod -- --skip-docker` not rerun against production here; prior audit records fail-closed exit 1 without managed values |

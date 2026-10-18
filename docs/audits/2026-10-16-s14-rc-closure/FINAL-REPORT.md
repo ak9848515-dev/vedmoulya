@@ -404,3 +404,64 @@ candidate is **not established**. Preview/staging deployment, identity schema
 attestation, backup/PITR, restore validation, DR drill, observability, rollback
 rehearsal and release approval remain open. No push, deployment, environment
 change or approval has occurred.
+
+---
+
+## 18. Release Certification Review Addendum (2026-10-18)
+
+**Purpose.** This addendum records the final release-certification review against the target
+release SHA. Nothing above is rewritten; this is the authoritative current-state block.
+
+### 18.1 Verified repository state
+
+| Field                         | Verified value                                                                 | How verified                           |
+| ----------------------------- | ------------------------------------------------------------------------------ | -------------------------------------- |
+| Branch                        | `main`                                                                         | `git rev-parse --abbrev-ref HEAD`      |
+| HEAD (full SHA)               | `08731d2287762299479ac8be738aa0089c433ce0`                                     | `git rev-parse HEAD`                   |
+| Target release SHA            | `08731d2287762299479ac8be738aa0089c433ce0`                                     | matches HEAD exactly                   |
+| Upstream `origin/main`        | `08731d2287762299479ac8be738aa0089c433ce0`                                     | `git ls-remote origin refs/heads/main` |
+| Divergence                    | `0 0` (fully synced)                                                           | `git rev-list --left-right --count`    |
+| Stashes                       | **none** (`git stash list` empty; `refs/stash` unresolvable)                   | `git stash list`, `git show-ref`       |
+| Working tree                  | only S14 audit edits + applied TLS SNI regression test; 1 untracked audit file | `git status --porcelain=v2`            |
+| Unexpected user modifications | none                                                                           | review of `git diff`                   |
+
+**Key correction.** HEAD **is** the target release SHA — this is the strongest possible code
+identity. The prior `afef0cb6` framing in §17 is superseded: `afef0cb6` is now the _parent_ of
+the release target.
+
+### 18.2 CI evidence precision
+
+| Claim                            | Status                                                                           |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| CI run `39030531474`             | `completed/success` for **parent** SHA `afef0cb6` (G8 e2e, G6 CodeQL, CI Result) |
+| CI for release target `08731d22` | **NOT independently verified** — no workflow run exists for the exact SHA        |
+| Local gates on `08731d22`        | typecheck, lint, format, tests, build, secret scan all green (see §17)           |
+
+CI evidence covers the parent commit; the release target itself has only local-gate coverage
+plus a one-line TLS SNI fix and documentation changes over that parent. A CI rerun for the
+exact SHA `08731d22` is recommended to convert GAP-S14-04/05 to fully closed.
+
+### 18.3 Deployment evidence precision
+
+- Production deployment on record: `dpl_FpjHmWmb1ZLeyUERw3U2ZBvYtqPs`, alias
+  `vedmoulya-web.vercel.app`, `readyState: READY`, created **2026-10-15 07:12 UTC** — this
+  **predates** `afef0cb6`/`08731d22` and is therefore **not** the release target commit.
+- Preview deployments referenced elsewhere (e.g. short SHA `b8aa12b`, branch `fix/s1…`) refer to
+  the earlier `b8aa12bc` deployment, **not** the release target. Do not conflate them.
+- A `READY` state or a healthy `/health` endpoint does **not** prove identity persistence, logout
+  revocation, schema compatibility, backup recovery, or rollback readiness.
+
+### 18.4 Final disposition (this block governs)
+
+The four mandatory external/authorization-gated gates remain BLOCKED / NOT RUN / NOT VERIFIED:
+
+| Gate                                   | Disposition                                                            |
+| -------------------------------------- | ---------------------------------------------------------------------- |
+| S012-A managed identity DB attestation | PARTIALLY SATISFIED — NOT CLOSED (no live evidence for current commit) |
+| S012-C staging DR drill                | BLOCKED — no authorized staging, no backup artifacts                   |
+| Backup schedule / PITR                 | BLOCKED — no scheduled backup; six-hour PITR window observed only      |
+| Live observability / rollback          | NOT RUN — no authorized deployment of the release SHA to observe       |
+
+**Release decision:** LOCAL CANDIDATE — GO (local scope only). PREVIEW / STAGING — NO-GO as
+configured. PUBLIC PRODUCTION — NO-GO. No push, deploy, environment change, migration, or
+approval occurred in this review.

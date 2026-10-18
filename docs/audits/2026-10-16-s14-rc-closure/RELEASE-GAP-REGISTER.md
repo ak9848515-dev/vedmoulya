@@ -1,27 +1,27 @@
 # S14 RC Closure — Reconciled Release Gap Register
 
-**Reconciled date (UTC):** 2026-10-17
+**Reconciled date (UTC):** 2026-10-18
 **Scope:** `docs/audits/2026-10-16-s14-rc-closure`
-**Reconciled HEAD:** `afef0cb6570f6e82aba0533c782b62019e73baff` (`main`, equal to `origin/main`)
-**Merged feature history:** PR #44 (`b8aa12bcdce095a1be2bdb649a80ff4c001741f2`) is merged into `main`
-**Basis:** Historical snapshot from preserved `stash@{0}` untracked file plus current tracked state. Nothing was restored from the stash.
+**Reconciled HEAD:** `08731d2287762299479ac8be738aa0089c433ce0` (`main`, equal to `origin/main`; supersedes `afef0cb6` after audit consolidation) — confirmed by `git rev-parse HEAD` and `git rev-parse origin/main` on 2026-10-18
+**Merged feature history:** PR #44 (`b8aa12bcdce095a1be2bdb649a80ff4c001741f2`) merged into `main`, followed by audit/hygiene consolidation commit `08731d22`
+**Basis:** Historical snapshot from a previously preserved `stash@{0}` untracked file plus current tracked state. The TLS SNI fix that lived in that stash was **applied into commit `08731d22`**, after which the stash was dropped; **zero stashes remain** (verified 2026-10-18: `git stash list` empty, no `refs/stash`). Nothing was restored from the stash during this reconciliation.
 **Safety:** No external database, environment, deployment, paid API, push, merge, or stash change was performed for this reconciliation. Secrets and credential values are excluded by policy.
 
 ## Source inventory
 
-| Source                                                                        | Location/status on 2026-10-17                                                                                       |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `docs/audits/2026-10-16-s14-rc-closure/FINAL-REPORT.md`                       | Tracked in `main`; §17 records later commit state                                                                   |
-| Historical `RELEASE-GAP-REGISTER.md`                                          | **Not tracked**; read-only copy in `stash@{0}` untracked snapshot parent `99ee76983e9840e88422d2d3316e2469ed7973cb` |
-| `docs/runbooks/identity-database-provisioning-runbook.md`                     | Tracked; added by `91003784`                                                                                        |
-| `docs/runbooks/backup-restore-runbook.md`                                     | Tracked                                                                                                             |
-| `docs/runbooks/rollback-runbook.md`                                           | Tracked                                                                                                             |
-| `docs/ops/DEPLOYMENT_GUIDE.md`                                                | Tracked                                                                                                             |
-| `docs/ops/SECRET_ROTATION.md`                                                 | Tracked                                                                                                             |
-| `BLOCKER-REPORT-S12-PRODUCTION.md`                                            | Tracked                                                                                                             |
-| `docs/audits/2026-10-12-quality-sprint-012/PRODUCTION-READINESS-CHECKLIST.md` | Tracked                                                                                                             |
-| `.github/workflows/ci.yml`                                                    | Tracked; gates G1–G8 plus Build and final `CI Result`                                                               |
-| `.github/workflows/release.yml`                                               | Tracked; manual `workflow_dispatch` only                                                                            |
+| Source                                                                        | Location/status on 2026-10-17                                                                                                                                                                       |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/audits/2026-10-16-s14-rc-closure/FINAL-REPORT.md`                       | Tracked in `main`; §17 records later commit state                                                                                                                                                   |
+| Historical `RELEASE-GAP-REGISTER.md`                                          | **Not tracked**; earlier read-only copy was in the `stash@{0}` untracked snapshot parent `99ee76983e9840e88422d2d3316e2469ed7973cb` (that stash has since been applied into `08731d22` and dropped) |
+| `docs/runbooks/identity-database-provisioning-runbook.md`                     | Tracked; added by `91003784`                                                                                                                                                                        |
+| `docs/runbooks/backup-restore-runbook.md`                                     | Tracked                                                                                                                                                                                             |
+| `docs/runbooks/rollback-runbook.md`                                           | Tracked                                                                                                                                                                                             |
+| `docs/ops/DEPLOYMENT_GUIDE.md`                                                | Tracked                                                                                                                                                                                             |
+| `docs/ops/SECRET_ROTATION.md`                                                 | Tracked                                                                                                                                                                                             |
+| `BLOCKER-REPORT-S12-PRODUCTION.md`                                            | Tracked                                                                                                                                                                                             |
+| `docs/audits/2026-10-12-quality-sprint-012/PRODUCTION-READINESS-CHECKLIST.md` | Tracked                                                                                                                                                                                             |
+| `.github/workflows/ci.yml`                                                    | Tracked; gates G1–G8 plus Build and final `CI Result`                                                                                                                                               |
+| `.github/workflows/release.yml`                                               | Tracked; manual `workflow_dispatch` only                                                                                                                                                            |
 
 **Status legend preserved:** `OPEN` = blocked/not run · `PARTIAL` = partly satisfied · `FIXED-LOCAL` = verified on a local tree only · **Reconciliation prefix:** `RECONCILED 2026-10-17` records what changed after the historical snapshot without rewriting history.
 
@@ -30,8 +30,8 @@
 - **Severity:** Medium; user-facing honesty, no data loss.
 - **Historical evidence:** FINAL-REPORT §3 Phase-2 note + §13; 2026-10-16 local family 164/164 using injected fetch doubles; OpenRouter subset 9/9; `429` taxonomy 3/3; no paid call.
 - **Historical status:** `FIXED-LOCAL`; not committed/pushed/CI-verified at snapshot time.
-- **Reconciliation:** `[RECONCILED 2026-10-17]` Fix commits including `e25f2c71` are now merged through `afef0cb6`; current `main` CI run `39030531474` reports success.
-- **Status:** Locally fixed and merged; CI pipeline green for current `main`; no live paid-provider claim.
+- **Reconciliation:** `[RECONCILED 2026-10-17]` Fix commits including `e25f2c71` are now merged through `afef0cb6`; `main` CI run `39030531474` reports success for `afef0cb6`.
+- **Status:** Locally fixed and merged; CI pipeline green for the **parent** commit `afef0cb6`, not for the release target `08731d22`; no live paid-provider claim.
 - **Responsible role:** Engineering.
 - **Prerequisites/verification:** Provider tester/orchestrator plus provider-state/UX suites; CI test/security jobs; preserve no-weakening rule.
 - **Closure criterion:** Committed fix remains green in current `main` CI without weakening assertions.
@@ -66,19 +66,26 @@
 ## Reconciliation summary
 
 - The stashed register contains unique release evidence: thirteen dependency-ordered gaps, checkpoints, operator handoffs, authorization drafts, and an explicit execution sequence. That structure is preserved here.
-- Since the snapshot, the local commits it describes were pushed through PR #44 and merged as `afef0cb6`. CI status for the current merge SHA is therefore newer than the snapshot.
-- Current `main` CI run `39030531474` for `afef0cb6` reports `completed/success`, including successful `G8: End-to-End Tests`, `G6: Security Scan` CodeQL steps, and final fail-closed `CI Result`. This updates CI-only gaps; it does not create deployment evidence.
-- Stale snapshot claims are retained as history and marked `[HISTORICAL]`. Reconciliation lines are marked `[RECONCILED 2026-10-17]`.
+- Since the snapshot, the local commits it describes were pushed through PR #44 and merged as `afef0cb6`, then followed by the audit/hygiene consolidation commit `08731d22`. The release target is therefore `08731d22`; `afef0cb6` is its parent.
+- `main` CI run `39030531474` for parent `afef0cb6` reports `completed/success`, including successful `G8: End-to-End Tests`, `G6: Security Scan` CodeQL steps, and final fail-closed `CI Result`. This updates CI-only gaps; it does not create deployment evidence, and it does not cover the release target `08731d22`.
+- Stale snapshot claims are retained as history and marked `[HISTORICAL]`. Reconciliation lines are marked `[RECONCILED 2026-10-17]`; the 2026-10-18 review below adds the stash and SHA-precision corrections.
 - No blocked, not-run, deployment, backup/DR, observability, rollback, or approval gate is converted to passed.
+
+## 2026-10-18 review corrections
+
+- **Stash inventory.** The historical text referred to five or six preserved stashes. On 2026-10-18 the repository contains **zero stashes** (`git stash list` empty; `refs/stash` unresolvable). The last known stash — whose untracked snapshot the register was based on — was applied into commit `08731d22` ("apply stashed tls fix") and dropped. No stash content is unreviewed or at risk.
+- **SHA precision.** The only CI run on record (`39030531474`) is for `afef0cb6`, the **parent** of the release target. The release target `08731d22` has **not** been independently CI-verified. GAP-S14-04 and GAP-S14-05 are therefore CI-verified for `afef0cb6` only.
+- **Deployment precision.** The production deployment on record (`dpl_FpjHmWmb1ZLeyUERw3U2ZBvYtqPs`, alias `vedmoulya-web.vercel.app`, `READY`, created 2026-10-15 07:12 UTC) predates `afef0cb6`/`08731d22`; the live production deployment is **not** the release target commit.
+- **Working tree.** HEAD is exactly the release target `08731d22`; `main` equals `origin/main` (0/0 divergence). The tree carries only the S14 audit documentation edits plus the applied TLS SNI regression test; there is no unreviewed user work.
 
 ## GAP-S14-04 — CI G8 production-mode E2E
 
 - **Severity:** High/mandatory.
 - **Historical evidence:** `[HISTORICAL]` No run for the then-current local candidate; push not authorized at snapshot time.
-- **Reconciliation:** `[RECONCILED 2026-10-17]` Current `main` CI run `39030531474` for `afef0cb6` reports `completed/success`, including `G8: End-to-End Tests` and final `CI Result`.
-- **Status:** CI-verified for current `main` SHA `afef0cb6`.
+- **Reconciliation:** `[RECONCILED 2026-10-17]` `main` CI run `39030531474` for `afef0cb6` reports `completed/success`, including `G8: End-to-End Tests` and final `CI Result`. The release target `08731d22` is the **child** of `afef0cb6`, so this evidence does **not** cover the exact release SHA.
+- **Status:** CI-verified for parent SHA `afef0cb6`; **NOT yet CI-verified for the release target `08731d22`**.
 - **Responsible role:** CI owner for future reruns.
-- **Prerequisites/verification:** Current run ID and per-job output; future exact-SHA rerun if the tree changes.
+- **Prerequisites/verification:** Exact-SHA rerun for `08731d22` (or explicit acceptance of parent-SHA coverage); current run ID and per-job output.
 - **Closure criterion:** Green G8 for the exact SHA being released.
 - **Review flag:** Retain the run/job URLs in the release record.
 
@@ -86,8 +93,8 @@
 
 - **Severity:** Medium/mandatory-but-CI-only.
 - **Historical evidence:** `[HISTORICAL]` No local equivalent; CI unknown at snapshot time.
-- **Reconciliation:** `[RECONCILED 2026-10-17]` Current `main` CI `G6: Security Scan` success includes CodeQL analysis and SARIF upload steps.
-- **Status:** CI-verified pipeline-level for `afef0cb6`.
+- **Reconciliation:** `[RECONCILED 2026-10-17]` `main` CI `G6: Security Scan` success includes CodeQL analysis and SARIF upload steps. This covers parent SHA `afef0cb6`, not the release target `08731d22`.
+- **Status:** CI-verified pipeline-level for parent `afef0cb6`; not yet verified for `08731d22`.
 - **Responsible role:** CI/security owner.
 - **Prerequisites/verification:** Review Code Scanning alerts separately if release policy requires an alert inventory.
 - **Closure criterion:** CodeQL check green for the release SHA with no unresolved blocking alert.
@@ -176,8 +183,8 @@
 
 - **Severity:** Medium traceability.
 - **Historical evidence:** `[HISTORICAL]` Six local-only commits, thirteen modified files, untracked work, five stashes.
-- **Reconciliation:** `[RECONCILED 2026-10-17]` That framing is stale. PR #44 is merged; `main` equals `origin/main` at `afef0cb6`; current `main` CI reports success; working tree is clean; six stashes are preserved, not five.
-- **Status:** Partially superseded; push/CI portion is now satisfied for `afef0cb6`, while deployment/approval hygiene remains open.
+- **Reconciliation:** `[RECONCILED 2026-10-17]` That framing is stale. PR #44 is merged; `main` equals `origin/main` at `08731d22` (target SHA); `main` CI reported success for parent `afef0cb6`; working tree holds only the S14 audit changes; **zero stashes remain** (verified 2026-10-18), not five or six.
+- **Status:** Partially superseded; push/CI portion is satisfied for parent `afef0cb6`, while deployment/approval hygiene remains open.
 - **Responsible role:** Repository Owner for future pushes; Engineering for local commits.
 - **Prerequisites/verification:** Clean-except-agreed status; intended commits visible in history; register tracked.
 - **Closure criterion:** Register tracked plus deployment/approval evidence completed.
@@ -226,8 +233,8 @@ Implementation anchors verified in the current tree:
 ## Contradictions and review labels
 
 - Stashed register says GAP-S14-01/06 were not committed; later history and PR #44 show those fixes merged. Preserved as historical wording; reconciliation status above supersedes only the commit/CI portion.
-- Stashed register counts six local-only commits/eleven local commits/five stashes in different addenda; current verified state is merged `main` plus six preserved stashes. Do not use stale counts operationally.
-- Prior audit text described CI as not run for the local candidate; current `main` CI run `39030531474` reports success for `afef0cb6`. This changes CI-only gates, not deployment gates.
+- Stashed register counts six local-only commits/eleven local commits/five stashes in different addenda; current verified state (2026-10-18) is merged `main` at `08731d22` with **zero stashes** — the last stash was applied into `08731d22` and dropped. Do not use stale counts operationally.
+- Prior audit text described CI as not run for the local candidate; `main` CI run `39030531474` reports success for parent `afef0cb6`. This changes CI-only gates, not deployment gates, and does not cover the release target `08731d22`.
 - Exact CVE/test-count/log-duration wording from history is preserved but not re-proven in this read-only sprint.
 
 15. Keep the restored backup path ready under the separate backup/DR approval before any destructive validation.

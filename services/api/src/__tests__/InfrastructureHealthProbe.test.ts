@@ -3,8 +3,9 @@
 // Real database/redis health probe (PH-002/T3 follow-up)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import net from 'node:net';
+import tls from 'node:tls';
 import { metrics } from '@vedmoulya/core';
 import { InfrastructureHealthProbe } from '../services/InfrastructureHealthProbe.js';
 
@@ -129,5 +130,44 @@ describe('InfrastructureHealthProbe', () => {
     const probe = new InfrastructureHealthProbe({ env: 'development' });
     await expect(probe.close()).resolves.toBeUndefined();
     await expect(probe.close()).resolves.toBeUndefined();
+  });
+
+  it('omits servername in TLS SNI when host is an IP address, but includes it for hostnames', async () => {
+    let capturedOptions: tls.ConnectionOptions | undefined;
+    const connectSpy = vi.spyOn(tls, 'connect').mockImplementation(((options: unknown) => {
+      capturedOptions = options as tls.ConnectionOptions;
+      const mockSocket = new net.Socket();
+      setTimeout(() => mockSocket.emit('error', new Error('mock connection error')), 5);
+      return mockSocket as unknown as tls.TLSSocket;
+    }) as unknown as typeof tls.connect);
+
+    try {
+      // 1. IP address case: 127.0.0.1
+      const ipProbe = new InfrastructureHealthProbe({
+        env: 'development',
+        redisUrl: 'rediss://127.0.0.1:6379',
+        timeoutMs: 500,
+      });
+      await ipProbe.checkRedis();
+      expect(capturedOptions).toBeDefined();
+      expect(capturedOptions?.host).toBe('127.0.0.1');
+      expect((capturedOptions as Record<string, unknown> | undefined)?.servername).toBeUndefined();
+
+      // 2. Hostname case: redis.example.com
+      capturedOptions = undefined;
+      const hostProbe = new InfrastructureHealthProbe({
+        env: 'development',
+        redisUrl: 'rediss://redis.example.com:6379',
+        timeoutMs: 500,
+      });
+      await hostProbe.checkRedis();
+      expect(capturedOptions).toBeDefined();
+      expect(capturedOptions?.host).toBe('redis.example.com');
+      expect((capturedOptions as Record<string, unknown> | undefined)?.servername).toBe(
+        'redis.example.com',
+      );
+    } finally {
+      connectSpy.mockRestore();
+    }
   });
 });
