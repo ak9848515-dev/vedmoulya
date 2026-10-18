@@ -2,7 +2,7 @@
 
 **Scope:** `docs/audits/2026-10-16-s14-rc-closure`
 **Template status:** LOCAL-ONLY preparation artifact. This file records field names and local validation only. It is not deployed-environment evidence.
-**Approved deployment SHA under test:** `08731d2287762299479ac8be738aa0089c433ce0` (supersedes `afef0cb6` after audit consolidation)
+**Approved deployment SHA under test:** `08731d2287762299479ac8be738aa0089c433ce0` — the canonical release candidate (supersedes `afef0cb6` after audit consolidation). _Revalidated 2026-10-18:_ this SHA is `origin/main`, is CI-green (run `39039076592`), and is the SHA the live production runtime reports; local `HEAD` is `27dc57e3` (evidence commits only, not the RC).
 **Environment identifier:** LOCAL workstation only. No authorized target environment has been exercised in this sprint.
 **Authorization/ticket reference:** NONE RECEIVED. No external provisioning, environment change, redeploy, or paid operation is authorized by this file.
 
@@ -19,22 +19,22 @@ Local-only results must never be copied into a deployed-evidence field.
 
 ## Identity acceptance fields
 
-| #   | Field                                              | Scope | Status  | Detail/evidence reference                                                                                                                  |
-| --- | -------------------------------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Approved deployment SHA                            | LOCAL | PASS    | `08731d2287762299479ac8be738aa0089c433ce0` verified with `git rev-parse HEAD` and `git rev-parse origin/main`                              |
-| 2   | Environment identifier                             | LOCAL | PASS    | Local workstation; no target deployment URL assigned                                                                                       |
-| 3   | Authorization/ticket reference                     | LOCAL | BLOCKED | No written Platform/Identity approval received                                                                                             |
-| 4   | Production preflight exit code                     | LOCAL | BLOCKED | `npm run preflight:prod -- --skip-docker` not rerun against production here; prior audit records fail-closed exit 1 without managed values |
-| 5   | Production doctor exit code                        | LOCAL | BLOCKED | `npm run doctor:prod -- --skip-docker` not rerun against production here; prior audit records fail-closed NOT READY without managed values |
-| 6   | Configuration-contract result                      | LOCAL | PASS    | `npm run config:contract` exit 0 in this sprint; example/env inventory consistent                                                          |
-| 7   | Migration ledger IDs and head                      | LOCAL | PASS    | Code defines ordered ledger ending in `005_timestamptz_instants`; no target database queried                                               |
-| 8   | `/health/ready` HTTP/database health               | LOCAL | NOT RUN | No authorized deployment exists to query                                                                                                   |
-| 9   | Deployment smoke-test result                       | LOCAL | NOT RUN | `scripts/deploy/smoke-test.sh` inspected but not executed; no target URL assigned                                                          |
-| 10  | Accessibility result and scope                     | LOCAL | NOT RUN | `npm run test:a11y` not rerun here; prior report marks it UI-only and not database proof                                                   |
-| 11  | Signup/logout persistence verification             | LOCAL | NOT RUN | No target deployment available                                                                                                             |
-| 12  | Token-deny-list verification                       | LOCAL | NOT RUN | No target deployment available                                                                                                             |
-| 13  | Fail-closed log scan                               | LOCAL | NOT RUN | No deployed logs available                                                                                                                 |
-| 14  | Operator, timestamp, evidence references, sign-off | LOCAL | BLOCKED | No operator assigned; no signed deployed evidence exists                                                                                   |
+| #   | Field                                              | Scope | Status  | Detail/evidence reference                                                                                                                                                                                                   |
+| --- | -------------------------------------------------- | ----- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Approved deployment SHA                            | LOCAL | PASS    | `08731d2287762299479ac8be738aa0089c433ce0` verified via `git rev-parse origin/main`, CI run `39039076592` `headSha`, and production `/api/trpc/health.version` `gitSha`. Local `HEAD` is `27dc57e3` (evidence commits only) |
+| 2   | Environment identifier                             | LOCAL | PASS    | Local workstation; no target deployment URL assigned                                                                                                                                                                        |
+| 3   | Authorization/ticket reference                     | LOCAL | BLOCKED | No written Platform/Identity approval received                                                                                                                                                                              |
+| 4   | Production preflight exit code                     | LOCAL | BLOCKED | `npm run preflight:prod -- --skip-docker` not rerun against production here; prior audit records fail-closed exit 1 without managed values                                                                                  |
+| 5   | Production doctor exit code                        | LOCAL | BLOCKED | `npm run doctor:prod -- --skip-docker` not rerun against production here; prior audit records fail-closed NOT READY without managed values                                                                                  |
+| 6   | Configuration-contract result                      | LOCAL | PASS    | `npm run config:contract` exit 0 in this sprint; example/env inventory consistent                                                                                                                                           |
+| 7   | Migration ledger IDs and head                      | LOCAL | PASS    | Code defines ordered ledger ending in `005_timestamptz_instants`; no target database queried                                                                                                                                |
+| 8   | `/health/ready` HTTP/database health               | LOCAL | NOT RUN | No authorized deployment exists to query                                                                                                                                                                                    |
+| 9   | Deployment smoke-test result                       | LOCAL | NOT RUN | `scripts/deploy/smoke-test.sh` inspected but not executed; no target URL assigned                                                                                                                                           |
+| 10  | Accessibility result and scope                     | LOCAL | NOT RUN | `npm run test:a11y` not rerun here; prior report marks it UI-only and not database proof                                                                                                                                    |
+| 11  | Signup/logout persistence verification             | LOCAL | NOT RUN | No target deployment available                                                                                                                                                                                              |
+| 12  | Token-deny-list verification                       | LOCAL | NOT RUN | No target deployment available                                                                                                                                                                                              |
+| 13  | Fail-closed log scan                               | LOCAL | NOT RUN | No deployed logs available                                                                                                                                                                                                  |
+| 14  | Operator, timestamp, evidence references, sign-off | LOCAL | BLOCKED | No operator assigned; no signed deployed evidence exists                                                                                                                                                                    |
 
 ## Authorized deployed-evidence fields (all empty)
 

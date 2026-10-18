@@ -443,6 +443,10 @@ exact SHA `08731d22` is recommended to convert GAP-S14-04/05 to fully closed.
 
 ### 18.3 Deployment evidence precision
 
+> **SUPERSEDED 2026-10-18 — see §19.2.** A newer production deployment now serves the release
+> target, and the running application reports `gitSha = 08731d2287762299479ac8be738aa0089c433ce0`.
+> The record below is retained as history only.
+
 - Production deployment on record: `dpl_FpjHmWmb1ZLeyUERw3U2ZBvYtqPs`, alias
   `vedmoulya-web.vercel.app`, `readyState: READY`, created **2026-10-15 07:12 UTC** — this
   **predates** `afef0cb6`/`08731d22` and is therefore **not** the release target commit.
@@ -452,6 +456,10 @@ exact SHA `08731d22` is recommended to convert GAP-S14-04/05 to fully closed.
   revocation, schema compatibility, backup recovery, or rollback readiness.
 
 ### 18.4 Final disposition (this block governs)
+
+> **Superseded 2026-10-18 by §19**, which governs the current decision and scores. The four
+> external gates listed here remain open; §19 adds the deployed-production identity evidence and
+> the SAST alert finding, and replaces the single score with two.
 
 The four mandatory external/authorization-gated gates remain BLOCKED / NOT RUN / NOT VERIFIED:
 
@@ -465,3 +473,82 @@ The four mandatory external/authorization-gated gates remain BLOCKED / NOT RUN /
 **Release decision:** LOCAL CANDIDATE — GO (local scope only). PREVIEW / STAGING — NO-GO as
 configured. PUBLIC PRODUCTION — NO-GO. No push, deploy, environment change, migration, or
 approval occurred in this review.
+
+---
+
+## 19. Phase-2 External Gate Closure Review (2026-10-18, 11:09Z) — **this section governs**
+
+**Scope:** read-only verification plus safe local gates. No push, deploy, environment write,
+migration, restore, rollback, or infrastructure change. No secret read or printed.
+
+### 19.1 Canonical release candidate
+
+**RC = `08731d2287762299479ac8be738aa0089c433ce0`.** It is simultaneously (a) `origin/main`
+(verified live with `git ls-remote origin refs/heads/main`), (b) the `headSha` of green CI run
+`39039076592`, and (c) the commit reported by the running production application.
+
+Local `HEAD` is `27dc57e3c31efa41c2d2250b72673af731017f33` (ahead 2). `git diff --name-only
+08731d22 27dc57e3` returns five audit documents plus
+`services/api/src/__tests__/InfrastructureHealthProbe.test.ts` — **no production source,
+configuration, or CI change** — so the two local commits are the evidence layer, not the RC.
+Promoting either would require an unauthorised push and a fresh CI run.
+
+### 19.2 Deployed identity — production runs the RC
+
+| Probe (read-only)                                      | Result                                                                                                                                    |
+| :----------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+| `vercel ls vedmoulya-web`                              | newest production deployment `dpl_2Lqkq1PV6YqPtxQsLVbbV6St7VbF` (`vedmoulya-2yp3y6mv6-…`), `● Ready`, created **2026-10-17 14:02:49 UTC** |
+| `GET /api/trpc/health.version`                         | **`gitSha: 08731d2287762299479ac8be738aa0089c433ce0`** (full 40-char match)                                                               |
+| `GET /health/live` · `/health/ready` · `/health/check` | 200 alive · 200 ready (`database: healthy`) · 200 ok                                                                                      |
+| `GET /api/metrics`                                     | Prometheus exposition served                                                                                                              |
+
+This **supersedes §18.3** and closes the "production deployment identity" question. It does **not**
+close identity acceptance: production is not an isolated non-production environment, and
+`IDENTITY_SCHEMA_READINESS_GATE` remains unset.
+
+⚠️ **Governance flag:** the release candidate is already serving production traffic even though
+this certification outcome is **NOT CERTIFIED**. The Release Owner must reconcile the live
+deployment with the open gates.
+
+### 19.3 New finding — 43 open CodeQL alerts (GAP-S14-05 re-opened)
+
+`gh api 'repos/ak9848515-dev/vedmoulya/code-scanning/alerts?state=open&per_page=100'` returns
+**43 open alerts on `refs/heads/main` — 42 `high` + 1 `medium`**, of which **42 are in shipped
+non-test source** (36× `js/polynomial-redos` across ~20 files, 2× `js/insecure-randomness`,
+`js/bad-tag-filter`, `js/clear-text-storage-of-sensitive-data` in
+`apps/web/src/auth/session-manager.ts`, `js/insufficient-password-hash` in
+`services/identity/src/auth/OAuthState.ts`, and one medium `js/shell-command-constructed-from-input`).
+Alerts were created 2026-08-23 → 2026-10-10; the release run added none, but they are **unresolved**.
+The earlier CLOSED status rests on the `G6` job's conclusion, which reports analysis-step success,
+not an empty alert set. This gate's own criterion ("no unresolved blocking alert") is **unmet**.
+
+### 19.4 Local gates executed (all green)
+
+typecheck exit 0 · lint **58 scopes, 0 failed** · full suite **13,232 passed / 48 skipped / 0 failed**
+(995 files) · `InfrastructureHealthProbe` 9/9 · `config:contract` 0 · `deps:cycles` 57 workspaces 0
+cycles · `quality:gates:verify` 18/18 · secret scan exit 0 with `HIT_COUNT=20` (fixtures/build output
+only) · `npm audit --omit=dev --audit-level=high` → 0 · `npm audit --audit-level=critical` → exit 0.
+
+**Real-engine PostgreSQL 16.15 (new):** no engine was listening on `127.0.0.1:5432` (so 10 PG-gated
+files skipped in the full run), so a disposable local container was used — identity migrations
+**9/9**, identity stores/denylist/rotation **16/16** (25/25 across four files), and nine wider
+PG-gated suites **37/37** serially. The container was removed immediately afterwards.
+
+**Correction (§17/§18 ancestry):** "Local PostgreSQL migration tests 9/9" was **misattributed** to
+`InfrastructureHealthProbe.test.ts` — a probe suite that happens to contain 9 tests. The real suite,
+`services/identity/__tests__/migrations.postgres.test.ts` (also 9 tests), was **skipped** in every
+no-engine run and is now genuinely executed and green.
+
+### 19.5 Scores and outcome
+
+| Score                              | Value        |
+| :--------------------------------- | :----------- |
+| Repository & CI readiness          | **88 / 100** |
+| Full operational release readiness | **50 / 100** |
+
+**Outcome: `NOT CERTIFIED`.** The strongest verified statements are that one SHA —
+`08731d22` — is consistent across git, CI, and the live production runtime, and that every locally
+reproducible gate passes. Certification is withheld because identity acceptance on an isolated
+non-production environment, backup/restore/rollback evidence, and the SAST alert inventory remain
+open. Full rubric, exit criteria, recovery assessment, and the approval action plan are in
+`S14-RELEASE-CERTIFICATION-AND-HANDOFF.md` §§10–14 and `PLATFORM-UNBLOCK-REQUEST.md` (§6).

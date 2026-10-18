@@ -2,7 +2,8 @@
 
 **Reconciled date (UTC):** 2026-10-18
 **Scope:** `docs/audits/2026-10-16-s14-rc-closure`
-**Reconciled HEAD:** `08731d2287762299479ac8be738aa0089c433ce0` (`main`, equal to `origin/main`; supersedes `afef0cb6` after audit consolidation) — confirmed by `git rev-parse HEAD` and `git rev-parse origin/main` on 2026-10-18
+**Canonical release candidate / release target:** `08731d2287762299479ac8be738aa0089c433ce0` — **equal to `origin/main`**, CI-green (run `39039076592`), and proven to be the SHA running in production (see the 2026-10-18 Phase-2 closure review below)
+**Local HEAD (evidence layer, not the RC):** `27dc57e3c31efa41c2d2250b72673af731017f33` — `main` is **ahead 2** of `origin/main`; the two extra commits (`d1f8eeea`, `27dc57e3`) are documentation plus one test file and are deliberately excluded from the RC
 **Merged feature history:** PR #44 (`b8aa12bcdce095a1be2bdb649a80ff4c001741f2`) merged into `main`, followed by audit/hygiene consolidation commit `08731d22`
 **Basis:** Historical snapshot from a previously preserved `stash@{0}` untracked file plus current tracked state. The TLS SNI fix that lived in that stash was **applied into commit `08731d22`**, after which the stash was dropped; **zero stashes remain** (verified 2026-10-18: `git stash list` empty, no `refs/stash`). Nothing was restored from the stash during this reconciliation.
 **Safety:** No external database, environment, deployment, paid API, push, merge, or stash change was performed for this reconciliation. Secrets and credential values are excluded by policy.
@@ -41,9 +42,9 @@
 
 - **Severity:** Critical/mandatory BLOCKED.
 - **Evidence:** FINAL-REPORT §§6–7, criterion #22; historical `preflight:prod` exit 1 and `doctor:prod` exit 1 fail-closed; production-config contract 15/15; attestation off.
-- **Root cause:** No managed non-localhost identity DB in a reachable environment; infrastructure/authorization gap, not code.
+- **Root cause:** No **isolated non-production** managed identity database exists for the acceptance drill; infrastructure/authorization gap, not code. _(Precision correction 2026-10-18: a managed non-localhost identity database **does** exist and boots in **Production** — `IDENTITY_DATABASE_URL` is set there and the live process returns `database: healthy`; the gap is the absence of an isolated non-production target, not the absence of any database.)_
 - **Dependencies:** Blocks GAP-S14-03, GAP-S14-08, and meaningful GAP-S14-09.
-- **Status:** `OPEN` / BLOCKED.
+- **Status:** `OPEN` / **BLOCKED EXTERNAL**. _Local portion strengthened 2026-10-18:_ the identity schema/migration/revocation suites now have real-engine evidence (62 PostgreSQL 16 tests, §9.5 of the handoff), which does not close this gap.
 - **Responsible role:** Deploy Operator, Platform/Identity, plus secrets owner.
 - **Prerequisites:** Written approval; managed PostgreSQL and least-privilege role; platform environment names only; redeploy permission.
 - **Verification commands:** `npm run preflight:prod -- --skip-docker`; `npm run doctor:prod -- --skip-docker`; `npm run config:contract`; ledger query proving head `005_timestamptz_instants`; deployed `/health/ready` HTTP 200; smoke script PASSED; `npm run test:a11y`; deployed-log scan; signup/logout round trip.
@@ -74,9 +75,9 @@
 ## 2026-10-18 review corrections
 
 - **Stash inventory.** The historical text referred to five or six preserved stashes. On 2026-10-18 the repository contains **zero stashes** (`git stash list` empty; `refs/stash` unresolvable). The last known stash — whose untracked snapshot the register was based on — was applied into commit `08731d22` ("apply stashed tls fix") and dropped. No stash content is unreviewed or at risk.
-- **SHA precision.** The only CI run on record (`39030531474`) is for `afef0cb6`, the **parent** of the release target. The release target `08731d22` has **not** been independently CI-verified. GAP-S14-04 and GAP-S14-05 are therefore CI-verified for `afef0cb6` only.
-- **Deployment precision.** The production deployment on record (`dpl_FpjHmWmb1ZLeyUERw3U2ZBvYtqPs`, alias `vedmoulya-web.vercel.app`, `READY`, created 2026-10-15 07:12 UTC) predates `afef0cb6`/`08731d22`; the live production deployment is **not** the release target commit.
-- **Working tree.** HEAD is exactly the release target `08731d22`; `main` equals `origin/main` (0/0 divergence). The tree carries only the S14 audit documentation edits plus the applied TLS SNI regression test; there is no unreviewed user work.
+- **SHA precision.** _Superseded 2026-10-18._ CI run **`39039076592`** carries `headSha = 08731d2287762299479ac8be738aa0089c433ce0` — the **exact** release target — with `completed/success` on all nine jobs. The earlier statement that only the parent `afef0cb6` was CI-verified no longer applies. (History preserved: `39030531474` remains the parent-SHA run.)
+- **Deployment precision.** _Superseded 2026-10-18._ The deployment `dpl_FpjHmWmb1ZLeyUERw3U2ZBvYtqPs` (2026-10-15 07:12 UTC) has been replaced. The newest production deployment is `dpl_2Lqkq1PV6YqPtxQsLVbbV6St7VbF` (`vedmoulya-2yp3y6mv6-…vercel.app`, `● Ready`, created **2026-10-17 14:02:49 UTC**, alias `vedmoulya-web.vercel.app`), and the live app reports **`gitSha = 08731d2287762299479ac8be738aa0089c433ce0`** through `/api/trpc/health.version`. Production **is** running the release target.
+- **Working tree.** `main` is ahead 2 of `origin/main`; the only working-tree change is the uncommitted Phase-2 edit to `S14-RELEASE-CERTIFICATION-AND-HANDOFF.md`. All previously untracked audit material is committed in `d1f8eeea`/`27dc57e3`.
 
 ## GAP-S14-04 — CI G8 production-mode E2E
 
@@ -92,14 +93,14 @@
 
 ## GAP-S14-05 — SAST CodeQL
 
-- **Severity:** Medium/mandatory-but-CI-only.
+- **Severity:** High/mandatory.
 - **Historical evidence:** `[HISTORICAL]` No local equivalent; CI unknown at snapshot time.
-- **Reconciliation:** `[RECONCILED 2026-10-18]` In run `39039076592` on the exact release target `08731d22`, the `G6: Security Scan` job reports `completed/success`; this job runs CodeQL analysis and SARIF upload.
-- **Status:** **CI-verified pipeline-level for the exact release target `08731d22`** — CLOSED for the target SHA (pending an alert-inventory review if release policy requires one).
-- **Responsible role:** CI/security owner.
-- **Prerequisites/verification:** Review Code Scanning alerts separately if release policy requires an alert inventory.
-- **Closure criterion:** CodeQL check green for the release SHA with no unresolved blocking alert.
-- **Authorization required:** No additional external action identified.
+- **Reconciliation:** `[RECONCILED 2026-10-18]` In run `39039076592` on the exact release target `08731d22`, the `G6: Security Scan` job reports `completed/success`; all of its steps succeed (`Dependency audit (production)`, `Dependency audit (full)`, `SAST scan (CodeQL)`, `Perform CodeQL analysis`, `Upload SARIF to Code Scanning`).
+- **Status (2026-10-18 Phase-2 review): `OPEN` — re-opened.** The job conclusion reflects **step** success, not an empty alert set. `gh api …/code-scanning/alerts?state=open` returns **43 open alerts on `refs/heads/main`: 42 `high` + 1 `medium`**; **42 of 43 sit in shipped, non-test source** (36× `js/polynomial-redos`, 2× `js/insecure-randomness`, `js/bad-tag-filter`, `js/clear-text-storage-of-sensitive-data` in `apps/web/src/auth/session-manager.ts`, `js/insufficient-password-hash` in `services/identity/src/auth/OAuthState.ts`). Alerts were created 2026-08-23 → 2026-10-10, i.e. they pre-date the release SHA and the release run added none, but they remain **unresolved**.
+- **Responsible role:** Platform Engineering (security owner); CI owner for gate policy.
+- **Prerequisites/verification:** `gh api 'repos/ak9848515-dev/vedmoulya/code-scanning/alerts?state=open&per_page=100'`; classify blocking vs accepted.
+- **Closure criterion:** CodeQL check green for the release SHA **with no unresolved blocking alert** — currently **unmet**. Either remediate or record a written risk acceptance with rationale and target date.
+- **Authorization required:** Engineering decision; remediation of the 36-instance ReDoS class is a broad change and would require a new commit, CI run, and re-certification.
 
 ## GAP-S14-06 — Secret-scan gate script defect
 
@@ -239,3 +240,33 @@ Implementation anchors verified in the current tree:
 - Exact CVE/test-count/log-duration wording from history is preserved but not re-proven in this read-only sprint.
 
 15. Keep the restored backup path ready under the separate backup/DR approval before any destructive validation.
+
+---
+
+## 2026-10-18 Phase-2 closure review (governs current status)
+
+**Canonical release candidate:** `08731d2287762299479ac8be738aa0089c433ce0` (= `origin/main` = CI `headSha` = production `gitSha`). The local evidence commits `d1f8eeea` and `27dc57e3` change **no shipped source, configuration, or CI** (`git diff --name-only 08731d22 27dc57e3` → five audit docs plus one test file) and are therefore excluded from the RC.
+
+**Status table (supersedes all earlier status columns in this register):**
+
+| Gap ID     | Status                     | Basis                                                                                                                |
+| :--------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------- |
+| GAP-S14-01 | **CLOSED**                 | Fix merged; exact-SHA CI green                                                                                       |
+| GAP-S14-02 | **BLOCKED EXTERNAL**       | No isolated non-production identity DB; production DB exists and boots                                               |
+| GAP-S14-03 | **BLOCKED EXTERNAL**       | `vercel env ls preview` still shows only `KV_*` + `REDIS_URL`                                                        |
+| GAP-S14-04 | **CLOSED**                 | Run `39039076592` on the exact SHA, G8 E2E green                                                                     |
+| GAP-S14-05 | **OPEN**                   | 43 open CodeQL alerts (42 high) on `main`                                                                            |
+| GAP-S14-06 | **CLOSED (local)**         | `s56-secret-scan.ps1` exit 0, `HIT_COUNT=20`, fixture/build-output only                                              |
+| GAP-S14-07 | **OPEN** (accepted risk)   | `npm audit --omit=dev --audit-level=high` → 0; dev-only highs remain                                                 |
+| GAP-S14-08 | **BLOCKED EXTERNAL**       | Preview cannot boot; no staging deployment                                                                           |
+| GAP-S14-09 | **BLOCKED EXTERNAL**       | No authorized staging, no backup artifacts                                                                           |
+| GAP-S14-10 | **BLOCKED EXTERNAL**       | No schedule/retention evidence; provider console inaccessible here                                                   |
+| GAP-S14-11 | **NOT RUN**                | Runbooks only; no deploy to observe or roll back                                                                     |
+| GAP-S14-12 | **OPEN** (hygiene)         | `vercel domains ls` → 0 domains; `app.vedmoulya.com` does not resolve                                                |
+| GAP-S14-13 | **CLOSED WITH LIMITATION** | Only the Phase-2 documentation commit remains uncommitted at review time; 2 evidence commits stay unpushed by policy |
+
+**New evidence recorded this review:** exact-SHA CI run `39039076592` (`headSha` match, 9/9 jobs); local gate re-runs (typecheck, lint 58/0, 13,232 tests passed, config contract, dep cycles, quality gates 18/18, secret scan, both dependency audits); **62 real-engine PostgreSQL 16 tests**; production identity and health proven via `GET /api/trpc/health.version` (`gitSha` = release target), `/health/live` 200, `/health/ready` 200, `/health/check` 200, `/api/metrics` served.
+
+**Corrections:** the earlier "local PostgreSQL migration tests 9/9" wording was misattributed to `InfrastructureHealthProbe.test.ts` (a probe suite); the real migration suite `services/identity/__tests__/migrations.postgres.test.ts` also has 9 tests and was **skipped** in no-engine runs. It is now executed and green against a real engine. The earlier CLOSED status of GAP-S14-05 was based on a job conclusion rather than the alert inventory and is withdrawn.
+
+**Scores (rubric in the handoff §10):** repository/CI readiness **88/100**; full operational release readiness **50/100**. **Outcome: NOT CERTIFIED.** No external gate was closed by documentation; nothing was pushed, deployed, or changed in any environment during this review.

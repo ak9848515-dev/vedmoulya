@@ -2,8 +2,9 @@
 
 **Document Reference:** `docs/audits/2026-10-16-s14-rc-closure/PLATFORM-UNBLOCK-REQUEST.md`  
 **Date:** 2026-10-17  
-**Target Release Candidate SHA:** `08731d2287762299479ac8be738aa0089c433ce0`  
-**Target Deployment Scope:** Vercel **Preview** Environment Only (Project: `vedmoulya-web`)
+**Target Release Candidate SHA:** `08731d2287762299479ac8be738aa0089c433ce0` (= `origin/main` = CI `headSha` = the SHA reported by the live production runtime)\
+**Target Deployment Scope:** Vercel **Preview** Environment Only (Project: `vedmoulya-web`)\
+**Revalidated:** 2026-10-18 (Phase 2) — approvals still **PENDING**; see §6 for the consolidated action plan
 
 ---
 
@@ -18,6 +19,7 @@ However, **Preview deployment and live identity verification are blocked** by ex
 1. `GAP-S14-02`: No managed, non-localhost PostgreSQL identity database exists for the non-production candidate.
 2. `GAP-S14-03`: The Vercel **Preview** environment holds only cache tokens (`KV_*`, `REDIS_URL`) and lacks `IDENTITY_DATABASE_URL` and `AUTH_JWT_SECRET`, causing candidate boots to fail closed.
 3. `GAP-S14-08`: Staging/Preview readiness and smoke tests cannot be executed without deployed services.
+4. `GAP-S14-05` **(added 2026-10-18)**: the release SHA carries **43 open CodeQL alerts** on `refs/heads/main` (42 `high`, 1 `medium`; 42 of 43 in shipped source). This is a repository-side blocker owned by Platform Engineering — it needs a remediation or a written risk acceptance, not a Preview deployment.
 
 This document serves as the formal, actionable handoff to **Platform Engineering**, the **Database Owner**, and the **Release Owner** to obtain required written approvals and safely execute the unblock procedure.
 
@@ -170,3 +172,35 @@ npx vercel rollback --token="$VERCEL_TOKEN"
 ```
 
 Ensure stakeholders and on-call operations are notified immediately upon rollback.
+
+---
+
+## 6. Consolidated Action Plan (Phase 5, revalidated 2026-10-18)
+
+**Status of this request: PENDING — no item below has been executed.** It was revalidated read-only on
+2026-10-18: exact-SHA CI `39039076592` is green on `08731d22`, production is proven to run that same
+SHA, and `vercel env ls preview` still shows **only** `KV_*` + `REDIS_URL` (so the Preview blocker is
+unchanged). One item was **added**: the release SHA carries **43 open CodeQL alerts (42 high)** on
+`refs/heads/main`.
+
+| #   | Approval required    | Responsible role                | Exact operation                                                                                                                                             | Required isolation                                                                                    | Acceptance criteria                                                                                            | Evidence to capture                                                                     | Abort / rollback                                           |
+| :-- | :------------------- | :------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------- | :--------------------------------------------------------- |
+| 1   | `DB-REQ-REF`         | Database Owner                  | Provision managed **PostgreSQL 16+** (instance or serverless branch) + least-privilege role; pooled DSN with `sslmode=require`                              | Dedicated branch/cluster. **Never** production credentials, tokens, or PII                            | Reachable from Preview; DSN validates; role scoped to the preview schema                                       | Provider reference, masked host, role name, TLS mode, approval ID                       | Abandon the branch; rotate anything created during setup   |
+| 2   | `TICKET-REF`         | Platform/Secrets Owner          | Set **Preview-scoped** `IDENTITY_DATABASE_URL`, `AUTH_JWT_SECRET`, `REDIS_URL`; leave `IDENTITY_SCHEMA_READINESS_GATE` **unset**                            | Preview scope only; production untouched; `IDENTITY_DATABASE_URL` must not equal the production value | Preview boots; `/health/ready` 200                                                                             | Variable **names**, scope, timestamp — never values                                     | Unset the variables; redeploy the previous Preview         |
+| 3   | `REL-REF`            | Release/Deploy Operator         | Deploy exact `08731d2287762299479ac8be738aa0089c433ce0` to Preview; run `/health/live`, `/health/ready`, `bash scripts/deploy/smoke-test.sh "$PREVIEW_URL"` | Preview deployment only                                                                               | `/health/ready` 200 with `database: healthy`; smoke prints `PASSED`                                            | Deployment URL + ID, HTTP codes, smoke output, timestamps                               | `npx vercel rollback`; delete the Preview deployment       |
+| 4   | `TICKET-REF`         | Platform Owner                  | After the ledger head is verified, set `IDENTITY_SCHEMA_READINESS_GATE=1` and redeploy Preview                                                              | Preview only                                                                                          | `/health/ready` 200 with `identitySchema.status = "current"`; a behind/unreachable schema answers **503**      | Readiness body before/after, plus the fail-closed check                                 | Unset the flag; redeploy                                   |
+| 5   | `OPS-REF`            | Release/Deploy Operator         | Identity lifecycle drill: signup → `users` row → logout → `refresh_token_denylist` row with `kind='family'` → scan logs for fail-closed migration errors    | Isolated preview database                                                                             | User persists; family revocation row written; ledger head `005_timestamptz_instants`; **0** fail-closed errors | Sanitised row dumps, ledger query output, log excerpt                                   | Roll back the Preview deployment; drop the drill schema    |
+| 6   | `DR-REF` + `OPS-REF` | DB Owner / Platform Ops On-Call | Enable backup schedule + retention (≥30 d daily, ≥12 mo monthly); run restore rehearsal into a scratch DB; run rollback rehearsal                           | Scratch → staging only. **Never** production                                                          | RTO ≤ 30 min, RPO ≤ 24 h measured; rollback restores readiness 200 and row-count invariants                    | Artifact ID + integrity result, timestamps, exit codes, measured RTO/RPO, rollback note | Abort the drill; production left untouched; notify on-call |
+| 7   | Risk decision        | Platform Engineering            | Review the 43 open CodeQL alerts: remediate or formally risk-accept with rationale + target date                                                            | n/a (repository)                                                                                      | The blocking set is empty, or accepted in writing                                                              | Alert export (rule, severity, path), decision record                                    | n/a                                                        |
+
+### Rollback authority (must be named before item 3)
+
+`OPS-ONCALL-REF` — Platform Operations On-Call, currently **PENDING**. If any abort condition in §5
+triggers, this role issues `npx vercel rollback` without further escalation and notifies stakeholders.
+
+### Explicit non-authorisation
+
+Nothing in this document authorises a production restore, production rollback, production migration,
+identity-database provisioning, environment-variable change, drift-gate enablement, or deployment.
+Each row needs its own written approval reference. Production is already running `08731d22`
+(deployment `dpl_2Lqkq1PV6YqPtxQsLVbbV6St7VbF`); no change to it is requested here.
