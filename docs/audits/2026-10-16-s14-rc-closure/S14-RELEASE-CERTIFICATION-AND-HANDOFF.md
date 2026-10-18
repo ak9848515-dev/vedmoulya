@@ -17,19 +17,18 @@
 
 All values captured read-only at the start of the certification sprint. No destructive commands were used.
 
-| Item                         | Value                                                                                                                                                                                                                                 |
-| :--------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Working directory            | `D:\VedMoulya`                                                                                                                                                                                                                        |
-| Branch                       | `main`                                                                                                                                                                                                                                |
-| HEAD SHA                     | `27dc57e3c31efa41c2d2250b72673af731017f33` (two certification commits ahead of the release target)                                                                                                                                    |
-| Release target SHA           | `08731d2287762299479ac8be738aa0089c433ce0` (= `origin/main`)                                                                                                                                                                          |
-| Upstream tracking at capture | `main...origin/main [ahead 2]` — the two certification commits are **local only, not pushed**                                                                                                                                         |
-| Working tree at capture      | **1 tracked modification** (this document — an uncommitted baseline-reconciliation edit carried into the session); no untracked files                                                                                                 |
-| `git diff --stat`            | `1 file changed, 27 insertions(+), 11 deletions(-)` (documentation only)                                                                                                                                                              |
-| `git diff --check`           | Clean — no whitespace/conflict-marker errors                                                                                                                                                                                          |
-| `git stash list`             | **Empty — zero stashes**                                                                                                                                                                                                              |
-| HEAD == target SHA           | **NO** — HEAD is `27dc57e3`, a descendant of the target `08731d22`; the target itself is verified as `origin/main` via `git rev-parse origin/main`                                                                                    |
-| Working tree after Phase 9   | **Clean** — the Phase-2 documentation changes were committed as **`7a1d81fd`** and **`07ca1056`**; `main` is now **ahead 4** of `origin/main` (`d1f8eeea`, `27dc57e3`, `7a1d81fd`, `07ca1056`), all four local and unpushed by policy |
+| Item                         | Value                                                                                                                                              |
+| :--------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Working directory            | `D:\VedMoulya`                                                                                                                                     |
+| Branch                       | `main`                                                                                                                                             |
+| HEAD SHA                     | `27dc57e3c31efa41c2d2250b72673af731017f33` (two certification commits ahead of the release target)                                                 |
+| Release target SHA           | `08731d2287762299479ac8be738aa0089c433ce0` (= `origin/main`)                                                                                       |
+| Upstream tracking at capture | `main...origin/main [ahead 2]` — the two certification commits are **local only, not pushed**                                                      |
+| Working tree at capture      | **1 tracked modification** (this document — an uncommitted baseline-reconciliation edit carried into the session); no untracked files              |
+| `git diff --stat`            | `1 file changed, 27 insertions(+), 11 deletions(-)` (documentation only)                                                                           |
+| `git diff --check`           | Clean — no whitespace/conflict-marker errors                                                                                                       |
+| `git stash list`             | **Empty — zero stashes**                                                                                                                           |
+| HEAD == target SHA           | **NO** — HEAD is `27dc57e3`, a descendant of the target `08731d22`; the target itself is verified as `origin/main` via `git rev-parse origin/main` |     | Working tree after Phase 9 | **Clean** — the Phase-2 documentation changes were committed as **`7a1d81fd`** and **`07ca1056`** (plus a final table-rendering repair). Local commits on top of the target: `d1f8eeea`, `27dc57e3`, `7a1d81fd`, `07ca1056` — all documentation (one test file in `d1f8eeea`), all unpushed by policy |
 
 ### 1.0 Reconciliation of the certification baseline
 
@@ -142,7 +141,7 @@ The earlier table in this section used a **local 9-row numbering** that conflict
 | GAP-S14-10 | Backup schedule / retention at provider                         | High     | **BLOCKED EXTERNAL**       | Platform/DevOps + DB Owner                    |
 | GAP-S14-11 | Live observability + rollback rehearsal                         | Medium   | **NOT RUN**                | Rollback Authority + Platform Engineering     |
 | GAP-S14-12 | Canonical production origin `app.vedmoulya.com` mismatch        | Low      | **OPEN** (hygiene)         | DNS/Platform owner (safe to defer)            |
-| GAP-S14-13 | Release hygiene / traceability                                  | Medium   | **CLOSED WITH LIMITATION** | 4 unpushed local evidence commits             |
+| GAP-S14-13 | Release hygiene / traceability                                  | Medium   | **CLOSED WITH LIMITATION** | Local evidence commits unpushed by policy     |
 
 > Two prior claims are corrected here: GAP-S14-05 was reported CLOSED in the register based on the G6 _job conclusion_ only; the alert inventory shows 43 open alerts, so it is **OPEN**. GAP-S14-02 was described as "no managed non-localhost identity DB **anywhere**" — production demonstrably has one and boots (see §12.3); the true gap is the absence of an **isolated non-production** environment for acceptance.
 
