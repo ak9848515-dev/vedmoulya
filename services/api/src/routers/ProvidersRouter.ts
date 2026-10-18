@@ -6,7 +6,12 @@
 
 import type { ProviderApplicationService, ProviderCredentialService } from '@vedmoulya/providers';
 import { resolvePlatformCredential } from '@vedmoulya/providers';
-import { readProviderRuntimeState, toRuntimeMode, validateDefaultProvider } from '@vedmoulya/core';
+import {
+  readProviderRuntimeState,
+  toRuntimeMode,
+  trimTrailingChars,
+  validateDefaultProvider,
+} from '@vedmoulya/core';
 import type { ProviderExperienceService } from '../services/ProviderExperienceService.js';
 import {
   testProviderConnection,
@@ -581,7 +586,7 @@ export function createProvidersRouter(
       try {
         // For OpenAI-compatible protocols, test with a minimal models request.
         if (protocol === 'openai-compatible' || protocol === '') {
-          const modelsUrl = endpointUrl.replace(/\/+$/, '') + '/models';
+          const modelsUrl = trimTrailingChars(endpointUrl, '/') + '/models';
           const response = await fetch(modelsUrl, {
             method: 'GET',
             headers: {

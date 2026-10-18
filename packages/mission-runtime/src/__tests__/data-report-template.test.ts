@@ -35,6 +35,20 @@ const BRIEF =
   `Every figure must come from ${SOURCE}.`;
 
 describe('data-report target extraction', () => {
+  // ReDoS regression (CodeQL js/polynomial-redos, alert 53): the column
+  // declaration pattern was quadratic (~2 276 ms at 32 000 hostile characters)
+  // because a whitespace run could be split between two free `\s*` around an
+  // optional `:`/`=`.
+  it('handles a whitespace flood in the columns clause in linear time', () => {
+    const hostile =
+      'Analyze the data in input/sales.csv and save the report to output/report.md. ' +
+      'columns' +
+      ' '.repeat(32_000);
+    const started = performance.now();
+    extractDataReportTarget(hostile);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it('extracts the source, output and aggregation columns from a natural brief', () => {
     expect(extractDataReportTarget(BRIEF)).toMatchObject({
       sourcePath: SOURCE,
@@ -190,5 +204,64 @@ describe('governed deterministic aggregation', () => {
     expect(() =>
       computeAggregates(header, rows, { relativePath: 'x.csv', amountColumn: 'sales_amount' }),
     ).toThrow(/non-numeric/);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// S14 CodeQL remediation — js/polynomial-redos (CWE-1333, alerts 53/54/55)
+//
+// The source/output separators were spelled twice in one alternation
+// (`source[:\s]+` *and* the trailing `\s+`), so a whitespace run could be split
+// between them in O(N) ways at every start position; the columns pattern
+// overlapped `\s*` with `[,\s]` inside a quantified group. Measured pre-fix:
+// `'source:' + ' '.repeat(32000) + 'x'` ~1 355 ms; the columns pattern
+// ~2 566 ms. Each separator now has exactly one owner.
+// ──────────────────────────────────────────────────────────────────
+describe('DataReportTemplate — adversarial whitespace goals', () => {
+  const longWhitespace = (prefix: string, n: number): string => prefix + ' '.repeat(n) + 'x';
+
+  it('stays linear on a long whitespace run after a source keyword', () => {
+    for (const goal of [
+      longWhitespace('source:', 64_000),
+      longWhitespace('source', 64_000),
+      longWhitespace('in', 64_000),
+      longWhitespace('report', 64_000),
+    ]) {
+      const started = performance.now();
+      expect(extractDataReportTarget(goal)).toBeUndefined();
+      expect(performance.now() - started).toBeLessThan(2_000);
+    }
+  });
+
+  it('still extracts the real source/output/columns from a normal brief', () => {
+    const target = extractDataReportTarget(
+      'Analyze in sales-2026.csv and write the report to summary.md, columns date, product, amount, quantity',
+    );
+    expect(target?.sourcePath).toBe('sales-2026.csv');
+    expect(target?.outputPath).toBe('summary.md');
+    expect(target?.amountColumn).toBe('amount');
+    expect(target?.groupBy).toContain('product');
+  });
+
+  it('keeps the separator language for colon/space variants', () => {
+    const withColonSpace = extractDataReportTarget(
+      'Analyze source: sales.csv, report file : out.md, columns date, product, amount',
+    );
+    expect(withColonSpace?.sourcePath).toBe('sales.csv');
+    expect(withColonSpace?.outputPath).toBe('out.md');
+
+    const withTwoSpaces = extractDataReportTarget(
+      'Analyze source  sales.csv, save to out.md, columns date, product, amount',
+    );
+    expect(withTwoSpaces?.sourcePath).toBe('sales.csv');
+    expect(withTwoSpaces?.outputPath).toBe('out.md');
+
+    // The `source`/`input` keyword still needs a colon or a doubled separator,
+    // exactly as before the rewrite (a bare "source data.csv" never matched).
+    expect(
+      extractDataReportTarget(
+        'Analyze source data.csv, save to out.md, columns date, product, amount',
+      ),
+    ).toBeUndefined();
   });
 });

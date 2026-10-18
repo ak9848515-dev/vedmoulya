@@ -21,6 +21,7 @@
 //     SpeechProviderError('ABORTED') otherwise.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { trimTrailingChars } from '@vedmoulya/core';
 import type { SpeechToTextPort } from '../contracts/voice-ports.js';
 import type { SpeechToTextResult } from '../types/voice-types.js';
 
@@ -97,7 +98,7 @@ export class RuntimeSpeechToTextAdapter implements SpeechToTextPort {
         'A real STT provider requires a secure (https) base URL.',
       );
     }
-    this.baseUrl = options.baseUrl.replace(/\/+$/, '');
+    this.baseUrl = trimTrailingChars(options.baseUrl, '/');
     this.apiKey = options.apiKey;
     this.model = options.model ?? 'whisper-1';
     this.timeoutMs = options.timeoutMs ?? 30_000;

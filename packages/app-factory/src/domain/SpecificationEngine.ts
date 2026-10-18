@@ -11,7 +11,7 @@
 // implementation assumptions").
 // ──────────────────────────────────────────────────────────────────
 
-import { generateId } from '@vedmoulya/core';
+import { generateId, trimEdgeChars, trimTrailingChars } from '@vedmoulya/core';
 import type {
   AppArchetype,
   AppRequirement,
@@ -248,14 +248,17 @@ export class SpecificationEngine {
   }
 
   private deriveName(goal: string, archetype: AppArchetype): string {
-    const stripped = goal
-      .replace(/^(please|build|create|make|develop|generate)\s+/i, '')
-      .replace(/[.\s]+$/, '');
-    const slug = stripped
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40);
+    // Edge trims go through the linear scans in @vedmoulya/core: the
+    // `/[.\s]+$/` and `/^-+|-+$/g` patterns are quadratic on adversarial
+    // input (js/polynomial-redos, CWE-1333).
+    const stripped = trimTrailingChars(
+      goal.replace(/^(?:please|build|create|make|develop|generate)\s+/i, ''),
+      '. \t\n\r\f\v',
+    );
+    const slug = trimEdgeChars(stripped.toLowerCase().replace(/[^a-z0-9]+/g, '-'), '-').slice(
+      0,
+      40,
+    );
     return slug || archetype;
   }
 

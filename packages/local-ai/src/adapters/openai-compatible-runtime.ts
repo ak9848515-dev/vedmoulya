@@ -37,7 +37,7 @@ import type {
   RuntimeDiscoveryResult,
   RuntimeHealth,
 } from '../types.js';
-import { asRecord, classifyNetworkError } from './http.js';
+import { asRecord, classifyNetworkError, normalizeEndpoint } from './http.js';
 
 /** LM Studio's documented default host/port. */
 export const DEFAULT_LM_STUDIO_ENDPOINT = 'http://127.0.0.1:1234';
@@ -58,10 +58,6 @@ export interface OpenAICompatibleRuntimeOptions {
   probeTimeoutMs?: number;
   /** Generation timeout, in ms (default 120000). */
   generateTimeoutMs?: number;
-}
-
-function normalizeEndpoint(endpoint: string): string {
-  return endpoint.trim().replace(/\/+$/, '');
 }
 
 /** Parse `{ data: [{ id }] }` into model ids (null when the shape is invalid). */

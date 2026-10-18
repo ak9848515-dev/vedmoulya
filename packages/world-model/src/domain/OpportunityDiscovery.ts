@@ -52,9 +52,33 @@ import type { WorldFabricPort } from '../contracts/world-ports.js';
 // eslint-disable-next-line no-control-regex -- Intentional control-char stripping of untrusted evidence text.
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/g;
 
+/**
+ * Strip `<markup>` runs, replacing each removed run with a single space.
+ *
+ * SECURITY (ReDoS): this used to be `/<[^>]*>/g` (CodeQL `js/polynomial-redos`,
+ * alert 15). Every `<` started a match that scanned to the end of the string
+ * looking for `>`, so text containing many `<` and no `>` was quadratic —
+ * measured ~1 150 ms at 32 000 hostile characters and ~4 577 ms at 64 000 (4×
+ * per doubling). Evidence text comes from untrusted sources, so the scan is now
+ * an explicit `indexOf` walk: identical results (leftmost `<` … first following
+ * `>`, unmatched `<` left alone), linear time.
+ */
+function stripMarkup(text: string): string {
+  let out = '';
+  let cursor = 0;
+  while (cursor < text.length) {
+    const open = text.indexOf('<', cursor);
+    if (open === -1) break;
+    const close = text.indexOf('>', open + 1);
+    if (close === -1) break;
+    out += text.slice(cursor, open) + ' ';
+    cursor = close + 1;
+  }
+  return out + text.slice(cursor);
+}
+
 export function sanitizeEvidenceText(text: string, maxLength = 500): string {
-  return text
-    .replace(/<[^>]*>/g, ' ') // strip markup/scripts
+  return stripMarkup(text)
     .replace(CONTROL_CHAR_RE, ' ')
     .replace(/\s+/g, ' ')
     .trim()

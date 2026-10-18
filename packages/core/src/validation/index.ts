@@ -5,6 +5,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { ValidationError } from '../errors/index.js';
+import { isEmail } from '../utilities/index.js';
 
 /**
  * Validation result
@@ -188,13 +189,12 @@ export const Rules = {
     },
   }),
 
-  /** String must be a valid email */
+  /** String must be a valid email (delegates to the linear-scan isEmail). */
   email: (message?: string): ValidationRule<string> => ({
     name: 'email',
     validate: (value: string): string | null => {
       if (typeof value !== 'string') return 'Value must be a string';
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(value)) return message ?? 'Must be a valid email address';
+      if (!isEmail(value)) return message ?? 'Must be a valid email address';
       return null;
     },
   }),

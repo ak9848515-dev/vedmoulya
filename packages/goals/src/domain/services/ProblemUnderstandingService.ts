@@ -17,6 +17,7 @@
 // determine goes into `missingInformation` (never hallucinated).
 // ──────────────────────────────────────────────────────────────────
 
+import { trimTrailingChars } from '@vedmoulya/core';
 import type { CapabilityType } from '@vedmoulya/ai';
 import type { GoalInput, GoalPriority, RiskLevel } from '../../types/goal-types.js';
 import { GoalUnderstandingService } from './GoalUnderstandingService.js';
@@ -91,10 +92,18 @@ const OUTCOME_SIGNALS = [
 ] as const;
 
 // ── Constraint signals (tightened: no "by the way" / bare-"budget" hits) ──
+// SECURITY (ReDoS): the two signals below used to place a free `\s+` next to a
+// free `\s*` with only optional tokens between them, so a long run of
+// whitespace could be split between them in every possible way (CodeQL
+// `js/polynomial-redos`, alerts 6 and 7 on goal text — user-controlled input).
+// `BUDGET_RE` was the worst: ~27.9 s on `'budget' + ' '.repeat(4000)`.
+// Each optional word now carries its own required whitespace and only one free
+// whitespace run remains, which makes the split unique (linear). The accepted
+// language is unchanged for every realistic goal, including malformed spacing.
 const DEADLINE_RE =
-  /\b(?:by|before|due)\s+(?:(?:the\s+)?end of\s+)?(?:this|next|early|late)?\s*(?:week|month|year|quarter|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?:st|nd|rd|th)?)|\bdeadline\b|\bby end of (?:this|next) (?:week|month)\b/i;
+  /\b(?:by|before|due)(?:\s+(?:the\s+)?end of)?(?:\s+(?:this|next|early|late))?\s*(?:week|month|year|quarter|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?:st|nd|rd|th)?)|\bdeadline\b|\bby end of (?:this|next) (?:week|month)\b/i;
 const BUDGET_RE =
-  /\$\s?\d[\d,.]*|under \$|cost cap|spend limit|\bbudget\s+(?:of|under|is|around|about|at|for)?\s*\$?\s*\d/i;
+  /\$\s?\d[\d,.]*|under \$|cost cap|spend limit|\bbudget(?:\s+(?:of|under|is|around|about|at|for))?\s*\$?\s*\d/i;
 const FREE_RE = /\bfree\b/i;
 const PRIVACY_RE =
   /private|confidential|sensitive|personal data|do not share|sharing the data|share.{0,15}external/i;
@@ -387,7 +396,12 @@ function extractSuccessCriteria(text: string): string[] {
   for (const marker of markers) {
     const m = marker.exec(text);
     if (m) {
-      const clause = m[0].trim().replace(/[.,;]+$/, '');
+      // SECURITY (CodeQL js/polynomial-redos, alert 8): `/[.,;]+$/` is
+      // quadratic on a long punctuation run (measured ~5.8 s for 64 000 dots).
+      // Here the clause comes from a marker bounded to `[^.\n]{0,120}`, so the
+      // runtime cost was already capped at ~120 characters; the linear trim
+      // removes the flagged construct outright with identical results.
+      const clause = trimTrailingChars(m[0].trim(), '.,;');
       if (clause.length >= 8 && MEASURABLE.test(clause) && !criteria.includes(clause)) {
         criteria.push(clause);
       }

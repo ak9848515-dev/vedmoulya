@@ -154,9 +154,59 @@ export function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
+/** A single-character test only — no quantifier, so no backtracking. */
+const EMAIL_FORBIDDEN_CHAR = /[\s@]/;
+
 /**
  * Check if a string is a valid email
+ *
+ * Equivalent to the old `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` shape (one '@', a
+ * non-empty local part, a domain containing a dot with characters on both
+ * sides) but implemented as a single forward scan. The regex form was
+ * reported by CodeQL as js/polynomial-redos (CWE-1333): the two `[^\s@]+`
+ * runs and the `\.` separator are ambiguous, so adversarial input drives
+ * quadratic backtracking. Every step below visits a character once.
  */
 export function isEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if (typeof value !== 'string' || value.length === 0) return false;
+  const at = value.indexOf('@');
+  if (at <= 0 || at >= value.length - 1) return false;
+  if (value.indexOf('@', at + 1) !== -1) return false;
+  for (let i = 0; i < at; i += 1) {
+    if (EMAIL_FORBIDDEN_CHAR.test(value.charAt(i))) return false;
+  }
+  const domain = value.slice(at + 1);
+  const dot = domain.indexOf('.');
+  if (dot <= 0 || dot >= domain.length - 1) return false;
+  for (let i = 0; i < domain.length; i += 1) {
+    if (EMAIL_FORBIDDEN_CHAR.test(domain.charAt(i))) return false;
+  }
+  return true;
+}
+
+/**
+ * Remove every trailing character of `chars` from `value` in one linear pass.
+ *
+ * Replaces the `/\.+$/` / `/\/+$/` family of trims. Those patterns are
+ * quadratic on adversarial input (every start position re-scans the whole
+ * run before the anchor fails), which CodeQL reports as js/polynomial-redos
+ * (CWE-1333/CWE-400). This scan is O(n) by construction.
+ */
+export function trimTrailingChars(value: string, chars: string): string {
+  let end = value.length;
+  while (end > 0 && chars.includes(value.charAt(end - 1))) end -= 1;
+  return value.slice(0, end);
+}
+
+/**
+ * Remove every leading AND trailing character of `chars` from `value` in one
+ * linear pass. Replaces the `/^-+|-+$/g` slug-trim idiom, which is quadratic
+ * for the same reason as {@link trimTrailingChars}.
+ */
+export function trimEdgeChars(value: string, chars: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && chars.includes(value.charAt(start))) start += 1;
+  while (end > start && chars.includes(value.charAt(end - 1))) end -= 1;
+  return value.slice(start, end);
 }

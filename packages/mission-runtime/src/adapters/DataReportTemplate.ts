@@ -44,18 +44,49 @@ import { DATA_NARRATIVE_CHECK_TOOL } from './DataNarrativeCheck.js';
 const WORKSPACE_READ_TOOL = 'workspace_read';
 const WORKSPACE_WRITE_TOOL = 'workspace_write';
 
-/** A data file the goal names as the SOURCE of the analysis. */
+/**
+ * A data file the goal names as the SOURCE of the analysis.
+ *
+ * SECURITY (ReDoS): the separator used to be spelled twice — `source[:\s]+`
+ * inside the keyword alternation AND the trailing `\s+` — so one whitespace run
+ * could be split between the two in O(N) ways at every start position. CodeQL
+ * reports this as js/polynomial-redos (CWE-1333, alert 54); measured pre-fix:
+ * `'source:' + ' '.repeat(32000) + 'x'` took ~1 355 ms (351 ms at 16 000, i.e.
+ * 4x per doubling). Each branch now owns exactly ONE separator run and the
+ * capture appears once, which accepts the same goals in linear time.
+ */
 const SOURCE_PATTERN =
-  /\b(?:in|from|at|source[:\s]+|input[:\s]+|reading)\s+([A-Za-z0-9][A-Za-z0-9._/-]{0,200}\.(?:csv|tsv|json|txt|log))/i;
-/** A document file the goal names as the requested OUTPUT deliverable. */
+  /\b(?:(?:in|from|at|reading)\s+|(?:source|input)[:\s]{2,})([A-Za-z0-9][A-Za-z0-9._/-]{0,200}\.(?:csv|tsv|json|txt|log))/i;
+/**
+ * A document file the goal names as the requested OUTPUT deliverable.
+ *
+ * Same root cause and same fix as {@link SOURCE_PATTERN} (CodeQL
+ * js/polynomial-redos, CWE-1333, alert 55): the `output[:\s]+\s+` and
+ * `report (?:file )?[:\s]+\s+` branches each placed a free whitespace run next
+ * to a second one.
+ */
 const OUTPUT_PATTERN =
-  /(?:at|to|into|as|output[:\s]+|report (?:file )?[:\s]+|save[d]?\s+(?:to|as))\s+([A-Za-z0-9][A-Za-z0-9._/-]{0,200}\.(?:md|markdown|txt|json))/i;
+  /(?:(?:at|to|into|as)\s+|output[:\s]{2,}|report (?:file )?[:\s]{2,}|save[d]?\s+(?:to|as)\s+)([A-Za-z0-9][A-Za-z0-9._/-]{0,200}\.(?:md|markdown|txt|json))/i;
 /** The goal must actually ask for an analysis / report / summary. */
 const REPORT_INTENT_PATTERN =
   /\b(analyz|analys|report|summar|breakdown|trend|insight|dashboard)\w*/i;
-/** An explicit column declaration, e.g. "columns date, product, region, ...". */
+/**
+ * An explicit column declaration, e.g. "columns date, product, region, ...".
+ *
+ * SECURITY (ReDoS): two overlapping whitespace constructs used to make this
+ * polynomial (CodeQL `js/polynomial-redos`, alert 53). The separator was
+ * `\s*[:=]?\s*` — two free whitespace runs around an *optional* `:`/`=` — and
+ * the column-list repeat was `(?:\s*[,\s]\s*[A-Za-z0-9_]+)+`, where `\s*`
+ * overlapped `[,\s]` *inside a quantified group*. A goal such as
+ * `'columns' + ' '.repeat(N)` gave the engine O(N) ways to split each free
+ * whitespace run, repeated per list element: measured ~2 276 ms at 32 000
+ * hostile characters (and still ~1 153 ms with only the prefix repaired).
+ * Each whitespace run now has exactly one owner, and the separator is a single
+ * greedy class that cannot overlap the name class — the accepted language is
+ * unchanged for real briefs (names are still filtered to `[A-Za-z0-9_]+`).
+ */
 const COLUMNS_PATTERN =
-  /(?:columns?|fields?)\s*[:=]?\s*([A-Za-z0-9_]+(?:\s*[,\s]\s*[A-Za-z0-9_]+)+)/i;
+  /(?:columns?|fields?)\s*(?:[:=]\s*)?([A-Za-z0-9_]+(?:[,\s]+[A-Za-z0-9_]+)+)/i;
 
 const AMOUNT_NAME_PATTERN = /(amount|revenue|total|value|sales|turnover)/i;
 const NON_AMOUNT_NAME_PATTERN = /(unit|price|quantity|qty|count|^id$|_id$)/i;

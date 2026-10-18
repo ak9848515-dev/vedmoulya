@@ -15,6 +15,7 @@
 // validates it. Nothing here executes — decomposition is representation.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { trimEdgeChars } from '@vedmoulya/core';
 import type {
   BusinessWorkflow,
   WorkflowDecomposition,
@@ -183,11 +184,9 @@ export class WorkflowFactory {
 
 /** Deterministic slug for stable keys — strips punctuation, keeps letters. */
 function slug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 120);
+  // The edge trim is a linear scan (js/polynomial-redos, CWE-1333): the
+  // `/^-+|-+$/g` idiom is quadratic on adversarial dashed input.
+  return trimEdgeChars(name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), '-').slice(0, 120);
 }
 
 /** A workflow record factory — validated, owner-scoped, stable-keyed. */

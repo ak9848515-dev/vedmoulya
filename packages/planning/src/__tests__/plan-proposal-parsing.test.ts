@@ -591,3 +591,35 @@ describe('plan proposal parsing — recovery rejections', () => {
     );
   });
 });
+
+// ──────────────────────────────────────────────────────────────────
+// S14 CodeQL remediation — js/polynomial-redos (CWE-1333, alert 32)
+//
+// The fenced-block extraction used `/```(?:json)?\s*([\s\S]*?)```/`, which
+// restarted at every backtick and scanned forward for the closer. Fence-prefix
+// spam in untrusted model text was therefore quadratic. The scan is now a
+// single forward pass; malformed input must stay fast and must not be parsed.
+// ──────────────────────────────────────────────────────────────────
+describe('parsePlanProposal — adversarial fence input', () => {
+  it('stays linear on fence spam and rejects it', () => {
+    const hostile = '`'.repeat(200_000);
+    const started = performance.now();
+    const result = parsePlanProposal(hostile);
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(result.ok).toBe(false);
+  });
+
+  it('stays linear on an unterminated fence around valid JSON', () => {
+    const hostile = `\`\`\`json\n${validProposalJson()}`;
+    const started = performance.now();
+    const result = parsePlanProposal(hostile);
+    expect(performance.now() - started).toBeLessThan(2_000);
+    // No closing fence → no fenced body; the raw-JSON fallback still applies.
+    expect(result.ok).toBe(true);
+  });
+
+  it('still accepts a well-formed fenced proposal', () => {
+    const fenced = `\`\`\`json\n${validProposalJson()}\n\`\`\``;
+    expect(parsePlanProposal(fenced).ok).toBe(true);
+  });
+});

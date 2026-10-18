@@ -78,6 +78,42 @@ describe('redactConnectionStrings', () => {
   it('is a no-op for text without a scheme', () => {
     expect(redactConnectionStrings('plain log line')).toBe('plain log line');
   });
+
+  // ReDoS regression (CodeQL js/polynomial-redos, alert 41): the previous
+  // pattern was quadratic — ~1 206 ms at 32 000 hostile characters — so a log
+  // line could have stalled the process that was trying to protect a secret.
+  it('redacts a hostile credential URL in linear time', () => {
+    // The trailing token matters: a stop character after the URL is what made
+    // the old pattern rescan the run from every start position.
+    const hostile = `postgres://user:${'p'.repeat(50_000)}@db.internal:5432/vedmoulya failed`;
+    const started = performance.now();
+    const out = redactConnectionStrings(hostile);
+    const elapsed = performance.now() - started;
+    expect(out).toBe('[REDACTED_CONNECTION_STRING] failed');
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it('scans a long non-matching URL run in linear time', () => {
+    // The pathological shape: a credential-looking run with no `@`, so the old
+    // pattern never matched and rescanned from every start position — 2 979 ms
+    // at this size.
+    const hostile = `postgres://user:${'p'.repeat(50_000)} and more text`;
+    const started = performance.now();
+    const out = redactConnectionStrings(hostile);
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(500);
+    // Nothing credential-bearing, so the text must survive unchanged.
+    expect(out).toBe(hostile);
+  });
+
+  it('redacts many credential URLs in one linear pass', () => {
+    const many = Array.from({ length: 2_000 }, (_, i) => `postgres://u${i}:p@h${i}/db`).join(' ');
+    const started = performance.now();
+    const out = redactConnectionStrings(many);
+    const elapsed = performance.now() - started;
+    expect(out.split('[REDACTED_CONNECTION_STRING]').length - 1).toBe(2_000);
+    expect(elapsed).toBeLessThan(500);
+  });
 });
 
 describe('safeConnectionError', () => {

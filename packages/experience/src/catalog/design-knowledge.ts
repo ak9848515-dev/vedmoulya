@@ -1319,7 +1319,15 @@ export function buildDesignSystem(
   const visualPersonality = designSpec?.visualPersonality ?? k.visualPersonality;
   if (designSpec) {
     for (const c of designSpec.colorSystem) {
-      const match = /([a-z]+)\s*[:=]\s*(#[0-9a-fA-F]{3,8})/.exec(c);
+      // SECURITY (ReDoS): the name run used to be an unbounded `[a-z]+`
+      // (CodeQL `js/polynomial-redos`, alert 5). The pattern is unanchored, so
+      // every position inside a long letter run restarted the match and the
+      // greedy run backtracked once per position — measured quadratic on a
+      // design-spec colour entry: ~18 ms at 4 000 hostile characters and
+      // ~1 238 ms at 32 000 (4× per doubling). Colour token names are short, so
+      // the run is now explicitly bounded, which removes the polynomial degree
+      // while accepting every realistic name.
+      const match = /([a-z]{1,32})\s*[:=]\s*(#[0-9a-fA-F]{3,8})/.exec(c);
       if (match && match[1] && match[2]) {
         const id = `color.${match[1].toLowerCase()}`;
         const existing = tokens.find((t) => t.id === id);

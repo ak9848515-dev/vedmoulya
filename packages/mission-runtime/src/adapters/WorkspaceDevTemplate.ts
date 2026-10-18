@@ -23,9 +23,17 @@
 import type { AgentPlan, VerificationPolicy } from '@vedmoulya/agent-execution';
 import type { GoalUnderstanding, PlanTemplate } from '@vedmoulya/planning';
 
-/** Matches bounded workspace-file development goals. */
+/**
+ * Matches bounded workspace-file development goals.
+ *
+ * The gap between the verb and the marker is BOUNDED. An unbounded
+ * `[\s\S]*` gap is quadratic (every verb occurrence re-scans the rest of the
+ * goal), which CodeQL reports as js/polynomial-redos (CWE-1333); the bound
+ * keeps the scan linear while covering goals far longer than any template
+ * accepts (content itself is capped at 400 chars).
+ */
 const WORKSPACE_FILE_PATTERN =
-  /(create|write|implement|add|update)[\s\S]*workspace file\s+([A-Za-z0-9][A-Za-z0-9._-]{0,80})/i;
+  /(create|write|implement|add|update)[\s\S]{0,2000}?workspace file\s+([A-Za-z0-9][A-Za-z0-9._-]{0,80})/i;
 const CONTENT_PATTERN = /(?:with|containing)[\s:]+(.{3,200})$/i;
 
 export interface WorkspaceFileTarget {

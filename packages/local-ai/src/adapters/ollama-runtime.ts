@@ -40,7 +40,9 @@ import type {
   RuntimeHealth,
 } from '../types.js';
 import { OLLAMA_RUNTIME_ID } from '../types.js';
-import { asRecord, classifyNetworkError } from './http.js';
+import { asRecord, classifyNetworkError, normalizeEndpoint } from './http.js';
+
+export { normalizeEndpoint };
 
 export { classifyNetworkError };
 
@@ -56,11 +58,6 @@ export interface OllamaRuntimeAdapterOptions {
   probeTimeoutMs?: number;
   /** Generation timeout, in ms (default 120000). */
   generateTimeoutMs?: number;
-}
-
-/** Normalize a base URL: trim and strip trailing slashes. */
-function normalizeEndpoint(endpoint: string): string {
-  return endpoint.trim().replace(/\/+$/, '');
 }
 
 /** The capabilities we infer only when the runtime does not declare any. */

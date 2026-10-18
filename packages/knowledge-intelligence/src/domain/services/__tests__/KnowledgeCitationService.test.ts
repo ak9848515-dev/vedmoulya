@@ -104,4 +104,22 @@ describe('KnowledgeCitationService', () => {
     const attached = service.attach(item(), citations);
     expect(attached.citations.length).toBe(citations.length);
   });
+
+  it('stays linear on an adversarial newline run (js/polynomial-redos regression)', () => {
+    // The `(?:^|\n)\s*` prefix let the line break be consumed twice, so every
+    // start position re-scanned the remaining text. 100k line breaks used to be
+    // quadratic; the scan must now finish well inside the budget.
+    const adversarial = `${'\n'.repeat(100_000)}source: brand-guide.pdf`;
+    const started = performance.now();
+    const extracted = service.extractCitations(item({ description: adversarial }));
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(extracted.some((c) => c.reference === 'brand-guide.pdf')).toBe(true);
+  });
+
+  it('still extracts a reference preceded by blank lines and indentation', () => {
+    const extracted = service.extractCitations(
+      item({ description: 'Fact.\n\n   reference:   memo-42.txt\n' }),
+    );
+    expect(extracted.some((c) => c.reference === 'memo-42.txt')).toBe(true);
+  });
 });

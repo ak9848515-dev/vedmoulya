@@ -35,6 +35,8 @@ import {
   retry,
   isUuid,
   isEmail,
+  trimTrailingChars,
+  trimEdgeChars,
 } from '../index.js';
 
 describe('sleep', () => {
@@ -215,5 +217,59 @@ describe('isEmail', () => {
     expect(isEmail('nope')).toBe(false);
     expect(isEmail('user@')).toBe(false);
     expect(isEmail('')).toBe(false);
+  });
+  it('keeps the historical shape: one @, a dot, characters on both sides', () => {
+    expect(isEmail('first.last+tag@sub.example.co.uk')).toBe(true);
+    expect(isEmail('a@b@c.com')).toBe(false);
+    expect(isEmail('user@.com')).toBe(false);
+    expect(isEmail('user@example.')).toBe(false);
+    expect(isEmail('user name@example.com')).toBe(false);
+    expect(isEmail('user@exa mple.com')).toBe(false);
+    expect(isEmail('@example.com')).toBe(false);
+  });
+  it('stays linear on adversarial input (js/polynomial-redos regression)', () => {
+    // The old anchored regex backtracked quadratically over long ambiguous runs.
+    const adversarial = [
+      `${'a'.repeat(50_000)}@${'.'.repeat(50_000)}`,
+      `a@${'b'.repeat(50_000)}`,
+      `${'a.'.repeat(25_000)}@x`,
+      `a@${'.'.repeat(50_000)}x`,
+    ];
+    const started = performance.now();
+    for (const value of adversarial) expect(typeof isEmail(value)).toBe('boolean');
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe('trimTrailingChars', () => {
+  it('removes every trailing character of the set and nothing else', () => {
+    expect(trimTrailingChars('http://host:4318///', '/')).toBe('http://host:4318');
+    expect(trimTrailingChars('///', '/')).toBe('');
+    expect(trimTrailingChars('http://host', '/')).toBe('http://host');
+    expect(trimTrailingChars('name...', '. ')).toBe('name');
+    expect(trimTrailingChars('name...  ', '. ')).toBe('name');
+    expect(trimTrailingChars('', '/')).toBe('');
+  });
+  it('stays linear on a long adversarial run (js/polynomial-redos regression)', () => {
+    const slashRun = `${'/'.repeat(200_000)}host`;
+    const started = performance.now();
+    expect(trimTrailingChars(slashRun, '/')).toBe(slashRun);
+    expect(trimTrailingChars(`${'host'}${'/'.repeat(200_000)}`, '/')).toBe('host');
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe('trimEdgeChars', () => {
+  it('removes leading and trailing runs of the set', () => {
+    expect(trimEdgeChars('--slug--', '-')).toBe('slug');
+    expect(trimEdgeChars('____', '_')).toBe('');
+    expect(trimEdgeChars('a-b', '-')).toBe('a-b');
+    expect(trimEdgeChars('', '_')).toBe('');
+  });
+  it('stays linear on a long adversarial run (js/polynomial-redos regression)', () => {
+    const run = `${'-'.repeat(100_000)}slug${'-'.repeat(100_000)}`;
+    const started = performance.now();
+    expect(trimEdgeChars(run, '-')).toBe('slug');
+    expect(performance.now() - started).toBeLessThan(2_000);
   });
 });

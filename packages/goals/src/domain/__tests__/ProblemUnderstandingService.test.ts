@@ -13,6 +13,25 @@ import { ProblemUnderstandingService } from '../services/ProblemUnderstandingSer
 describe('ProblemUnderstandingService', () => {
   const service = new ProblemUnderstandingService();
 
+  // ReDoS regression (CodeQL js/polynomial-redos, alerts 6 and 7): `BUDGET_RE`
+  // took ~27.9 s on `'budget' + ' '.repeat(4000)` of goal text, and
+  // `DEADLINE_RE` was quadratic for the same reason (a free `\s+` sitting next
+  // to a free `\s*` with only optional tokens between them).
+  it('handles whitespace-spam constraint signals in linear time', () => {
+    const budgetSpam = `Save money. budget${' '.repeat(4_000)}`;
+    const deadlineSpam = `Finish it by${' '.repeat(20_000)}`;
+    const started = performance.now();
+    service.understand(budgetSpam);
+    service.understand(deadlineSpam);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it('still detects budget and deadline constraints after the ReDoS fix', () => {
+    const d = service.understand('Save money: budget of $500, finish by next month');
+    expect(d.constraints.map((c) => c.kind)).toContain('budget');
+    expect(d.constraints.find((c) => c.kind === 'deadline')?.value).toMatch(/next month/i);
+  });
+
   it('classifies a question as ANSWER', () => {
     const d = service.understand('What is RAG and how does retrieval work?');
     expect(d.intent).toBe('ANSWER');
@@ -123,5 +142,24 @@ describe('ProblemUnderstandingService', () => {
     const a = service.understand('Automate my daily Excel report before Friday');
     const b = service.understand('Automate my daily Excel report before Friday');
     expect(a).toEqual(b);
+  });
+
+  // S14 CodeQL remediation (js/polynomial-redos, CWE-1333, alert 8): the
+  // success-criteria clause trim used `/[.,;]+$/`, which is quadratic on a long
+  // punctuation run (~5.8 s for 64 000 dots) — and the whitespace/budget signals
+  // rejected in the same pass used two free `\s` runs (measured ~29 s on
+  // 'budget' + 4 000 spaces). All three are now linear.
+  it('stays linear on whitespace and punctuation floods', () => {
+    const started = performance.now();
+    for (const goal of [
+      `must ${'.'.repeat(64_000)}`,
+      `budget${' '.repeat(64_000)}x`,
+      `by${' '.repeat(64_000)}x`,
+      `Automate my weekly report before${' '.repeat(32_000)}x`,
+    ]) {
+      const d = service.understand(goal);
+      expect(d.originalRequest).toBe(goal);
+    }
+    expect(performance.now() - started).toBeLessThan(3_000);
   });
 });

@@ -261,6 +261,8 @@ export {
   retry,
   isUuid,
   isEmail,
+  trimTrailingChars,
+  trimEdgeChars,
 } from './utilities/index.js';
 
 // Base Abstractions

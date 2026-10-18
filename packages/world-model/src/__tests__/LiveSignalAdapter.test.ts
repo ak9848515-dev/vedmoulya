@@ -150,6 +150,37 @@ describe('LiveSignalAdapter', () => {
     expect('authority' in signal).toBe(false);
   });
 
+  // ReDoS regression (CodeQL js/polynomial-redos, alert 18): the lazy
+  // `/<script[\s\S]*?<\/script>/gi` scan was quadratic on content with many
+  // `<script` prefixes and no closer, i.e. exactly the untrusted payload this
+  // function exists to sanitize.
+  it('sanitizeExternalText handles script-prefix spam in linear time', () => {
+    const hostile = '<script>'.repeat(200_000);
+    const started = performance.now();
+    const out = sanitizeExternalText(hostile, 1_000);
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(1_000);
+    expect(out).not.toContain('script');
+    expect(out.length).toBeLessThanOrEqual(1_000);
+  });
+
+  // ReDoS regression (same class as alert 18, no distinct CodeQL alert id):
+  // `/<[^>]+>/g` restarted at every `<` and re-scanned the rest of the payload,
+  // so tag-prefix spam with no closer was quadratic — measured ~37 s for
+  // 200 000 `<` characters with the old pattern, 0.1 ms with the index walk.
+  it('sanitizeExternalText handles unterminated tag spam in linear time', () => {
+    const hostile = '<'.repeat(200_000);
+    const started = performance.now();
+    const out = sanitizeExternalText(hostile, 1_000);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(out.length).toBeLessThanOrEqual(1_000);
+
+    // Semantics preserved: a real tag run is replaced by one space, while an
+    // empty `<>` run is not a tag and is left alone.
+    expect(sanitizeExternalText('a<b>c', 100)).toBe('a c');
+    expect(sanitizeExternalText('a<>b', 100)).toBe('a<>b');
+  });
+
   it('sanitizeExternalText strips control chars and script blocks', () => {
     expect(sanitizeExternalText('a\u0000b<script>x</script>c', 200)).not.toMatch(/[\u0000]/);
     expect(sanitizeExternalText('<script>evil()</script> safe', 200)).not.toContain('script');

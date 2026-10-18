@@ -7,6 +7,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { createHash, randomBytes } from 'node:crypto';
+import { trimTrailingChars } from '@vedmoulya/core';
 
 export const VERIFICATION_TOKEN_BYTES = 32;
 export const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
@@ -37,6 +38,6 @@ export function hashVerificationToken(token: string): string {
 
 /** Build the email verification link for a given app origin. */
 export function buildVerificationLink(origin: string, token: string): string {
-  const base = origin.replace(/\/+$/, '');
+  const base = trimTrailingChars(origin, '/');
   return `${base}/verify-email?token=${encodeURIComponent(token)}`;
 }

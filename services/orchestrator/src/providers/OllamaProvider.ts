@@ -28,6 +28,7 @@
 // advertises a model this adapter will really run.
 // ──────────────────────────────────────────────────────────────────
 
+import { trimTrailingChars } from '@vedmoulya/core';
 import type { AIResponse, CapabilityType, ProviderHealth } from '@vedmoulya/ai';
 import type { ProviderAdapter } from '@vedmoulya/services';
 
@@ -111,7 +112,7 @@ export class OllamaProvider implements ProviderAdapter {
   private resolving: Promise<void> | undefined;
 
   constructor(options: OllamaProviderOptions) {
-    const baseUrl = options.baseUrl.trim().replace(/\/+$/, '');
+    const baseUrl = trimTrailingChars(options.baseUrl.trim(), '/');
     if (!baseUrl) {
       throw new Error('OllamaProvider requires a non-empty baseUrl');
     }

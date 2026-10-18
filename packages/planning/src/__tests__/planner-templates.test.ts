@@ -12,7 +12,11 @@
 import { describe, expect, it } from 'vitest';
 import { validatePlanStructure } from '@vedmoulya/agent-execution';
 import { GoalUnderstandingService } from '../domain/goal-understanding.js';
-import { PLAN_TEMPLATES, selectTemplate } from '../domain/planner-templates.js';
+import {
+  extractRepositoryFixTarget,
+  PLAN_TEMPLATES,
+  selectTemplate,
+} from '../domain/planner-templates.js';
 import type { AgentPlan } from '@vedmoulya/agent-execution';
 
 const understandingService = new GoalUnderstandingService();
@@ -258,5 +262,35 @@ describe('deterministic template catalog', () => {
         .map((a) => (a as { arguments: { relativePath: string } }).arguments.relativePath);
       expect(new Set(paths)).toEqual(new Set(['mission-acceptance.txt']));
     });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// S14 CodeQL remediation — js/polynomial-redos (CWE-1333)
+//
+// REPAIR_TARGET_PATTERN used an UNBOUNDED `[\s\S]*?` gap between the verb
+// and the "workspace file <name>" marker, so a goal repeating a verb made
+// every occurrence re-scan the rest of the goal. The gap is bounded now;
+// these tests pin the behaviour and the cost.
+// ──────────────────────────────────────────────────────────────────
+describe('extractRepositoryFixTarget — bounded scan', () => {
+  it('still extracts a nested repair target from a normal goal', () => {
+    const target = extractRepositoryFixTarget(
+      'Fix the workspace file src/app.ts with content: export const a = 1;',
+    );
+    expect(target?.relativePath).toBe('src/app.ts');
+    expect(target?.content).toContain('export const a = 1;');
+  });
+
+  it('never derives an escaping path', () => {
+    const target = extractRepositoryFixTarget('Fix the workspace file ../escape.md');
+    expect(target).toBeUndefined();
+  });
+
+  it('stays linear on a goal that repeats the verb (polynomial-redos regression)', () => {
+    const adversarial = `${'fix '.repeat(20_000)}summarize the release notes`;
+    const started = performance.now();
+    expect(extractRepositoryFixTarget(adversarial)).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(2_000);
   });
 });

@@ -16,6 +16,7 @@
 //   - retentionDays → MemoryRetentionPolicy + expiresAt.
 // ──────────────────────────────────────────────────────────────────
 
+import { trimEdgeChars } from '@vedmoulya/core';
 import type {
   MemoryConfidence,
   MemoryItem,
@@ -78,11 +79,12 @@ function retentionPolicy(entry: MemoryEntry): MemoryRetentionPolicy {
  *  merges of the same entry OVERWRITE the same MemoryItem instead of
  *  duplicating it (dedup across services/persistence). */
 export function memoryItemIdFor(entry: Pick<MemoryEntry, 'fingerprint'>): string {
-  const slug = entry.fingerprint
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 96);
+  // Linear edge trim — the `/^_+|_+$/g` idiom is quadratic on adversarial
+  // underscore runs (js/polynomial-redos, CWE-1333).
+  const slug = trimEdgeChars(
+    entry.fingerprint.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+    '_',
+  ).slice(0, 96);
   return `xmem_${slug || 'entry'}`;
 }
 

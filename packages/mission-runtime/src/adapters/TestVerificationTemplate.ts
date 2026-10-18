@@ -87,8 +87,13 @@ const NODE_SCRIPT_PATTERN =
  * planner-templates' FILE_CONTENT_PATTERN): used when the goal states the
  * content inline instead of in a fenced block.
  */
+//
+// The separator is ONE character class (`[\s:-]*`) instead of the
+// `\s*[:-]?\s*` chain: overlapping optional whitespace before and after an
+// optional separator gives the engine several ways to split the same text,
+// which CodeQL reports as js/polynomial-redos (CWE-1333).
 const INLINE_CONTENT_PATTERN =
-  /(?:with|containing|content(?:\s+is)?|contents?(?:\s+are)?|exact\s+contents?)\s*[:-]?\s*["'`]?([^\n"'`]{3,400})["'`]?/i;
+  /(?:with|containing|content(?:\s+is)?|contents?(?:\s+are)?|exact\s+contents?)[\s:-]*["'`]?([^\n"'`]{3,400})["'`]?/i;
 
 const MAX_CONTENT_CHARS = 8_000;
 const MAX_PATH_CHARS = 160;

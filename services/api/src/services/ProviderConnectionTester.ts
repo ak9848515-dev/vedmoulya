@@ -18,7 +18,7 @@
 //     never credential material.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { logger } from '@vedmoulya/core';
+import { logger, trimTrailingChars } from '@vedmoulya/core';
 import { resolvePlatformCredential, type ProviderCredentialSource } from '@vedmoulya/providers';
 
 // Google Gemini generativelanguage API (same host @ai-sdk/google uses).
@@ -783,11 +783,10 @@ function generationPlanFor(
         parse: (body) => firstMessagePart(body).trim() !== '',
       };
     case 'ollama': {
-      const base = (
-        input.endpointUrl?.trim() ||
-        env.AI_OLLAMA_BASE_URL?.trim() ||
-        OLLAMA_DEFAULT_ENDPOINT
-      ).replace(/\/+$/, '');
+      const base = trimTrailingChars(
+        input.endpointUrl?.trim() || env.AI_OLLAMA_BASE_URL?.trim() || OLLAMA_DEFAULT_ENDPOINT,
+        '/',
+      );
       return {
         url: `${base}/api/chat`,
         headers: { 'Content-Type': 'application/json' },
@@ -814,7 +813,7 @@ function generationPlanFor(
             ? DEEPSEEK_ENDPOINT
             : input.family === 'openrouter'
               ? OPENROUTER_ENDPOINT
-              : (input.endpointUrl?.trim() ?? '').replace(/\/+$/, '');
+              : trimTrailingChars(input.endpointUrl?.trim() ?? '', '/');
       return {
         url: `${base}/chat/completions`,
         headers: { Authorization: `Bearer ${apiKey ?? ''}`, 'Content-Type': 'application/json' },
@@ -1207,11 +1206,10 @@ function probeFor(
         parse: parseAnthropicModels,
       };
     case 'ollama': {
-      const base = (
-        input.endpointUrl?.trim() ||
-        env.AI_OLLAMA_BASE_URL?.trim() ||
-        OLLAMA_DEFAULT_ENDPOINT
-      ).replace(/\/+$/, '');
+      const base = trimTrailingChars(
+        input.endpointUrl?.trim() || env.AI_OLLAMA_BASE_URL?.trim() || OLLAMA_DEFAULT_ENDPOINT,
+        '/',
+      );
       return {
         url: `${base}/api/tags`,
         headers: { Accept: 'application/json' },
@@ -1220,7 +1218,7 @@ function probeFor(
     }
     case 'openai-compatible':
     default: {
-      const base = (input.endpointUrl?.trim() ?? '').replace(/\/+$/, '');
+      const base = trimTrailingChars(input.endpointUrl?.trim() ?? '', '/');
       return {
         url: `${base}/models`,
         headers: { Authorization: `Bearer ${apiKey ?? ''}`, Accept: 'application/json' },

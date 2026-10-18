@@ -19,6 +19,7 @@
 //     memory (guard against unbounded audio buffers).
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { trimTrailingChars } from '@vedmoulya/core';
 import type { TextToSpeechPort } from '../contracts/voice-ports.js';
 import type { TextToSpeechResult } from '../types/voice-types.js';
 import { SpeechProviderError } from './RuntimeSpeechToTextAdapter.js';
@@ -83,7 +84,7 @@ export class RuntimeTextToSpeechAdapter implements TextToSpeechPort {
         'A real TTS provider requires a secure (https) base URL.',
       );
     }
-    this.baseUrl = options.baseUrl.replace(/\/+$/, '');
+    this.baseUrl = trimTrailingChars(options.baseUrl, '/');
     this.apiKey = options.apiKey;
     this.model = options.model ?? 'tts-1';
     this.voice = options.voice ?? 'alloy';

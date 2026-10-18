@@ -10,6 +10,21 @@
 
 import type { LocalRuntimeErrorKind } from '../types.js';
 
+/**
+ * Normalize a runtime base URL: trim, then drop trailing slashes.
+ *
+ * The trim is a single linear scan rather than `/\/+$/`: the regex is
+ * quadratic on adversarial slash runs (every start position re-scans the run
+ * before the anchor fails), which CodeQL reports as js/polynomial-redos
+ * (CWE-1333). Both local runtime adapters share this ONE implementation.
+ */
+export function normalizeEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  let end = trimmed.length;
+  while (end > 0 && trimmed.charAt(end - 1) === '/') end -= 1;
+  return trimmed.slice(0, end);
+}
+
 /** Narrow an unknown JSON value to a plain record. */
 export function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;

@@ -6,6 +6,8 @@
 // stable slugs; relationship/version ids are unique and timestamped.
 // ──────────────────────────────────────────────────────────────────
 
+import { trimEdgeChars } from '@vedmoulya/core';
+
 export type KnowledgeId = string & { readonly __knowledgeId: unique symbol };
 
 export type RelationshipId = string & { readonly __relationshipId: unique symbol };
@@ -19,12 +21,15 @@ export function createKnowledgeId(id: string): KnowledgeId {
 
 /** Generate a unique knowledge item id: kn_<slug>_<timestamp>. */
 export function generateKnowledgeId(slug: string): KnowledgeId {
-  const safe = slug
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 48);
+  // Linear edge trim — the `/^_+|_+$/g` idiom is quadratic on adversarial
+  // underscore runs (js/polynomial-redos, CWE-1333).
+  const safe = trimEdgeChars(
+    slug
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_'),
+    '_',
+  ).slice(0, 48);
   return `kn_${safe || 'item'}_${Date.now().toString(36)}` as KnowledgeId;
 }
 

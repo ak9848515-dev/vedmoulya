@@ -200,8 +200,11 @@ function commandToolStep(input: {
 // AI-only — the builder never invents a file to write, and the run steps
 // still execute real commands through the governed tool.
 
+// The gap between the verb and the marker is BOUNDED: an unbounded
+// `[\s\S]*?` gap is quadratic on goals that repeat a verb, which CodeQL
+// reports as js/polynomial-redos (CWE-1333).
 const REPAIR_TARGET_PATTERN =
-  /(?:fix|repair|update|correct)[\s\S]*?workspace file\s+([A-Za-z0-9][A-Za-z0-9._\-/]{0,80})/i;
+  /(?:fix|repair|update|correct)[\s\S]{0,2000}?workspace file\s+([A-Za-z0-9][A-Za-z0-9._\-/]{0,80})/i;
 const REPAIR_CONTENT_PATTERN = /(?:with|containing)[\s:]+(.{3,200})$/i;
 
 /**

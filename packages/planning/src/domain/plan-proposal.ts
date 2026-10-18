@@ -779,6 +779,20 @@ function describeValue(value: unknown): string {
   }
 }
 
+/**
+ * Body of the first ```-fenced block in `text`, or undefined when there is no
+ * complete fence pair. A single forward scan: linear in the text length.
+ */
+function extractFencedBody(text: string): string | undefined {
+  const open = text.indexOf('```');
+  if (open === -1) return undefined;
+  let bodyStart = open + 3;
+  if (text.startsWith('json', bodyStart)) bodyStart += 4;
+  const close = text.indexOf('```', bodyStart);
+  if (close === -1) return undefined;
+  return text.slice(bodyStart, close);
+}
+
 /** Extract the first JSON object from model text (strips code fences). */
 function extractJson(content: string): unknown {
   const trimmed = content.trim();
@@ -789,9 +803,16 @@ function extractJson(content: string): unknown {
       return undefined;
     }
   }
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced?.[1]) {
-    const candidate = fenced[1].trim();
+  // The fenced block is located with `indexOf`, not `/```(?:json)?\s*([\s\S]*?)```/`:
+  // the regex restarted at every backtick and lazily scanned forward for the
+  // closer, which is quadratic on fence-prefix spam (CodeQL
+  // js/polynomial-redos, CWE-1333, alert 32). Model text is untrusted input.
+  // Semantics are unchanged — same first ``` opener, same optional `json`
+  // marker, same first ``` closer, with the body trimmed below (which is what
+  // absorbed the old leading `\s*`).
+  const fencedBody = extractFencedBody(trimmed);
+  if (fencedBody !== undefined) {
+    const candidate = fencedBody.trim();
     if (candidate.startsWith('{')) {
       try {
         return JSON.parse(candidate);

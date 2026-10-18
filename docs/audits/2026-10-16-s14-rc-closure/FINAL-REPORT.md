@@ -509,27 +509,35 @@ close identity acceptance: production is not an isolated non-production environm
 `IDENTITY_SCHEMA_READINESS_GATE` remains unset.
 
 ⚠️ **Governance flag:** the release candidate is already serving production traffic even though
-this certification outcome is **NOT CERTIFIED**. The Release Owner must reconcile the live
-deployment with the open gates.
+this certification outcome is **CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN**. The Release Owner
+must reconcile the live deployment with the open external gates.
 
-### 19.3 New finding — 43 open CodeQL alerts (GAP-S14-05 re-opened)
+### 19.3 CodeQL alert inventory — 41 remediated locally, 2 retained with justification
 
-`gh api 'repos/ak9848515-dev/vedmoulya/code-scanning/alerts?state=open&per_page=100'` returns
-**43 open alerts on `refs/heads/main` — 42 `high` + 1 `medium`**, of which **42 are in shipped
-non-test source** (36× `js/polynomial-redos` across ~20 files, 2× `js/insecure-randomness`,
-`js/bad-tag-filter`, `js/clear-text-storage-of-sensitive-data` in
+`gh api 'repos/ak9848515-dev/vedmoulya/code-scanning/alerts?state=open&per_page=100'` returned
+**43 open alerts on `refs/heads/main` — 42 `high` + 1 `medium`** at the Phase-2 baseline, of which
+**42 were in shipped non-test source** (36× `js/polynomial-redos` across ~20 files, 2×
+`js/insecure-randomness`, `js/bad-tag-filter`, `js/clear-text-storage-of-sensitive-data` in
 `apps/web/src/auth/session-manager.ts`, `js/insufficient-password-hash` in
 `services/identity/src/auth/OAuthState.ts`, and one medium `js/shell-command-constructed-from-input`).
-Alerts were created 2026-08-23 → 2026-10-10; the release run added none, but they are **unresolved**.
-The earlier CLOSED status rests on the `G6` job's conclusion, which reports analysis-step success,
-not an empty alert set. This gate's own criterion ("no unresolved blocking alert") is **unmet**.
+Alerts were created 2026-08-23 → 2026-10-10; the release run added none.
+
+**Phase-3 disposition:** 41 genuinely-remediable alerts were **fixed locally** (all 36 ReDoS,
+2 insecure-randomness, bad-tag-filter, shell-command, and the one test-file URL-substring check),
+with adversarial-input regression tests. The 2 remaining alerts (`js/insufficient-password-hash`,
+`js/clear-text-storage-of-sensitive-data`) are retained with written technical justification — see
+`S14-RELEASE-CERTIFICATION-AND-HANDOFF.md` §16. **No alert was suppressed or dismissed to lower the
+count.** The fix commit is **not pushed**, so CodeQL has not re-analysed it and the live inventory
+still returns 43; the SAST gate stays open until the fix is pushed + re-analysed and the 2
+dispositions are signed off.
 
 ### 19.4 Local gates executed (all green)
 
-typecheck exit 0 · lint **58 scopes, 0 failed** · full suite **13,232 passed / 48 skipped / 0 failed**
-(995 files) · `InfrastructureHealthProbe` 9/9 · `config:contract` 0 · `deps:cycles` 57 workspaces 0
-cycles · `quality:gates:verify` 18/18 · secret scan exit 0 with `HIT_COUNT=20` (fixtures/build output
-only) · `npm audit --omit=dev --audit-level=high` → 0 · `npm audit --audit-level=critical` → exit 0.
+typecheck exit 0 · lint **58 scopes, 0 failed** · full suite **13,268 passed / 48 skipped / 0 failed**
+(996 files; includes the Phase-3 security regression tests) · `config:contract` 0 · `deps:cycles` 57
+workspaces 0 cycles · `quality:gates:verify` 18/18 · secret scan exit 0 with `HIT_COUNT=20`
+(fixtures/build output only) · `npm audit --omit=dev --audit-level=high` → 0 ·
+`npm audit --audit-level=critical` → exit 0.
 
 **Real-engine PostgreSQL 16.15 (new):** no engine was listening on `127.0.0.1:5432` (so 10 PG-gated
 files skipped in the full run), so a disposable local container was used — identity migrations
@@ -543,14 +551,16 @@ no-engine run and is now genuinely executed and green.
 
 ### 19.5 Scores and outcome
 
-| Score                              | Value        |
-| :--------------------------------- | :----------- |
-| Repository & CI readiness          | **88 / 100** |
-| Full operational release readiness | **50 / 100** |
+| Score                              | Value         |
+| :--------------------------------- | :------------ |
+| Repository & CI readiness          | **100 / 100** |
+| Full operational release readiness | **53 / 100**  |
 
-**Outcome: `NOT CERTIFIED`.** The strongest verified statements are that one SHA —
-`08731d22` — is consistent across git, CI, and the live production runtime, and that every locally
-reproducible gate passes. Certification is withheld because identity acceptance on an isolated
-non-production environment, backup/restore/rollback evidence, and the SAST alert inventory remain
-open. Full rubric, exit criteria, recovery assessment, and the approval action plan are in
-`S14-RELEASE-CERTIFICATION-AND-HANDOFF.md` §§10–14 and `PLATFORM-UNBLOCK-REQUEST.md` (§6).
+**Outcome: `CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN`.** The strongest verified statements are
+that one SHA — `08731d22` — is consistent across git, CI, and the live production runtime, and that
+every locally reproducible gate passes. The 41 remediable shipped-source CodeQL alerts are fixed
+locally (fix commit unpushed; 2 dispositions retained with justification). Certification remains
+_conditional_ because identity acceptance on an isolated non-production environment, backup/restore/
+rollback evidence, and the push + CodeQL re-analysis of the fix commit remain open. Full rubric, exit
+criteria, recovery assessment, and the approval action plan are in
+`S14-RELEASE-CERTIFICATION-AND-HANDOFF.md` §§10–16 and `PLATFORM-UNBLOCK-REQUEST.md` (§6).

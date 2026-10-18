@@ -26,6 +26,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { EnvironmentError } from '../env/index.js';
+import { trimTrailingChars } from '../utilities/index.js';
 
 /** The single environment variable that owns the cross-origin allow-list. */
 export const CORS_ORIGIN_ENV = 'API_CORS_ORIGIN';
@@ -62,7 +63,7 @@ export function parseCorsOrigins(raw: string | undefined): string[] {
 
 /** True for an origin that only a developer machine can serve from. */
 export function isLoopbackOrigin(origin: string): boolean {
-  return LOOPBACK_ORIGIN_PATTERN.test(origin.trim().replace(/\/+$/, ''));
+  return LOOPBACK_ORIGIN_PATTERN.test(trimTrailingChars(origin.trim(), '/'));
 }
 
 /**

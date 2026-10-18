@@ -170,8 +170,19 @@ describe('S7.1 — discovery + normalization + source identity', () => {
     // The stable key is the canonical owner + source + reference discriminator.
     expect(record.stableKey).toBe('owner-a:freelancer:project:123456');
     // The source URL survives as provenance evidence (the record has no URL field).
+    // SECURITY (S14 CodeQL alert 52, js/incomplete-url-substring-sanitization):
+    // a substring check would also accept `https://evil.example/?u=<url>` or
+    // `https://www.freelancer.com.evil.example/...`, so the provenance URL is
+    // compared as a PARSED URL — scheme, host and path must match exactly.
     expect(
-      record.evidence.some((e) => e.label.includes('https://www.freelancer.com/projects/123456')),
+      record.evidence.some((e) => {
+        const raw = e.label.replace(/^Source URL:\s*/, '');
+        try {
+          return new URL(raw).href === 'https://www.freelancer.com/projects/123456';
+        } catch {
+          return false;
+        }
+      }),
     ).toBe(true);
   });
 

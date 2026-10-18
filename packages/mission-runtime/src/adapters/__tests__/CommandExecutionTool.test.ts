@@ -186,4 +186,39 @@ describe('AUTONOMY-03: Command Execution Tool', () => {
       }
     });
   });
+
+  // S14 CodeQL remediation — js/shell-command-constructed-from-input
+  // (CWE-78/CWE-88, MEDIUM alert 34). Windows re-joins the audited argv into
+  // ONE cmd.exe line, so a metacharacter in the single free argument must be
+  // rejected BEFORE any process is spawned.
+  describe('TEST 8 — WIN32 SHELL METACHARACTERS ARE REJECTED', () => {
+    it.runIf(process.platform === 'win32')(
+      'rejects a free argument carrying a cmd.exe metacharacter',
+      async () => {
+        const workspace = newWorkspace();
+        const binding = new WorkspaceRootBinding();
+        binding.setRoot(workspace);
+        const tool = createCommandExecutionTool(binding, { allow: ['npm_test_file'] });
+        const { signal } = createAbortController();
+
+        for (const evil of ['safe&evil.test.ts', 'a|b.test.ts', 'x>y.test.ts', '%TEMP%.test.ts']) {
+          await expect(
+            tool.handler({ command: 'npm_test_file', fileArg: evil }, { signal }),
+          ).rejects.toThrow(/forbidden shell metacharacter|not permitted/);
+        }
+      },
+    );
+
+    it('still runs a plain file argument', async () => {
+      const workspace = newWorkspace();
+      writeFileSync(path.join(workspace, 'plain.js'), 'console.log("plain-ok");');
+      const binding = new WorkspaceRootBinding();
+      binding.setRoot(workspace);
+      const tool = createCommandExecutionTool(binding, { allow: ['node_run'] });
+      const { signal } = createAbortController();
+
+      const result = await tool.handler({ command: 'node_run', fileArg: 'plain.js' }, { signal });
+      expect(result.success).toBe(true);
+    });
+  });
 });

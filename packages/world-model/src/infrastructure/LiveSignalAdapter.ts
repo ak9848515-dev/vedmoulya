@@ -55,12 +55,84 @@ interface RawSignal {
   publishedAt?: unknown;
 }
 
+/** Non-markup filler emitted for each removed run. */
+const STRIPPED_FILLER = ' ';
+
+/** Literal, case-insensitive token patterns — a literal search is linear. */
+const SCRIPT_OPEN = /<script/gi;
+const SCRIPT_CLOSE = /<\/script>/gi;
+
+/** Index of `pattern` at or after `from`, or -1. Index-safe (no case folding). */
+function findIgnoreCase(pattern: RegExp, text: string, from: number): number {
+  pattern.lastIndex = from;
+  const match = pattern.exec(text);
+  return match ? match.index : -1;
+}
+
+/**
+ * Strip `<script>…</script>` blocks (case-insensitive), emitting one space per
+ * removed block.
+ *
+ * SECURITY (ReDoS): this used to be `/<script[\s\S]*?<\/script>/gi` (CodeQL
+ * `js/polynomial-redos`, alert 18; the same line drives the `js/bad-tag-filter`
+ * alert 24). Every `<script` start lazily scanned the entire remaining string
+ * for a closing tag, so content with many `<script` prefixes and no closer was
+ * quadratic — measured ~6.7 ms at 32 000 hostile characters and ~107 ms at
+ * 128 000 (4× per doubling). The content here is *untrusted external* payload,
+ * so the scan is now an explicit literal walk with identical results
+ * (first `<script` … first following `</script>`, unmatched prefix left alone).
+ */
+function stripScriptBlocks(text: string): string {
+  let out = '';
+  let cursor = 0;
+  while (cursor < text.length) {
+    const open = findIgnoreCase(SCRIPT_OPEN, text, cursor);
+    if (open === -1) break;
+    const close = findIgnoreCase(SCRIPT_CLOSE, text, open + '<script'.length);
+    if (close === -1) break;
+    out += text.slice(cursor, open) + STRIPPED_FILLER;
+    cursor = close + '</script>'.length;
+  }
+  return out + text.slice(cursor);
+}
+
+/**
+ * Replace every `<tag>` run with a single space.
+ *
+ * SECURITY (ReDoS, same class as the alert-15 sighting in
+ * OpportunityDiscovery): `/<[^>]+>/g` restarts at every `<`, and each restart
+ * scans to the end of the string before failing, so payloads full of `<` with
+ * no `>` were quadratic. The index walk below has identical semantics
+ * (a match runs from `<` to the next `>`, requires at least one character
+ * between them, and an unmatched `<` is left untouched) in linear time.
+ * The input is untrusted external content, so this is the hot path that must
+ * not scale with the payload's hostile shape.
+ */
+function stripTagRuns(text: string): string {
+  let out = '';
+  let cursor = 0; // start of the tail that has not been emitted yet
+  let scan = 0; // where the next candidate '<' is looked up
+  while (scan < text.length) {
+    const open = text.indexOf('<', scan);
+    if (open === -1) break;
+    const close = text.indexOf('>', open + 1);
+    if (close === -1) break; // no closer anywhere → no match from here on
+    if (close === open + 1) {
+      // "<>" — an empty run, which `[^>]+` does not match; retry after this '<'.
+      scan = open + 1;
+      continue;
+    }
+    out += text.slice(cursor, open) + STRIPPED_FILLER;
+    cursor = close + 1;
+    scan = cursor;
+  }
+  return out + text.slice(cursor);
+}
+
 /** Sanitize untrusted external content: strip control chars + script blocks,
  *  bound the length. Returns plain text only — never markup. */
 export function sanitizeExternalText(value: string, max: number): string {
-  const stripped = value
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
+  const stripped = stripTagRuns(stripScriptBlocks(value))
     .replace(/\p{Cc}/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();

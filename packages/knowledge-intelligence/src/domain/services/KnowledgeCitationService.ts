@@ -43,10 +43,16 @@ export class KnowledgeCitationService {
     }
 
     // "source: <reference>" lines.
-    const sourcePattern = /(?:^|\n)\s*(?:source|reference|ref):\s*([^\n]{3,120})/gi;
+    //
+    // The whitespace runs use `[^\S\n]` (same characters as `\s` except the
+    // newline) and the trailing trim is a linear scan. With plain `\s*`,
+    // `(?:^|\n)` and `\s*` can both consume newlines, so a line break sequence
+    // makes every start position re-scan the rest of the text — the quadratic
+    // shape CodeQL reports as js/polynomial-redos (CWE-1333).
+    const sourcePattern = /(?:^|\n)[^\S\n]*(?:source|reference|ref):[^\S\n]*([^\n]{3,120})/gi;
     const sources = item.description.match(sourcePattern) ?? [];
     for (const match of sources.slice(0, 3)) {
-      const reference = match.replace(/^[^:]*:\s*/i, '').trim();
+      const reference = match.replace(/^[^:]*:[^\S\n]*/, '').trim();
       candidates.push({
         citationId: generateCitationId(),
         sourceId: reference,

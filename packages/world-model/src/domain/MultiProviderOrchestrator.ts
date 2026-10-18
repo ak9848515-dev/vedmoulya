@@ -31,6 +31,7 @@ import type {
   RetryPolicyDecision,
 } from '../types/world-types.js';
 import type { WorldActionPort, WorldFabricPort } from '../contracts/world-ports.js';
+import { trimEdgeChars } from '@vedmoulya/core';
 import { WorkflowFactory, planWithinBounds } from './WorkflowFactory.js';
 
 export type SelectionStrategyKind = 'CHEAP' | 'FAST' | 'QUALITY' | 'PRIVATE' | 'BALANCED';
@@ -69,11 +70,8 @@ function err<T>(error: string, code = 'ORCHESTRATION_ERROR'): OrchestrateResult<
 
 /** Deterministic slug for stable keys. */
 function slug(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 120);
+  // Linear edge trim — see WorkflowFactory.slug (js/polynomial-redos, CWE-1333).
+  return trimEdgeChars(text.toLowerCase().replace(/[^a-z0-9]+/g, '-'), '-').slice(0, 120);
 }
 
 /** Map the fabric's observed health state to the honest plan-level state. */

@@ -60,6 +60,25 @@ describe('DesignSystemEngine (Phase 1)', () => {
     expect(system.byGroup.color).toContain('color.accent');
   });
 
+  // ReDoS regression (CodeQL js/polynomial-redos, alert 5): the unanchored
+  // `[a-z]+` colour-name run was quadratic (~1 238 ms at 32 000 hostile
+  // characters) because every position inside a long letter run restarted the
+  // match. The run is now explicitly bounded.
+  it('resolves colour overrides from hostile spec entries in linear time', () => {
+    const spec: DesignSpecification = {
+      ...RESTAURANT_SPEC,
+      colorSystem: ['a'.repeat(64_000), 'accent: #16A34A'],
+    };
+    const started = performance.now();
+    const system = DESIGN_SYSTEM.derive({
+      applicationId: 'app-redos',
+      archetype: 'restaurant-app',
+      designSpec: spec,
+    });
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(system.tokens.find((t) => t.id === 'color.accent')?.value).toBe('#16A34A');
+  });
+
   it('produces a typed design system with structured tokens', () => {
     const system = DESIGN_SYSTEM.derive({
       applicationId: 'app-1',

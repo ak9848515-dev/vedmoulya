@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   classifyNetworkError,
+  normalizeEndpoint,
   OllamaRuntimeAdapter,
   parseOllamaChatContent,
   parseOllamaModels,
@@ -317,5 +318,22 @@ describe('OllamaRuntimeAdapter — generation', () => {
       if (chunk.done) usage = chunk.usage;
     }
     expect(usage).toEqual({ input: 9, output: 4, total: 13 });
+  });
+});
+
+describe('normalizeEndpoint', () => {
+  it('trims whitespace and every trailing slash, and nothing else', () => {
+    expect(normalizeEndpoint('  http://127.0.0.1:11434///  ')).toBe('http://127.0.0.1:11434');
+    expect(normalizeEndpoint('http://127.0.0.1:11434')).toBe('http://127.0.0.1:11434');
+    expect(normalizeEndpoint('///')).toBe('');
+    expect(normalizeEndpoint('http://host/ollama/')).toBe('http://host/ollama');
+  });
+
+  it('stays linear on an adversarial slash run (js/polynomial-redos regression)', () => {
+    // `/\/+$/` re-scanned the remaining slash run from every start position.
+    const run = `http://host:11434${'/'.repeat(200_000)}`;
+    const started = performance.now();
+    expect(normalizeEndpoint(run)).toBe('http://host:11434');
+    expect(performance.now() - started).toBeLessThan(2_000);
   });
 });

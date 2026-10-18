@@ -132,9 +132,25 @@ export interface CommandExecutionToolOptions {
 const WIN32_BATCH_EXECUTABLES: ReadonlySet<string> = new Set(['npm', 'npx', 'pnpm', 'yarn']);
 
 /** Rejects shell metacharacters in a controlled command line (fail closed). */
+/**
+ * cmd.exe metacharacters that would change the meaning of the joined line.
+ *
+ * S14 CodeQL remediation — js/shell-command-constructed-from-input
+ * (CWE-78/CWE-88, MEDIUM alert 34). The argv elements are already drawn from
+ * the fixed catalog or the path jail, but the Windows path re-joins them into
+ * ONE line handed to `cmd.exe /d /s /c`, and cmd.exe re-parses that line after
+ * stripping the outer quotes: `&`, `|`, `<`, `>`, `^`, `%VAR%` and grouping
+ * parentheses are all interpreted there. Rejecting them keeps the value
+ * provably inert instead of relying on every caller to avoid them.
+ */
+const WIN32_SHELL_METACHARACTERS = ['"', '&', '|', '<', '>', '^', '%', '(', ')'] as const;
+
 function assertSafeWin32Arg(arg: string): string {
-  if (arg.includes('"') || /[\r\n]/.test(arg)) {
-    throw new Error('command argument contains a forbidden quote/newline character — rejected');
+  const forbidden = WIN32_SHELL_METACHARACTERS.find((char) => arg.includes(char));
+  if (forbidden !== undefined || /[\r\n]/.test(arg)) {
+    throw new Error(
+      'command argument contains a forbidden shell metacharacter or newline — rejected',
+    );
   }
   return arg;
 }

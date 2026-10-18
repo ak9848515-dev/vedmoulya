@@ -6,6 +6,8 @@
 // relationship/citation/consumer/audit ids are unique and timestamped.
 // ──────────────────────────────────────────────────────────────────
 
+import { trimEdgeChars } from '@vedmoulya/core';
+
 export type MemoryId = string & { readonly __memoryId: unique symbol };
 
 export type MemoryRelationshipId = string & { readonly __memoryRelationshipId: unique symbol };
@@ -17,12 +19,15 @@ export function createMemoryId(id: string): MemoryId {
 
 /** Generate a unique memory item id: mem_<slug>_<timestamp>. */
 export function generateMemoryId(slug: string): MemoryId {
-  const safe = slug
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 48);
+  // Linear edge trim — the `/^_+|_+$/g` idiom is quadratic on adversarial
+  // underscore runs (js/polynomial-redos, CWE-1333).
+  const safe = trimEdgeChars(
+    slug
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_'),
+    '_',
+  ).slice(0, 48);
   return `mem_${safe || 'item'}_${Date.now().toString(36)}` as MemoryId;
 }
 

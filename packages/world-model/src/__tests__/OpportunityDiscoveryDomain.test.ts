@@ -383,6 +383,18 @@ describe('OpportunityDiscovery domain — branch coverage (SPRINT-038)', () => {
     expect(radar2.entries[0]?.nextAction).toContain('Start the NO_COST experiment');
   });
 
+  // ReDoS regression (CodeQL js/polynomial-redos, alert 15): `/<[^>]*>/g` was
+  // quadratic (~4 577 ms at 64 000 hostile characters) because every `<`
+  // rescanned to the end of the string looking for `>`.
+  it('sanitizes markup-spam evidence in linear time', () => {
+    const hostile = 'a<'.repeat(64_000);
+    const started = performance.now();
+    const out = sanitizeEvidenceText(hostile, 500);
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(500);
+    expect(out.length).toBeLessThanOrEqual(500);
+  });
+
   it('sanitization strips markup and control characters; empty input yields empty', () => {
     expect(sanitizeEvidenceText('<script>alert(1)</script>text')).not.toContain('<');
     expect(sanitizeEvidenceText('a\u0000b')).not.toContain('\u0000');
