@@ -11,6 +11,8 @@
 
 Local code gates (TypeScript, 58 ESLint scopes, 18/18 quality gates, Next.js 15.5 production build, secret scanning, dependency cycles, and identity schema gate contract tests) are 100% verified and green on `origin/main` at commit `08731d22`.
 
+> **Verified 2026-10-18:** Exact-SHA CI run **`39039076592`** (`main`, push, `completed/success`, all 9 jobs including `G8: End-to-End Tests` and the fail-closed `CI Result`) ran on the exact release SHA `08731d2287762299479ac8be738aa0089c433ce0`. Run URL: `https://github.com/ak9848515-dev/vedmoulya/actions/runs/39039076592`. This confirms the CI claim above; the remaining blockers below are deployed-environment/DR only.
+
 However, **Preview deployment and live identity verification are blocked** by external infrastructure prerequisites:
 
 1. `GAP-S14-02`: No managed, non-localhost PostgreSQL identity database exists for the non-production candidate.

@@ -30,8 +30,8 @@
 - **Severity:** Medium; user-facing honesty, no data loss.
 - **Historical evidence:** FINAL-REPORT §3 Phase-2 note + §13; 2026-10-16 local family 164/164 using injected fetch doubles; OpenRouter subset 9/9; `429` taxonomy 3/3; no paid call.
 - **Historical status:** `FIXED-LOCAL`; not committed/pushed/CI-verified at snapshot time.
-- **Reconciliation:** `[RECONCILED 2026-10-17]` Fix commits including `e25f2c71` are now merged through `afef0cb6`; `main` CI run `39030531474` reports success for `afef0cb6`.
-- **Status:** Locally fixed and merged; CI pipeline green for the **parent** commit `afef0cb6`, not for the release target `08731d22`; no live paid-provider claim.
+- **Reconciliation:** `[RECONCILED 2026-10-18]` Fix commits including `e25f2c71` are merged through `afef0cb6`. `main` CI run `39039076592` (2026-10-17T14:02:46Z, `completed/success`) ran on the **exact release target** `08731d2287762299479ac8be738aa0089c433ce0`; an earlier run `39030531474` covered parent `afef0cb6`.
+- **Status:** Locally fixed and merged; CI pipeline green for the **exact release target** `08731d22`; no live paid-provider claim.
 - **Responsible role:** Engineering.
 - **Prerequisites/verification:** Provider tester/orchestrator plus provider-state/UX suites; CI test/security jobs; preserve no-weakening rule.
 - **Closure criterion:** Committed fix remains green in current `main` CI without weakening assertions.
@@ -82,19 +82,20 @@
 
 - **Severity:** High/mandatory.
 - **Historical evidence:** `[HISTORICAL]` No run for the then-current local candidate; push not authorized at snapshot time.
-- **Reconciliation:** `[RECONCILED 2026-10-17]` `main` CI run `39030531474` for `afef0cb6` reports `completed/success`, including `G8: End-to-End Tests` and final `CI Result`. The release target `08731d22` is the **child** of `afef0cb6`, so this evidence does **not** cover the exact release SHA.
-- **Status:** CI-verified for parent SHA `afef0cb6`; **NOT yet CI-verified for the release target `08731d22`**.
-- **Responsible role:** CI owner for future reruns.
-- **Prerequisites/verification:** Exact-SHA rerun for `08731d22` (or explicit acceptance of parent-SHA coverage); current run ID and per-job output.
-- **Closure criterion:** Green G8 for the exact SHA being released.
-- **Review flag:** Retain the run/job URLs in the release record.
+- **Reconciliation:** `[RECONCILED 2026-10-18]` `main` CI run **`39039076592`** (push event, `main`, `completed/success`, 15m32s, created `2026-10-17T14:02:46Z`, updated `2026-10-17T14:18:18Z`) ran on the **exact release target** `08731d2287762299479ac8be738aa0089c433ce0`. All mandatory jobs passed: `G1-G2: Architecture & Code Quality`, `G3: Testing & Coverage`, `G4: Accessibility`, `G5: Performance`, `G6: Security Scan`, `G7: Quality Benchmarks`, `G8: End-to-End Tests`, `Build`, and the fail-closed `CI Result`. An earlier run `39030531474` covered the parent `afef0cb6`.
+- **Status:** **CI-verified for the exact release target `08731d22`** — CLOSED for the target SHA.
+- **Responsible role:** CI owner.
+- **Prerequisites/verification:** Run/job output retained; see §CI evidence below.
+- **Closure criterion:** Green G8 for the exact SHA being released. **Met.**
+- **Review flag:** Retain the run/job URLs in the release record: `https://github.com/ak9848515-dev/vedmoulya/actions/runs/39039076592`.
+- **Caveat:** The subsequent local commit `d1f8eeea` (documentation + one regression test) is **not** itself CI-verified; it is a descendant of `08731d22` and contains no production source change beyond the added test.
 
 ## GAP-S14-05 — SAST CodeQL
 
 - **Severity:** Medium/mandatory-but-CI-only.
 - **Historical evidence:** `[HISTORICAL]` No local equivalent; CI unknown at snapshot time.
-- **Reconciliation:** `[RECONCILED 2026-10-17]` `main` CI `G6: Security Scan` success includes CodeQL analysis and SARIF upload steps. This covers parent SHA `afef0cb6`, not the release target `08731d22`.
-- **Status:** CI-verified pipeline-level for parent `afef0cb6`; not yet verified for `08731d22`.
+- **Reconciliation:** `[RECONCILED 2026-10-18]` In run `39039076592` on the exact release target `08731d22`, the `G6: Security Scan` job reports `completed/success`; this job runs CodeQL analysis and SARIF upload.
+- **Status:** **CI-verified pipeline-level for the exact release target `08731d22`** — CLOSED for the target SHA (pending an alert-inventory review if release policy requires one).
 - **Responsible role:** CI/security owner.
 - **Prerequisites/verification:** Review Code Scanning alerts separately if release policy requires an alert inventory.
 - **Closure criterion:** CodeQL check green for the release SHA with no unresolved blocking alert.
@@ -234,7 +235,7 @@ Implementation anchors verified in the current tree:
 
 - Stashed register says GAP-S14-01/06 were not committed; later history and PR #44 show those fixes merged. Preserved as historical wording; reconciliation status above supersedes only the commit/CI portion.
 - Stashed register counts six local-only commits/eleven local commits/five stashes in different addenda; current verified state (2026-10-18) is merged `main` at `08731d22` with **zero stashes** — the last stash was applied into `08731d22` and dropped. Do not use stale counts operationally.
-- Prior audit text described CI as not run for the local candidate; `main` CI run `39030531474` reports success for parent `afef0cb6`. This changes CI-only gates, not deployment gates, and does not cover the release target `08731d22`.
+- Prior audit text described CI as not run for the local candidate; `main` CI run `39030531474` reports success for parent `afef0cb6`. **Updated 2026-10-18:** `main` CI run `39039076592` reports `completed/success` for the **exact release target** `08731d22`, covering all mandatory gates including G8 E2E and the fail-closed CI Result. This closes the CI-only gates (GAP-S14-04/05) for the release SHA; it does **not** close deployment/identity/DR gates.
 - Exact CVE/test-count/log-duration wording from history is preserved but not re-proven in this read-only sprint.
 
 15. Keep the restored backup path ready under the separate backup/DR approval before any destructive validation.
