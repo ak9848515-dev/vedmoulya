@@ -1,17 +1,21 @@
 # S14 Release Certification & Handoff Report
 
 **Document Reference:** `docs/audits/2026-10-16-s14-rc-closure/S14-RELEASE-CERTIFICATION-AND-HANDOFF.md`
-**Certification Date (UTC):** 2026-10-18 (Phase 2 revalidation, 11:09Z; Phase 3 remediation)
+**Certification Date (UTC):** 2026-10-18 (Phase 4: Release Acceptance & External Gate Closure)
 **Prepared By:** Release Certification Engineer / QA / Repository Auditor
 **Scope:** `docs/audits/2026-10-16-s14-rc-closure`
 **Canonical Release Candidate SHA:** `08731d2287762299479ac8be738aa0089c433ce0` (see §2)
-**Latest local certification commit:** `27dc57e3c31efa41c2d2250b72673af731017f33` (evidence layer only — **not** the RC)
-**Decision:** **CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN** (see §11)
-**Scores:** Repository/CI readiness **100/100** · Full operational release readiness **53/100** (see §10)
+**Latest local security-fix commit:** `347164edd2d76d87589db71bc3d1bec83a302cc8` (ahead of `origin/main` by 8 commits, unpushed; see §17)
+**Decision:** **CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN** (see §11 and §18)
+**Scores (scope-corrected 2026-10-19):** Deployed RC `08731d22` repository/CI readiness **88/100** · Local security-fix HEAD `347164ed` **58/58 locally-verifiable points, 0/42 remote-only points — no full score claimed while remote CI and CodeQL are NOT RUN** · Full operational release readiness (deployed RC) **50/100** (see §10 and §18)
 
 > **2026-10-18 Phase-2 update:** Exact-SHA CI is verified for the canonical RC. Production was additionally proven (via the running app's own `/api/trpc/health.version`) to serve **exactly** `08731d2287762299479ac8be738aa0089c433ce0`. Two material corrections were made this session: the historical "local PostgreSQL migration tests 9/9" claim was **misattributed**, and the release SHA carries **43 open CodeQL alerts (42 high, 1 medium)** on `refs/heads/main`, which re-opens the SAST gate. Remaining blockers are identity acceptance on an authorized isolated environment, backup/DR/rollback, and unresolved SAST findings.
 
-> **2026-10-18 Phase-3 update (remediation):** The 41 shipped-source alerts that were genuinely remediable have been fixed in a single, bounded change set (all 36 ReDoS instances, 2 insecure-randomness sites, `js/bad-tag-filter`, `js/shell-command-constructed-from-input`, `js/incomplete-url-substring-sanitization` in the one test file). Two alerts remain **open with documented technical justification** — `js/insufficient-password-hash` (`services/identity/src/auth/OAuthState.ts`, a CSPRNG-nonce false positive) and `js/clear-text-storage-of-sensitive-data` (`apps/web/src/auth/session-manager.ts`, the standard web-server OAuth `state` handoff). These dispositions require Platform Engineering sign-off (§16). **No alert was suppressed or dismissed to lower the count.** The fix set is verified locally (13,268 tests, lint 58/58, quality gates 18/18, secret scan, dependency audits) but is **not yet pushed and not CI-verified** — so the SAST gate remains open on `refs/heads/main` until the fix commit is pushed and CodeQL re-analyses it. Certification therefore moves from `NOT CERTIFIED` to `CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN`.
+> **2026-10-18 Phase-3 update (remediation):** The 41 shipped-source alerts that were genuinely remediable have been fixed in a single, bounded change set (all 36 ReDoS instances, 2 insecure-randomness sites, `js/bad-tag-filter`, `js/shell-command-constructed-from-input`, `js/incomplete-url-substring-sanitization` in the one test file). Two alerts remain **open with engineering review records only** — `js/insufficient-password-hash` (`services/identity/src/auth/OAuthState.ts`, a CSPRNG nonce digest) and `js/clear-text-storage-of-sensitive-data` (`apps/web/src/auth/session-manager.ts`, a tab-scoped OAuth `state` handoff). These are **proposals**, not recorded dispositions, and require Platform Security Lead sign-off (§16, §18.4). Neither is dismissed as a false positive or accepted as a risk. **No alert was suppressed or dismissed to lower the count.** The fix set is verified locally (13,268 tests, lint 58/58, quality gates 18/18, secret scan, dependency audits) but is **not yet pushed and not CI-verified** — so the SAST gate remains open on `refs/heads/main` until the fix commit is pushed and CodeQL re-analyses it.
+
+> **2026-10-18 Phase-4 update (release acceptance & external gate closure):** Validated exact repository baseline (HEAD `347164ed`, ahead 8, clean tree). Prepared concise owner-review records for both retained CodeQL findings. Verified read-only that Vercel Preview lacks `IDENTITY_DATABASE_URL` and `AUTH_JWT_SECRET`, that `app.vedmoulya.com` returns NXDOMAIN, that public production alias `vedmoulya-web.vercel.app` serves valid TLS and reports `08731d22`, and drafted an executable restore-drill and rollback-rehearsal plan. Documented exact push approval required (`PUSH-AUTH-REF`). All external gates remain open pending authorized execution. See §17.
+
+> **2026-10-19 Phase-5 update (certification integrity review):** The Phase-4 record contained material internal contradictions, corrected in **§18** without rewriting the historical text: (1) the **100/100 repository score conflated** the CI-verified baseline `08731d22` with the unpushed security-fix HEAD `347164ed`, whose remote CI and CodeQL are **NOT RUN**; (2) rollback was described as **rehearsed** in one document and **NOT RUN/NOT EVIDENCED** elsewhere — the supported state is **NOT VERIFIED — REHEARSAL EVIDENCE MISSING**; (3) the existence of `scripts/backup.sh` and runbooks was not separated from provider schedule evidence or an executed restore drill; (4) two CodeQL findings had **proposed** dispositions written in a way that could read as recorded risk acceptance. No push, deploy, infrastructure change, migration, restore, or rollback was performed.
 
 ---
 
@@ -54,16 +58,20 @@ These were present before the sprint and have since been committed intact (super
 
 ### 1.2 Commit history beyond the target SHA
 
-| Commit     | Subject                                                                                        | CI-verified?                                       |
-| :--------- | :--------------------------------------------------------------------------------------------- | :------------------------------------------------- |
-| `afef0cb6` | Merge PR #44 (`fix/s14-rc-closure`)                                                            | Yes — run `39030531474` (parent)                   |
-| `08731d22` | chore(meta): complete repository audit, apply stashed TLS fix, audit evidence, clean workspace | **Yes — run `39039076592` (exact release target)** |
-| `d1f8eeea` | docs: finalize s14 rc certification evidence                                                   | **No** — documentation + one regression test only  |
-| `27dc57e3` | docs: close s14 exact-sha ci gaps via verified run                                             | **No** — documentation only                        |
-| `7a1d81fd` | docs: revalidate s14 rc via exact-sha ci and live deployment identity (Phase 2)                | **No** — documentation only                        |
-| `07ca1056` | docs: record the s14 phase-2 commit hash and clean tree                                        | **No** — documentation only                        |
+| Commit     | Subject                                                                                        | CI-verified?                                             |
+| :--------- | :--------------------------------------------------------------------------------------------- | :------------------------------------------------------- |
+| `afef0cb6` | Merge PR #44 (`fix/s14-rc-closure`)                                                            | Yes — run `39030531474` (parent)                         |
+| `08731d22` | chore(meta): complete repository audit, apply stashed TLS fix, audit evidence, clean workspace | **Yes — run `39039076592` (exact release target)**       |
+| `d1f8eeea` | docs: finalize s14 rc certification evidence                                                   | **No** — documentation + one regression test only        |
+| `27dc57e3` | docs: close s14 exact-sha ci gaps via verified run                                             | **No** — documentation only                              |
+| `7a1d81fd` | docs: revalidate s14 rc via exact-sha ci and live deployment identity (Phase 2)                | **No** — documentation only                              |
+| `07ca1056` | docs: record the s14 phase-2 commit hash and clean tree                                        | **No** — documentation only                              |
+| `082d6284` | docs: repair s14 audit table rows and escape a cell pipe                                       | **No** — documentation only                              |
+| `cc5e63c9` | docs: state the s14 local commit set without a brittle count                                   | **No** — documentation only                              |
+| `1ae96566` | docs: split the merged phase-9 row in the s14 baseline table                                   | **No** — documentation only                              |
+| `347164ed` | fix(core): remediate verified s14 codeql findings (**HEAD**)                                   | **No** — 50 files, +1,213/−223; remote CI/CodeQL NOT RUN |
 
-> The release target `08731d22` is CI-verified. The two documentation commits on top are **not** CI-verified, but neither changes production source behavior (one adds a regression test; the other edits audit docs).
+> The release target `08731d22` is CI-verified. **No commit above it is CI-verified.** The documentation commits add evidence and table repairs; `347164ed` is the security-fix candidate, changes 50 files including production source, and has **no remote CI or CodeQL run** (see §18).
 
 ---
 
@@ -77,7 +85,7 @@ These were present before the sprint and have since been committed intact (super
 | CI run `39039076592` reports success                     | **Verified 2026-10-18** | `gh run view 39039076592` → `completed/success`, headSha `08731d22…`                                |
 | That run covers the **exact** release target `08731d22…` | **VERIFIED — YES**      | `gh run view` returned `"headSha":"08731d2287762299479ac8be738aa0089c433ce0"`; all 9 jobs `success` |
 
-> **Reconciliation (2026-10-18):** A CI run **on the exact release SHA** `08731d22` exists: run `39039076592` (push, `main`, `completed/success`, 15m32s, created `2026-10-17T14:02:46Z`). All mandatory jobs passed: G1-G2 Architecture & Code Quality, G3 Testing & Coverage, G4 Accessibility, G5 Performance, G6 Security Scan, G7 Quality Benchmarks, G8 End-to-End Tests, Build, and the fail-closed `CI Result`. Run URL: `https://github.com/ak9848515-dev/vedmoulya/actions/runs/39039076592`. This **closes GAP-S14-04 and GAP-S14-05** for the release SHA. The prior statement that only the parent SHA was covered is now superseded.
+> **Reconciliation (2026-10-18):** A CI run **on the exact release SHA** `08731d22` exists: run `39039076592` (push, `main`, `completed/success`, 15m32s, created `2026-10-17T14:02:46Z`). All mandatory jobs passed: G1-G2 Architecture & Code Quality, G3 Testing & Coverage, G4 Accessibility, G5 Performance, G6 Security Scan, G7 Quality Benchmarks, G8 End-to-End Tests, Build, and the fail-closed `CI Result`. Run URL: `https://github.com/ak9848515-dev/vedmoulya/actions/runs/39039076592`. This **closes GAP-S14-04** for the release SHA. It does **not** close GAP-S14-05: the `G6` job concluded `success` because it uploads SARIF, but the live alert inventory for this same SHA was **43 open alerts** (42 high, 1 medium). The prior statement that only the parent SHA was covered is now superseded.
 
 ### 2.2 Production and Preview
 
@@ -128,23 +136,24 @@ These were present before the sprint and have since been committed intact (super
 
 ## 3. Gap Register (canonical numbering — supersedes the earlier 9-row table)
 
-The earlier table in this section used a **local 9-row numbering** that conflicted with `RELEASE-GAP-REGISTER.md`. The register's 13-gap numbering is canonical; this table now matches it exactly (2026-10-18).
+The earlier table in this section used a **local 9-row numbering** that conflicted with `RELEASE-GAP-REGISTER.md`. The register's numbering is canonical: the original 13 gaps plus **GAP-S14-14** (remote CI for the unpushed security-fix candidate), added 2026-10-19.
 
-| Gap ID     | Description                                                     | Severity | Status 2026-10-18          | Blocker / Owner                                                                                                  |
-| :--------- | :-------------------------------------------------------------- | :------- | :------------------------- | :--------------------------------------------------------------------------------------------------------------- |
-| GAP-S14-01 | OpenRouter probe false positive                                 | Medium   | **CLOSED**                 | Fix merged and CI-green on the exact RC SHA                                                                      |
-| GAP-S14-02 | No _isolated non-production_ managed identity DB for acceptance | Critical | **BLOCKED EXTERNAL**       | Database Owner (provision + written approval)                                                                    |
-| GAP-S14-03 | Preview env lacks `IDENTITY_DATABASE_URL` / `AUTH_JWT_SECRET`   | High     | **BLOCKED EXTERNAL**       | Platform/Secrets Owner                                                                                           |
-| GAP-S14-04 | CI G8 production-mode E2E for the exact release SHA             | High     | **CLOSED**                 | Run `39039076592` on `08731d22`                                                                                  |
-| GAP-S14-05 | SAST / CodeQL alert inventory                                   | High     | **PARTIALLY CLOSED**       | 41 shipped-source alerts fixed locally (fix commit unpushed); 2 retained with justification; live count still 43 |
-| GAP-S14-06 | Secret-scan gate script defect                                  | Low      | **CLOSED (local)**         | `s56-secret-scan.ps1` exit 0, 20 fixture hits                                                                    |
-| GAP-S14-07 | Twelve dev-only high advisories                                 | Low      | **OPEN** (accepted risk)   | Platform Engineering                                                                                             |
-| GAP-S14-08 | Staging/Preview readiness + smoke                               | High     | **BLOCKED EXTERNAL**       | Platform Engineering + Deploy Operator                                                                           |
-| GAP-S14-09 | S012-C staging DR drill                                         | Critical | **BLOCKED EXTERNAL**       | Staging/DB Owner                                                                                                 |
-| GAP-S14-10 | Backup schedule / retention at provider                         | High     | **BLOCKED EXTERNAL**       | Platform/DevOps + DB Owner                                                                                       |
-| GAP-S14-11 | Live observability + rollback rehearsal                         | Medium   | **NOT RUN**                | Rollback Authority + Platform Engineering                                                                        |
-| GAP-S14-12 | Canonical production origin `app.vedmoulya.com` mismatch        | Low      | **OPEN** (hygiene)         | DNS/Platform owner (safe to defer)                                                                               |
-| GAP-S14-13 | Release hygiene / traceability                                  | Medium   | **CLOSED WITH LIMITATION** | Local evidence commits unpushed by policy                                                                        |
+| Gap ID     | Description                                                     | Severity | Status 2026-10-19     | Blocker / Owner                                                                                                     |
+| :--------- | :-------------------------------------------------------------- | :------- | :-------------------- | :------------------------------------------------------------------------------------------------------------------ |
+| GAP-S14-01 | OpenRouter probe false positive                                 | Medium   | **CLOSED**            | Fix merged and CI-green on the exact RC SHA                                                                         |
+| GAP-S14-02 | No _isolated non-production_ managed identity DB for acceptance | Critical | **BLOCKED**           | Database Owner (provision + written approval)                                                                       |
+| GAP-S14-03 | Preview env lacks `IDENTITY_DATABASE_URL` / `AUTH_JWT_SECRET`   | High     | **BLOCKED**           | Platform/Secrets Owner                                                                                              |
+| GAP-S14-04 | CI G8 production-mode E2E for the exact release SHA             | High     | **CLOSED**            | Run `39039076592` on `08731d22`                                                                                     |
+| GAP-S14-05 | SAST / CodeQL alert inventory (remote)                          | High     | **OPEN**              | 43 open on `refs/heads/main`; 41 fixed only in unpushed `347164ed`; 2 retained findings lack authorized disposition |
+| GAP-S14-06 | Secret-scan gate script defect                                  | Low      | **CLOSED (local)**    | `s56-secret-scan.ps1` exit 0, 20 fixture hits                                                                       |
+| GAP-S14-07 | Twelve dev-only high advisories                                 | Low      | **OPEN**              | No signed risk-acceptance record (owner + date) exists; decision pending Platform Engineering                       |
+| GAP-S14-08 | Staging/Preview readiness + smoke                               | High     | **BLOCKED**           | Platform Engineering + Deploy Operator                                                                              |
+| GAP-S14-09 | S012-C staging DR drill                                         | Critical | **BLOCKED**           | Staging/DB Owner                                                                                                    |
+| GAP-S14-10 | Backup schedule / retention at provider                         | High     | **BLOCKED**           | Platform/DevOps + DB Owner                                                                                          |
+| GAP-S14-11 | Live observability + rollback rehearsal                         | Medium   | **NOT RUN**           | Rollback Authority + Platform Engineering                                                                           |
+| GAP-S14-12 | Canonical production origin `app.vedmoulya.com` mismatch        | Low      | **OPEN** (hygiene)    | DNS/Platform owner (safe to defer)                                                                                  |
+| GAP-S14-13 | Release hygiene / traceability                                  | Medium   | **AWAITING APPROVAL** | 8 local commits unpushed pending `PUSH-AUTH-REF`; governance edits uncommitted (see §18.1)                          |
+| GAP-S14-14 | Remote CI for security-fix candidate `347164ed`                 | High     | **NOT RUN**           | No CI run exists for this SHA (`gh run list --commit 347164ed` returned none); push unauthorized                    |
 
 > Two prior claims are corrected here: GAP-S14-05 was reported CLOSED in the register based on the G6 _job conclusion_ only; the alert inventory shows 43 open alerts, so it is **OPEN**. GAP-S14-02 was described as "no managed non-localhost identity DB **anywhere**" — production demonstrably has one and boots (see §12.3); the true gap is the absence of an **isolated non-production** environment for acceptance.
 
@@ -194,18 +203,19 @@ All checks below were executed locally against the working tree containing `d1f8
 
 ### **CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN** (Phase-3 outcome; supersedes the Phase-2 `NOT CERTIFIED`)
 
-**Rationale:** The canonical RC `08731d22` is CI-green and deployed to production with matching runtime identity. During Phase 3 the SAST findings were **remediated locally**: all 36 `js/polynomial-redos` instances, both `js/insecure-randomness` sites, the `js/bad-tag-filter`, the `js/shell-command-constructed-from-input` (medium), and the `js/incomplete-url-substring-sanitization` test-file alert were fixed with bounded, semantically-equivalent linear-time replacements, each with a focused adversarial-input regression test. Two alerts are retained **open with documented technical justification** (see §16): a CSPRNG-nonce false positive and the standard OAuth `state` handoff. The remaining mandatory classes are **external** and cannot be closed from the repository: **(a)** identity acceptance on an authorized isolated non-production environment; **(b)** backup schedule/retention evidence, a restore drill with measured RTO/RPO, and a rollback rehearsal; **(c)** the fix commit being pushed and CodeQL re-analysing `refs/heads/main` so the 43-alert inventory clears.
+**Rationale:** The canonical RC `08731d22` is CI-green and deployed to production with matching runtime identity. During Phase 3 the SAST findings were **remediated locally**: all 36 `js/polynomial-redos` instances, both `js/insecure-randomness` sites, the `js/bad-tag-filter`, the `js/shell-command-constructed-from-input` (medium), and the `js/incomplete-url-substring-sanitization` test-file alert were fixed with bounded, semantically-equivalent linear-time replacements, each with a focused adversarial-input regression test. Two alerts are retained **open with engineering review records, not authorized dispositions** (see §16 and §18.4): a CSPRNG nonce digest and a tab-scoped OAuth `state` handoff. Calling either a "false positive" or an "accepted risk" is **not supported**, because no security-owner decision with owner and date is recorded. The remaining mandatory classes are **external** and cannot be closed from the repository: **(a)** identity acceptance on an authorized isolated non-production environment; **(b)** backup schedule/retention evidence, a restore drill with measured RTO/RPO, and a rollback rehearsal; **(c)** the fix commit being pushed and CodeQL re-analysing `refs/heads/main` so the 43-alert inventory clears.
 
-> **Why "conditional" and not "certified":** the repository/CI readiness score is now full (100/100), but the certification cannot be closed until the external identity/recovery gates run and the SAST fix commit is pushed and re-analysed. Until then, public production release approval remains **NO-GO**.
+> **Why "conditional" and not "certified":** the repository/CI readiness of the deployed RC is **88/100**, not 100, and the local security-fix candidate has **no remote verification at all**. Certification cannot close until the external identity/recovery gates run and the SAST fix commit is pushed and re-analysed. Until then, public production release approval remains **NO-GO**.
 
-### Scores (rubric defined in §10; two separate scores per Phase 8)
+### Scores (rubric defined in §10; scope-corrected 2026-10-19)
 
-| Score                              | Value         |
-| :--------------------------------- | :------------ |
-| Repository & CI readiness          | **100 / 100** |
-| Full operational release readiness | **53 / 100**  |
+| Score                                                  | Value                                               | Scope                                                          |
+| :----------------------------------------------------- | :-------------------------------------------------- | :------------------------------------------------------------- |
+| Repository & CI readiness — deployed RC `08731d22`     | **88 / 100**                                        | Remote CI exact-SHA verified; SAST criterion not met (43 open) |
+| Repository & CI readiness — local candidate `347164ed` | **58 / 58 local points; 0 / 42 remote-only points** | Remote CI and CodeQL **NOT RUN** — no full score               |
+| Full operational release readiness — deployed RC       | **50 / 100**                                        | External identity/recovery gates open                          |
 
-> **Score movement 2026-10-18 (Phase 3):** Repository/CI readiness rose from 88 → **100** because the SAST criterion (12 pts) is now satisfied locally: all remediable shipped-source alerts are fixed with regression coverage and every local gate is green. The operational score rose from 50 → **53** only by the amount attributable to the closed SAST criterion (the carried repo-readiness weight 25 × 100% = 25, up from 22); the external identity/recovery gates remain at zero, which is why the outcome is _conditional_, not certified.
+> **Score correction 2026-10-19 (Phase 5):** The Phase-3 movement to 100/100 was **not earned**. It awarded the full 12-point SAST criterion on the strength of a **local, unpushed** fix while the remote inventory on `refs/heads/main` still showed 43 open alerts and the fix SHA had no CI run. The criteria that require remote evidence are now scored zero for `347164ed`, and the deployed RC keeps the score its own evidence supports (88). The operational score returns to **50** because its carried repository component is 25 × 88% = 22, not 25.
 
 ---
 
@@ -321,28 +331,39 @@ docker rm -f vm-rc-verify-pg   # removed immediately after; no container left be
 
 No single rubric existed that separated repository readiness from operational readiness, so two explicit weighted rubrics were defined **before** scoring. Unverified criteria earn **zero**.
 
-### 10.1 Repository & CI readiness — 88 / 100
+### 10.1 Repository & CI readiness — deployed RC `08731d22`: 88 / 100
 
-| #   | Criterion                                        | Weight  | Evidence                                                                                       | Status           | Earned  |
-| :-- | :----------------------------------------------- | :------ | :--------------------------------------------------------------------------------------------- | :--------------- | :------ |
-| 1   | Typecheck + format                               | 10      | `npm run typecheck` exit 0; CI `G1-G2`                                                         | PASS             | 10      |
-| 2   | Lint                                             | 8       | 58 scopes, 0 failed; CI `G1-G2`                                                                | PASS             | 8       |
-| 3   | Full test suite                                  | 12      | 13,268 passed / 48 skipped / 0 failed (§5)                                                     | PASS             | 12      |
-| 4   | Real-engine database suites                      | 8       | 62 tests on PostgreSQL 16.15 (§9.5)                                                            | PASS             | 8       |
-| 5   | Config contract, dep cycles, quality gates       | 10      | 3 commands, exit 0 each; 18/18                                                                 | PASS             | 10      |
-| 6   | Secret scan                                      | 5       | exit 0, 20 fixture-only hits                                                                   | PASS             | 5       |
-| 7   | Dependency security (production)                 | 5       | `npm audit --omit=dev --audit-level=high` → 0                                                  | PASS             | 5       |
-| 8   | Accessibility gate                               | 5       | CI `G4` success on the RC                                                                      | PASS             | 5       |
-| 9   | Performance/bundle budgets                       | 5       | CI `G5` success on the RC                                                                      | PASS             | 5       |
-| 10  | CI green on the exact canonical SHA incl. G8 E2E | 20      | run `39039076592`, 9/9 jobs                                                                    | PASS             | 20      |
-| 11  | SAST with no unresolved blocking alert           | 12      | 41 shipped-source alerts fixed + 2 justified dispositions (§16); **fix commit not yet pushed** | **PASS (local)** | 12      |
-|     | **Total**                                        | **100** |                                                                                                |                  | **100** |
+This table scores **`08731d22` only** — the SHA that is `origin/main`, the exact-SHA CI run `39039076592`, and the production runtime. It does not score the unpushed fix commit.
 
-### 10.2 Full operational release readiness — 50 / 100
+| #   | Criterion                                        | Weight  | Evidence                                                                                        | Status      | Earned |
+| :-- | :----------------------------------------------- | :------ | :---------------------------------------------------------------------------------------------- | :---------- | :----- |
+| 1   | Typecheck + format                               | 10      | `npm run typecheck` exit 0; CI `G1-G2`                                                          | PASS        | 10     |
+| 2   | Lint                                             | 8       | 58 scopes, 0 failed; CI `G1-G2`                                                                 | PASS        | 8      |
+| 3   | Full test suite                                  | 12      | 13,268 passed / 48 skipped / 0 failed (§5)                                                      | PASS        | 12     |
+| 4   | Real-engine database suites                      | 8       | 62 tests on PostgreSQL 16.15 (§9.5)                                                             | PASS        | 8      |
+| 5   | Config contract, dep cycles, quality gates       | 10      | 3 commands, exit 0 each; 18/18                                                                  | PASS        | 10     |
+| 6   | Secret scan                                      | 5       | exit 0, 20 fixture-only hits                                                                    | PASS        | 5      |
+| 7   | Dependency security (production)                 | 5       | `npm audit --omit=dev --audit-level=high` → 0                                                   | PASS        | 5      |
+| 8   | Accessibility gate                               | 5       | CI `G4` success on the RC                                                                       | PASS        | 5      |
+| 9   | Performance/bundle budgets                       | 5       | CI `G5` success on the RC                                                                       | PASS        | 5      |
+| 10  | CI green on the exact canonical SHA incl. G8 E2E | 20      | run `39039076592`, 9/9 jobs                                                                     | PASS        | 20     |
+| 11  | SAST with no unresolved blocking alert           | 12      | 43 open alerts on `refs/heads/main` at this SHA; remediation exists only in unpushed `347164ed` | **NOT MET** | 0      |
+|     | **Total**                                        | **100** |                                                                                                 |             | **88** |
+
+**Local security-fix candidate `347164ed` — evidence-scoped, not a readiness score:**
+
+| Scope                                             | Points | Verified | Basis                                                                                    |
+| :------------------------------------------------ | :----- | :------- | :--------------------------------------------------------------------------------------- |
+| Criteria 1–7 (locally executable)                 | 58     | **58**   | Typecheck, lint, tests, PG suites, config/quality gates, secret scan, prod audit on HEAD |
+| Criteria 8–11 (require remote CI/CodeQL evidence) | 42     | **0**    | No CI run exists for `347164ed`; CodeQL has not analysed it                              |
+
+> A 58/42 split is reported instead of a single number because blending the two evidence classes is exactly the defect this review corrects. The candidate cannot earn remote points until it is pushed and analysed.
+
+### 10.2 Full operational release readiness — deployed RC `08731d22`: 50 / 100
 
 | #   | Criterion                                                                                                         | Weight  | Evidence                                                                                                             | Status        | Earned |
 | :-- | :---------------------------------------------------------------------------------------------------------------- | :------ | :------------------------------------------------------------------------------------------------------------------- | :------------ | :----- |
-| 1   | Repository & CI readiness (carried from §10.1)                                                                    | 25      | see §10.1                                                                                                            | 100%          | 25     |
+| 1   | Repository & CI readiness (carried from §10.1)                                                                    | 25      | §10.1 = 88/100 for `08731d22`                                                                                        | 88%           | 22     |
 | 2   | One canonical SHA consistent across git, CI, and deployed runtime                                                 | 10      | `origin/main` = CI `headSha` = production `gitSha` = `08731d22`                                                      | PASS          | 10     |
 | 3   | Production deployment boots the RC and is healthy                                                                 | 10      | `/health/live` 200, `/health/ready` 200 (`database: healthy`), `/health/check` 200                                   | PASS          | 10     |
 | 4   | Production configuration completeness                                                                             | 5       | `vercel env ls production` shows `IDENTITY_DATABASE_URL` + `AUTH_JWT_SECRET`; values not inspected; drift gate unset | PARTIAL       | 4      |
@@ -351,9 +372,9 @@ No single rubric existed that separated repository readiness from operational re
 | 7   | Restore drill with measured RTO/RPO                                                                               | 10      | never executed                                                                                                       | **NOT RUN**   | 0      |
 | 8   | Rollback rehearsal + named rollback authority                                                                     | 5       | runbooks only; authority unassigned                                                                                  | **NOT RUN**   | 0      |
 | 9   | Deployed observability evidence                                                                                   | 5       | `/api/metrics` scrapeable in production; no log/alert evidence recorded                                              | PARTIAL       | 2      |
-|     | **Total**                                                                                                         | **100** |                                                                                                                      |               | **53** |
+|     | **Total**                                                                                                         | **100** |                                                                                                                      |               | **50** |
 
-> **Phase-3 recalculation:** with repository/CI readiness at 100/100, the carried contribution rises from 22 → 25 (+3) and the total rises from 50 → **53**. No external gate moved: identity acceptance (0), restore drill (0), rollback rehearsal (0) remain unexecuted and unscored.
+> **Phase-5 recalculation:** the carried repository component is **25 × 88% = 22** (not 25), so the operational total is **50**, not 53. No external gate moved: identity acceptance (0), restore drill (0), rollback rehearsal (0) remain unexecuted and unscored. The Phase-3 +3 was attributable solely to the unearned local SAST credit and is withdrawn.
 
 > **Recalculation note:** the retired 45/100 → 55/100 progression is **not** carried forward. Those figures used a 7-row rubric that could not represent the SAST alert inventory or deployed production identity, and they scored "exact-SHA CI verification" 15/15 while the release SHA carries 42 open high alerts. The new figures are recalculated from the evidence in §9 and §12.
 
@@ -381,12 +402,12 @@ They are not enough for full certification, because identity acceptance, recover
 
 ### Release posture by scope
 
-| Scope                                  | Decision                                                                                                                                                                                                                                                                  |
-| :------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Repository / local candidate           | **GO** — all local gates green on the RC lineage; SAST remediated locally                                                                                                                                                                                                 |
-| Preview / staging as configured        | **NO-GO** — Preview lacks `IDENTITY_DATABASE_URL` and `AUTH_JWT_SECRET`                                                                                                                                                                                                   |
-| Public production **release approval** | **NO-GO** — mandatory acceptance and recovery gates open; fix commit unpushed                                                                                                                                                                                             |
-| Public production **observed state**   | ⚠️ **The uncertified RC is already serving production** (`gitSha 08731d22`, deployed 2026-10-17 14:02 UTC). This is a governance fact, not an approval: no certification was issued for it, and the Release Owner must reconcile the live deployment with the open gates. |
+| Scope                                   | Decision                                                                                                                                                                                                                                                                  |
+| :-------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Repository / local candidate `347164ed` | **LOCAL GATES GO / PUBLICATION AWAITING APPROVAL** — all local gates green; remote CI and CodeQL **NOT RUN**; SAST remediated locally but unverified remotely                                                                                                             |
+| Preview / staging as configured         | **NO-GO** — Preview lacks `IDENTITY_DATABASE_URL` and `AUTH_JWT_SECRET`                                                                                                                                                                                                   |
+| Public production **release approval**  | **NO-GO** — mandatory acceptance and recovery gates open; fix commit unpushed                                                                                                                                                                                             |
+| Public production **observed state**    | ⚠️ **The uncertified RC is already serving production** (`gitSha 08731d22`, deployed 2026-10-17 14:02 UTC). This is a governance fact, not an approval: no certification was issued for it, and the Release Owner must reconcile the live deployment with the open gates. |
 
 ---
 
@@ -464,21 +485,32 @@ Also re-verified: `vercel domains ls` → **0 domains**; `https://app.vedmoulya.
 
 ## 13. Recovery and Rollback Gate Assessment (Phase 6)
 
-| Item                                    | Repository / provider evidence                                                                                                                               | Status                               |
-| :-------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------- |
-| Objectives defined                      | `docs/runbooks/backup-restore-runbook.md`: **RPO ≤ 24 h**, **RTO ≤ 30 min** (full restore)                                                                   | DOCUMENTED                           |
-| Backup procedure                        | `scripts/backup.sh` (`pg_dump --format=custom \| gzip`, per service), runbook's 02:00 UTC S3 path                                                            | DOCUMENTED, never executed           |
-| Backup schedule / retention at provider | Nothing in-repo (no cron, no CI step); provider console evidence unavailable in this environment (`neonctl` not installed, no API key)                       | **NOT EVIDENCED — BLOCKED EXTERNAL** |
-| Retention policy                        | Runbook: daily ≥ 30 d, monthly ≥ 12 mo, quarterly restore test                                                                                               | DOCUMENTED, not enforced             |
-| PITR scope / recovery point             | Neon six-hour history/PITR window observed previously; **a window is not a scheduled backup**                                                                | PARTIAL                              |
-| Restore procedure                       | Runbook §2 (stop writes → download → `psql < restore.sql` → invariants → readiness 200)                                                                      | DOCUMENTED                           |
-| Restore verification                    | No drill has ever been run; no artifacts (`backups/`, `*.sql.gz`) exist                                                                                      | **NOT RUN**                          |
-| RTO/RPO measurement                     | Requires a drill; no timestamps recorded                                                                                                                     | **NOT RUN**                          |
-| Rollback procedure                      | `docs/runbooks/rollback-runbook.md` + `backup-restore-runbook.md` §3 (restore pre-deploy backup → redeploy previous release → verify readiness + invariants) | DOCUMENTED and internally consistent |
-| Rollback authority                      | `PLATFORM-UNBLOCK-REQUEST.md` names _Platform Operations On-Call_ — reference still `PENDING`                                                                | **UNASSIGNED**                       |
-| Required post-recovery checks           | readiness 200, row-count/key invariants, auth/dashboard/search smoke, post-mortem ≤ 48 h                                                                     | DOCUMENTED, never executed           |
+| Item                                    | Repository / provider evidence                                                                                                                               | Status                                   |
+| :-------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------- |
+| Objectives defined                      | `docs/runbooks/backup-restore-runbook.md`: **RPO ≤ 24 h**, **RTO ≤ 30 min** (full restore)                                                                   | DOCUMENTED                               |
+| Backup procedure                        | `scripts/backup.sh` (`pg_dump --format=custom \| gzip`, per service), runbook's 02:00 UTC S3 path                                                            | DOCUMENTED, never executed               |
+| Backup schedule / retention at provider | Nothing in-repo (no cron, no CI step); provider console evidence unavailable in this environment (`neonctl` not installed, no API key)                       | **BLOCKED — NOT VERIFIED**               |
+| Retention policy                        | Runbook: daily ≥ 30 d, monthly ≥ 12 mo, quarterly restore test                                                                                               | DOCUMENTED, not enforced                 |
+| PITR scope / recovery point             | Neon six-hour history/PITR window observed previously; **a window is not a scheduled backup**                                                                | PARTIAL                                  |
+| Restore procedure                       | Runbook §2 (stop writes → download → `psql < restore.sql` → invariants → readiness 200)                                                                      | DOCUMENTED                               |
+| Restore verification                    | No drill has ever been run; no artifacts (`backups/`, `*.sql.gz`) exist                                                                                      | **NOT RUN — REHEARSAL EVIDENCE MISSING** |
+| RTO/RPO measurement                     | Requires a drill; no timestamps recorded                                                                                                                     | **NOT RUN**                              |
+| Rollback procedure                      | `docs/runbooks/rollback-runbook.md` + `backup-restore-runbook.md` §3 (restore pre-deploy backup → redeploy previous release → verify readiness + invariants) | **DOCUMENTED ONLY — NOT VERIFIED**       |
+| Rollback authority                      | `PLATFORM-UNBLOCK-REQUEST.md` names _Platform Operations On-Call_ — reference still `PENDING`                                                                | **UNASSIGNED**                           |
+| Required post-recovery checks           | readiness 200, row-count/key invariants, auth/dashboard/search smoke, post-mortem ≤ 48 h                                                                     | DOCUMENTED, never executed               |
 
 **Gate conclusion: OPEN.** A configured PITR window, a helper script, and a consistent runbook do not constitute recoverability. No restore or rollback was initiated against production, and none may be without an approved, isolated rehearsal.
+
+**Four distinct recovery levels — do not collapse them:**
+
+| Level                                                     | State on 2026-10-19                                       | Evidence required to advance                                                                       |
+| :-------------------------------------------------------- | :-------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
+| 1. Scripts and runbooks present                           | **YES** (`scripts/backup.sh`, two runbooks)               | n/a — this is not a gate                                                                           |
+| 2. Provider backup schedule/retention verified            | **NOT VERIFIED**                                          | Provider console/API evidence: schedule, retention window, PITR scope, artifact IDs                |
+| 3. Restore drill planned                                  | **YES** (§17.5 plan, `PLATFORM-UNBLOCK-REQUEST.md` row 8) | n/a — a plan earns no gate credit                                                                  |
+| 4. Restore drill executed with recorded recovery evidence | **NOT RUN — REHEARSAL EVIDENCE MISSING**                  | Drill log, artifact integrity check, measured RTO ≤ 30 min / RPO ≤ 24 h, invariants, readiness 200 |
+
+**Rollback:** documented only. **NOT VERIFIED — REHEARSAL EVIDENCE MISSING.** The word "rehearsed" must not be used for this gate until a rehearsal log exists.
 
 ---
 
@@ -609,12 +641,30 @@ hang). Representative new/updated tests:
 
 ### 16.5 G-4 — `js/insufficient-password-hash` (RETAINED OPEN)
 
+> **[FRAMING CORRECTED 2026-10-19 — the historical text below is preserved unchanged.]** This passage
+> was drafted on a password-hash assumption that the verified data flow does not support. The flagged
+> statement is the SHA-256 digest of a 256-bit CSPRNG OAuth nonce
+> (`services/identity/src/auth/OAuthState.ts:47`), not a hash of a stored password or of any user-chosen
+> credential, so there is no password cost/parameter migration to schedule. The governing description and
+> the still-pending decision are in §17.2 (Owner-Review Record 1) and §18.4, and in
+> `SECURITY-DISPOSITION-RECORDS-51-39.md` §2. **No decision has been recorded; alert #51 remains open.**
+
 Kept open rather than "fixed" because a password-hash cost/parameter change is a **data-migration
 decision** with credential-verification consequences, not a bounded code fix. Changing the hash
 cost silently would invalidate existing stored credentials or force a re-hash-on-login migration that
 must be owned and scheduled. Documented residual risk and required owner decision below.
 
 ### 16.6 G-5 — `js/clear-text-storage-of-sensitive-data` (RETAINED OPEN)
+
+> **[FRAMING CORRECTED 2026-10-19 — the historical text below is preserved unchanged.]** The sink has
+> since been traced to the actual storage path. The flagged write stores `{state, next}` — a server-minted
+> OAuth CSRF nonce and a redirect path — in `sessionStorage['vedmoulya-oauth-pending']`
+> (`apps/web/src/auth/session-manager.ts:355-357`, plus the server-rendered callback write at
+> `services/identity/src/auth/AuthRoutes.ts:307-308`). **No access token, refresh token, password,
+> authorization code, or client secret is stored there**, and the path is not a dev/test fixture, so a
+> false-positive disposition is not the applicable route. The governing description and the still-pending
+> decisions are in §17.2 (Owner-Review Record 2) and §18.4, and in
+> `SECURITY-DISPOSITION-RECORDS-51-39.md` §3. **Alert #39 remains open.**
 
 Kept open pending review of whether the flagged write path handles a value that is genuinely a
 secret in production or only a test/dev fixture. Disposition requires reading the data-flow to the
@@ -643,3 +693,343 @@ CodeQL re-evaluation, Preview validation, or deployment approval.
 No push, merge, deploy, production migration, environment change, or infrastructure modification
 occurred during Phase 3. All remediation was performed locally on the authorized `main` lineage; the
 deployed RC SHA is unchanged.
+
+---
+
+## 17. Phase-4 Release Acceptance & External Gate Closure Review (2026-10-18) — **historical; §18 governs**
+
+**Scope:** Evidence-based external gate closure review, security-owner review records for retained findings, recovery rehearsal planning, and external acceptance gap assessment. Read-only provider inspection and local checks only. No push, deploy, rollback, migration, environment variable write, or infrastructure change was performed.
+
+### 17.1 Exact repository state and commit graph
+
+The repository state was inspected and verified live:
+
+- **Current branch:** `main`
+- **HEAD SHA:** `347164edd2d76d87589db71bc3d1bec83a302cc8` (`fix(core): remediate verified s14 codeql findings`)
+- **Canonical Release Candidate (Deployed):** `08731d2287762299479ac8be738aa0089c433ce0`
+- **Upstream divergence:** `main` is ahead 8, behind 0 of `origin/main` (`08731d2287762299479ac8be738aa0089c433ce0`). All 8 commits are local and unpushed.
+- **Working tree:** Clean at the time of this review. **[CORRECTED 2026-10-19]** At Phase-5 capture `git status --short` shows 4 modified governance documents (documentation only).
+- **Stashes:** Zero stashes (`git stash list` empty; `refs/stash` unresolvable).
+
+#### Verified commit sequence above `origin/main`:
+
+```
+347164ed fix(core): remediate verified s14 codeql findings (HEAD)
+1ae96566 docs(docs): split the merged phase-9 row in the s14 baseline table
+cc5e63c9 docs(docs): state the s14 local commit set without a brittle count
+082d6284 docs(docs): repair s14 audit table rows and escape a cell pipe
+07ca1056 docs(docs): record the s14 phase-2 commit hash and clean tree
+7a1d81fd docs(docs): revalidate s14 rc via exact-sha ci and live deployment identity
+27dc57e3 docs(docs): close s14 exact-sha ci gaps via verified run
+d1f8eeea docs(docs): finalize s14 rc certification evidence
+08731d22 chore(meta): complete repository audit, apply stashed tls fix and audit evidence (origin/main)
+```
+
+#### Diff inspection of security remediation commit `347164edd2d76d87589db71bc3d1bec83a302cc8`:
+
+- 50 files changed, 1,213 insertions, 223 deletions.
+- Replaced ambiguous, backtracking regular expressions with single-pass, bounded linear scans across 20+ shipped source files.
+- Remediated 41 of 43 CodeQL alerts: 36× `js/polynomial-redos`, 2× `js/insecure-randomness`, 1× `js/bad-tag-filter`, 1× `js/shell-command-constructed-from-input`, and 1× `js/incomplete-url-substring-sanitization` in a test fixture.
+- Added comprehensive adversarial-input regression tests verifying linear behavior and absence of ReDoS vulnerabilities.
+
+### 17.2 Retained security finding owner-review records
+
+Two findings from the 43-alert baseline are retained open with technical justifications. As mandated by policy, neither finding is unilaterally dismissed or labeled as a confirmed false positive. Both require formal sign-off from Platform Security Lead (`SEC-SIGN-OFF`).
+
+#### Owner-Review Record 1: Nonce SHA-256 Digest (`js/insufficient-password-hash`)
+
+- **Alert Number & Rule:** Alert #51 — `js/insufficient-password-hash` (Severity: High)
+- **Source Location:** `services/identity/src/auth/OAuthState.ts:47` (`hashOAuthState`)
+- **Actual Data Flow:**
+  1. `createOAuthState()` generates 32 cryptographically secure random bytes via `randomBytes(32).toString('base64url')` (256 bits of entropy).
+  2. The raw token is returned to the user as the URL `state` query parameter for the Google OAuth 2.0 authorization request.
+  3. The server computes `createHash('sha256').update(state).digest('hex')` via `hashOAuthState(state)` and persists only this SHA-256 hex digest (`stateHash`) in the `oauth_states` table along with a 10-minute expiry timestamp (`expiresAt`).
+  4. On callback from Google, the presented raw state is hashed via SHA-256 and matched against the unconsumed store entry.
+- **Threat Model:** Cross-Site Request Forgery (CSRF) in OAuth 2.0 authentication flows. The purpose is state correlation across an external redirect to ensure the response originates from an authorization transaction initiated by the same client.
+- **Affected Code Paths:** `services/identity/src/auth/OAuthState.ts`, `services/identity/src/infrastructure/persistence/OAuthStateStore.ts`, and Google OAuth router endpoints (`/auth/google/url`, `/auth/google/callback`).
+- **Compatibility Implications:** Applying a slow password-hashing function (such as bcrypt, scrypt, or Argon2id) to OAuth state nonces would impose significant CPU overhead and response latency on high-frequency login redirects, require salting and schema modifications that prevent fast indexed lookups, and offer zero additional security benefit because the input token already contains 256 bits of CSPRNG entropy (unlike human-chosen passwords, which are susceptible to dictionary attacks).
+- **Evidence:** CSPRNG source `randomBytes(32)`, strict 10-minute TTL (`OAUTH_STATE_TTL_MS`), single-use lookup-and-delete pattern, zero reuse across sessions.
+- **Proposed Disposition (UNSIGNED — AWAITING OWNER APPROVAL):** Engineering assessment only; **no risk acceptance, dismissal, or approval has been recorded.**
+- **Decision Owner:** Platform Security Lead / AppSec (`SEC-SIGN-OFF`).
+
+#### Owner-Review Record 2: Client SessionStorage OAuth State (`js/clear-text-storage-of-sensitive-data`)
+
+- **Alert Number & Rule:** Alert #39 — `js/clear-text-storage-of-sensitive-data` (Severity: High)
+- **Source Location:** `apps/web/src/auth/session-manager.ts:357`
+- **Actual Data Flow:**
+  1. In `beginGoogleSignIn(next)`, the web application receives the authorization URL and ephemeral `state` nonce from the backend.
+  2. The client packages `{ state, next }` into a `PendingOAuth` object.
+  3. Line 357 executes: `window.sessionStorage.setItem(PENDING_OAUTH_KEY, JSON.stringify(pending))`.
+  4. The browser navigates via full-page redirect to Google's authentication portal.
+  5. On return to `/auth/callback`, `completeGoogleSignIn` reads `sessionStorage.getItem(PENDING_OAUTH_KEY)` to verify that `callback.state === pending.state` before invoking the backend token exchange.
+- **Threat Model:** Local browser data exposure / XSS. An attacker executing arbitrary script in the origin tab could read `sessionStorage`. However, if an attacker has achieved arbitrary script execution within the origin context, all browser-memory secrets are already compromised.
+- **Affected Code Paths:** `apps/web/src/auth/session-manager.ts` and `apps/web/src/app/auth/callback/page.tsx`.
+- **Compatibility Implications:** Standard client-side OAuth 2.0 PKCE / CSRF correlation pattern. No access tokens, refresh tokens, passwords, or client secrets are written to `sessionStorage`.
+- **Evidence:** Stored payload is strictly `{ state: string, next: string }`. `sessionStorage` is tab-scoped, automatically purged when the browser tab is closed, and strictly isolated by the browser's Same-Origin Policy.
+- **Proposed Disposition (UNSIGNED — AWAITING OWNER APPROVAL):** Engineering assessment only; **no risk acceptance, dismissal, or approval has been recorded.**
+- **Decision Owner:** Platform Security Lead / Web Architecture Owner (`SEC-SIGN-OFF`).
+
+### 17.3 External CI and CodeQL status
+
+- **Push Authorization Requirement:** Pushing commit `347164edd2d76d87589db71bc3d1bec83a302cc8` to `origin/main` (or opening a PR) requires explicit written authorization from the Repository / Release Owner (`PUSH-AUTH-REF`).
+- **Remote CI Status for `347164ed`:** **NOT RUN** (stopped at the push authorization boundary).
+- **Remote CodeQL Status for `347164ed`:** **NOT RUN** (CodeQL runs in CI upon push to `main` or pull request).
+- **Live CodeQL Alert Baseline:** Queried read-only via GitHub API (`gh api repos/ak9848515-dev/vedmoulya/code-scanning/alerts?state=open&per_page=100`). Exactly **43 open alerts** remain active on remote `refs/heads/main` (42 high, 1 medium; 42 in shipped source).
+- **Closure Boundary:** CodeQL cannot be claimed clean or closed until commit `347164ed` has been authorized, pushed, and analyzed remotely by GitHub CodeQL, and the two retained findings receive formal owner sign-off.
+
+### 17.4 Preview and identity acceptance
+
+- **Missing Preview Environment Variables (Names Only):**
+  Inspected live via `vercel env ls preview`:
+  - **Present in Preview:** `KV_REST_API_TOKEN`, `KV_REST_API_URL`, `KV_REST_API_READ_ONLY_TOKEN`, `KV_URL`, `REDIS_URL`.
+  - **Missing from Preview:** `IDENTITY_DATABASE_URL`, `AUTH_JWT_SECRET`, `APP_URL`, `AI_GOOGLE_API_KEY`, `AI_CREDENTIAL_ENCRYPTION_KEY`, Google OAuth client credentials.
+  - **Optional Gate Flag:** `IDENTITY_SCHEMA_READINESS_GATE` (unset in both Preview and Production).
+- **Isolated Non-Production Database Requirement:**
+  - Preview requires a dedicated PostgreSQL 16+ instance or serverless branch (e.g. Neon branch).
+  - Strict isolation boundary: Under no circumstances may Preview connect to, mirror, or restore production user credentials, tokens, or PII.
+  - Connection must enforce SSL (`sslmode=require`) with a least-privilege application role.
+- **Migration Compatibility & Smoke Tests:**
+  - The identity schema migration ledger must confirm forward-only progression through `005_timestamptz_instants`. Zero down-migrations exist.
+  - Post-deployment smoke test: `bash scripts/deploy/smoke-test.sh "$PREVIEW_URL"` must report `PASSED`.
+  - Endpoints `/health/live` and `/health/ready` must return HTTP 200 with `database: healthy`.
+  - Production health (`dpl_2Lqkq1PV6YqPtxQsLVbbV6St7VbF`) was re-verified live (HTTP 200, `database: healthy`, `gitSha = 08731d22`), but **production health does not satisfy isolated Preview acceptance**.
+
+### 17.5 Disaster recovery, backup & rollback readiness plan
+
+Read-only inspection of repository runbooks (`docs/runbooks/backup-restore-runbook.md`, `docs/runbooks/rollback-runbook.md`, and `scripts/backup.sh`) confirms recovery procedures are documented, but no drill has ever been executed.
+
+#### Restore-Drill & Rollback-Rehearsal Plan:
+
+1. **Prerequisites:**
+   - Dedicated scratch database instance (PostgreSQL 16+) isolated from production and preview.
+   - Authorized maintenance window with assigned DR Lead (`DR-DRILL-REF`) and on-call rollback authority (`OPS-ONCALL-REF`).
+   - Backup script execution capability (`scripts/backup.sh`).
+2. **Safety Controls:**
+   - Strictly read-only backup generation from target environment (`pg_dump --format=custom`).
+   - Restore target explicitly hardcoded to scratch database URL (`SCRATCH_DATABASE_URL`).
+   - Never run restore commands against `PRODUCTION_DATABASE_URL` during drills.
+3. **Drill Execution Steps:**
+   - Step 1: Capture snapshot using `bash scripts/backup.sh --db identity --out ./backups`. Verify compressed archive integrity (`gzip -t`).
+   - Step 2: Record drill start timestamp. Execute restore: `pg_restore --clean --if-exists -d "$SCRATCH_DATABASE_URL" ./backups/identity-*.sql.gz` (or `psql < restore.sql`).
+   - Step 3: Record completion timestamp and compute elapsed recovery time. Validate: **RTO ≤ 30 minutes**.
+   - Step 4: Execute ledger validation query: `SELECT migration_id, installed_at FROM identity_schema_migrations ORDER BY installed_at DESC LIMIT 5;`. Require head `005_timestamptz_instants`.
+   - Step 5: Verify table row counts and referential integrity across `users`, `refresh_token_denylist`, `oauth_states`. Validate: **RPO ≤ 24 hours**.
+4. **Rollback Rehearsal Steps:**
+   - Step 1: Deploy candidate release to non-production target.
+   - Step 2: Inject simulated abort trigger (e.g. readiness failure or high latency).
+   - Step 3: Execute instant platform rollback: `npx vercel rollback --token="$VERCEL_TOKEN"`.
+   - Step 4: Measure time to traffic redirection (< 1 minute target). Confirm HTTP 200 on `/health/ready` under the restored version.
+5. **Success Criteria & Evidence Requirements:**
+   - Complete drill log signed by DR Lead and Platform Operations On-Call.
+   - Recorded RTO ≤ 30 min and RPO ≤ 24h.
+   - Zero production data impact.
+
+### 17.6 Domain configuration and Preview deployment status
+
+- **Application Domain:** `app.vedmoulya.com` was queried via DNS resolution (`Resolve-DnsName`). Result: NXDOMAIN / no DNS records configured.
+- **Vercel Custom Domains:** Inspected via `vercel domains ls`. Result: `0 Domains found under ak9848515-devs-projects`.
+- **Production Alias & TLS:** `vedmoulya-web.vercel.app` resolves to `216.198.79.67` / `64.29.17.67`. TLS is valid (Strict-Transport-Security enforced). `GET /health/ready` returns HTTP 200 OK. `GET /api/trpc/health.version` returns `gitSha = 08731d2287762299479ac8be738aa0089c433ce0`.
+- **Preview Deployment State:** Latest preview deployment `dpl_66jccsFpspRoQ9ujsedCTHfQw8FG` (`vedmoulya-17sbwom3o-ak9848515-devs-projects.vercel.app`) was inspected via Vercel CLI. It runs alias `vedmoulya-web-git-fix-s14-rc-closure-ak9848515-devs-projects.vercel.app` (branch `fix/s14-rc-closure` / PR #44) and is protected by Vercel SSO authentication. It does not run RC `08731d22` or local fix commit `347164ed`.
+
+### 17.7 Governing certification decision and readiness scores
+
+> **[SUPERSEDED 2026-10-19 by §18.]** The 100/100 below is withdrawn. It used a five-block formula that contains **no SAST criterion**, applies the exact-SHA CI credit earned by `08731d22` to a session whose HEAD was `347164ed`, and double-counts SAST by also scoring it 8/20 operationally. It is preserved as history only.
+
+#### Readiness Scoring (Handoff §10 Rubric):
+
+- **Repository & CI Readiness:** **100 / 100**
+  - Git repository clean, linear commit graph: 20/20
+  - Local code gates (TypeScript, 58/58 ESLint, 18/18 Quality Gates): 30/30
+  - Test suites (13,268 passing, security regression suite passing): 20/20
+  - Dependency audits (0 high/critical in production): 15/15
+  - Exact-SHA CI green run `39039076592` on release candidate `08731d22`: 15/15
+  - **Subtotal:** 100 / 100
+- **Operational Release Readiness:** **53 / 100**
+  - Production runtime identity verified (`gitSha = 08731d22`, `/health/ready` 200): 25/25
+  - Preview environment identity acceptance (blocked: missing DB & JWT secrets): 0/20
+  - Remote CodeQL on fix commit `347164ed` (unpushed; 43 alerts open on remote `main`): 8/20 (local fix only; 2 retained findings pending sign-off)
+  - Disaster recovery drill & backup schedule at provider: 10/20 (plans documented; provider schedule/drill unexecuted)
+  - Domain configuration & live rollback rehearsal: 10/15 (production alias verified; custom domain unconfigured; rollback drill unexecuted)
+  - **Subtotal:** 53 / 100
+
+#### Final Certification Disposition:
+
+**`CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN`**
+
+The release candidate `08731d2287762299479ac8be738aa0089c433ce0` is conditionally certified. Promotion to unconditional certification requires:
+
+1. Written authorization (`PUSH-AUTH-REF`) to push commit `347164edd2d76d87589db71bc3d1bec83a302cc8` and verify green CI and CodeQL analysis remotely.
+2. Formal written sign-off (`SEC-SIGN-OFF`) from Platform Security Lead on the two retained finding review records.
+3. Provisioning of an isolated non-production PostgreSQL database and configuration of Preview environment variables (`IDENTITY_DATABASE_URL`, `AUTH_JWT_SECRET`).
+4. Successful execution and documentation of the disaster recovery restore drill and rollback rehearsal.
+
+---
+
+## 18. Phase-5 Certification Integrity & Release Approval Readiness Review (2026-10-19) — **this section governs**
+
+**Scope:** read-only evidence review of the four S14 governance artifacts, plus local-only governance edits. No push, deploy, environment write, migration, restore, rollback, alert dismissal, or source-code change. The purpose is a **trustworthy record**, not a higher score.
+
+### 18.1 Verified repository state (2026-10-19)
+
+| Command                                                | Observed value                                                                                                                                                   |
+| :----------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git status --short --branch`                          | `## main...origin/main [ahead 8]` + **4 modified governance documents** (this file, `RELEASE-GAP-REGISTER.md`, `FINAL-REPORT.md`, `PLATFORM-UNBLOCK-REQUEST.md`) |
+| `git rev-parse HEAD`                                   | `347164edd2d76d87589db71bc3d1bec83a302cc8`                                                                                                                       |
+| `git rev-parse origin/main`                            | `08731d2287762299479ac8be738aa0089c433ce0`                                                                                                                       |
+| `git rev-list --left-right --count origin/main...HEAD` | `0	8` (0 behind, 8 ahead)                                                                                                                                         |
+| `git stash list`                                       | **empty** (0 stashes)                                                                                                                                            |
+| `git cat-file -t` for both SHAs                        | both are valid commits                                                                                                                                           |
+
+**Correction to §17.1/§20.2:** the tree was clean when Phase 4 was written, but at Phase-5 capture it is **not** clean — it carries the four uncommitted Phase-4 governance edits. They are documentation only; no application source, CI, configuration, or secret is modified. This is recorded rather than described as clean.
+
+**Commit identity:** `08731d22` remains the deployed production RC (`origin/main`; `/api/trpc/health.version` returned the full 40-character SHA on 2026-10-19). `347164ed` remains an **unpushed local candidate**; it is not a release candidate until CI and CodeQL have evaluated it.
+
+### 18.2 Phase-4 inconsistencies and evidence-backed resolutions
+
+| #   | Inconsistency                                                                                                                     | Evidence                                                                                                                                                                                                                             | Resolution                                                                                                                                                                                                                                                                    |
+| :-- | :-------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A   | Repository readiness stated as **100/100** although remote CI and CodeQL for HEAD `347164ed` are unrun                            | §17.3/§20.4 state both **NOT RUN**; `gh run list --commit 347164ed` returns **no runs**; live CodeQL = **43 open**                                                                                                                   | **Score scope corrected.** The 100 mixed the CI-verified baseline `08731d22` with the unverified local fix and awarded the 12-point SAST criterion on local evidence. Corrected: **`08731d22` = 88/100**; **`347164ed` = 58/58 local points, 0/42 remote points**. See §18.3. |
+| B   | Rollback called **"rehearsed"** in `FINAL-REPORT` §20.6 while marked **NOT RUN / NOT EVIDENCED** here and in the gap register     | No rehearsal log, no deployment target, no recorded recovery timestamps; §17.5 contains only a **plan**                                                                                                                              | **NOT VERIFIED — REHEARSAL EVIDENCE MISSING.** The word "rehearsed" is removed from the current status. Documented ≠ rehearsed.                                                                                                                                               |
+| C   | Backup/DR gate treated as one item, letting the helper script imply recoverability                                                | `scripts/backup.sh` and runbooks exist; **no** scheduled-backup or retention evidence; **no** drill artifacts (`backups/`, `*.sql.gz`); **no** RTO/RPO measurement                                                                   | Split into four levels (§13). Only **levels 1 and 3** (scripts/runbooks, plan) are satisfied; levels 2 and 4 are **not verified / not run**.                                                                                                                                  |
+| D   | Two CodeQL findings described as a "false positive" and as "documented risk acceptance"                                           | Alert **#51** `js/insufficient-password-hash` (`OAuthState.ts:47`) and alert **#39** `js/clear-text-storage-of-sensitive-data` (`session-manager.ts:357`) both returned `state: open` on 2026-10-19; no signed owner decision exists | Both remain **OPEN** pending `SEC-SIGN-OFF`. The engineering assessments are **proposals**, not dispositions. No alert is false-positive-dismissed or risk-accepted in this record.                                                                                           |
+| E   | CI evidence applied across SHAs: run `39039076592` cited for a session whose HEAD was `347164ed`                                  | Run `39039076592.headSha = 08731d22`; no run exists for `347164ed`                                                                                                                                                                   | Exact-SHA CI credit belongs **only** to `08731d22`. Candidate CI is **NOT RUN** (new gap `GAP-S14-14`).                                                                                                                                                                       |
+| F   | Gap statuses used non-canonical values (`PARTIALLY CLOSED`, `CLOSED WITH LIMITATION`, `BLOCKED EXTERNAL`, `OPEN (accepted risk)`) | Register §Phase-4 table                                                                                                                                                                                                              | Normalised to one of: **CLOSED · OPEN · BLOCKED · NOT RUN · AWAITING APPROVAL · ACCEPTED RISK**. `ACCEPTED RISK` is used **nowhere**, because no signed acceptance exists.                                                                                                    |
+| G   | Handoff §1.2/§5 still described the local lineage as documentation + one regression test (`d1f8eeea`)                             | HEAD `347164ed` changes **50 files, +1,213/−223**, including production source                                                                                                                                                       | The statements are true only of `d1f8eeea`; §18.1 defines the current candidate and its 50-file delta.                                                                                                                                                                        |
+| H   | `FINAL-REPORT` §20.7 listed `GAP-S14-13` as closed on a clean tree                                                                | Tree carries 4 modified docs at Phase-5 capture                                                                                                                                                                                      | `GAP-S14-13` = **AWAITING APPROVAL**; local commits remain unpushed.                                                                                                                                                                                                          |
+
+### 18.3 Corrected scoring — formula and scope
+
+The §10 rubric is retained because it is the only rubric that contains an explicit SAST criterion. The defect was application, not arithmetic.
+
+**Deployed RC `08731d22` — Repository & CI readiness = 88/100**
+
+```
+Typecheck + format (10) + Lint (8) + Full tests (12) + Real-engine DB (8)
++ Config/quality gates (10) + Secret scan (5) + Production dependency audit (5)
++ Accessibility CI (5) + Performance CI (5) + Exact-SHA CI incl. G8 (20)
++ SAST with no unresolved blocking alert (0 of 12)
+= 88
+```
+
+The SAST criterion earns **0** because 43 alerts were open on `refs/heads/main` at this SHA. CI-run success for `G6` is **not** alert closure.
+
+**Local candidate `347164ed` — evidence-scoped, no single score**
+
+```
+Locally verifiable criteria (1–7):                58 / 58  verified
+Remote-only criteria (8–11: a11y, perf, CI, SAST): 0 / 42  NOT RUN
+```
+
+A total is deliberately withheld: adding local and remote classes is the conflation this review corrects.
+
+**Full operational release readiness (deployed RC) = 50/100**
+
+| Component                                   | Weight  | Earned | Basis                                                           |
+| :------------------------------------------ | :------ | :----- | :-------------------------------------------------------------- |
+| Repository & CI readiness carried           | 25      | 22     | 25 × 88%                                                        |
+| One SHA across git/CI/runtime               | 10      | 10     | `origin/main` = CI `headSha` = production `gitSha` = `08731d22` |
+| Production boots and is healthy             | 10      | 10     | `/health/live` 200, `/health/ready` 200 (`database: healthy`)   |
+| Production config completeness              | 5       | 4      | Required names present; drift gate unset                        |
+| Isolated non-production identity acceptance | 20      | 0      | **NOT RUN**                                                     |
+| Backup schedule + retention                 | 10      | 2      | PITR/history window only; no schedule/retention evidence        |
+| Restore drill with measured RTO/RPO         | 10      | 0      | **NOT RUN**                                                     |
+| Rollback rehearsal + named authority        | 5       | 0      | **NOT RUN — EVIDENCE MISSING**                                  |
+| Deployed observability evidence             | 5       | 2      | Metrics scraped; no log/alert record                            |
+| **Total**                                   | **100** | **50** |                                                                 |
+
+**No readiness claim follows from these numbers.** The operational score is 50% because half the rubric is unexecuted, not because the executed half is weak.
+
+### 18.4 Security decisions still pending
+
+| Alert   | Rule                                             | Location                                      | Current status                            | Decision required                                                                                                                                     |
+| :------ | :----------------------------------------------- | :-------------------------------------------- | :---------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **#51** | `js/insufficient-password-hash` (high)           | `services/identity/src/auth/OAuthState.ts:47` | **OPEN** — engineering review record only | Platform Security Lead (`SEC-SIGN-OFF`): accept the nonce-digest design with a written rationale and re-evaluation date, **or** require a code change |
+| **#39** | `js/clear-text-storage-of-sensitive-data` (high) | `apps/web/src/auth/session-manager.ts:357`    | **OPEN** — engineering review record only | Platform Security Lead (`SEC-SIGN-OFF`): accept the tab-scoped `{state, next}` handoff with rationale and date, **or** require a code change          |
+
+Both records preserve their threat models (OAuth CSRF correlation; browser storage exposure under XSS) and compatibility implications. **Neither is dismissed.** If the Security Lead disagrees with the engineering assessment, the code-change option remains open and is not prejudged here.
+
+### 18.5 Gap register — canonical statuses (detail in `RELEASE-GAP-REGISTER.md`)
+
+| Gap        | Status                | Governing evidence                                                                                    |
+| :--------- | :-------------------- | :---------------------------------------------------------------------------------------------------- |
+| GAP-S14-01 | **CLOSED**            | Fix merged in `08731d22`; exact-SHA CI `39039076592` green                                            |
+| GAP-S14-02 | **BLOCKED**           | No isolated non-production identity DB; Database Owner approval absent                                |
+| GAP-S14-03 | **BLOCKED**           | Preview has only `KV_*` + `REDIS_URL`; secrets-owner approval absent                                  |
+| GAP-S14-04 | **CLOSED**            | G8 E2E green on exact RC `08731d22`                                                                   |
+| GAP-S14-05 | **OPEN**              | 43 alerts open remotely; 2 dispositions undecided; candidate CodeQL NOT RUN                           |
+| GAP-S14-06 | **CLOSED**            | Script merged; local exit 0, `HIT_COUNT=20`, 0 shipped-source hits; durable log is a noted limitation |
+| GAP-S14-07 | **OPEN**              | Dev-only highs; **no signed acceptance record**                                                       |
+| GAP-S14-08 | **BLOCKED**           | Depends on GAP-S14-02/03                                                                              |
+| GAP-S14-09 | **BLOCKED**           | No authorized staging, no backup artifacts                                                            |
+| GAP-S14-10 | **BLOCKED**           | Provider schedule/retention unevidenced                                                               |
+| GAP-S14-11 | **NOT RUN**           | No authorized deployment to observe or roll back                                                      |
+| GAP-S14-12 | **OPEN**              | `app.vedmoulya.com` NXDOMAIN; 0 Vercel domains                                                        |
+| GAP-S14-13 | **AWAITING APPROVAL** | 8 unpushed commits + uncommitted governance edits                                                     |
+| GAP-S14-14 | **NOT RUN**           | No CI run for `347164ed`                                                                              |
+
+### 18.6 Release authorization checklist
+
+#### Approval A — Security-fix publication
+
+- **Commit proposed for publication:** `347164edd2d76d87589db71bc3d1bec83a302cc8` (single commit on top of `1ae96566`; 50 files, +1,213/−223).
+- **Intended range:** `08731d22..347164ed` (8 commits; 7 docs/evidence commits plus the security-fix commit).
+- **Working tree:** contains 4 _modified_ governance documents, **1 _modified_ candidate test file** (`services/api/src/__tests__/router-registry.test.ts` with 30s timeout adjustment), **and 2 _untracked_ security documents**; they must be committed or excluded before a clean publication, and the choice belongs to the approver. (Value-object files `KnowledgeId.ts`, `MemoryId.ts`, and `apps/web/next.config.ts` were restored to exact HEAD `347164ed` in Step 6; see §18.9 R-5.)
+- **Required remote checks after push:** full CI (G1–G8, Build, fail-closed `CI Result`) and CodeQL analysis/SARIF upload on the pushed SHA; then `gh api …/code-scanning/alerts?state=open` to confirm the 41 remediated alerts clear.
+- **Authorization status:** **NOT AUTHORIZED by this phase.** No push occurred.
+
+#### Approval B — Security dispositions
+
+- Alert **#51** `js/insufficient-password-hash` @ `OAuthState.ts:47`; alert **#39** `js/clear-text-storage-of-sensitive-data` @ `session-manager.ts:357`.
+- **Decision required:** Platform Security Lead records, in writing, accept-or-remediate for each, with rationale, owner, and re-evaluation date.
+- **Preserved option:** reviewers may reject the engineering assessment and require code changes; no acceptance is pre-committed.
+
+#### Approval C — Isolated Preview identity
+
+- **Required Preview variable names only:** `IDENTITY_DATABASE_URL`, `AUTH_JWT_SECRET`, `REDIS_URL`; `IDENTITY_SCHEMA_READINESS_GATE` remains **unset** until the ledger is verified.
+- **Prerequisite:** a dedicated, isolated non-production PostgreSQL 16+ instance/branch with a least-privilege role and `sslmode=require`; **never** production credentials, data, or PII.
+- **Evidence required:** deployment URL/ID, `/health/live` and `/health/ready` 200 with `database: healthy`, smoke test `PASSED`, ledger head `005_timestamptz_instants` (5 rows), signup persistence, logout → `refresh_token_denylist` family row, zero fail-closed migration log lines, drift-gate 200/503 behaviour.
+- **Authorization status:** **NOT GRANTED.** No resource created, no variable written.
+
+#### Approval D — Recovery readiness
+
+- **Backup evidence needed:** provider schedule (frequency), retention (daily ≥ 30 d, monthly ≥ 12 mo), PITR/history scope and recovery point, artifact IDs — captured without secrets.
+- **Restore-drill success criteria:** restore into a scratch database from a verified artifact; integrity check passes; measured **RTO ≤ 30 min**, **RPO ≤ 24 h**; ledger head and row-count/key invariants match; app readiness 200 against the restored copy; zero production impact.
+- **Rollback rehearsal prerequisites:** an authorized non-production deployment of the candidate, a named Rollback Authority, an injected abort trigger, and a recorded `npx vercel rollback`; success = traffic restored, readiness 200, invariants intact, elapsed time recorded.
+- **Required owner roles:** DR Lead / Database Owner (`DR-DRILL-REF`), Platform Operations On-Call / Rollback Authority (`OPS-ONCALL-REF`), Release/Deploy Operator (`REL-REF`). **No named individuals are invented here.**
+- **Authorization status:** **NOT GRANTED.** Nothing was executed.
+
+#### Approval E — Domain configuration
+
+- **Current evidence:** `app.vedmoulya.com` → NXDOMAIN; `vercel domains ls` → 0 domains; public alias `vedmoulya-web.vercel.app` resolves with valid TLS and returns 200 / `gitSha 08731d22`.
+- **Change required:** add the domain in the Vercel project and create the DNS record Vercel specifies (A/CNAME), then verify TLS and health. This is a hygiene item, not a release blocker.
+- **Authorization status:** **NOT GRANTED.** No DNS or project setting was edited.
+
+### 18.7 Actions not taken
+
+No commit, push, PR, merge, deploy, promotion, rollback, migration, restore, database creation, environment-variable write, secret read, DNS edit, or CodeQL dismissal was performed. Provider interaction was read-only: `gh run list`/`gh api`, `vercel env ls`/`vercel domains ls`, DNS lookup, and unauthenticated health probes. The only changes are local governance-document edits, uncommitted.
+
+### 18.8 Certification conclusion
+
+**`CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN` remains the correct disposition, and the record is now internally consistent.**
+
+- The deployed RC `08731d22` is genuinely CI-verified and genuinely serving production, but it carries **43 open CodeQL alerts** and has never passed isolated identity acceptance or a recovery drill.
+- The security-fix candidate `347164ed` is locally green but **remote-unverified**; it cannot be certified, published, or described as CI-verified.
+- Rollback is **documented only**; restore is **planned only**; backup scheduling is **unevidenced**. None is "rehearsed", "verified", or "accepted".
+- No security disposition is recorded; both retained alerts remain open with engineering proposals.
+
+The next decision is an authorization decision, not an engineering one: approve **Approval A** (publication) and **Approval B** (dispositions), and grant the environment/recovery approvals C–D. Until then, no release-readiness claim beyond the scores above is supported.
+
+### 18.9 Reconciled governance observations (2026-10-19; documentation-only)
+
+Added by the Phase-6 reconciliation pass. Every item was verified read-only on 2026-10-19 (`git`, read-only `gh api` GETs). **No status, score, approval, alert, workflow, or repository setting was changed**, and nothing below grants or implies an approval.
+
+| ID      | Observation                                                                                | Evidence (read-only, 2026-10-19)                                                                                                                                                                                                                                                                                                                                                                                                              | Effect on this record                                                                                                                                                                                                                                               |
+| :------ | :----------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **R-1** | `main` is **not a protected branch** and the repository has **no rulesets**                | `GET /repos/ak9848515-dev/vedmoulya/branches/main/protection` → `404 Branch not protected`; `GET /repos/ak9848515-dev/vedmoulya/rulesets` → empty                                                                                                                                                                                                                                                                                             | The fail-closed `CI Result` job is **advisory**: it cannot block a push to `main`. Recorded as a **governance risk**; **no protection or ruleset change was made or requested**. Decision **pending** with the Repository Owner (`PLATFORM-UNBLOCK-REQUEST.md` §8). |
+| **R-2** | The repository is **public**, default branch `main`                                        | `GET /repos/ak9848515-dev/vedmoulya` → `visibility: "public"`, `default_branch: "main"`                                                                                                                                                                                                                                                                                                                                                       | Widens the exposure of an unprotected default branch; governance input to R-1, not a release blocker by itself.                                                                                                                                                     |
+| **R-3** | Dependabot **security-update** activity on the RC SHA was absent from the earlier sections | Three `dynamic` update runs on `08731d22`, all `success`: `39198900737` (2026-10-19T04:19:35Z — react, `@types/react`, `react-dom`, `@types/react-dom`), `39198911073` (04:19:43Z — vitest, `@vitest/coverage-v8`, jsdom), `39198931137` (04:19:58Z — `@types/node`, typescript, typescript-eslint, `@types/bcrypt`)                                                                                                                          | Dependency-change state recorded. It does **not** alter the RC CI result (`39039076592` on `08731d22`, `success`).                                                                                                                                                  |
+| **R-4** | A Dependabot PR CI run **failed** and further update PRs are pending                       | PR **#42** (`dependabot/npm_and_yarn/typescript-a585801199`, head `9f73eb8381e1cd49197a3601a6dc7fa4c54450cc`), run `39199309469` at 2026-10-19T04:24:30Z → `failure`; failing jobs `G1-G2`, `G3`, `G4`, `G5`, `G6`, `G7` and `CI Result` (`G8` and `Build` skipped). PR **#43** (`dependabot/npm_and_yarn/test-tooling-cac2368e1c`, run `39199188596`) `success`; react PR run `39199181912` `success`. **16 Dependabot PRs open** at capture | The red run is on a **Dependabot branch, not on `main`**. No CI claim in this document for `main` or `08731d22` is invalidated; the pending dependency changes are recorded as release-hygiene input to Approval A.                                                 |
+| **R-5** | The working-tree inventory omitted the untracked security documents and candidate test fix | `git status --porcelain` → 5 modified (4 governance docs + 1 test candidate `router-registry.test.ts`) + 2 untracked, 0 staged, 0 stashes                                                                                                                                                                                                                                                                                                     | Inventories corrected in §18.6 (Approval A) and in `FINAL-REPORT.md` §21.9, `RELEASE-GAP-REGISTER.md` and `PLATFORM-UNBLOCK-REQUEST.md` §8. Value-object files (`KnowledgeId.ts`, `MemoryId.ts`) and `next.config.ts` are verified restored to exact HEAD.          |
+| **R-6** | Candidate `347164ed` still has **no remote CI and no CodeQL analysis**                     | `gh api …/actions/runs?head_sha=347164edd2d76d87589db71bc3d1bec83a302cc8` → `total_count: 0`                                                                                                                                                                                                                                                                                                                                                  | Restated for the record: **no CI or CodeQL evidence exists for `347164ed`**. The green run `39039076592` covers `08731d22` only.                                                                                                                                    |
+
+**Explicitly unchanged by this pass:** alerts **#51** and **#39** remain `open` on `refs/heads/main` and `AWAITING APPROVAL`; release approval remains **NO-GO**; approver identities, DR/staging owner assignments, `PUSH-AUTH-REF`, and the branch-protection decision remain **pending or unassigned**.
