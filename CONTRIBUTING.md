@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-# Prerequisites: Node.js >=20, npm >=10, Docker
+# Prerequisites: Node.js >=22, npm >=10, Docker
 
 # 1. Clone the repository
 git clone https://github.com/vedmoulya/vedmoulya.git

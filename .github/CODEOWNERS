@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VedMoulya — CODEOWNERS
+#
+# Specifies code ownership for automatic review requests.
+# Syntax: <pattern> <owner> [<owner> ...]
+# Patterns match relative to the repository root using gitignore-style glob.
+# The last matching rule wins.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Default owner — all files not matched by a more specific rule.
+* @ak9848515-dev
+
+# ── Security-sensitive paths ─────────────────────────────────────────────────
+# Authentication, session management, and cryptographic primitives require
+# owner review on every change.
+/services/identity/src/auth/                @ak9848515-dev
+/apps/web/src/auth/                         @ak9848515-dev
+/apps/web/src/stores/auth-store.ts          @ak9848515-dev
+
+# ── CI / CD / GitHub configuration ───────────────────────────────────────────
+/.github/                                   @ak9848515-dev
+
+# ── Production configuration and scripts ─────────────────────────────────────
+/apps/web/next.config.ts                    @ak9848515-dev
+/packages/core/src/config/                  @ak9848515-dev
+/scripts/                                   @ak9848515-dev
+
+# ── Governance and audit documents ───────────────────────────────────────────
+/docs/audits/                               @ak9848515-dev
+/docs/runbooks/                             @ak9848515-dev
+/docs/ops/                                  @ak9848515-dev

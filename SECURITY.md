@@ -56,6 +56,22 @@ Dependency vulnerabilities are tracked continuously:
   [`docs/CVE_TRACKING.md`](docs/CVE_TRACKING.md), including known transitive
   issues with no upstream fix and their mitigation plans.
 
+## Security controls
+
+VedMoulya enforces the following gates on every commit to `main` via CI:
+
+| Control                       | Tool                                      | Requirement                                  |
+| :---------------------------- | :---------------------------------------- | :------------------------------------------- |
+| SAST — static analysis        | GitHub CodeQL (JavaScript/TypeScript)     | 0 unresolved blocking alerts                 |
+| Dependency audit (production) | `npm audit --omit=dev --audit-level=high` | Exit 0 (0 production vulnerabilities)        |
+| Secret scanning               | `scripts/s56-secret-scan.ps1`             | 0 hits in shipped source                     |
+| Type safety                   | TypeScript strict mode                    | 0 errors                                     |
+| Code style                    | ESLint + Prettier                         | 0 failures across all workspaces             |
+| Test coverage                 | Vitest                                    | ≥ 80% per workspace                          |
+| Dependency graph              | Internal cycle checker                    | 0 cycles across all workspaces               |
+| Accessibility                 | Playwright WCAG                           | All production routes pass structural checks |
+| Bundle size                   | `scripts/check-bundle-size.sh`            | Shared JS < 150 kB                           |
+
 ## Scope
 
 This policy covers the VedMoulya source code and its published artifacts
