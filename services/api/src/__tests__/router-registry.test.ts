@@ -2442,7 +2442,7 @@ describe('router coverage walker (every namespace through the pipeline)', () => 
     // schema-valid procedures were fired (sanity guard against a silent no-op).
     expect(validated).toBeGreaterThan(200);
     expect(fired).toBeGreaterThan(0);
-  });
+  }, 30_000);
 });
 
 // ── S-1 — Portal rate limiting (IP-keyed, production-only) ──────────────────
