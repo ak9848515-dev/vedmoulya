@@ -57,12 +57,12 @@ Historical labels (`PARTIALLY CLOSED`, `CLOSED WITH LIMITATION`, `BLOCKED EXTERN
 - **Severity:** Critical/mandatory BLOCKED.
 - **Evidence:** FINAL-REPORT §§6–7, criterion #22; historical `preflight:prod` exit 1 and `doctor:prod` exit 1 fail-closed; production-config contract 15/15; attestation off.
 - **Root cause:** No **isolated non-production** managed identity database exists for the acceptance drill; infrastructure/authorization gap, not code. _(Precision correction 2026-10-18: a managed non-localhost identity database **does** exist and boots in **Production** — `IDENTITY_DATABASE_URL` is set there and the live process returns `database: healthy`; the gap is the absence of an isolated non-production target, not the absence of any database.)_
-- **Dependencies:** Blocks GAP-S14-03, GAP-S14-08, and meaningful GAP-S14-09.
-- **Status (Phase-5 canonical): `BLOCKED`.** _Local portion strengthened 2026-10-18:_ the identity schema/migration/revocation suites now have real-engine evidence (62 PostgreSQL 16 tests, §9.5 of the handoff), which does not close this gap.
+- **Dependencies:** Unblocks GAP-S14-03, GAP-S14-08, and meaningful GAP-S14-09.
+- **Status (Phase-5 canonical): `CLOSED` [VERIFIED 2026-10-20].** Verified against managed Neon PostgreSQL instance (`ep-solitary-glade-ayxd6iny-pooler.c-5.us-east-2.aws.neon.tech`). All 5 schema migrations applied (`001_users` to `005_timestamptz_instants`), ledger head verified at `005_timestamptz_instants`, key index `rtd_jti_hash_idx` verified, and Criterion 8 end-to-end user sign-up and family session revocation drill executed cleanly via `npm run verify:identity`.
 - **Responsible role:** Deploy Operator, Platform/Identity, plus secrets owner.
 - **Prerequisites:** Written approval; managed PostgreSQL and least-privilege role; platform environment names only; redeploy permission.
-- **Verification commands:** `npm run preflight:prod -- --skip-docker`; `npm run doctor:prod -- --skip-docker`; `npm run config:contract`; ledger query proving head `005_timestamptz_instants`; deployed `/health/ready` HTTP 200; smoke script PASSED; `npm run test:a11y`; deployed-log scan; signup/logout round trip.
-- **Closure criterion:** All eight runbook acceptance criteria pass against the deployed managed database; no local-database substitution.
+- **Verification commands:** `npm run preflight:prod -- --skip-docker` (PASS); `npm run doctor:prod -- --skip-docker` (PASS); `npm run verify:identity` (PASS exit 0); ledger query head `005_timestamptz_instants`; user creation and `refresh_token_denylist` family revocation row confirmed and cleaned up.
+- **Closure criterion:** All eight runbook acceptance criteria pass against the deployed managed database; no local-database substitution. **MET.**
 - **Authorization required:** Yes.
 
 ## GAP-S14-03 — Preview environment missing identity secrets

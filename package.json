@@ -21,6 +21,7 @@
     "preflight:prod": "npx tsx scripts/preflight.ts --mode production",
     "doctor": "npx tsx scripts/doctor.ts",
     "doctor:prod": "npx tsx scripts/doctor.ts --mode production",
+    "verify:identity": "npx tsx scripts/verify-identity-acceptance.ts",
     "verify": "bash scripts/verify.sh",
     "check-port": "npx tsx scripts/check-port.ts",
     "lint": "node scripts/lint.mjs",

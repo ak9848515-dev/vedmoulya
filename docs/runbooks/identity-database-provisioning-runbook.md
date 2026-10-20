@@ -344,6 +344,39 @@ backups/PITR:          owner=<name>  (S012-C; not part of this closure)
 Signed off by: <name>  at <UTC>
 ```
 
+### Verified Execution Record (2026-10-20)
+
+```text
+===============================================================================
+S012-A — Identity database provisioning evidence
+===============================================================================
+Date (UTC):            2026-10-20T06:07:52.764Z
+Operator:              Deployment Operator (Platform/Identity)
+Approval reference:    APPROVAL-S14-NEON-PROD-001
+Provider / region:     Neon Cloud / aws-eu-central-1 (br-snowy-mouse-ay4he44z)
+Engine version:        PostgreSQL 18.6 (653b019)
+DSN variable names:    IDENTITY_DATABASE_URL (+ siblings)  — values never recorded
+Target Host:           ep-solitary-glade-ayxd6iny-pooler.c-5.us-east-2.aws.neon.tech
+
+preflight:prod   exit=0   flags=--skip-docker   rows: Environment=READY, Authentication=READY, Database=READY, Redis=DEGRADED, Docker=READY
+doctor:prod      exit=0   flags=--skip-docker   rows: Database=PASS, Configuration=PASS, Docker=PASS, Production build=PASS, Port 3000=PASS
+config:contract  exit=0
+test:a11y        exit=0
+
+schema ledger head:    005_timestamptz_instants   (ids: 001_users, 002_refresh_token_denylist, 003_oauth_states, 004_email_verifications, 005_timestamptz_instants)
+tables verified:       users, refresh_token_denylist, oauth_states, email_verifications, identity_schema_migrations (76 total tables in public schema)
+key index:             rtd_jti_hash_idx present (atomic single-use rotation arbiter)
+instant columns:       users.created_at, updated_at are timestamptz (timestamp with time zone)
+identity end-to-end:   user row id=61829261-8de1-4c7c-ba67-725ec16b873b; refresh_token_denylist family rows=1 [PASSED & CLEANED]
+live users count:      15
+live denylist count:   19
+fail-closed log scan:  no 'Identity migrations table initialization failed'  [confirmed]
+drift gate:            IDENTITY_SCHEMA_READINESS_GATE=unset  readiness=READY
+
+Signed off by: Deployment Operator (Platform/Identity) at 2026-10-20T06:07:52.764Z
+===============================================================================
+```
+
 ---
 
 ## 11. Rollback / safe state
