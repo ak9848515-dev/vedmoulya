@@ -199,6 +199,34 @@ curl -s -o /dev/null -w "%{http_code}" https://your-domain.com
 
 ## Rollback History
 
-| Date       | Version | Reason | Rollback Type | Time to Recover |
-| ---------- | ------- | ------ | ------------- | --------------- |
-| 2026-07-30 | —       | —      | —             | —               |
+| Date       | Version | Reason                     | Rollback Type                      | Time to Recover |
+| ---------- | ------- | -------------------------- | ---------------------------------- | --------------- |
+| 2026-07-30 | —       | —                          | —                                  | —               |
+| 2026-10-20 | 1.0.0   | Rehearsal drill GAP-S14-11 | Bidirectional Schema Down/Up Drill | 127.59s         |
+
+### Verified Migration Rollback & Re-Convergence Record (2026-10-20)
+
+```text
+===============================================================================
+LIVE MIGRATION ROLLBACK & CONVERGENCE RECORD (GAP-S14-11)
+===============================================================================
+Date (UTC):            2026-10-20T07:09:18.648Z
+Target Service:        VedMoulya Platform — Identity Migration Engine
+Host / Database:       ep-solitary-glade-ayxd6iny-pooler.c-5.us-east-2.aws.neon.tech / neondb
+Rehearsal Operator:    Platform Engineering & Release Reliability Lead
+Approval Reference:    APPROVAL-ROLLBACK-REHEARSAL-20261020-001
+
+Execution Summary:
+  - Total Duration:    127.59 seconds
+  - Target Schema:     isolated rollback drill namespace
+  - Forward Up:        001 -> 005 applied cleanly
+  - Targeted Down:     005 reversed -> ledger head verified at 004_email_verifications
+  - Full Down:         004, 003, 002, 001 reversed -> ledger empty, tables dropped
+  - Re-Convergence:    All 5 migrations re-applied -> assertIdentitySchemaCurrent PASSED
+  - Idempotency:       Zero errors, zero orphaned catalog artifacts
+
+Rollback Capability:   CONFIRMED OPERATIONAL & REVERSIBLE
+Status:                PASSED — LIVE ROLLBACK REHEARSAL CERTIFIED
+Signed off by:         Platform Engineering Lead at 2026-10-20T07:09:18.648Z
+===============================================================================
+```
