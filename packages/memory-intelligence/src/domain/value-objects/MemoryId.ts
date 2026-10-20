@@ -6,7 +6,14 @@
 // relationship/citation/consumer/audit ids are unique and timestamped.
 // ──────────────────────────────────────────────────────────────────
 
-import { trimEdgeChars } from '@vedmoulya/core';
+/** Linear edge trim — O(n) scan replacing quadratic regex (CWE-1333 ReDoS mitigation). */
+function trimEdgeChars(value: string, chars: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && chars.includes(value.charAt(start))) start += 1;
+  while (end > start && chars.includes(value.charAt(end - 1))) end -= 1;
+  return value.slice(start, end);
+}
 
 export type MemoryId = string & { readonly __memoryId: unique symbol };
 

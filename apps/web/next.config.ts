@@ -208,6 +208,18 @@ const nextConfig: NextConfig = {
         ...([] as unknown[]).concat((config.externals ?? []) as unknown[]),
         { esbuild: 'commonjs esbuild' },
       ];
+    } else {
+      const fallback =
+        typeof resolve.fallback === 'object' && resolve.fallback !== null ? resolve.fallback : {};
+      resolve.fallback = {
+        ...fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        crypto: false,
+        child_process: false,
+        perf_hooks: false,
+      };
     }
     return config;
   },
