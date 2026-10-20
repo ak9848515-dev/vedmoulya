@@ -175,11 +175,10 @@ function spawnGovernedChild(
       .replace(/\.cmd$/i, '')
       .toLowerCase();
     if (WIN32_BATCH_EXECUTABLES.has(base)) {
-      const line = [file, ...rest].map(assertSafeWin32Arg).join(' ');
-      const comspec = process.env.comspec ?? 'cmd.exe';
-      return spawn(comspec, ['/d', '/s', '/c', `"${line}"`], {
+      const safeArgs = rest.map(assertSafeWin32Arg);
+      return spawn(file, safeArgs, {
         cwd: options.cwd,
-        windowsVerbatimArguments: true,
+        shell: true,
         env: { ...process.env, CI: '1' },
         stdio,
       });

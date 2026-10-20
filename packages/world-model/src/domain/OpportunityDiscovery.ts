@@ -88,11 +88,12 @@ export function sanitizeEvidenceText(text: string, maxLength = 500): string {
 // ── Stable keys + ids ───────────────────────────────────────────────────────
 
 export function problemStableKey(ownerId: string, problemStatement: string): string {
-  const slug = problemStatement
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
+  const raw = problemStatement.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  let start = 0;
+  let end = raw.length;
+  while (start < end && raw.charCodeAt(start) === 45) start += 1;
+  while (end > start && raw.charCodeAt(end - 1) === 45) end -= 1;
+  const slug = raw.slice(start, end).slice(0, 80);
   return `${ownerId}:${slug || 'problem'}`;
 }
 

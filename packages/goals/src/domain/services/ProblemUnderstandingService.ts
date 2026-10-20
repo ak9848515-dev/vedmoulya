@@ -103,7 +103,7 @@ const OUTCOME_SIGNALS = [
 const DEADLINE_RE =
   /\b(?:by|before|due)(?:\s+(?:the\s+)?end of)?(?:\s+(?:this|next|early|late))?\s*(?:week|month|year|quarter|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?:st|nd|rd|th)?)|\bdeadline\b|\bby end of (?:this|next) (?:week|month)\b/i;
 const BUDGET_RE =
-  /\$\s?\d[\d,.]*|under \$|cost cap|spend limit|\bbudget(?:\s+(?:of|under|is|around|about|at|for))?\s*\$?\s*\d/i;
+  /\$\s?\d+[\d,.]*|under \$|cost cap|spend limit|\bbudget\b(?:\s+(?:of|under|is|around|about|at|for))?\s*(?:\$\s*)?\d/i;
 const FREE_RE = /\bfree\b/i;
 const PRIVACY_RE =
   /private|confidential|sensitive|personal data|do not share|sharing the data|share.{0,15}external/i;

@@ -85,8 +85,7 @@ const REPORT_INTENT_PATTERN =
  * greedy class that cannot overlap the name class — the accepted language is
  * unchanged for real briefs (names are still filtered to `[A-Za-z0-9_]+`).
  */
-const COLUMNS_PATTERN =
-  /(?:columns?|fields?)\s*(?:[:=]\s*)?([A-Za-z0-9_]+(?:[,\s]+[A-Za-z0-9_]+)+)/i;
+const COLUMNS_PATTERN = /\b(?:columns?|fields?)\b(?:\s*[:=])?\s*([A-Za-z0-9_,\s]{3,200})/i;
 
 const AMOUNT_NAME_PATTERN = /(amount|revenue|total|value|sales|turnover)/i;
 const NON_AMOUNT_NAME_PATTERN = /(unit|price|quantity|qty|count|^id$|_id$)/i;

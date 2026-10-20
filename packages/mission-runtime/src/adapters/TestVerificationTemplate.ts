@@ -93,7 +93,7 @@ const NODE_SCRIPT_PATTERN =
 // optional separator gives the engine several ways to split the same text,
 // which CodeQL reports as js/polynomial-redos (CWE-1333).
 const INLINE_CONTENT_PATTERN =
-  /(?:with|containing|content(?:\s+is)?|contents?(?:\s+are)?|exact\s+contents?)[\s:-]*["'`]?([^\n"'`]{3,400})["'`]?/i;
+  /\b(?:with|containing|content(?:\s+is)?|contents?(?:\s+are)?|exact\s+contents?)\b[\s:-]+["'`]?([^\n"'`]{3,400})/i;
 
 const MAX_CONTENT_CHARS = 8_000;
 const MAX_PATH_CHARS = 160;
@@ -136,11 +136,19 @@ export function extractTestVerifiedFileTarget(goal: string): TestVerifiedFileTar
   if (!relativePath) return undefined;
 
   const fenced = FENCED_BLOCK_PATTERN.exec(goal);
-  const inline = INLINE_CONTENT_PATTERN.exec(goal)?.[1]
+  let inline = INLINE_CONTENT_PATTERN.exec(goal)?.[1]
     ?.replace(/^(?:the\s+)?exact\s+contents?\s+/i, '')
-    .replace(/^contents?\s+/i, '')
-    .replace(/[.,;]+$/, '')
-    .trim();
+    .replace(/^contents?\s+/i, '');
+  if (inline) {
+    let end = inline.length;
+    while (
+      end > 0 &&
+      (inline[end - 1] === '.' || inline[end - 1] === ',' || inline[end - 1] === ';')
+    ) {
+      end -= 1;
+    }
+    inline = inline.slice(0, end).trim();
+  }
   const content = fenced?.[1]
     ? fenced[1].replace(/\r\n/g, '\n').replace(/\n+$/, '')
     : (inline ?? extractWorkspaceFileTarget(goal)?.content);
