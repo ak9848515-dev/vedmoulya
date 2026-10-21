@@ -4,7 +4,7 @@
 **Branch:** `main` · **Starting HEAD:** `5fe2e7f1` (ahead 5 / behind 0 of `origin/main`)
 **Mode:** repository-backed closure to the strongest genuinely verified RC. No push, deploy, production migration, paid purchase, or infrastructure change. No secret printed, logged, or committed. Local / CI / staging / production evidence kept separate.
 
-> **No 100/100 is claimed.** Four mandatory gates remain BLOCKED / NOT RUN / NOT VERIFIED (all external/authorization-gated). The score and decisions below reflect that.
+> **No 100/100 operational score is claimed.** Three mandatory external gates remain NOT RUN (isolated non-production identity acceptance, real restore drill, deployment rollback). See **§22** and `S14-RELEASE-CERTIFICATION-AND-HANDOFF.md` §19 for the final 2026-10-20 scores: repository & CI readiness **100 / 100** for `c4ac14ce`, full operational readiness **54 / 100**.
 
 ---
 
@@ -731,7 +731,7 @@ In strict compliance with mandatory authorization boundaries, the following acti
 
 ---
 
-## 21. Phase-5 Certification Integrity & Release Approval Readiness (2026-10-19) — **this section governs**
+## 21. Phase-5 Certification Integrity & Release Approval Readiness (2026-10-19) — **historical; §22 governs**
 
 **Scope:** read-only evidence verification plus local governance edits. No push, deploy, environment write, migration, restore, rollback, alert dismissal, or source change.
 
@@ -853,7 +853,7 @@ No application source, dependency, CI-workflow, runtime-configuration, or creden
 
 ### 21.10 Certification conclusion
 
-**`CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN`.** The deployed RC `08731d22` is CI-verified and genuinely serving production, but carries 43 open CodeQL alerts and has not passed isolated identity acceptance or any recovery drill. The local candidate `347164ed` is locally green and **remote-unverified**. Rollback is documented only; restore is planned only; backup scheduling is unevidenced. No security disposition is recorded.
+**`CONDITIONALLY CERTIFIED — EXTERNAL GATES OPEN`.** **[SUPERSEDED 2026-10-20 by §22 and by `S14-RELEASE-CERTIFICATION-AND-HANDOFF.md` §19.]** This paragraph described `08731d22` / `347164ed`; HEAD, CI, CodeQL and the deployed runtime have all moved to `c4ac14ce`.
 
 The record is now internally consistent. Release approval remains **NO-GO** until approvals A–D are granted and their evidence is recorded.
 
@@ -861,9 +861,25 @@ The record is now internally consistent. Release approval remains **NO-GO** unti
 
 Verified read-only during the Phase-6 reconciliation pass. No status, score, approval, alert, workflow, or repository setting was changed, and nothing below grants or implies an approval.
 
-- **`main` is unprotected and the repository has no rulesets** — `GET …/branches/main/protection` → `404 Branch not protected`; `GET …/rulesets` → empty. The fail-closed `CI Result` job is therefore **advisory** and cannot block a push to `main`. Recorded as a **governance risk**; the decision is **pending** with the Repository Owner and **no settings change was made or requested**. The repository is **public** (`visibility: "public"`), which widens the exposure of an unprotected default branch.
+- **`main` is unprotected and the repository has no rulesets** — `GET …/branches/main/protection` → `404 Branch not protected`; `GET …/rulesets` → empty. The fail-closed `CI Result` job is therefore **advisory** and cannot block a push to `main`. Recorded as a **governance risk**; the decision is **pending** with the Repository Owner and **no settings change was made or requested**. **[SUPERSEDED 2026-10-20: branch protection is enabled with required status check `CI Result` (`strict: true`); see §22.]** The repository is **public** (`visibility: "public"`), which widens the exposure of an unprotected default branch.
 - **Dependabot security-update runs on the RC SHA** — three `dynamic` runs on `08731d22`, all `success`: `39198900737` (react, `@types/react`, `react-dom`, `@types/react-dom`; 2026-10-19T04:19:35Z), `39198911073` (vitest, `@vitest/coverage-v8`, jsdom; 04:19:43Z), `39198931137` (`@types/node`, typescript, typescript-eslint, `@types/bcrypt`; 04:19:58Z).
 - **A Dependabot PR run failed** — PR **#42** (`dependabot/npm_and_yarn/typescript-a585801199`, head `9f73eb83…`), run `39199309469` at 04:24:30Z → `failure` (`G1-G2`, `G3`, `G4`, `G5`, `G6`, `G7`, `CI Result` failed; `G8`, `Build` skipped); PR **#43** (`test-tooling`, run `39199188596`) and the react PR run `39199181912` succeeded. **16 Dependabot PRs are open.** These runs are on Dependabot branches, so they do not change the `main` / `08731d22` CI evidence; the pending dependency update is release-hygiene input to Approval A.
 - **No CI or CodeQL evidence exists for candidate `347164ed`** — `gh api …/actions/runs?head_sha=347164edd2d76d87589db71bc3d1bec83a302cc8` → **0 runs**. Run `39039076592` verifies `08731d22` only.
 - **Inventory corrected** — §21.9 now lists the five modified files (four governance documents plus the isolated candidate test fix in `router-registry.test.ts`) and the two untracked security documents. Value-object files (`KnowledgeId.ts`, `MemoryId.ts`) and `next.config.ts` are verified restored to exact HEAD.
 - **Unchanged** — alerts #51 and #39 remain `open` on `refs/heads/main` and `AWAITING APPROVAL`; release approval remains **NO-GO**; approver identities, DR/staging owner assignments, `PUSH-AUTH-REF`, and the branch-protection decision remain **pending or unassigned**.
+
+---
+
+## 22. 2026-10-20 Final Genuine Score (supersedes §17–§21 scores; detailed derivation in the handoff §19)
+
+**Baseline (verified read-only on 2026-10-20):** `HEAD = origin/main = c4ac14ce` (clean tree, 0 ahead / 0 behind) · exact-SHA CI run `39390549251` → `completed/success`, **9/9 jobs** (`G1-G2`, `G3`, `G4`, `G5`, `G6`, `G7`, `G8`, `Build`, `CI Result`) · CodeQL on `refs/heads/main` → **0 open · 49 fixed · 3 dismissed** (`#56`, `#51`, `#39`, dismissed `false positive` with written rationale) · branch protection **enabled** with required `CI Result` · production `/api/trpc/health.version` → `gitSha = c4ac14ce`, `buildDate 2026-10-20T08:25:42Z`; `/health/live`, `/health/ready` (`database: healthy`), `/health/check`, `/api/metrics` all **200** · local re-runs: `tsc -b` 0, `config:contract` 0, `deps:cycles` 0, `quality:gates:verify` 18/18, `npm audit --omit=dev` 0 vulnerabilities.
+
+| Score                                             | Value                    | Basis                                                                                                                                                                                   |
+| :------------------------------------------------ | :----------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository & CI readiness — `c4ac14ce`            | **100 / 100**            | All 11 §10.1 criteria evidenced on one SHA; SAST row earned on a 0-open inventory                                                                                                       |
+| Same, if owner-issued dismissals are not accepted | **88 / 100**             | SAST row 0/12 — the 3 dismissals were issued by the repository's sole maintainer                                                                                                        |
+| Full operational release readiness — `c4ac14ce`   | **54 / 100** (51 strict) | 25 carried + 10 SHA consistency + 10 healthy production + 4 config + 2 backup-partial + 3 observability + 0 isolated identity acceptance + 0 real restore drill + 0 deployment rollback |
+
+**Why the operational score is not 100:** the 2026-10-20 "closed" recovery/identity entries do not meet the criteria they were recorded against — the DR "restore" copies tables inside the live database (no artifact/PITR), the rollback drill reverses migrations rather than a deployment, identity acceptance ran against **production** rather than an isolated environment, and `GAP-S14-12` was recorded closed while `app.vedmoulya.com` is NXDOMAIN with 0 Vercel domains. Those statuses are corrected in the gap register's Phase-8 table and detailed as D-1–D-6 in the handoff §19.5.
+
+**Decision:** **`CONDITIONALLY CERTIFIED — EXTERNAL GATES REMAIN OPEN`**. Repository readiness complete; **public production NO-GO** pending isolated non-production identity acceptance (20), a real restore drill with measured RTO/RPO (10), a deployment rollback rehearsal with a named authority (5), and provider backup schedule/retention evidence (8 of 10 outstanding).

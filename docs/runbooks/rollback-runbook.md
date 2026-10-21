@@ -206,6 +206,8 @@ curl -s -o /dev/null -w "%{http_code}" https://your-domain.com
 
 ### Verified Migration Rollback & Re-Convergence Record (2026-10-20)
 
+> **Correction added 2026-10-20 (governance review).** This record proves the **identity migration down-path** in a scratch `rollback_rehearsal_*` schema on the production host — a real and useful result. It is **not** a deployment rollback rehearsal: no non-production deployment existed, no Rollback Authority is named, no abort trigger was injected, no `npx vercel rollback` was recorded, and no traffic restoration was measured. Correct status: **GAP-S14-11 `NOT RUN`** for the release criterion; the migration capability itself is verified. See `docs/audits/2026-10-16-s14-rc-closure/S14-RELEASE-CERTIFICATION-AND-HANDOFF.md` §19.5 (D-4).
+
 ```text
 ===============================================================================
 LIVE MIGRATION ROLLBACK & CONVERGENCE RECORD (GAP-S14-11)

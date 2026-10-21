@@ -99,6 +99,7 @@ function AutonomousBuilderInner(): React.JSX.Element {
         userId,
         title: title.trim(),
         objective: objective.trim(),
+        initialObjectives: [objective.trim()],
         workspace: workspace.trim() || undefined,
         maxObjectives: Number.parseInt(maxObjectives, 10) || 5,
       });

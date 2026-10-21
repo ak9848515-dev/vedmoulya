@@ -669,7 +669,12 @@ export class MissionService {
             ],
             grantedPermissionClasses: ['READ', 'WRITE'],
           },
-      initialObjectives: input.initialObjectives,
+      initialObjectives:
+        input.initialObjectives && input.initialObjectives.length > 0
+          ? input.initialObjectives
+          : input.objective
+            ? [input.objective]
+            : undefined,
       objectiveDependencies: input.objectiveDependencies,
     });
     return mission;

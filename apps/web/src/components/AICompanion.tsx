@@ -354,7 +354,8 @@ export function AICompanion(): React.JSX.Element {
       } else {
         await runAnswer(prompt);
       }
-    } catch {
+    } catch (error) {
+      console.error('[AskVedMoulya] Request failed:', error);
       setLastFailedInput(prompt);
       setStreamingText('');
       setMessages((prev) => [

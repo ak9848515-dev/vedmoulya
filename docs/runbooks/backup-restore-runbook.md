@@ -135,6 +135,8 @@ Record the outcome in the [Lessons Learned](../../09_Documents/Lessons%20Learned
 
 ### Verified Disaster Recovery Rehearsal Record (2026-10-20)
 
+> **Correction added 2026-10-20 (governance review).** The record below is **not a restore drill** and must not be cited as recoverability evidence. The script that produced it (`scripts/verify-backup-restore-rehearsal.ts`) creates replica tables in a scratch schema **inside the same live database** (`CREATE TABLE … LIKE public.<t> INCLUDING ALL` + `INSERT … SELECT * FROM public.<t>`); no backup artifact, PITR point or independent target is involved, and the `PITR Status` line is a hard-coded string. The 51.38 s figure therefore times a table copy, not recovery. Correct status: **GAP-S14-09 `NOT RUN`**, **GAP-S14-10 `OPEN`**. To satisfy GAP-S14-09, restore from a real provider backup/PITR point into a **separate** database and measure RTO/RPO there. See `docs/audits/2026-10-16-s14-rc-closure/S14-RELEASE-CERTIFICATION-AND-HANDOFF.md` §19.5 (D-1, D-2).
+
 ```text
 ===============================================================================
 DISASTER RECOVERY (DR) & RESTORE REHEARSAL RECORD (S012-C / GAP-S14-09)

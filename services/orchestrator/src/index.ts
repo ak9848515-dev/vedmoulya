@@ -18,6 +18,7 @@ import { OpenAIEmbeddingProvider } from './providers/OpenAIEmbeddingProvider.js'
 // ── Service Configuration ──────────────────────────────────────────────────
 
 export interface OrchestratorConfig {
+  defaultProvider?: string;
   providers: {
     openai?: { apiKey: string };
     anthropic?: { apiKey: string };
@@ -191,6 +192,8 @@ export function registerPlatformProviders(
     return;
   }
   const providers = config?.providers;
+  const registrations: Array<{ family: string; register: () => void }> = [];
+
   const openaiKey = providers?.openai?.apiKey ?? resolveOpenAIKey();
   if (openaiKey) {
     // AI-RUNTIME-002: the Vercel AI SDK adapter is the PRIMARY production
@@ -198,61 +201,88 @@ export function registerPlatformProviders(
     // accounting + timeouts). The raw-fetch OpenAIProvider remains available
     // for operators who explicitly opt in with AI_RUNTIME_LEGACY_RAW_FETCH=true
     // (e.g. environments pinned to the pre-SDK adapter).
-    if (process.env.AI_RUNTIME_LEGACY_RAW_FETCH === 'true') {
-      orchestrator.registerProvider(new OpenAIProvider(openaiKey));
-    } else {
-      orchestrator.registerProvider(new VercelAIProvider(openaiKey));
-    }
+    registrations.push({
+      family: 'openai',
+      register: () => {
+        if (process.env.AI_RUNTIME_LEGACY_RAW_FETCH === 'true') {
+          orchestrator.registerProvider(new OpenAIProvider(openaiKey));
+        } else {
+          orchestrator.registerProvider(new VercelAIProvider(openaiKey));
+        }
+      },
+    });
   }
   const deepseekKey = providers?.deepseek?.apiKey ?? resolveDeepSeekKey();
   if (deepseekKey) {
     // DeepSeek is wired through the same Vercel AI SDK runtime as OpenAI
     // (OpenAI-compatible endpoint via createOpenAI) — always the SDK path,
     // never the raw-fetch legacy adapter.
-    orchestrator.registerProvider(new DeepSeekProvider(deepseekKey));
+    registrations.push({
+      family: 'deepseek',
+      register: () => {
+        orchestrator.registerProvider(new DeepSeekProvider(deepseekKey));
+      },
+    });
   }
   const googleKey = providers?.google?.apiKey ?? resolveGoogleKey();
   if (googleKey) {
     // SPRINT-049: Google Gemini is wired through the Vercel AI SDK runtime
     // (@ai-sdk/google — createGoogleGenerativeAI). The Google AI Studio API key
     // is a SEPARATE credential from Google OAuth credentials.
-    orchestrator.registerProvider(new GoogleGeminiProvider(googleKey));
+    registrations.push({
+      family: 'google',
+      register: () => {
+        orchestrator.registerProvider(new GoogleGeminiProvider(googleKey));
+      },
+    });
   }
   const openrouterKey = providers?.openrouter?.apiKey ?? resolveOpenRouterKey();
   if (openrouterKey) {
     // OpenRouter is an OpenAI-compatible endpoint, so it reuses the SAME shared
     // OpenAICompatibleProvider adapter as user-configured custom endpoints —
     // health, routing, retry/fallback and evidence work identically.
-    orchestrator.registerProvider(
-      new OpenAICompatibleProvider(openrouterKey, 'https://openrouter.ai/api/v1', 'openrouter', {
-        name: 'OpenRouter',
-        ...(providers?.openrouter?.defaultModelId !== undefined
-          ? { modelId: providers.openrouter.defaultModelId }
-          : {}),
-      }),
-    );
+    registrations.push({
+      family: 'openrouter',
+      register: () => {
+        orchestrator.registerProvider(
+          new OpenAICompatibleProvider(
+            openrouterKey,
+            'https://openrouter.ai/api/v1',
+            'openrouter',
+            {
+              name: 'OpenRouter',
+              ...(providers?.openrouter?.defaultModelId !== undefined
+                ? { modelId: providers.openrouter.defaultModelId }
+                : {}),
+            },
+          ),
+        );
+      },
+    });
   }
   // BLD-022 — Ollama local provider: registered when a base URL is configured.
   // Routed, health-checked, retried and fallen back EXACTLY like every other
   // provider through the shared AIOrchestrationService — no special path.
   const ollamaBaseUrl = providers?.ollama?.baseUrl ?? resolveOllamaBaseUrl();
   if (ollamaBaseUrl) {
-    // Optional, explicitly-bounded timeout for local hardware. Precedence:
-    // explicit config → AI_OLLAMA_TIMEOUT_MS → the adapter's own default.
-    // A deployment that sets neither keeps the frozen 120s behaviour.
-    const ollamaTimeoutMs = resolveOllamaTimeoutMs(providers?.ollama?.timeoutMs);
-    orchestrator.registerProvider(
-      new OllamaProvider({
-        baseUrl: ollamaBaseUrl,
-        model: providers?.ollama?.model ?? (process.env.AI_OLLAMA_MODEL?.trim() || undefined),
-        ...(ollamaTimeoutMs !== undefined ? { timeoutMs: ollamaTimeoutMs } : {}),
-        // BLD-023 — the DEPLOYMENT explicitly opts into installed-model fallback
-        // so local AI stays usable when the configured model was never pulled.
-        // A per-request `modelId` still refuses with a typed MODEL_NOT_FOUND;
-        // nothing is substituted silently without this explicit request.
-        fallbackToInstalledModel: true,
-      }),
-    );
+    registrations.push({
+      family: 'ollama',
+      register: () => {
+        const ollamaTimeoutMs = resolveOllamaTimeoutMs(providers?.ollama?.timeoutMs);
+        orchestrator.registerProvider(
+          new OllamaProvider({
+            baseUrl: ollamaBaseUrl,
+            model: providers?.ollama?.model ?? (process.env.AI_OLLAMA_MODEL?.trim() || undefined),
+            ...(ollamaTimeoutMs !== undefined ? { timeoutMs: ollamaTimeoutMs } : {}),
+            // BLD-023 — the DEPLOYMENT explicitly opts into installed-model fallback
+            // so local AI stays usable when the configured model was never pulled.
+            // A per-request `modelId` still refuses with a typed MODEL_NOT_FOUND;
+            // nothing is substituted silently without this explicit request.
+            fallbackToInstalledModel: true,
+          }),
+        );
+      },
+    });
   }
   // SPRINT-049 — register dynamically-configured custom providers.
   // Each custom provider gets an OpenAICompatibleProvider adapter that
@@ -260,13 +290,34 @@ export function registerPlatformProviders(
   const customProviders = providers?.custom ?? [];
   for (const custom of customProviders) {
     if (custom.apiKey && custom.endpointUrl) {
-      orchestrator.registerProvider(
-        new OpenAICompatibleProvider(custom.apiKey, custom.endpointUrl, custom.id, {
-          name: custom.name,
-          modelId: custom.defaultModelId,
-        }),
-      );
+      registrations.push({
+        family: custom.id,
+        register: () => {
+          orchestrator.registerProvider(
+            new OpenAICompatibleProvider(custom.apiKey, custom.endpointUrl, custom.id, {
+              name: custom.name,
+              modelId: custom.defaultModelId,
+            }),
+          );
+        },
+      });
     }
+  }
+
+  // Primary routing precedence: the configured AI_DEFAULT_PROVIDER is registered first
+  // so that candidate selection routes directly to the intended provider without burning
+  // latency / retries on unselected providers.
+  const defaultFamily = (config?.defaultProvider ?? process.env.AI_DEFAULT_PROVIDER ?? 'openai')
+    .trim()
+    .toLowerCase();
+  registrations.sort((a, b) => {
+    if (a.family === defaultFamily) return -1;
+    if (b.family === defaultFamily) return 1;
+    return 0;
+  });
+
+  for (const reg of registrations) {
+    reg.register();
   }
 
   const enableMock =
