@@ -22,7 +22,7 @@ export interface OrchestratorConfig {
   providers: {
     openai?: { apiKey: string };
     anthropic?: { apiKey: string };
-    google?: { apiKey: string };
+    google?: { apiKey: string; modelId?: string };
     deepseek?: { apiKey: string };
     /** OpenRouter — OpenAI-compatible endpoint (shared adapter, no special path). */
     openrouter?: { apiKey: string; defaultModelId?: string };
@@ -232,7 +232,12 @@ export function registerPlatformProviders(
     registrations.push({
       family: 'google',
       register: () => {
-        orchestrator.registerProvider(new GoogleGeminiProvider(googleKey));
+        const googleModel =
+          providers?.google?.modelId ??
+          (process.env.AI_GOOGLE_MODEL?.trim() || 'gemini-3.5-flash-lite');
+        orchestrator.registerProvider(
+          new GoogleGeminiProvider(googleKey, { modelId: googleModel }),
+        );
       },
     });
   }

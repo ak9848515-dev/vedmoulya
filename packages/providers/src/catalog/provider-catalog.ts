@@ -361,6 +361,36 @@ const CATALOG: readonly CatalogEntry[] = [
     fullSpectrum: true,
     models: [
       {
+        id: 'gemini-3.5-flash-lite',
+        name: 'Gemini 3.5 Flash Lite',
+        contextLength: 1048576,
+        maxOutputTokens: 65536,
+        streaming: true,
+        vision: true,
+        functionCalling: true,
+        embeddings: false,
+        reasoning: true,
+        coding: true,
+        creativeWriting: true,
+        translation: true,
+        image: true,
+        audio: true,
+        video: true,
+        modalities: [...TXT, 'image-in', 'audio-in'],
+        capabilities: [
+          'reasoning',
+          'coding',
+          'vision',
+          'summarization',
+          'classification',
+          'translation',
+          'speech',
+          'image_understanding',
+          'general_conversation',
+          'content_generation',
+        ],
+      },
+      {
         // S3.1B.2 — Google retired the 2.5 generation for newer API keys
         // ("no longer available to new users" — verified 404 against the
         // configured production credential). gemini-3.8-flash is the model
