@@ -20,8 +20,31 @@ import type postgres from 'postgres';
 import type { JSONValue } from 'postgres';
 import { WriteThroughDocumentStore } from '@vedmoulya/core';
 import type { CheckpointStore, MissionStore } from '@vedmoulya/mission-controller';
-import type { Mission, MissionCheckpoint, MissionObjective } from '@vedmoulya/mission-controller';
-import { MISSION_TERMINAL_STATES } from '@vedmoulya/mission-controller';
+import type {
+  Mission,
+  MissionActivityEvent,
+  MissionCasSnapshot,
+  MissionCheckpoint,
+  MissionObjective,
+  MissionObjectiveLease,
+  MissionPatch,
+  MissionPatchResult,
+  MissionReplaceResult,
+  ObjectiveLeaseRenewal,
+  ObjectivePublication,
+  ObjectivePublicationResult,
+  RecoveryChangesResult,
+  RecoveryObjectiveChange,
+} from '@vedmoulya/mission-controller';
+import {
+  MISSION_TERMINAL_STATES,
+  applyActivityToMission,
+  applyMissionPatchToMission,
+  applyPublicationToMission,
+  applyRecoveryChangesToMission,
+  hasOtherLiveLease,
+  matchesMissionCas,
+} from '@vedmoulya/mission-controller';
 
 export const MISSIONS_TABLE = 'mission_controller_missions';
 export const CHECKPOINTS_TABLE = 'mission_controller_checkpoints';
@@ -112,10 +135,17 @@ export class PostgresMissionStore
       const row = rows[0];
       if (!row) return undefined;
       const mission = JSON.parse(row.doc) as Mission;
+      // LEASE-03 — a terminal mission never starts new work: the cancellation
+      // (or completion) is authoritative, even for an objective that is still
+      // PENDING.
+      if (isTerminalState(mission.state)) return undefined;
       const objective = mission.objectives.find(
         (candidate) => candidate.objectiveId === objectiveId,
       );
       if (!objective || !['PENDING', 'READY'].includes(objective.state)) return undefined;
+      // LEASE-02 — one owner per MISSION: never start a second objective while
+      // another objective of the same mission is still owned.
+      if (hasOtherLiveLease(mission, objectiveId, lease.acquiredAt)) return undefined;
       const now = new Date().toISOString();
       objective.state = 'RUNNING';
       objective.stateHistory.push('RUNNING');
@@ -130,9 +160,356 @@ export class PostgresMissionStore
       `;
       return mission;
     });
-    if (acquired) this.write(OWNER, missionId, acquired);
+    // LEASE-03 — the transaction already persisted the authoritative row, so
+    // refresh the mirror ONLY: enqueuing another whole-document upsert here
+    // would let a delayed best-effort write land after a newer commit (a
+    // renewal or another process's acquisition) and revert it.
+    if (acquired) this.remember(OWNER, missionId, acquired);
     return acquired;
   }
+
+  /**
+   * LEASE-01 — ownership-checked lease RENEWAL, atomic against the authoritative
+   * persisted document.
+   *
+   * The row lock (`SELECT … FOR UPDATE`) serialises renewal against acquisition
+   * and healing, and the state/owner/token/expiry checks all happen INSIDE the
+   * transaction on the durable copy — never on the (possibly stale) mirror.
+   * Only `expiresAt` is extended, so a renewal can never resurrect a lease that
+   * recovery already released or steal one that another execution acquired.
+   * The mirror is refreshed only after the durable write committed, and with the
+   * committed document itself (`remember`) rather than a queued whole-document
+   * write, so a renewal never re-publishes an older snapshot.
+   */
+  async renewObjectiveLease(
+    missionId: string,
+    objectiveId: string,
+    renewal: ObjectiveLeaseRenewal,
+  ): Promise<MissionObjectiveLease | undefined> {
+    // Drain any queued best-effort write FIRST so an older snapshot cannot land
+    // after (and overwrite) the renewal this transaction commits.
+    await this.flush();
+    const renewed = await this.database.begin(async (tx) => {
+      const rows = await tx<Array<{ doc: string }>>`
+        SELECT doc::text AS doc
+        FROM ${tx(this.tableName)}
+        WHERE owner = ${OWNER} AND key = ${missionId}
+        FOR UPDATE
+      `;
+      const row = rows[0];
+      if (!row) return undefined;
+      const mission = JSON.parse(row.doc) as Mission;
+      const objective = mission.objectives.find(
+        (candidate) => candidate.objectiveId === objectiveId,
+      );
+      if (!objective || objective.state !== 'RUNNING') return undefined;
+      const current = objective.lease;
+      if (!current || !sameLeaseAcquisition(current, renewal)) return undefined;
+      // A lease that already EXPIRED is not renewable: recovery may already own
+      // the decision, and a late renewal must never reclaim authority.
+      if (Date.parse(current.expiresAt) <= renewal.nowMs) return undefined;
+
+      const extended: MissionObjectiveLease = { ...current, expiresAt: renewal.expiresAt };
+      const now = new Date(renewal.nowMs).toISOString();
+      objective.lease = extended;
+      objective.updatedAt = now;
+      mission.updatedAt = now;
+      await tx`
+        UPDATE ${tx(this.tableName)}
+        SET doc = ${tx.json(mission as unknown as JSONValue)}, updated_at = now()
+        WHERE owner = ${OWNER} AND key = ${missionId}
+      `;
+      return { mission, lease: extended };
+    });
+    if (!renewed) return undefined;
+    this.remember(OWNER, missionId, renewed.mission);
+    return renewed.lease;
+  }
+
+  /**
+   * LEASE-01 — FENCING read against the authoritative row (see the port).
+   * Deliberately lock-free: it answers a question, it never mutates.
+   */
+  async holdsObjectiveLease(
+    missionId: string,
+    objectiveId: string,
+    acquisition: { owner: string; token: string },
+  ): Promise<boolean> {
+    return readObjectiveAcquisition(
+      this.database,
+      this.tableName,
+      missionId,
+      objectiveId,
+      acquisition,
+    );
+  }
+
+  /**
+   * LEASE-01 — atomically heal ONE abandoned RUNNING objective back to READY.
+   *
+   * The liveness re-check and the READY write happen under the SAME row lock, so
+   * a renewal (or a fresh acquisition) that lands in between makes this a no-op
+   * instead of resetting a working objective. Returns `undefined` when the heal
+   * was refused, so recovery adopts the authoritative record.
+   */
+  async releaseExpiredObjectiveLease(
+    missionId: string,
+    objectiveId: string,
+    options: { nowMs: number; failureReason: string },
+  ): Promise<Mission | undefined> {
+    await this.flush();
+    const outcome = await this.withLockedMission(missionId, (mission) => {
+      // LEASE-03 — a terminal mission is never healed: the cancellation (or any
+      // other terminal decision) wins over a recovery observation, and this
+      // check runs under the SAME row lock as the write.
+      if (isTerminalState(mission.state)) return undefined;
+      const objective = mission.objectives.find(
+        (candidate) => candidate.objectiveId === objectiveId,
+      );
+      if (!objective || objective.state !== 'RUNNING') return undefined;
+      const lease = objective.lease;
+      if (lease && Date.parse(lease.expiresAt) > options.nowMs) return undefined; // a live owner
+      const now = new Date(options.nowMs).toISOString();
+      objective.state = 'READY';
+      objective.stateHistory.push('READY');
+      objective.lease = undefined;
+      if (!objective.failureReason) objective.failureReason = options.failureReason;
+      objective.updatedAt = now;
+      mission.updatedAt = now;
+      return { value: true };
+    });
+    return outcome?.value === true ? outcome.mission : undefined;
+  }
+
+  /**
+   * LEASE-02/03 — run `work` against the AUTHORITATIVE document under the row
+   * lock. `work` returns `undefined` to leave the row untouched; it may also
+   * return a REPLACEMENT document (`write`), which is how a conditional
+   * whole-document write (`replaceMissionIfUnchanged`) stays inside the same
+   * transaction as its authority check. The caller always gets the
+   * authoritative mission back. The mirror is refreshed only AFTER commit.
+   */
+  private async withLockedMission<R>(
+    missionId: string,
+    work: (mission: Mission) => { value: R; write?: Mission } | undefined,
+  ): Promise<{ value: R | undefined; mission: Mission } | undefined> {
+    const outcome = await this.database.begin(async (tx) => {
+      const rows = await tx<Array<{ doc: string }>>`
+        SELECT doc::text AS doc
+        FROM ${tx(this.tableName)}
+        WHERE owner = ${OWNER} AND key = ${missionId}
+        FOR UPDATE
+      `;
+      const row = rows[0];
+      if (!row) return undefined;
+      const mission = JSON.parse(row.doc) as Mission;
+      const outcomeOfWork = work(mission);
+      if (outcomeOfWork === undefined) return { mission, value: undefined };
+      const next = outcomeOfWork.write ?? mission;
+      await tx`
+        UPDATE ${tx(this.tableName)}
+        SET doc = ${tx.json(next as unknown as JSONValue)}, updated_at = now()
+        WHERE owner = ${OWNER} AND key = ${missionId}
+      `;
+      return { mission: next, value: outcomeOfWork.value };
+    });
+    if (!outcome) return undefined;
+    this.remember(OWNER, missionId, outcome.mission);
+    return outcome;
+  }
+
+  /**
+   * LEASE-02 — ownership-checked, OBJECTIVE-scoped publication.
+   *
+   * Ownership, the objective state and the mission's terminal status are
+   * validated inside the SAME row-locked transaction that writes the result, so
+   * there is no window between "I still own it" and the write. A superseded
+   * execution receives `applied: false` together with the authoritative mission
+   * and never overwrites a newer lease, result or activity history.
+   */
+  async finalizeObjectiveIfLeaseOwner(
+    missionId: string,
+    objectiveId: string,
+    acquisition: { owner: string; token: string },
+    publication: ObjectivePublication,
+  ): Promise<ObjectivePublicationResult | undefined> {
+    // Drain queued best-effort writes first so an older whole-document snapshot
+    // cannot land after (and overwrite) this committed publication.
+    await this.flush();
+    const outcome = await this.withLockedMission(missionId, (mission) => {
+      const index = mission.objectives.findIndex(
+        (candidate) => candidate.objectiveId === objectiveId,
+      );
+      // eslint-disable-next-line security/detect-object-injection -- Index produced by findIndex on the same bounded objectives array.
+      const current = index >= 0 ? mission.objectives[index] : undefined;
+      const owns =
+        current !== undefined &&
+        current.state === 'RUNNING' &&
+        current.lease?.token !== undefined &&
+        current.lease.owner === acquisition.owner &&
+        current.lease.token === acquisition.token;
+      if (!owns || isTerminalState(mission.state)) {
+        return { value: { applied: false } };
+      }
+      applyPublicationToMission(mission, index, current.lease, publication);
+      return { value: { applied: true } };
+    });
+    if (!outcome) return undefined;
+    return { applied: outcome.value?.applied === true, mission: outcome.mission };
+  }
+
+  /**
+   * LEASE-02 — conditional recovery publication. Changes whose observed state
+   * (state + lease token + expiration) no longer matches are skipped, so a
+   * renewal or a fresh acquisition is never reverted by a recovery pass.
+   */
+  async applyRecoveryChanges(
+    missionId: string,
+    changes: RecoveryObjectiveChange[],
+    options: { nowMs: number; activity?: MissionActivityEvent[]; activityLimit?: number },
+  ): Promise<RecoveryChangesResult | undefined> {
+    await this.flush();
+    const outcome = await this.withLockedMission(missionId, (mission) => ({
+      value: applyRecoveryChangesToMission(mission, changes, options),
+    }));
+    if (!outcome || !outcome.value) return undefined;
+    return {
+      applied: outcome.value.applied,
+      skipped: outcome.value.skipped,
+      mission: outcome.mission,
+    };
+  }
+
+  /** LEASE-02 — merge-only activity append (never reverts any state). */
+  async appendActivity(
+    missionId: string,
+    events: MissionActivityEvent[],
+    options?: { limit?: number; at?: string },
+  ): Promise<Mission | undefined> {
+    const outcome = await this.withLockedMission(missionId, (mission) => {
+      // LEASE-03 — a terminal mission still accepts merge-only history (it is
+      // never reverted by it), but nothing here may change its state.
+      applyActivityToMission(mission, events, options?.limit);
+      if (options?.at !== undefined && !isTerminalState(mission.state)) {
+        mission.updatedAt = options.at;
+      }
+      return { value: true };
+    });
+    return outcome?.mission;
+  }
+
+  /**
+   * LEASE-02 — optimistic mission-level patch. Refused when the persisted state
+   * moved on, or (for a terminal acknowledgement) while any objective is still
+   * RUNNING. It never rewrites objectives, checkpoints or usage accounting.
+   */
+  async patchMission(
+    missionId: string,
+    patch: MissionPatch,
+  ): Promise<MissionPatchResult | undefined> {
+    await this.flush();
+    const outcome = await this.withLockedMission(missionId, (mission) => {
+      if (mission.state !== patch.expectedState) return { value: { applied: false } };
+      if (
+        patch.requireIdle &&
+        mission.objectives.some((objective) => objective.state === 'RUNNING')
+      ) {
+        return { value: { applied: false } };
+      }
+      // LEASE-03 — refuse while any objective still holds a LIVE lease: a
+      // stale provider-resume/recovery decision must never reopen work a real
+      // worker is executing.
+      const requireNoLiveLease = patch.requireNoLiveLease;
+      if (
+        requireNoLiveLease !== undefined &&
+        mission.objectives.some(
+          (objective) =>
+            objective.state === 'RUNNING' &&
+            objective.lease !== undefined &&
+            Date.parse(objective.lease.expiresAt) > requireNoLiveLease.nowMs,
+        )
+      ) {
+        return { value: { applied: false } };
+      }
+      applyMissionPatchToMission(mission, patch);
+      return { value: { applied: true } };
+    });
+    if (!outcome) return undefined;
+    return { applied: outcome.value?.applied === true, mission: outcome.mission };
+  }
+
+  /**
+   * LEASE-03 — conditional WHOLE-DOCUMENT replacement.
+   *
+   * The authority check and the write are the SAME row-locked transaction, and
+   * the check is `matchesMissionCas` against the row itself (never the mirror).
+   * A stale snapshot is therefore refused instead of overwriting a renewal, a
+   * re-acquisition, a verification or a terminal decision, and the caller gets
+   * the authoritative record back.
+   */
+  async replaceMissionIfUnchanged(
+    missionId: string,
+    next: Mission,
+    expected: MissionCasSnapshot,
+  ): Promise<MissionReplaceResult | undefined> {
+    // Drain queued best-effort writes first so an older snapshot cannot land
+    // after (and overwrite) this committed replacement.
+    await this.flush();
+    const outcome = await this.withLockedMission(missionId, (mission) => {
+      if (!matchesMissionCas(mission, expected)) {
+        return { value: { applied: false } };
+      }
+      return { value: { applied: true }, write: next };
+    });
+    if (!outcome) return undefined;
+    return { applied: outcome.value?.applied === true, mission: outcome.mission };
+  }
+}
+
+/** LEASE-01/02 — true for a mission state that can never be reopened. */
+function isTerminalState(state: Mission['state']): boolean {
+  return (MISSION_TERMINAL_STATES as readonly string[]).includes(state);
+}
+
+/**
+ * LEASE-01 — is this EXACT acquisition still the recorded owner? Reads the
+ * AUTHORITATIVE row (not the mirror): the question is asked exactly when
+ * another process may have healed or re-acquired the objective. An expired
+ * lease still counts — expiry refuses RENEWAL, it does not transfer ownership.
+ */
+async function readObjectiveAcquisition(
+  sql: Sql,
+  table: string,
+  missionId: string,
+  objectiveId: string,
+  acquisition: { owner: string; token: string },
+): Promise<boolean> {
+  const rows = await sql<Array<{ doc: string }>>`
+    SELECT doc::text AS doc
+    FROM ${sql(table)}
+    WHERE owner = ${OWNER} AND key = ${missionId}
+  `;
+  const row = rows[0];
+  if (!row) return false;
+  const mission = JSON.parse(row.doc) as Mission;
+  const objective = mission.objectives.find((candidate) => candidate.objectiveId === objectiveId);
+  if (!objective || objective.state !== 'RUNNING') return false;
+  const lease = objective.lease;
+  if (!lease?.token) return false;
+  return lease.owner === acquisition.owner && lease.token === acquisition.token;
+}
+
+/**
+ * LEASE-01 — the shared ownership predicate: the persisted lease must be the
+ * EXACT acquisition the caller holds. A legacy lease without a token (or a
+ * request without one) can never be proven and is therefore not renewable.
+ */
+function sameLeaseAcquisition(
+  current: MissionObjectiveLease,
+  renewal: ObjectiveLeaseRenewal,
+): boolean {
+  if (!current.token || !renewal.token) return false;
+  return current.owner === renewal.owner && current.token === renewal.token;
 }
 
 export class PostgresCheckpointStore

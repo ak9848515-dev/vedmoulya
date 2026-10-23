@@ -37,11 +37,12 @@ describe('Mission Checkpointing & Crash Recovery', () => {
       initialObjectives: ['First objective', 'Second objective'],
     });
     await service.startMission(mission.missionId);
-    await service.runAutonomousLoop(mission.missionId);
+    // The store is a persistence boundary: assert the record the loop returns.
+    const completed = await service.runAutonomousLoop(mission.missionId);
 
     expect(executeCount).toBe(2);
-    expect(mission.objectives[0]?.state).toBe('VERIFIED');
-    expect(mission.objectives[1]?.state).toBe('VERIFIED');
+    expect(completed.objectives[0]?.state).toBe('VERIFIED');
+    expect(completed.objectives[1]?.state).toBe('VERIFIED');
 
     // Resume must NOT re-execute verified objectives.
     const resumed = await service.resumeFromCheckpoint(mission.missionId);
@@ -70,10 +71,10 @@ describe('Mission Checkpointing & Crash Recovery', () => {
 
     // Crash — process restarts and the loop resumes. Objective 1 is VERIFIED,
     // so the selector must not re-run it; only objective 2 executes.
-    await service.runAutonomousLoop(mission.missionId);
+    const completed = await service.runAutonomousLoop(mission.missionId);
     expect(executed).toHaveLength(2);
-    expect(mission.objectives[0]?.state).toBe('VERIFIED');
-    expect(mission.objectives[1]?.state).toBe('VERIFIED');
+    expect(completed.objectives[0]?.state).toBe('VERIFIED');
+    expect(completed.objectives[1]?.state).toBe('VERIFIED');
   });
 
   it('crash before checkpoint — unverified work is never claimed completed', async () => {

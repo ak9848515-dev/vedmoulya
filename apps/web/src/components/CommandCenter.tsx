@@ -250,7 +250,10 @@ interface OpportunityRadarResponse {
   };
 }
 
-type Tab = 'today' | 'portfolio' | 'intelligence' | 'ecosystem' | 'automation' | 'approvals';
+export type CommandCenterTab =
+  'today' | 'portfolio' | 'intelligence' | 'ecosystem' | 'automation' | 'approvals';
+
+type Tab = CommandCenterTab;
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'today', label: 'Today', icon: LayoutDashboard },
@@ -335,9 +338,20 @@ export function twinDimensionsFromCommandCenter(args: {
   return dims;
 }
 
-export function CommandCenter(): React.JSX.Element {
+export interface CommandCenterProps {
+  /**
+   * Section to open first. Defaults to TODAY — the assistant drawer's entry
+   * point. A routed surface (e.g. /revenue) opens directly on the earning read
+   * it is named after instead of the briefing tab.
+   */
+  initialTab?: Tab;
+}
+
+export function CommandCenter({
+  initialTab = 'today',
+}: CommandCenterProps = {}): React.JSX.Element {
   const userId = useAuthStore((s) => s.user?.userId ?? '');
-  const [tab, setTab] = useState<Tab>('today');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [view, setView] = useState<CommandCenterView | null>(null);
   const [ranking, setRanking] = useState<RevenueRankingEntry[]>([]);
   const [streams, setStreams] = useState<RevenueStreamRow[]>([]);

@@ -91,20 +91,25 @@ export abstract class WriteThroughDocumentStore<TDoc extends object> {
    * compile-time constant per store; values are always parameterized.
    */
   async ensureTable(): Promise<void> {
-    await this.sql`
-      CREATE TABLE IF NOT EXISTS ${this.sql(this.table)} (
-        owner TEXT NOT NULL,
-        key TEXT NOT NULL,
-        doc JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        PRIMARY KEY (owner, key)
-      )
-    `;
-    await this.sql`
-      CREATE INDEX IF NOT EXISTS ${this.sql(`${this.table}_owner_updated_idx`)}
-      ON ${this.sql(this.table)} (owner, updated_at DESC)
-    `;
+    try {
+      await this.sql`
+        CREATE TABLE IF NOT EXISTS ${this.sql(this.table)} (
+          owner TEXT NOT NULL,
+          key TEXT NOT NULL,
+          doc JSONB NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (owner, key)
+        )
+      `;
+      await this.sql`
+        CREATE INDEX IF NOT EXISTS ${this.sql(`${this.table}_owner_updated_idx`)}
+        ON ${this.sql(this.table)} (owner, updated_at DESC)
+      `;
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      if (code !== '23505') throw err;
+    }
   }
 
   /**

@@ -10,10 +10,21 @@
 import type { AgentPlan, AgentRunBudgetConfig } from '@vedmoulya/agent-execution';
 import type {
   Mission,
+  MissionActivityEvent,
+  MissionCasSnapshot,
   MissionCheckpoint,
   MissionObjective,
+  MissionObjectiveLease,
   MissionExecutionTrace,
+  MissionPatch,
+  MissionPatchResult,
+  MissionReplaceResult,
+  ObjectiveLeaseRenewal,
+  ObjectivePublication,
+  ObjectivePublicationResult,
   ObjectiveSelectionResult,
+  RecoveryChangesResult,
+  RecoveryObjectiveChange,
   ProviderCapability,
   ProviderStatus,
   MissionFailureClassification,
@@ -57,6 +68,165 @@ export interface MissionStore {
     objectiveId: string,
     lease: MissionObjective['lease'],
   ): Promise<Mission | undefined>;
+  /**
+   * LEASE-01 — ownership-checked lease RENEWAL for a long-running objective.
+   *
+   * A single objective legitimately runs far longer than any fixed lease TTL
+   * (planning + execution + verification + evidence persistence). Without
+   * renewal the lease expires mid-execution and a recovery pass treats the
+   * still-working owner as dead. This operation extends the SAME lease the
+   * caller already owns, atomically against the authoritative persisted state:
+   *
+   *   - the mission and objective must exist and the objective must be RUNNING;
+   *   - `owner` AND `token` must match the persisted lease EXACTLY (a stale or
+   *     replaced execution can never renew);
+   *   - the persisted lease must not already be expired (a late renewal never
+   *     reclaims ownership that recovery already took);
+   *   - only `expiresAt` changes — the acquisition time, state and history stay
+   *     untouched, so renewal is never a state transition;
+   *   - the renewed expiration is durable BEFORE success is reported.
+   *
+   * Returns the renewed lease, or `undefined` when the caller does not own it.
+   * Stores that cannot renew may omit this (the controller then keeps the
+   * pre-LEASE-01 behavior: a fixed-TTL lease and no heartbeat).
+   */
+  renewObjectiveLease?(
+    missionId: string,
+    objectiveId: string,
+    renewal: ObjectiveLeaseRenewal,
+  ): Promise<MissionObjectiveLease | undefined>;
+  /**
+   * LEASE-01 — atomically heal ONE abandoned RUNNING objective back to READY.
+   *
+   * The liveness re-check and the READY transition are the SAME operation
+   * against the authoritative document (a row-locked transaction for
+   * PostgreSQL), so a recovery pass can never reset an objective whose owner
+   * renewed — or that another execution re-acquired — between the observation
+   * and the write. Returns the healed mission, or `undefined` when the heal was
+   * refused (the caller then adopts the authoritative record).
+   */
+  releaseExpiredObjectiveLease?(
+    missionId: string,
+    objectiveId: string,
+    options: { nowMs: number; failureReason: string },
+  ): Promise<Mission | undefined>;
+  /**
+   * LEASE-02 — publish ONE execution's objective ATOMICALLY, but only while it
+   * still owns the lease.
+   *
+   * This replaces the "check ownership, then write the whole mission document"
+   * pattern: the ownership check and the write are the SAME operation. The
+   * store validates, inside one transaction / one atomic step against the
+   * authoritative document:
+   *   - the objective exists and is still RUNNING;
+   *   - its lease still carries the caller's `owner` AND fencing `token`;
+   *   - the mission is not already terminal (a cancelled/completed mission is
+   *     never resurrected and never receives a late result).
+   *
+   * When ownership still holds, it applies the OBJECTIVE-scoped document, MERGES
+   * the activity (deduped by id, bounded), appends the checkpoint (deduped),
+   * records the usage accounting, and applies a mission-level hold only while
+   * the mission is still RUNNING. Nothing else in the authoritative document is
+   * rewritten — another owner's objective, lease, evidence or history is never
+   * clobbered.
+   *
+   * Returns `undefined` only when the mission does not exist. A refused
+   * publication returns `applied: false` WITH the authoritative mission, so the
+   * caller adopts it instead of overwriting it.
+   */
+  finalizeObjectiveIfLeaseOwner?(
+    missionId: string,
+    objectiveId: string,
+    acquisition: { owner: string; token: string },
+    publication: ObjectivePublication,
+  ): Promise<ObjectivePublicationResult | undefined>;
+  /**
+   * LEASE-02 — publish a recovery pass's objective changes atomically.
+   *
+   * Each change is applied ONLY when the authoritative objective still matches
+   * the state and lease token/expiry the pass OBSERVED, so a renewal or a fresh
+   * acquisition that landed in between is never reverted. Activity carried by an
+   * applied change (and `options.activity`) is merged into the bounded trail;
+   * nothing is ever written for a skipped change beyond the mission-level
+   * activity. This is the ONLY way recovery publishes state — no whole-document
+   * trailing save exists.
+   *
+   * Returns `undefined` only when the mission does not exist.
+   */
+  applyRecoveryChanges?(
+    missionId: string,
+    changes: RecoveryObjectiveChange[],
+    options: { nowMs: number; activity?: MissionActivityEvent[]; activityLimit?: number },
+  ): Promise<RecoveryChangesResult | undefined>;
+  /**
+   * LEASE-02 — append bounded activity events to the authoritative mission.
+   *
+   * Merge-only by construction: it never writes a document snapshot, so it can
+   * never revert a lease, a verified result or a terminal state. Used where the
+   * only thing to record is that something happened (a lost lease, a recovery
+   * failure) and no state may be claimed.
+   */
+  appendActivity?(
+    missionId: string,
+    events: MissionActivityEvent[],
+    options?: { limit?: number; at?: string },
+  ): Promise<Mission | undefined>;
+  /**
+   * LEASE-02 — apply a MISSION-LEVEL patch (command transition, hold or terminal
+   * acknowledgement) atomically and optimistically.
+   *
+   * The patch is refused when the persisted mission is no longer in
+   * `expectedState`, and — for `requireIdle` — while ANY objective is still
+   * RUNNING. Objectives, checkpoints and usage accounting are never rewritten
+   * by it, so a stale command write cannot resurrect an objective, a lease or a
+   * verified result. Returns `undefined` only when the mission does not exist.
+   */
+  patchMission?(missionId: string, patch: MissionPatch): Promise<MissionPatchResult | undefined>;
+  /**
+   * LEASE-03 — conditional WHOLE-DOCUMENT replacement (optimistic CAS).
+   *
+   * Some legitimate transitions own more than one objective-scoped operation
+   * can express (a scope report, the insertion of a discovered objective, a
+   * checkpoint restoration, a command that carries mission-level counters).
+   * They may still write the document — but ONLY while the authoritative record
+   * still matches `expected`, which the caller captured BEFORE mutating its
+   * copy. The comparison happens INSIDE the same transaction as the write
+   * (Postgres: under the row lock), and it covers mission state, state-history
+   * length, activity length, update instant and every objective's state and
+   * lease identity. A renewal, a re-acquisition, a heal, a verification or a
+   * terminal decision that landed in between therefore REFUSES the write
+   * instead of being overwritten by an older copy.
+   *
+   * A refusal returns the authoritative mission so the caller can adopt it.
+   * Returns `undefined` only when the mission does not exist.
+   */
+  replaceMissionIfUnchanged?(
+    missionId: string,
+    next: Mission,
+    expected: MissionCasSnapshot,
+  ): Promise<MissionReplaceResult | undefined>;
+  /**
+   * LEASE-01 — FENCING check: is this EXACT acquisition still the recorded
+   * owner of the objective?
+   *
+   * Read against the AUTHORITATIVE persisted document (never the in-memory
+   * mirror), because the question is asked exactly when another process may
+   * have healed or re-acquired the objective. Ownership means: the objective
+   * still exists, is still RUNNING, and still carries a lease whose `owner` and
+   * fencing `token` match the caller's acquisition.
+   *
+   * This deliberately does NOT require the lease to be unexpired — that is
+   * `renewObjectiveLease`'s job. An expired lease that was never released or
+   * replaced still belongs to the execution that holds it (nobody else can own
+   * it), so its finished work may be acknowledged; a healed/replaced one never
+   * may be. Stores that cannot answer may omit this (the controller then treats
+   * a refused renewal as lost ownership — the conservative behavior).
+   */
+  holdsObjectiveLease?(
+    missionId: string,
+    objectiveId: string,
+    acquisition: { owner: string; token: string },
+  ): Promise<boolean>;
 }
 
 // -- Checkpoint Persistence ----------------------------------------

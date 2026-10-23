@@ -140,9 +140,9 @@ describe('Mission Security Boundaries — advisory & runtime', () => {
     await service.startMission(mission.missionId);
 
     const before = memoryCalls;
-    await service.runNextObjective(mission.missionId);
+    const completed = await service.runNextObjective(mission.missionId);
     expect(memoryCalls).toBe(before + 1); // recorded after verified outcome
-    expect(mission.objectives[0]?.state).toBe('VERIFIED');
+    expect(completed.objectives[0]?.state).toBe('VERIFIED');
   });
 
   it('optimization is advisory-only — never used to escalate authority', async () => {
@@ -159,10 +159,10 @@ describe('Mission Security Boundaries — advisory & runtime', () => {
       initialObjectives: ['Tune strategy'],
     });
     await service.startMission(mission.missionId);
-    await service.runNextObjective(mission.missionId);
+    const completed = await service.runNextObjective(mission.missionId);
     // Advisory may be requested; it never changed the mission's authority.
     expect(advisoryCalls).toBeGreaterThanOrEqual(0);
-    expect(mission.objectives[0]?.state).toBe('VERIFIED');
+    expect(completed.objectives[0]?.state).toBe('VERIFIED');
   });
 
   it('current runtime truth overrides historical recommendations', async () => {

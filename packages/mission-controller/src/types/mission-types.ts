@@ -110,6 +110,184 @@ export interface MissionObjectiveLease {
   owner: string;
   acquiredAt: string;
   expiresAt: string;
+  /**
+   * LEASE-01 — opaque FENCING token, unique per acquisition.
+   *
+   * `owner` alone names the worker CLASS, not one acquisition: every controller
+   * writes `owner: 'mission-runtime'`, so it cannot distinguish a live owner
+   * from a previous execution of the SAME worker that already lost the lease.
+   * The token is what makes ownership checkable, so a stale execution can never
+   * renew, finalize or overwrite a newer execution's objective.
+   *
+   * Optional so older persisted mission documents (and leases seeded by existing
+   * tests/operators) remain readable. A lease WITHOUT a token is never renewable
+   * — renewal requires proof of the exact acquisition, and a lease that cannot
+   * be proven is treated as stale (safe, never a silent takeover).
+   */
+  token?: string;
+}
+
+/**
+ * LEASE-01 — an ownership-checked renewal request for a RUNNING objective's
+ * lease. `owner` + `token` identify the EXACT acquisition the caller believes
+ * it holds; `nowMs` and `expiresAt` come from the caller's injected clock and
+ * configured TTL (the stores own no clock of their own).
+ */
+export interface ObjectiveLeaseRenewal {
+  /** The owner tag recorded at acquisition (must match exactly). */
+  owner: string;
+  /** The fencing token issued at acquisition (must match exactly). */
+  token: string;
+  /** The caller's current time (ms) — an already-expired lease is refused. */
+  nowMs: number;
+  /** The new absolute expiration, computed from the configured lease TTL. */
+  expiresAt: string;
+}
+
+/**
+ * LEASE-02 — the ONE execution's publication of its objective.
+ *
+ * Everything an attempt produces is published through this patch: the
+ * objective's own document (RUNNING + evidence, or the final VERIFIED/FAILED/
+ * PENDING state), the bounded activity it recorded, the checkpoint that
+ * witnesses a verified objective, the usage it consumed and — for a provider or
+ * approval hold — the mission-level hold. The store validates ownership and
+ * applies it ATOMICALLY, so a superseded execution can never write any of it
+ * over a newer owner's state.
+ */
+export interface ObjectivePublication {
+  /** The objective as this execution wants it recorded (merged by objectiveId). */
+  objective: MissionObjective;
+  /**
+   * The fencing token of the execution publishing it. It is stamped on the
+   * objective's final record (`finalizedByLeaseToken`) so a REFUSED
+   * publication can tell "my own retried write already committed" apart from
+   * "another execution's result is there" — the difference between a silent
+   * idempotent retry and an honestly recorded lease loss.
+   */
+  leaseToken?: string;
+  /** Activity events to MERGE (deduped by id) into the authoritative trail. */
+  activity?: MissionActivityEvent[];
+  /** Bounded activity trail length (the controller's configured cap). */
+  activityLimit?: number;
+  /** Checkpoint to append (deduped by checkpointId) — never replaces history. */
+  checkpoint?: MissionCheckpoint;
+  /** Absolute usage accounting produced by this execution. */
+  budgetUsage?: MissionBudgetUsage;
+  /**
+   * Mission-level hold produced by this execution (WAITING_FOR_PROVIDER /
+   * WAITING_FOR_APPROVAL). Applied ONLY while the persisted mission is still
+   * RUNNING: an operator hold, a cancellation or a terminal state always wins.
+   */
+  hold?: { state: MissionState; reason?: string };
+  /** Timestamp recorded on the authoritative document. */
+  at: string;
+}
+
+/** LEASE-02 — result of a conditional objective publication. */
+export interface ObjectivePublicationResult {
+  /** True only when this execution still owned the lease and the write landed. */
+  applied: boolean;
+  /** Authoritative mission after the attempt (post-write or post-refusal read). */
+  mission: Mission;
+}
+
+/**
+ * LEASE-02 — one conditionally applied objective state change produced by a
+ * recovery pass. `expected` is what recovery OBSERVED; the change applies only
+ * if the authoritative objective still matches it exactly.
+ */
+export interface RecoveryObjectiveChange {
+  objectiveId: string;
+  expected: { state: ObjectiveState; leaseToken?: string; leaseExpiresAt?: string };
+  state: ObjectiveState;
+  failureReason?: string;
+  /** Activity appended ONLY when this change is applied. */
+  activity?: MissionActivityEvent[];
+}
+
+/** LEASE-02 — what a recovery publication actually applied. */
+export interface RecoveryChangesResult {
+  applied: string[];
+  skipped: string[];
+  mission: Mission;
+}
+
+/**
+ * LEASE-02 — a MISSION-LEVEL conditional patch (command transitions, holds and
+ * terminal acknowledgements). Objective documents, checkpoints and the usage
+ * accounting are never rewritten by it.
+ */
+export interface MissionPatch {
+  /** The persisted state the caller observed (optimistic guard). */
+  expectedState: MissionState;
+  state: MissionState;
+  /** Entry appended to `stateHistory` (defaults to nothing). */
+  stateHistoryEntry?: MissionState;
+  outcome?: MissionOutcome;
+  outcomeReason?: string;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  /**
+   * A checkpoint to APPEND (deduped by id) — never replaces checkpoint history.
+   * A mission-level hold produced a witness checkpoint; the patch is what makes
+   * its reference durable without rewriting the objectives.
+   */
+  checkpoint?: MissionCheckpoint;
+  /**
+   * LEASE-03 — refuse while ANY objective still holds an UNEXPIRED lease. Used
+   * by recovery's provider-resume so a stale recovery decision can never
+   * reopen a mission that a real worker is executing.
+   */
+  requireNoLiveLease?: { nowMs: number };
+  /** Activity events to MERGE (deduped by id). */
+  activity?: MissionActivityEvent[];
+  activityLimit?: number;
+  /**
+   * Terminal acknowledgement: refuse while ANY objective is still RUNNING, so a
+   * mission is never reported finished while an execution owns an objective.
+   */
+  requireIdle?: boolean;
+  at: string;
+}
+
+/** LEASE-02 — result of a conditional mission patch. */
+export interface MissionPatchResult {
+  applied: boolean;
+  mission: Mission;
+}
+
+/**
+ * LEASE-03 — the OWNERSHIP-RELEVANT facts of a mission document at the moment
+ * the caller read it.
+ *
+ * A whole-document write is legitimate for some transitions (a scope report, a
+ * discovery insertion, a checkpoint restoration), but only if nothing that
+ * matters moved since the read. Comparing this compact snapshot inside the
+ * store's transaction is what makes those writes conditional: a newer lease,
+ * a healed objective, a terminal decision or any other commit refuses the
+ * write instead of being overwritten by an older copy.
+ */
+export interface MissionCasSnapshot {
+  state: MissionState;
+  updatedAt: string;
+  stateHistoryLength: number;
+  activityLength: number;
+  objectives: Array<{
+    objectiveId: string;
+    state: ObjectiveState;
+    leaseToken?: string;
+    leaseExpiresAt?: string;
+  }>;
+}
+
+/** LEASE-03 — result of a conditional whole-document replacement. */
+export interface MissionReplaceResult {
+  /** True only when the authority still matched the snapshot and the write landed. */
+  applied: boolean;
+  /** Authoritative mission after the attempt (post-write or post-refusal read). */
+  mission: Mission;
 }
 
 export interface MissionObjective {
@@ -130,6 +308,12 @@ export interface MissionObjective {
   maxRetries: number;
   verifiedOutcome?: VerifiedOutcome;
   failureReason?: string;
+  /**
+   * LEASE-02 — the fencing token that published this objective's FINAL record
+   * (VERIFIED / FAILED / PENDING). Audit evidence of who acknowledged the
+   * result; cleared while the objective is RUNNING (no final record exists).
+   */
+  finalizedByLeaseToken?: string;
   advisoryRecommendation?: string;
   confidenceScore?: number;
   goalId?: string;

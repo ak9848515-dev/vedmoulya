@@ -135,6 +135,11 @@ export const LIFE_DESTINATION: AppDestination = {
     // invoicing · analytics) over the existing business services, so it is a
     // Life → Business sub-experience rather than a separate product.
     '/content-agency',
+    // Revenue is the earning workspace: the founder command center's real
+    // reads (revenue streams, cost-weighted ranking, opportunity radar and the
+    // bounded discovery/proposal-draft pass), given its own route so it is
+    // reachable without opening the assistant drawer.
+    '/revenue',
   ],
   icon: Compass,
 };

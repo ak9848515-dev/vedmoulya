@@ -6,6 +6,7 @@
 // Does NOT duplicate: planners, agent loops, memory, routers, tools.
 // ------------------------------------------------------------------
 
+import { randomUUID } from 'node:crypto';
 import type {
   CreateMissionInput,
   Mission,
@@ -13,8 +14,11 @@ import type {
   MissionCheckpoint,
   MissionFailureClassification,
   MissionFailureDiagnosisRecord,
+  MissionCasSnapshot,
   MissionObjective,
   MissionOutcome,
+  MissionState,
+  RecoveryObjectiveChange,
 } from '../types/mission-types.js';
 import { transition, canTransition, isTerminal } from '../domain/mission-state-machine.js';
 import {
@@ -54,12 +58,31 @@ import type {
   RepairResult,
 } from '../domain/diagnosis-repair.js';
 import { createRepairRecord, type RepairAttemptRecord } from '../domain/diagnosis-repair.js';
+import {
+  ObjectiveLeaseHeartbeat,
+  type LeaseRenewalScheduler,
+} from '../domain/objective-lease-heartbeat.js';
+import { DEFAULT_MAX_ACTIVITY_EVENTS } from '../domain/mission-activity.js';
+import { isMissionTerminal, missionCasSnapshot } from '../domain/mission-publication.js';
+
+export type { LeaseRenewalScheduler } from '../domain/objective-lease-heartbeat.js';
+// LEASE-02 — the shared bounded activity cap (one definition for the service
+// and every store that merges activity).
+export { DEFAULT_MAX_ACTIVITY_EVENTS };
 
 /** BLD-025 — durable objective ownership lease TTL (ms). When a persisted
  *  RUNNING objective's lease expires, recovery treats the previous owner as
  *  dead and the objective as recoverable — a live lease means another worker
- *  still owns it and it must NOT be re-run. */
+ *  still owns it and it must NOT be re-run. LEASE-01: a running objective now
+ *  RENEWS its lease for as long as it works (see `ObjectiveLeaseHeartbeat`), so
+ *  the TTL bounds how long a CRASHED owner is tolerated — never how long a real
+ *  attempt may take. */
 export const DEFAULT_LEASE_TTL_MS = 60_000;
+
+/** LEASE-01 — the durable failure reason recorded when recovery heals an
+ *  interrupted (expired-lease) objective back to READY. */
+export const RECOVERED_LEASE_EXPIRED_REASON =
+  'Recovered after process interruption (durable lease expired)';
 
 /** FINAL-03A — bounded durable diagnosis trail per objective. */
 export const DEFAULT_MAX_DIAGNOSIS_HISTORY = 5;
@@ -69,9 +92,6 @@ const MAX_DIAGNOSIS_ERROR_CHARS = 1_000;
 const MAX_DIAGNOSIS_OUTPUT_CHARS = 1_000;
 const MAX_DIAGNOSIS_EVIDENCE_LINES = 10;
 const MAX_DIAGNOSIS_EVIDENCE_HISTORY = 3;
-
-/** BLD-025 — bounded durable activity trail per mission. */
-export const DEFAULT_MAX_ACTIVITY_EVENTS = 200;
 
 /** S10 — bounded attempts for a REQUIRED (durability-barrier) mission write. */
 export const DEFAULT_PERSISTENCE_ATTEMPTS = 3;
@@ -233,6 +253,19 @@ export interface MissionControllerOptions {
   persistenceRetry?: { attempts?: number; baseDelayMs?: number };
   /** BLD-025 — durable objective ownership lease TTL (defaults to 60s). */
   leaseTtlMs?: number;
+  /**
+   * LEASE-02 — hard bound (ms) on ONE lease renewal attempt, and therefore on
+   * heartbeat shutdown (defaults to `DEFAULT_LEASE_RENEWAL_TIMEOUT_MS`, never
+   * more than the configured TTL). A renewal that cannot settle never blocks
+   * objective cleanup and never counts as proof of ownership.
+   */
+  leaseRenewalTimeoutMs?: number;
+  /**
+   * LEASE-01 — scheduler seam for the objective lease heartbeat (defaults to
+   * `setTimeout`). Tests inject a manual scheduler so renewal is deterministic
+   * and never depends on real-time sleeps; production uses the default.
+   */
+  leaseRenewalScheduler?: LeaseRenewalScheduler;
   /** BLD-025 — bounded durable activity trail length (defaults to 200). */
   maxActivityEvents?: number;
   /**
@@ -300,6 +333,13 @@ export interface AbandonedExecutionReconciliationResult {
 
 export class MissionControllerService {
   private readonly objectivesInFlight = new Set<string>();
+  /**
+   * LEASE-01 — the lease heartbeat of the objective this process is currently
+   * executing, keyed by mission. Exactly one objective runs per mission
+   * (`objectivesInFlight`), and the entry is removed — after the heartbeat is
+   * stopped — in every exit path of `runNextObjective`.
+   */
+  private readonly activeHeartbeats = new Map<string, ObjectiveLeaseHeartbeat>();
   private readonly persistenceAttempts: number;
   private readonly persistenceBaseDelayMs: number;
 
@@ -446,12 +486,29 @@ export class MissionControllerService {
     try {
       return await this.runNextObjectiveInternal(missionId);
     } finally {
+      // ── LEASE-01 — the heartbeat NEVER outlives the attempt. ──────────
+      //    Success, exception, hold or cancellation all pass through here, so
+      //    no timer keeps renewing a lease the execution no longer holds. The
+      //    renewal in flight (if any) is awaited by `stop()`.
+      await this.stopObjectiveHeartbeat(missionId);
       this.objectivesInFlight.delete(missionId);
     }
   }
 
+  /** LEASE-01 — stop and forget the mission's objective lease heartbeat. */
+  private async stopObjectiveHeartbeat(missionId: string): Promise<void> {
+    const heartbeat = this.activeHeartbeats.get(missionId);
+    if (!heartbeat) return;
+    this.activeHeartbeats.delete(missionId);
+    await heartbeat.stop();
+  }
+
   private async runNextObjectiveInternal(missionId: string): Promise<Mission> {
     let mission = await this.getMission(missionId);
+    // LEASE-03 — the authority this attempt READ. The conditional writes below
+    // (discovery insertion, objective-start barrier) are applied only while the
+    // record still matches it.
+    const loadBaseline = missionCasSnapshot(mission);
 
     if (mission.state !== 'RUNNING' && mission.state !== 'CREATED') {
       throw new Error(`Cannot run objective in state ${mission.state}`);
@@ -483,23 +540,40 @@ export class MissionControllerService {
       const pendingObjective = mission.objectives.find(
         (o) => o.state === 'PENDING' || o.state === 'READY',
       );
+      let holdCheckpoint: MissionCheckpoint | undefined;
       if (pendingObjective) {
-        const checkpoint = await this.createCheckpoint(mission, pendingObjective);
-        mission.checkpoints.push(checkpoint);
+        holdCheckpoint = await this.createCheckpoint(mission, pendingObjective);
+        mission.checkpoints.push(holdCheckpoint);
       }
+      const holdState = mission.state;
+      const holdReason = `No capable provider available (required capabilities: ${requiredCaps.join(', ') || 'none'})`;
       mission.state = 'WAITING_FOR_PROVIDER';
       mission.stateHistory.push('WAITING_FOR_PROVIDER');
-      mission.outcomeReason = `No capable provider available (required capabilities: ${requiredCaps.join(', ') || 'none'})`;
+      mission.outcomeReason = holdReason;
       // FINAL-04 — the provider hold is observable on the durable trail, so
       // the reason a mission is (and stays) WAITING_FOR_PROVIDER survives a
       // process restart.
-      this.recordActivity(
-        mission,
-        'WAITING_FOR_PROVIDER',
-        `No capable provider available (required capabilities: ${requiredCaps.join(', ') || 'none'})`,
-      );
+      this.recordActivity(mission, 'WAITING_FOR_PROVIDER', holdReason);
       mission.updatedAt = this.options.clock.now();
-      await this.options.store.save(mission);
+      const holdStore = this.options.store;
+      if (typeof holdStore.patchMission === 'function') {
+        // LEASE-02 — a MISSION-LEVEL patch guarded by the state this pass
+        // observed: the hold never rewrites objectives (so it cannot revive a
+        // lease or an objective another owner advanced). A refusal means the
+        // mission moved on; that record is adopted.
+        const patched = await holdStore.patchMission(mission.missionId, {
+          expectedState: holdState,
+          state: 'WAITING_FOR_PROVIDER',
+          stateHistoryEntry: 'WAITING_FOR_PROVIDER',
+          outcomeReason: holdReason,
+          ...(holdCheckpoint !== undefined ? { checkpoint: holdCheckpoint } : {}),
+          activity: mission.activity,
+          activityLimit: this.activityLimit(),
+          at: mission.updatedAt,
+        });
+        if (patched) return patched.mission;
+      }
+      await holdStore.save(mission);
       return mission;
     }
 
@@ -543,19 +617,34 @@ export class MissionControllerService {
         return this.applyCommand(mission, { type: 'FAIL', reason: 'No objectives achieved' });
       }
       // Work remains but nothing is selectable (blocked dependency).
-      return this.applyCommand(mission, {
-        type: 'BLOCK',
-        reason: 'No selectable objective with satisfied dependencies',
-      });
+      // LEASE-03 — this decision is CONDITIONAL and its premise ("nothing of
+      // this mission is being executed") is re-validated before any retry: an
+      // objective another worker acquired while this pass was selecting must
+      // not be blocked underneath it.
+      return this.applyCommand(
+        mission,
+        {
+          type: 'BLOCK',
+          reason: 'No selectable objective with satisfied dependencies',
+        },
+        { requireNoLiveLeaseAtMs: this.options.clock.timestampMs() },
+      );
     }
 
     // Hard budget ceiling — enforced only when real work remains.
     const budgetStatus = checkBudget(mission.budget, mission.budgetUsage);
     if (budgetStatus.exhausted) {
-      return this.applyCommand(mission, {
-        type: 'FAIL',
-        reason: budgetStatus.reason ?? 'Budget exhausted',
-      });
+      // LEASE-03 — a terminal FAIL is decided by THIS pass, so it is refused
+      // atomically while any objective still holds a live lease (another owner
+      // is working; the mission must not be failed underneath it).
+      return this.applyCommand(
+        mission,
+        {
+          type: 'FAIL',
+          reason: budgetStatus.reason ?? 'Budget exhausted',
+        },
+        { requireNoLiveLeaseAtMs: this.options.clock.timestampMs() },
+      );
     }
 
     let objective: MissionObjective | undefined;
@@ -608,8 +697,12 @@ export class MissionControllerService {
     //    before planning/execution may touch the workspace. After a crash the
     //    lease proves who owned the objective; recovery never re-runs a live
     //    lease and heals an expired one to READY (recoverable).
-    const lease = {
+    const lease: NonNullable<MissionObjective['lease']> = {
       owner: 'mission-runtime',
+      // LEASE-01 — a FENCING token unique to THIS acquisition. `owner` alone is
+      // the same string for every worker/attempt, so it can never distinguish
+      // "I still own it" from "a previous execution of mine lost it".
+      token: `lease_${randomUUID()}`,
       acquiredAt: this.options.clock.now(),
       expiresAt: new Date(
         this.options.clock.timestampMs() + (this.options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS),
@@ -618,8 +711,21 @@ export class MissionControllerService {
     if (this.options.store.acquireObjectiveLease) {
       // A discovered objective is first made durable as PENDING; the optional
       // store CAS then owns the only transition to RUNNING.
+      //
+      // LEASE-03 — the insertion is a CONDITIONAL document write: it applies
+      // only while the mission still matches the snapshot this attempt read, so
+      // it can neither revert a renewal/terminal decision nor erase another
+      // actor's objectives. An equivalent objective that already exists is
+      // REUSED (idempotent discovery) instead of being added twice.
       if (discoveredObjective) {
-        await this.options.store.save(mission);
+        const inserted = await this.insertDiscoveredObjective(mission, loadBaseline, objective);
+        mission = inserted.mission;
+        objective = inserted.objective;
+        if (objective === undefined) {
+          // The insertion could never be made authoritative (the mission moved
+          // on twice). Never acquire an objective the durable record lacks.
+          return mission;
+        }
       }
       const objectiveId = objective.objectiveId;
       const acquired = await this.options.store.acquireObjectiveLease(
@@ -639,6 +745,10 @@ export class MissionControllerService {
       objective.updatedAt = this.options.clock.now();
       mission.updatedAt = this.options.clock.now();
     }
+    // LEASE-03 — the snapshot this barrier is allowed to overwrite. Captured
+    // AFTER acquisition (so it includes the durable RUNNING + lease) and BEFORE
+    // the local replan/activity changes below.
+    const startBaseline = missionCasSnapshot(mission);
     if (objective.retryCount > 0) {
       // A re-attempt of an already-attempted objective re-plans it. Count it
       // as a mission-level replan — persisted with the lease so the replan
@@ -655,15 +765,25 @@ export class MissionControllerService {
     //    "never ran", and recovery would BLINDLY RE-EXECUTE an objective that
     //    had already started causing side effects. Nothing has executed yet at
     //    this point, so an exhausted barrier is safe to hold.
+    //
+    // LEASE-03 — the barrier is now CONDITIONAL. The acquisition already made
+    // RUNNING + the lease durable, so this write only adds the attempt's own
+    // mission-level facts (replan counter, activity, timestamps). If the
+    // authority moved on meanwhile — an operator cancelled or paused, another
+    // owner advanced the mission — the write is REFUSED and its authoritative
+    // record is adopted; nothing executes and no terminal decision is
+    // overwritten.
     try {
-      await this.persistRequired(
-        `objective_start:${objective.objectiveId}`,
-        () =>
-          this.options.store.saveRequired
-            ? this.options.store.saveRequired(mission)
-            : this.options.store.save(mission),
-        mission,
-      );
+      const barrier = await this.publishDocument(mission, startBaseline, {
+        operation: `objective_start:${objective.objectiveId}`,
+        required: true,
+      });
+      if (!barrier.applied) {
+        // A stale worker must not continue as a valid owner.
+        return barrier.mission;
+      }
+      mission = barrier.mission;
+      objective = this.findObjectiveOrThrow(mission, objective.objectiveId);
     } catch (error) {
       return this.holdAfterPersistenceFailure(
         mission,
@@ -671,6 +791,28 @@ export class MissionControllerService {
         error,
       );
     }
+
+    // ── LEASE-01 — OWNERSHIP HEARTBEAT. ──────────────────────────────────
+    //    An objective legitimately runs longer than the lease TTL (planning +
+    //    execution + verification + evidence persistence). Without renewal the
+    //    lease expires mid-attempt, recovery heals the objective to READY and
+    //    the still-working owner later overwrites the record — the interrupted
+    //    objective and the lost `Last Verification` result. The heartbeat keeps
+    //    THIS lease alive while THIS execution works; the `finally` in
+    //    `runNextObjective` stops it in every exit path.
+    const leaseHeartbeat = new ObjectiveLeaseHeartbeat({
+      store: this.options.store,
+      clock: this.options.clock,
+      missionId: mission.missionId,
+      objectiveId: objective.objectiveId,
+      lease,
+      ttlMs: this.options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS,
+      ...(this.options.leaseRenewalScheduler
+        ? { scheduler: this.options.leaseRenewalScheduler }
+        : {}),
+    });
+    this.activeHeartbeats.set(mission.missionId, leaseHeartbeat);
+    leaseHeartbeat.start();
 
     // ── Execute (plan + AI execution) with honest, bounded error handling ──
     //    A provider/planner/executor throw must NEVER leave the mission stuck
@@ -757,18 +899,28 @@ export class MissionControllerService {
         objective.lease = undefined;
         objective.updatedAt = this.options.clock.now();
         const checkpoint = await this.createCheckpoint(mission, objective);
-        mission.checkpoints.push(checkpoint);
         this.recordActivity(
           mission,
           'WAITING_FOR_PROVIDER',
           `No capable provider available: ${classification.reason}`,
         );
-        mission.state = 'WAITING_FOR_PROVIDER';
-        mission.stateHistory.push('WAITING_FOR_PROVIDER');
-        mission.outcomeReason = classification.reason;
-        mission.updatedAt = this.options.clock.now();
-        await this.options.store.save(mission);
-        return mission;
+        // LEASE-02 — the hold rides the SAME ownership-validated publication as
+        // the objective: it is applied only while the mission is still RUNNING,
+        // so an operator's cancellation always wins over a late hold.
+        const held = await this.publishObjective(mission, objective, lease, {
+          operation: `objective_hold:${objective.objectiveId}:WAITING_FOR_PROVIDER`,
+          checkpoint,
+          hold: { state: 'WAITING_FOR_PROVIDER', reason: classification.reason },
+        });
+        if (!held.applied) {
+          return this.handleRefusedPublication(
+            held.mission,
+            objective,
+            leaseHeartbeat,
+            lease.token,
+          );
+        }
+        return held.mission;
       }
       executionResult = {
         runId: `failed-${objective.objectiveId}`,
@@ -787,8 +939,22 @@ export class MissionControllerService {
       ].slice(-5);
       // Keep evidence persistence outside the executor catch path: a database
       // failure must stop this objective rather than fabricate an execution failure.
-      if (this.options.store.saveRequired) await this.options.store.saveRequired(mission);
-      else await this.options.store.save(mission);
+      // LEASE-02 — evidence is published by the SAME ownership-validated
+      // operation as the result, so a superseded execution can never write its
+      // traces over a newer owner's objective.
+      const published = await this.publishObjective(mission, objective, lease, {
+        operation: `objective_evidence:${objective.objectiveId}`,
+      });
+      if (!published.applied) {
+        return this.handleRefusedPublication(
+          published.mission,
+          objective,
+          leaseHeartbeat,
+          lease.token,
+        );
+      }
+      mission = published.mission;
+      objective = this.findObjectiveOrThrow(mission, objective.objectiveId);
     }
     mission.budgetUsage.runtimeMs += this.options.clock.timestampMs() - attemptStartedAtMs;
 
@@ -917,10 +1083,29 @@ export class MissionControllerService {
           );
           mission.state = 'WAITING_FOR_APPROVAL';
           mission.stateHistory.push('WAITING_FOR_APPROVAL');
-          mission.outcomeReason = `Operator approval required before this objective may continue — ${classification.reason}`;
+          const approvalReason = `Operator approval required before this objective may continue — ${classification.reason}`;
+          mission.outcomeReason = approvalReason;
           mission.updatedAt = this.options.clock.now();
-          await this.options.store.save(mission);
-          return mission;
+          // LEASE-02 — clearing the objective lease is an OWNERSHIP CHECKPOINT,
+          // not an ordinary write: the approval hold is published by the SAME
+          // ownership-validated operation as the objective (and only while the
+          // mission is still RUNNING), so a superseded execution can never
+          // re-write its lease/state over a newer owner and an operator hold
+          // can never revive a cancelled mission.
+          const held = await this.publishObjective(mission, objective, lease, {
+            operation: `objective_hold:${objective.objectiveId}:WAITING_FOR_APPROVAL`,
+            checkpoint,
+            hold: { state: 'WAITING_FOR_APPROVAL', reason: approvalReason },
+          });
+          if (!held.applied) {
+            return this.handleRefusedPublication(
+              held.mission,
+              objective,
+              leaseHeartbeat,
+              lease.token,
+            );
+          }
+          return held.mission;
         }
       }
 
@@ -1127,15 +1312,40 @@ export class MissionControllerService {
     //    + retry counters + the checkpoint reference). It must not be returned
     //    as success while it is still only a queued write: a crash then loses a
     //    verified objective and recovery would run it again.
-    try {
-      await this.persistRequired(
-        `objective_result:${objective.objectiveId}:${objective.state}`,
-        () =>
-          this.options.store.saveRequired
-            ? this.options.store.saveRequired(mission)
-            : this.options.store.save(mission),
+    //
+    // LEASE-01 — FENCING. The ownership checks above happened before the
+    // checkpoint/evidence writes, so they are separated from THIS write by two
+    // awaits: recovery could have healed our lease and another execution could
+    // have acquired the objective in between. The acknowledgement is therefore
+    // published through the token-conditioned store operation, which validates
+    // ownership in the SAME transaction (Postgres: same row lock) that writes
+    // the final state. A superseded worker's write is refused and it adopts the
+    // authoritative record instead of clobbering the new owner.
+    // LEASE-01 — a FAILED renewal while ownership still holds is recorded
+    // honestly (the work is acknowledged exactly once, but the degradation is
+    // never silent). When ownership was actually lost the publication below is
+    // refused and this event is not merged at all.
+    if (leaseHeartbeat.renewalFailureReason !== undefined) {
+      this.recordActivity(
         mission,
+        'OBJECTIVE_LEASE_NOT_RENEWED',
+        `Lease renewal failed (${leaseHeartbeat.renewalFailureReason}) while this execution still owned the objective — the finished work is acknowledged once.`,
       );
+    }
+    try {
+      const published = await this.publishObjective(mission, objective, lease, {
+        operation: `objective_result:${objective.objectiveId}:${objective.state}`,
+        checkpoint,
+      });
+      if (!published.applied) {
+        return await this.handleRefusedPublication(
+          published.mission,
+          objective,
+          leaseHeartbeat,
+          lease.token,
+        );
+      }
+      mission = published.mission;
     } catch (error) {
       return this.holdAfterPersistenceFailure(
         mission,
@@ -1183,7 +1393,7 @@ export class MissionControllerService {
   }
 
   async resumeFromCheckpoint(missionId: string): Promise<Mission> {
-    const mission = await this.getMission(missionId);
+    let mission = await this.getMission(missionId);
     const latest = await this.options.checkpointStore.getLatestForMission(missionId);
     if (!latest) throw new Error(`No checkpoint found for mission ${missionId}`);
     if (
@@ -1203,17 +1413,23 @@ export class MissionControllerService {
     //    never weaken, demote or duplicate newer durable state, and it never
     //    touches leases or budget counters other than the verified count it
     //    caused to be missing.
+    // LEASE-03 — the restoration is a WHOLE-DOCUMENT write (it promotes a
+    // verified result and its usage counter), so it is CONDITIONAL: the store
+    // applies it only while every objective still matches the snapshot this
+    // pass read. A renewal or an acquisition of ANY objective that landed in
+    // between is therefore preserved instead of being restored over, and the
+    // authoritative record is adopted on refusal.
+    const restoreBaseline = missionCasSnapshot(mission);
     if (this.restoreVerifiedFromCheckpoint(mission, latest)) {
       mission.updatedAt = this.options.clock.now();
       try {
-        await this.persistRequired(
-          `checkpoint_restore:${missionId}:${latest.checkpointId}`,
-          () =>
-            this.options.store.saveRequired
-              ? this.options.store.saveRequired(mission)
-              : this.options.store.save(mission),
-          mission,
-        );
+        const restored = await this.publishDocument(mission, restoreBaseline, {
+          operation: `checkpoint_restore:${missionId}:${latest.checkpointId}`,
+          required: true,
+        });
+        // Adopt the authority either way: on refusal the restore simply did not
+        // happen, and the newer record is what the caller must continue from.
+        mission = restored.mission;
       } catch (error) {
         return this.holdAfterPersistenceFailure(
           mission,
@@ -1254,6 +1470,34 @@ export class MissionControllerService {
     // Promote-only: the mission document always wins when it already records
     // the verified result.
     if (objective.state === 'VERIFIED' || objective.verifiedOutcome) return false;
+    // LEASE-02 — a checkpoint never overrides a LIVE owner. While the mission
+    // is RUNNING and the objective holds an unexpired lease, a real execution is
+    // working on it, so promoting an older VERIFIED witness over it would erase
+    // that ownership. An EXPIRED lease — or a mission that is no longer RUNNING
+    // (a hold was persisted, so nothing continues the loop) — still promotes:
+    // that is exactly the "verification succeeded but the mission write was
+    // lost" window this restore exists for.
+    const lease = objective.lease;
+    const checkpointMs = Date.parse(checkpoint.timestamp);
+    const leaseMs = lease === undefined ? Number.NaN : Date.parse(lease.acquiredAt);
+    // The witness belongs to the CURRENT ownership epoch only when it was
+    // written after that lease was acquired — i.e. this attempt verified the
+    // objective and then lost its result write. A checkpoint older than the
+    // lease is a PREVIOUS attempt's witness and must not be promoted over a
+    // newer owner.
+    // (`>=`, not `>`: a witness written in the same millisecond as the lease
+    // acquisition belongs to that attempt. A later owner is always STRICTLY
+    // after the witness, which is what makes this a safe discriminator.)
+    const witnessedByCurrentAttempt =
+      !Number.isNaN(checkpointMs) && !Number.isNaN(leaseMs) && checkpointMs >= leaseMs;
+    if (
+      mission.state === 'RUNNING' &&
+      objective.state === 'RUNNING' &&
+      this.isLeaseLive(lease, this.options.clock.timestampMs()) &&
+      !witnessedByCurrentAttempt
+    ) {
+      return false;
+    }
     objective.state = 'VERIFIED';
     objective.stateHistory.push('VERIFIED');
     objective.lease = undefined;
@@ -1303,8 +1547,56 @@ export class MissionControllerService {
     }
   }
 
-  private async applyCommand(mission: Mission, command: MissionCommand): Promise<Mission> {
-    const { clock, store } = this.options;
+  /**
+   * LEASE-03 — apply a command on the AUTHORITATIVE record.
+   *
+   * A command is a mission-level transition, so it is published through a
+   * CONDITIONAL write: the store applies it only while the record still matches
+   * the state the caller observed (mission state, history, activity and every
+   * objective's state/lease identity). When another process moved the mission in
+   * between — a renewal, a heal, a verification, a cancellation — the refusal
+   * is adopted and a NON-terminal command is re-derived ONCE on the
+   * authoritative record, so an operator action racing a heartbeat still does
+   * what was asked without ever overwriting the newer record. Terminal
+   * decisions are never retried, and a caller that must KNOW whether its
+   * command won receives the refusal.
+   */
+  private async applyCommand(
+    mission: Mission,
+    command: MissionCommand,
+    options: { requireApplied?: boolean; requireNoLiveLeaseAtMs?: number } = {},
+  ): Promise<Mission> {
+    const first = await this.applyCommandOnce(mission, command, options);
+    if (first.applied) return first.mission;
+    // Adopt the authoritative record; re-derive only a non-terminal command
+    // that is still LEGAL on it (a cancellation must never be forced back into
+    // PAUSED/BLOCKED by a retry).
+    //
+    // LEASE-03 — a WATCHDOG decision carries its own premise ("nothing owns this
+    // mission"). If the authoritative record now holds a LIVE lease, a renewal
+    // landed after the watchdog read it, and re-deriving the command would block
+    // a mission a real owner is executing. The premise is false, so there is no
+    // retry: the authoritative record is adopted and the decision is dropped.
+    if (
+      TERMINAL_COMMANDS.has(command.type) ||
+      options.requireApplied === true ||
+      (options.requireNoLiveLeaseAtMs !== undefined &&
+        this.hasLiveObjectiveLease(first.mission, options.requireNoLiveLeaseAtMs)) ||
+      !canTransition(first.mission.state, command)
+    ) {
+      return first.mission;
+    }
+    const retried = await this.applyCommandOnce(first.mission, command, options);
+    return retried.mission;
+  }
+
+  private async applyCommandOnce(
+    mission: Mission,
+    command: MissionCommand,
+    options: { requireApplied?: boolean; requireNoLiveLeaseAtMs?: number } = {},
+  ): Promise<{ applied: boolean; mission: Mission }> {
+    const { clock } = this.options;
+    const baseline = missionCasSnapshot(mission);
     const fromState = mission.state;
     // S10 — a TERMINAL transition acknowledges an irreversible outcome (the
     // mission is finished), so it takes the durability barrier. Every other
@@ -1349,9 +1641,17 @@ export class MissionControllerService {
       `${fromState} → ${newState}${commandReason ? ` — ${commandReason}` : ''}`,
     );
 
-    if (!required) {
-      await store.save(mission);
-      return mission;
+    // LEASE-03 — a best-effort command is still a WHOLE-DOCUMENT write (it
+    // carries the scope report and mission-level counters), so it is published
+    // conditionally: the store refuses it if anything that matters moved since
+    // this command read the mission. A refusal is reported to the caller so a
+    // stale watchdog/operator decision can never be mistaken for applied.
+    // Terminal decisions always take the narrow mission-level patch path; a
+    // caller that must KNOW whether its command won asks for it too.
+    if (!required && options.requireApplied !== true) {
+      return this.publishDocument(mission, baseline, {
+        operation: `command:${command.type}`,
+      });
     }
 
     // ── S10 — DURABILITY BARRIER (terminal transition). ───────────────────
@@ -1362,16 +1662,71 @@ export class MissionControllerService {
     //    lifecycle event) so memory and the durable snapshot agree, and the
     //    mission is held honestly.
     try {
+      const terminalStore = this.options.store;
+      if (typeof terminalStore.patchMission === 'function') {
+        // LEASE-02 — a TERMINAL decision is published as a MISSION-LEVEL patch
+        // guarded by the state this command observed. A stale terminal write
+        // (the mission already moved — e.g. it was cancelled, or another worker
+        // advanced it) is REFUSED and the authoritative record is adopted
+        // instead of overwritten. `COMPLETE` additionally requires an IDLE
+        // mission: the mission is never reported finished while any objective
+        // is still RUNNING (a live lease means the work is not done).
+        const patched = await this.persistRequired(
+          `terminal:${command.type}`,
+          async () => {
+            const result = await terminalStore.patchMission?.(mission.missionId, {
+              expectedState: fromState,
+              state: newState,
+              stateHistoryEntry: newState,
+              ...(mission.outcome !== undefined ? { outcome: mission.outcome } : {}),
+              ...(mission.outcomeReason !== undefined
+                ? { outcomeReason: mission.outcomeReason }
+                : {}),
+              ...(mission.error !== undefined ? { error: mission.error } : {}),
+              ...(mission.startedAt !== undefined ? { startedAt: mission.startedAt } : {}),
+              ...(mission.finishedAt !== undefined ? { finishedAt: mission.finishedAt } : {}),
+              activity: mission.activity,
+              activityLimit: this.activityLimit(),
+              requireIdle: command.type === 'COMPLETE',
+              // LEASE-03 — a controller-issued terminal decision refuses while
+              // a live lease exists, INSIDE the same atomic patch. Operator
+              // commands (cancel/reject) deliberately carry no such guard: an
+              // operator decision always wins over a running execution.
+              ...(options.requireNoLiveLeaseAtMs !== undefined
+                ? { requireNoLiveLease: { nowMs: options.requireNoLiveLeaseAtMs } }
+                : {}),
+              at: mission.updatedAt,
+            });
+            if (!result) throw new Error(`Mission ${mission.missionId} not found`);
+            return result;
+          },
+          mission,
+        );
+        if (patched.applied) return { applied: true, mission: patched.mission };
+        // Refused: the durable mission already moved on. Adopt it — a late
+        // command never fabricates a terminal outcome. Callers that must KNOW
+        // whether their command won (a watchdog counting a resume it did not
+        // perform) ask for the refusal explicitly.
+        if (options.requireApplied === true) {
+          throw new Error(
+            `Mission ${mission.missionId} did not accept ${command.type}: its durable state moved on`,
+          );
+        }
+        return { applied: false, mission: patched.mission };
+      }
       await this.persistRequired(
         `terminal:${command.type}`,
         () =>
-          this.options.store.saveRequired
-            ? this.options.store.saveRequired(mission)
-            : this.options.store.save(mission),
+          terminalStore.saveRequired
+            ? terminalStore.saveRequired(mission)
+            : terminalStore.save(mission),
         mission,
       );
-      return mission;
+      return { applied: true, mission };
     } catch (error) {
+      // A caller that asked to KNOW whether its command won gets the refusal
+      // verbatim — never a hold fabricated out of someone else's transition.
+      if (options.requireApplied === true) throw error;
       if (before) {
         mission.state = before.state;
         mission.stateHistory = before.stateHistory;
@@ -1383,7 +1738,13 @@ export class MissionControllerService {
         mission.activity = before.activity;
         mission.updatedAt = before.updatedAt;
       }
-      return this.holdAfterPersistenceFailure(mission, `terminal:${command.type}`, error);
+      // The acknowledgement was withdrawn and the mission held honestly: the
+      // command is NOT reported as applied, but retrying it would only repeat
+      // the same failure.
+      return {
+        applied: true,
+        mission: await this.holdAfterPersistenceFailure(mission, `terminal:${command.type}`, error),
+      };
     }
   }
 
@@ -1424,23 +1785,35 @@ export class MissionControllerService {
    * Bounded by construction: at most `persistenceAttempts` attempts (default 3)
    * with exponential backoff. No unbounded loop, no unbounded queue.
    */
-  private async persistRequired(
+  private async persistRequired<T>(
     operation: string,
-    write: () => Promise<void>,
+    write: () => Promise<T>,
     mission?: Mission,
-  ): Promise<void> {
+  ): Promise<T> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.persistenceAttempts; attempt += 1) {
       try {
-        await write();
-        if (attempt > 1 && mission) {
-          this.recordActivity(
-            mission,
-            'PERSISTENCE_RETRIED',
-            `Required persistence for ${operation} succeeded on attempt ${String(attempt)}`,
-          );
+        const value = await write();
+        if (attempt > 1) {
+          const retriedMessage = `Required persistence for ${operation} succeeded on attempt ${String(attempt)}`;
+          if (mission) {
+            this.recordActivity(mission, 'PERSISTENCE_RETRIED', retriedMessage);
+          }
+          const rawVal: unknown = value;
+          if (
+            typeof rawVal === 'object' &&
+            rawVal !== null &&
+            'mission' in rawVal &&
+            Boolean((rawVal as { mission?: unknown }).mission)
+          ) {
+            this.recordActivity(
+              (rawVal as { mission: Mission }).mission,
+              'PERSISTENCE_RETRIED',
+              retriedMessage,
+            );
+          }
         }
-        return;
+        return value;
       } catch (error) {
         lastError = error;
         if (attempt < this.persistenceAttempts && this.persistenceBaseDelayMs > 0) {
@@ -1482,16 +1855,42 @@ export class MissionControllerService {
     )} attempt(s) (${
       error instanceof Error ? error.message : String(error)
     }) — the outcome is NOT acknowledged as durable; resume after persistence recovers.`;
+    const observedState = mission.state;
     mission.outcomeReason = reason;
     const blockCommand = { type: 'BLOCK', reason } as const;
-    if (canTransition(mission.state, blockCommand)) {
-      mission.state = transition(mission.state, blockCommand);
+    const blocks = canTransition(observedState, blockCommand);
+    if (blocks) {
+      mission.state = transition(observedState, blockCommand);
       mission.stateHistory.push(mission.state);
       this.recordActivity(mission, BLD_025_COMMAND_ACTIVITY.BLOCK, reason);
     }
     this.recordActivity(mission, 'PERSISTENCE_FAILED', reason);
     mission.updatedAt = this.options.clock.now();
-    await this.options.store.save(mission);
+    const store = this.options.store;
+    if (typeof store.patchMission === 'function') {
+      // LEASE-02 — the hold is a MISSION-LEVEL patch, not a document write: it
+      // is applied only against the state this failure was observed in and it
+      // never rewrites an objective, a lease or a verified result. A refusal
+      // means the durable mission already moved on, so that record is adopted
+      // and the failure is recorded as merge-only activity instead.
+      const patched = await store.patchMission(mission.missionId, {
+        expectedState: observedState,
+        state: mission.state,
+        ...(blocks ? { stateHistoryEntry: mission.state } : {}),
+        outcomeReason: reason,
+        activity: mission.activity,
+        activityLimit: this.activityLimit(),
+        at: mission.updatedAt,
+      });
+      if (patched?.applied) return patched.mission;
+      const appended = await this.appendActivitySafe(
+        mission.missionId,
+        'PERSISTENCE_FAILED',
+        reason,
+      );
+      return appended ?? patched?.mission ?? mission;
+    }
+    await store.save(mission);
     return mission;
   }
 
@@ -1570,28 +1969,86 @@ export class MissionControllerService {
    *   - objective history is never fabricated.
    */
   async recoverMission(missionId: string): Promise<Mission> {
-    const mission = await this.getMission(missionId);
+    let mission = await this.getMission(missionId);
     if (isTerminal(mission.state)) return mission;
     const nowMs = this.options.clock.timestampMs();
     let changed = false;
+    const store = this.options.store;
+    // LEASE-02 — a recovery pass publishes CHANGES, never a document snapshot:
+    // each change is applied by the store only while the objective still
+    // matches what this pass OBSERVED (state + lease token + expiration).
+    const conditionalRecovery = typeof store.applyRecoveryChanges === 'function';
+    const recoveryChanges: RecoveryObjectiveChange[] = [];
     // FINAL-04 — recovery is observable: the counts of each recovery action
     // are recorded on the durable activity trail (never per-objective noise).
     let healedLeases = 0;
     let staleSkipped = 0;
 
     // Heal expired RUNNING leases (crash recovery at every objective boundary).
-    for (const objective of mission.objectives) {
-      if (objective.state !== 'RUNNING') continue;
-      if (this.isLeaseLive(objective.lease, nowMs)) continue; // another owner is active
-      objective.state = 'READY';
-      objective.stateHistory.push('READY');
-      objective.updatedAt = this.options.clock.now();
-      objective.lease = undefined;
-      if (!objective.failureReason) {
-        objective.failureReason = 'Recovered after process interruption (durable lease expired)';
+    //
+    // ── LEASE-01 — HEAL ATOMICALLY, PER OBJECTIVE. ─────────────────────
+    //    Reading "the lease looks expired" and then writing the whole mission
+    //    document is racy: a live owner may RENEW between the read and the
+    //    write, and the write would reset a working objective to READY (then
+    //    re-run it — duplicate execution and a lost verified result). When the
+    //    store offers the atomic heal, the state/ownership/expiry check and the
+    //    READY transition happen in ONE transaction against the authoritative
+    //    record, and a refusal simply adopts the fresh authoritative view.
+    const abandonedObjectiveIds = mission.objectives
+      .filter(
+        (objective) => objective.state === 'RUNNING' && !this.isLeaseLive(objective.lease, nowMs),
+      )
+      .map((objective) => objective.objectiveId);
+    for (const objectiveId of abandonedObjectiveIds) {
+      if (typeof store.releaseExpiredObjectiveLease === 'function') {
+        const healed = await store.releaseExpiredObjectiveLease(mission.missionId, objectiveId, {
+          nowMs,
+          failureReason: RECOVERED_LEASE_EXPIRED_REASON,
+        });
+        if (!healed) {
+          // A concurrent owner renewed (or advanced) it since the read: keep
+          // THEIR state — recovery never overwrites a live objective.
+          mission = await this.getMission(mission.missionId);
+          continue;
+        }
+        mission = healed;
+        healedLeases += 1;
+        changed = true;
+        continue;
+      }
+      // Store without the atomic heal: the frozen in-memory path.
+      const objective = mission.objectives.find(
+        (candidate) => candidate.objectiveId === objectiveId,
+      );
+      if (!objective || objective.state !== 'RUNNING') continue;
+      if (this.isLeaseLive(objective.lease, this.options.clock.timestampMs())) continue;
+      if (conditionalRecovery) {
+        // Conditional heal: applied only while the observed RUNNING + lease is
+        // still the authoritative one (a renewal or re-acquisition in between
+        // makes it a no-op that ADOPTS the new owner's state).
+        recoveryChanges.push({
+          objectiveId,
+          expected: {
+            state: 'RUNNING',
+            ...(objective.lease?.token !== undefined ? { leaseToken: objective.lease.token } : {}),
+            ...(objective.lease?.expiresAt !== undefined
+              ? { leaseExpiresAt: objective.lease.expiresAt }
+              : {}),
+          },
+          state: 'READY',
+          failureReason: objective.failureReason ?? RECOVERED_LEASE_EXPIRED_REASON,
+        });
+      } else {
+        objective.state = 'READY';
+        objective.stateHistory.push('READY');
+        objective.updatedAt = this.options.clock.now();
+        objective.lease = undefined;
+        if (!objective.failureReason) {
+          objective.failureReason = RECOVERED_LEASE_EXPIRED_REASON;
+        }
+        changed = true;
       }
       healedLeases += 1;
-      changed = true;
     }
 
     // Stale-objective / concurrent-external-change detection (§14/§15).
@@ -1603,13 +2060,31 @@ export class MissionControllerService {
           inspection = await this.options.repositoryInspector.inspectRepository(mission.workspace);
         }
         if (this.isRepoDerivedStale(objective, inspection)) {
-          objective.state = 'SKIPPED';
-          objective.stateHistory.push('SKIPPED');
-          objective.failureReason =
+          const staleReason =
             'Stale objective: no longer evidenced by current repository state (external change detected) — not re-executed';
-          objective.updatedAt = this.options.clock.now();
           staleSkipped += 1;
-          changed = true;
+          if (conditionalRecovery) {
+            recoveryChanges.push({
+              objectiveId: objective.objectiveId,
+              expected: {
+                state: objective.state,
+                ...(objective.lease?.token !== undefined
+                  ? { leaseToken: objective.lease.token }
+                  : {}),
+                ...(objective.lease?.expiresAt !== undefined
+                  ? { leaseExpiresAt: objective.lease.expiresAt }
+                  : {}),
+              },
+              state: 'SKIPPED',
+              failureReason: staleReason,
+            });
+          } else {
+            objective.state = 'SKIPPED';
+            objective.stateHistory.push('SKIPPED');
+            objective.failureReason = staleReason;
+            objective.updatedAt = this.options.clock.now();
+            changed = true;
+          }
         }
       }
     }
@@ -1642,14 +2117,45 @@ export class MissionControllerService {
           'MISSION_RESUMED',
           'Provider became available — mission recoverable',
         );
-        await this.applyCommand(mission, { type: 'PROVIDER_AVAILABLE' });
+        // LEASE-03 — the resume is CONDITIONAL and the AUTHORITATIVE record is
+        // returned. A cancellation (or any other commit) that landed while this
+        // pass was checking the provider therefore wins, and the caller never
+        // receives the stale snapshot it started from. The premise ("nothing
+        // is executing this mission") is re-validated too, so a lease that an
+        // owner renewed or acquired in the meantime is never reopened by a
+        // recovery pass.
+        try {
+          mission = await this.applyCommand(
+            mission,
+            { type: 'PROVIDER_AVAILABLE' },
+            { requireNoLiveLeaseAtMs: nowMs },
+          );
+        } catch {
+          mission = await this.getMission(mission.missionId);
+        }
         return mission;
       }
     }
 
-    if (changed) {
+    // ── LEASE-02 — CONDITIONAL PUBLICATION (no trailing whole-document write). ──
+    //    The pass used to save the WHOLE document it read at the start. A lease
+    //    renewed, or an objective re-acquired, between that read and this write
+    //    was silently reverted by it (and could revive a cancelled mission).
+    //    Changes are now applied only while the authoritative objective still
+    //    matches what recovery observed, and activity is MERGED; anything that
+    //    moved on is SKIPPED and the authoritative mission is adopted.
+    if (conditionalRecovery) {
+      const published = await store.applyRecoveryChanges?.(mission.missionId, recoveryChanges, {
+        nowMs,
+        activity: mission.activity,
+        activityLimit: this.activityLimit(),
+      });
+      if (published) mission = published.mission;
+    } else if (changed) {
+      // Legacy store without the conditional operation: the frozen local-apply
+      // + document write (never used by the durable runtime stores).
       mission.updatedAt = this.options.clock.now();
-      await this.options.store.save(mission);
+      await store.save(mission);
     }
     return mission;
   }
@@ -1689,13 +2195,14 @@ export class MissionControllerService {
         failed.push({ missionId: mission.missionId, reason });
         // Persist the failure as a bounded activity event so the operator can
         // SEE which mission could not be recovered (never silent abandonment).
-        try {
-          this.recordActivity(mission, 'MISSION_BLOCKED', `Recovery failed for mission: ${reason}`);
-          mission.updatedAt = this.options.clock.now();
-          await this.options.store.save(mission);
-        } catch {
-          // Store write failure on the recovery path must not abort other missions.
-        }
+        // LEASE-02 — the failure is recorded as merge-only activity: a boot-time
+        // snapshot must never be re-written over state another owner advanced.
+        // `appendActivitySafe` never throws, so one mission cannot abort the rest.
+        await this.appendActivitySafe(
+          mission.missionId,
+          'MISSION_BLOCKED',
+          `Recovery failed for mission: ${reason}`,
+        );
       }
     }
     return { recovered, active: missions.length, resumableMissionIds, failed };
@@ -1796,13 +2303,21 @@ export class MissionControllerService {
         // The EXISTING frozen state machine owns the transition; the frozen
         // applyCommand records the durable activity event as usual. One extra
         // event names WHY the watchdog resumed (the providers it observed).
-        const resumed = await this.applyCommand(mission, { type: 'PROVIDER_AVAILABLE' });
-        this.recordActivity(
-          resumed,
+        const resumed = await this.applyCommand(
+          mission,
+          { type: 'PROVIDER_AVAILABLE' },
+          {
+            requireApplied: true,
+          },
+        );
+        // LEASE-02 — merge-only activity (never a document snapshot): the
+        // watchdog must not re-write a lease that another owner renewed between
+        // the transition and this event.
+        await this.appendActivitySafe(
+          resumed.missionId,
           'WATCHDOG_RESUMED',
           `Watchdog: provider became available (${capableProviderIds.join(', ')}) — mission resumed`,
         );
-        await this.options.store.save(resumed);
         result.resumed.push(resumed.missionId);
       } catch (error) {
         // An illegal transition means another owner already moved the mission
@@ -1928,7 +2443,19 @@ export class MissionControllerService {
     if (Number.isNaN(updatedAtMs) || nowMs - updatedAtMs <= stuckAfterMs) return undefined;
     const reason = `Watchdog: mission RUNNING with no progress since ${mission.updatedAt} — transitioned to a recoverable state`;
     this.recordActivity(mission, 'MISSION_BLOCKED', reason);
-    return this.applyCommand(mission, { type: 'BLOCK', reason });
+    // LEASE-03 — the block is published CONDITIONALLY and its premise ("no live
+    // owner") is re-validated against the authoritative record before any
+    // retry: a renewal that landed after the read above wins, and the watchdog
+    // reports honestly that it did NOT transition the mission.
+    const blocked = await this.applyCommand(
+      mission,
+      { type: 'BLOCK', reason },
+      { requireNoLiveLeaseAtMs: nowMs },
+    );
+    // Still RUNNING means the decision was superseded by a live owner and no
+    // transition happened — reported honestly as undefined. Any other state was
+    // decided by someone else (e.g. an operator cancellation) and is returned.
+    return blocked.state === 'RUNNING' ? undefined : blocked;
   }
 
   // ── Status Read ───────────────────────────────────────────────────
@@ -1960,9 +2487,289 @@ export class MissionControllerService {
     return this.options.gitSafety ?? new GitSafetyPolicy();
   }
 
+  /**
+   * LEASE-03 — insert a DISCOVERED objective conditionally and idempotently.
+   *
+   * The insertion is a whole-document write, so it is applied only while the
+   * authority still matches what this attempt read. On refusal the authoritative
+   * record is adopted: an equivalent objective that already exists (another
+   * worker discovered the same work) is REUSED instead of added twice, and the
+   * insertion is retried ONCE from the fresh record. Failure to insert is
+   * reported as such — the caller never acquires an objective the durable
+   * mission does not contain.
+   */
+  private async insertDiscoveredObjective(
+    mission: Mission,
+    baseline: MissionCasSnapshot,
+    objective: MissionObjective,
+  ): Promise<{ mission: Mission; objective?: MissionObjective }> {
+    // Idempotent discovery: the SAME work may already be recorded (this is a
+    // re-run, or another worker discovered it first). Reuse it — never add a
+    // second copy.
+    const alreadyPresent = mission.objectives.find(
+      (candidate) =>
+        candidate !== objective &&
+        (candidate.objectiveId === objective.objectiveId ||
+          (candidate.title === objective.title && candidate.objective === objective.objective)),
+    );
+    if (alreadyPresent !== undefined) return { mission, objective: alreadyPresent };
+
+    const published = await this.publishDocument(mission, baseline, {
+      operation: `discovery:${objective.objectiveId}`,
+    });
+    let current = published.mission;
+    if (published.applied) {
+      return {
+        mission: current,
+        objective: this.findObjectiveOrThrow(current, objective.objectiveId),
+      };
+    }
+    // A terminal mission never gains work (the decision wins over discovery).
+    if (isMissionTerminal(current.state)) return { mission: current };
+    const existing = this.findEquivalentObjective(current, objective);
+    if (existing !== undefined) return { mission: current, objective: existing };
+
+    // Retry ONCE from the authoritative record (the mission moved while this
+    // attempt was preparing the insertion).
+    const retryBaseline = missionCasSnapshot(current);
+    const next: Mission = {
+      ...current,
+      objectives: [...current.objectives, objective],
+      currentObjectiveId: objective.objectiveId,
+      updatedAt: this.options.clock.now(),
+    };
+    const retried = await this.publishDocument(next, retryBaseline, {
+      operation: `discovery:${objective.objectiveId}:retry`,
+    });
+    current = retried.mission;
+    return {
+      mission: current,
+      ...(retried.applied
+        ? { objective: this.findObjectiveOrThrow(current, objective.objectiveId) }
+        : { objective: this.findEquivalentObjective(current, objective) }),
+    };
+  }
+
+  /** The SAME discovered work already present (by id, or by title+objective). */
+  private findEquivalentObjective(
+    mission: Mission,
+    objective: MissionObjective,
+  ): MissionObjective | undefined {
+    return mission.objectives.find(
+      (candidate) =>
+        candidate.objectiveId === objective.objectiveId ||
+        (candidate.title === objective.title && candidate.objective === objective.objective),
+    );
+  }
+
+  /**
+   * LEASE-02 — the AUTHORITATIVE objective for an id, never a fabricated one.
+   * Used after a publication so the caller continues on the merged record.
+   */
+  private findObjectiveOrThrow(mission: Mission, objectiveId: string): MissionObjective {
+    const objective = mission.objectives.find((candidate) => candidate.objectiveId === objectiveId);
+    if (!objective) {
+      throw new Error(`Objective ${objectiveId} not found on mission ${mission.missionId}`);
+    }
+    return objective;
+  }
+
   /** True while a durable objective lease is still valid (owner presumed alive). */
   private isLeaseLive(lease: MissionObjective['lease'], nowMs: number): boolean {
     return lease !== undefined && Date.parse(lease.expiresAt) > nowMs;
+  }
+
+  /** LEASE-03 — does ANY objective of the mission still hold a live lease? */
+  private hasLiveObjectiveLease(mission: Mission, nowMs: number): boolean {
+    return mission.objectives.some((objective) => this.isLeaseLive(objective.lease, nowMs));
+  }
+
+  /** LEASE-02 — the configured bounded activity-trail length. */
+  private activityLimit(): number {
+    return this.options.maxActivityEvents ?? DEFAULT_MAX_ACTIVITY_EVENTS;
+  }
+
+  /**
+   * LEASE-02 — append activity WITHOUT writing any document snapshot.
+   *
+   * Merge-only by construction, so it can never revert a lease, a verified
+   * result or a terminal state — which is why it is the only persistence a
+   * refused/lost execution is allowed to perform.
+   */
+  private async appendActivitySafe(
+    missionId: string,
+    kind: string,
+    message: string,
+  ): Promise<Mission | undefined> {
+    const store = this.options.store;
+    if (typeof store.appendActivity !== 'function') return undefined;
+    const event = {
+      id: this.options.idGenerator.generateId('act'),
+      at: this.options.clock.now(),
+      kind,
+      message: message.slice(0, 300),
+    };
+    try {
+      return await store.appendActivity(missionId, [event], {
+        limit: this.activityLimit(),
+        at: this.options.clock.now(),
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * LEASE-03 — publish a WHOLE-DOCUMENT transition CONDITIONALLY.
+   *
+   * Some transitions legitimately own more than an objective-scoped
+   * publication can express (the objective-start barrier's replan counter, a
+   * discovery insertion, a checkpoint restoration, a command's scope report).
+   * They may still write the document — but only while the authority still
+   * matches the snapshot the caller captured BEFORE mutating its copy. The
+   * comparison and the write are ONE store operation, so a renewal, a
+   * re-acquisition, a verification or a terminal decision that landed in
+   * between REFUSES the write instead of being overwritten by an older copy.
+   *
+   * A refusal returns the authoritative mission (`applied: false`) so the
+   * caller adopts it. `required` keeps the S10 durability barrier semantics
+   * (bounded retries, throws on exhaustion); otherwise the frozen best-effort
+   * behavior is preserved. Stores without the conditional operation keep the
+   * frozen whole-document write — the documented compatibility path.
+   */
+  private async publishDocument(
+    mission: Mission,
+    baseline: MissionCasSnapshot,
+    options: { operation: string; required?: boolean },
+  ): Promise<{ applied: boolean; mission: Mission }> {
+    const store = this.options.store;
+    const replace = store.replaceMissionIfUnchanged?.bind(store);
+    if (replace === undefined) {
+      const write = (): Promise<void> =>
+        store.saveRequired ? store.saveRequired(mission) : store.save(mission);
+      if (options.required === true) {
+        await this.persistRequired(options.operation, write, mission);
+      } else {
+        await write();
+      }
+      return { applied: true, mission };
+    }
+    const attempt = async (): Promise<{ applied: boolean; mission: Mission }> => {
+      const result = await replace(mission.missionId, mission, baseline);
+      if (!result) throw new Error(`Mission ${mission.missionId} not found`);
+      return result;
+    };
+    if (options.required === true) {
+      return this.persistRequired(options.operation, attempt, mission);
+    }
+    return attempt();
+  }
+
+  /**
+   * LEASE-02 — publish this execution's objective ATOMICALLY.
+   *
+   * Ownership is validated by the store in the SAME operation that writes the
+   * objective (a row-locked transaction for PostgreSQL, one atomic step in
+   * memory) — there is deliberately no "check here, save there" pair anymore.
+   * The publication carries the objective document, the activity (merged), the
+   * checkpoint witness and the mission-level hold, so a superseded execution
+   * can neither acknowledge a result nor overwrite a newer owner's state.
+   *
+   * Stores without the atomic operation keep the frozen whole-document write;
+   * they are the documented pre-LEASE-02 compatibility path.
+   */
+  private async publishObjective(
+    mission: Mission,
+    objective: MissionObjective,
+    lease: NonNullable<MissionObjective['lease']>,
+    extra: {
+      operation: string;
+      checkpoint?: MissionCheckpoint;
+      hold?: { state: MissionState; reason?: string };
+    },
+  ): Promise<{ applied: boolean; mission: Mission }> {
+    const store = this.options.store;
+    const token = lease.token;
+    const finalize = store.finalizeObjectiveIfLeaseOwner?.bind(store);
+    if (finalize !== undefined && token !== undefined) {
+      return this.persistRequired(
+        extra.operation,
+        async () => {
+          const result = await finalize(
+            mission.missionId,
+            objective.objectiveId,
+            { owner: lease.owner, token },
+            {
+              objective,
+              leaseToken: token,
+              activity: mission.activity,
+              activityLimit: this.activityLimit(),
+              budgetUsage: mission.budgetUsage,
+              ...(extra.checkpoint !== undefined ? { checkpoint: extra.checkpoint } : {}),
+              ...(extra.hold !== undefined ? { hold: extra.hold } : {}),
+              at: this.options.clock.now(),
+            },
+          );
+          if (!result) throw new Error(`Mission ${mission.missionId} not found`);
+          return result;
+        },
+        mission,
+      );
+    }
+    // Legacy store: the frozen pre-LEASE-02 whole-document write.
+    await this.persistRequired(
+      extra.operation,
+      () => (store.saveRequired ? store.saveRequired(mission) : store.save(mission)),
+      mission,
+    );
+    return { applied: true, mission };
+  }
+
+  /**
+   * LEASE-02 — the honest outcome of a REFUSED publication.
+   *
+   * Nothing is written except a merge-only activity event (and only when the
+   * result genuinely was not recorded). The authoritative mission is returned
+   * so the caller never reports stale success. Note the deliberate asymmetry:
+   * a refused publication is NOT an error — it means this execution is no
+   * longer the owner, and the durable record already belongs to whoever is.
+   */
+  private async handleRefusedPublication(
+    authoritative: Mission,
+    intended: MissionObjective,
+    leaseHeartbeat: ObjectiveLeaseHeartbeat,
+    leaseToken: string | undefined,
+  ): Promise<Mission> {
+    const existing = authoritative.objectives.find(
+      (candidate) => candidate.objectiveId === intended.objectiveId,
+    );
+    // A retried required write can find its OWN already-committed result (the
+    // record is stamped with this execution's fencing token): that is not a
+    // loss and must never be reported as one. A result published by a
+    // DIFFERENT execution is never silently claimed as ours — the loss is
+    // recorded honestly instead.
+    const alreadyApplied =
+      existing !== undefined &&
+      existing.state === intended.state &&
+      (intended.state !== 'VERIFIED' || existing.verifiedOutcome !== undefined) &&
+      (leaseToken === undefined || existing.finalizedByLeaseToken === leaseToken);
+    if (alreadyApplied) return authoritative;
+
+    const terminal = isTerminal(authoritative.state);
+    const stillOwned = terminal ? false : await leaseHeartbeat.stillOwnsObjective();
+    const reason = terminal
+      ? `the mission is ${authoritative.state} — a terminal decision wins over a late result`
+      : stillOwned
+        ? 'the mission state changed before the result could be recorded'
+        : `this execution no longer owns the objective (${
+            leaseHeartbeat.renewalFailureReason ?? 'the lease was released or replaced'
+          })`;
+    const appended = await this.appendActivitySafe(
+      authoritative.missionId,
+      terminal ? 'OBJECTIVE_INTERRUPTED' : 'OBJECTIVE_LEASE_LOST',
+      `Objective ${intended.objectiveId} was NOT published: ${reason}. No completion is claimed and nothing was overwritten.`,
+    );
+    return appended ?? authoritative;
   }
 
   /**

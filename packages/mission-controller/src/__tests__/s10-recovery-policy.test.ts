@@ -8,9 +8,10 @@
 //     the operator", and that is asserted rather than assumed;
 //   • the documented operator action must actually work (BLOCKED is cleared
 //     with the state machine's own UNBLOCK transition);
-//   • durable leases keep their existing ownership/expiry semantics, and the
-//     boundary that remains (a single execution longer than the lease TTL) is
-//     asserted explicitly instead of being claimed as exactly-once.
+//   • durable leases keep their existing ownership/expiry semantics: a LIVE
+//     lease is never touched and a genuinely EXPIRED one is healed (LEASE-01
+//     added renewal, so a still-running objective no longer expires mid-attempt;
+//     see lease-renewal.test.ts).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, expect, it } from 'vitest';
@@ -181,8 +182,10 @@ describe('S10 · lease ownership and the documented boundary', () => {
     const recovered = healed.objectives.find((o) => o.objectiveId === objectiveId);
     expect(recovered?.state).toBe('READY');
     expect(recovered?.lease).toBeUndefined();
-    // The documented boundary: an execution that OUTLIVES its lease is treated
-    // as abandoned — this is why leaseTtlMs must exceed the longest attempt.
+    // A lease that genuinely EXPIRED (no owner renewed it) is treated as
+    // abandoned. LEASE-01 removed the old "an execution that outlives its TTL is
+    // abandoned" boundary: a running objective now RENEWS its lease, so only a
+    // crashed/stale owner ever reaches this state.
     expect(healed.activity?.some((a) => a.kind === 'RECOVERY_LEASE_EXPIRED')).toBe(true);
   });
 });

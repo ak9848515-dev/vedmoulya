@@ -25,6 +25,7 @@ import {
   Sparkles,
   AlertTriangle,
   Store,
+  Wallet,
 } from 'lucide-react';
 import { useLifeOSSnapshot } from '../../lib/api-client.js';
 import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
@@ -427,6 +428,13 @@ export default function LifePage(): React.JSX.Element {
           >
             <Target className="h-4 w-4 text-[#7C3AED]" aria-hidden="true" />
             Goals
+          </Link>
+          <Link
+            href="/revenue"
+            className="inline-flex items-center gap-2 rounded-full border border-[#E8EDF5] dark:border-[#334155] bg-white dark:bg-[#1E293B] px-4 py-2 text-[13px] font-medium text-[#374151] dark:text-[#E2E8F0] hover:border-[#2B5FD9]/30 transition-colors"
+          >
+            <Wallet className="h-4 w-4 text-[#15803D]" aria-hidden="true" />
+            Revenue &amp; opportunities
           </Link>
         </div>
       </ErrorBoundary>

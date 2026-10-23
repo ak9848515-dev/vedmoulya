@@ -284,6 +284,7 @@ function controllerFor(
         // same "transient outage within the retry budget" the barrier promises.
         let remainingFailures = 2;
         const original = store.saveRequired.bind(store);
+        const originalPatch = store.patchMission?.bind(store);
         const flakyStore = Object.create(store) as PostgresMissionStore;
         Object.defineProperty(flakyStore, 'saveRequired', {
           value: async (mission: Mission): Promise<void> => {
@@ -294,6 +295,17 @@ function controllerFor(
             await original(mission);
           },
         });
+        if (originalPatch) {
+          Object.defineProperty(flakyStore, 'patchMission', {
+            value: async (...args: Parameters<typeof originalPatch>) => {
+              if (remainingFailures > 0) {
+                remainingFailures -= 1;
+                throw new Error('simulated transient persistence outage');
+              }
+              return originalPatch(...args);
+            },
+          });
+        }
 
         // The REAL controller path: CANCEL takes the terminal durability barrier.
         const ack = await controllerFor(flakyStore, checkpointStore).cancelMission(missionId);

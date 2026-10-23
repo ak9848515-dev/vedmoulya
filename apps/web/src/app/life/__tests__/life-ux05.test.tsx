@@ -119,6 +119,12 @@ describe('UX-05 Life — landing', () => {
     expect(screen.getAllByText('Marketplace').length).toBeGreaterThan(0);
   });
 
+  it('links to the revenue workspace so earning is reachable from Life', () => {
+    render(React.createElement(LifePage));
+    const link = screen.getByRole('link', { name: /Revenue & opportunities/i });
+    expect(link.getAttribute('href')).toBe('/revenue');
+  });
+
   it('shows real module status', () => {
     render(React.createElement(LifePage));
     const activeElements = screen.getAllByText('Active');

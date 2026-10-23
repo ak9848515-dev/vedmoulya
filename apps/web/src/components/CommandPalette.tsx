@@ -16,6 +16,7 @@ import {
   Store,
   LayoutDashboard,
   Lightbulb,
+  Wallet,
   Settings,
   User,
   X,
@@ -94,6 +95,14 @@ const STATIC_RESULTS: SearchResult[] = [
     description: 'Ventures, clients and results',
     route: '/business',
     icon: <BarChart3 className="h-4 w-4" />,
+  },
+  {
+    id: 'revenue',
+    category: 'Navigation',
+    title: 'Revenue',
+    description: 'Revenue streams, ranking and the opportunity radar',
+    route: '/revenue',
+    icon: <Wallet className="h-4 w-4" />,
   },
   {
     id: 'ai',

@@ -187,11 +187,12 @@ describe('BLD-021A Requirements 1 to 14: Mission Lifecycle & Planning Integratio
       initialObjectives: ['Obj 1', 'Obj 2'],
     });
     await service.startMission(mission.missionId);
-    await service.runNextObjective(mission.missionId);
-    expect(mission.objectives[0]?.state).toBe('VERIFIED');
-    expect(mission.objectives[1]?.state).toBe('PENDING');
-    await service.runNextObjective(mission.missionId);
-    expect(mission.objectives[1]?.state).toBe('VERIFIED');
+    // The store is a persistence boundary: assert the AUTHORITATIVE record.
+    const afterFirst = await service.runNextObjective(mission.missionId);
+    expect(afterFirst.objectives[0]?.state).toBe('VERIFIED');
+    expect(afterFirst.objectives[1]?.state).toBe('PENDING');
+    const afterSecond = await service.runNextObjective(mission.missionId);
+    expect(afterSecond.objectives[1]?.state).toBe('VERIFIED');
   });
 
   it('13. two sequential objectives: runs 2 objectives in loop without intermediate prompt', async () => {

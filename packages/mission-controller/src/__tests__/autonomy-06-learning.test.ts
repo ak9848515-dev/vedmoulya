@@ -45,8 +45,9 @@ describe('AUTONOMY-06: Learning Feedback Loop (mission-controller)', () => {
         initialObjectives: ['Run the test suite'],
       });
       await service.startMission(mission.missionId);
-      await service.runAutonomousLoop(mission.missionId);
-      expect(mission.objectives[0]?.state).toBe('VERIFIED');
+      // The store is a persistence boundary: assert the record the loop returns.
+      const completed = await service.runAutonomousLoop(mission.missionId);
+      expect(completed.objectives[0]?.state).toBe('VERIFIED');
     });
   });
 
@@ -355,10 +356,10 @@ describe('AUTONOMY-06: Learning Feedback Loop (mission-controller)', () => {
       });
 
       await service.startMission(mission.missionId);
-      await service.runAutonomousLoop(mission.missionId);
+      const completed = await service.runAutonomousLoop(mission.missionId);
 
       // Mission must still complete successfully despite learning failure.
-      expect(mission.objectives[0]?.state).toBe('VERIFIED');
+      expect(completed.objectives[0]?.state).toBe('VERIFIED');
       expect(retrievalCalled).toBe(true);
     });
   });

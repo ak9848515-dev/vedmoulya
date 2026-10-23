@@ -28,6 +28,15 @@ export type {
   GitSafetyClassification,
   MissionActivityEvent,
   MissionObjectiveLease,
+  MissionCasSnapshot,
+  MissionReplaceResult,
+  ObjectiveLeaseRenewal,
+  ObjectivePublication,
+  ObjectivePublicationResult,
+  RecoveryObjectiveChange,
+  RecoveryChangesResult,
+  MissionPatch,
+  MissionPatchResult,
   MissionExecutionTrace,
   MissionFailureDiagnosisRecord,
   DiscoveredWorkScope,
@@ -68,6 +77,31 @@ export { SimpleProviderAvailability } from './domain/provider-availability.js';
 // AUTONOMY-02 — failure context for objective revision/replanning.
 export { createFailureContext } from './domain/failure-context.js';
 export type { FailureContext } from './types/mission-types.js';
+// LEASE-01 — ownership-checked lease renewal (a long-running objective keeps
+// its lease alive instead of looking abandoned).
+export {
+  DEFAULT_LEASE_RENEWAL_TIMEOUT_MS,
+  ObjectiveLeaseHeartbeat,
+  systemLeaseRenewalScheduler,
+} from './domain/objective-lease-heartbeat.js';
+export type {
+  LeaseRenewalScheduler,
+  ObjectiveLeaseHeartbeatOptions,
+} from './domain/objective-lease-heartbeat.js';
+// LEASE-02 — atomic publication semantics shared by every mission store. The
+// stores apply these INSIDE their ownership/state validation (a row-locked
+// transaction for PostgreSQL, one atomic step in memory).
+export { mergeMissionActivity } from './domain/mission-activity.js';
+export {
+  applyActivityToMission,
+  applyMissionPatchToMission,
+  applyPublicationToMission,
+  applyRecoveryChangesToMission,
+  hasOtherLiveLease,
+  isMissionTerminal,
+  matchesMissionCas,
+  missionCasSnapshot,
+} from './domain/mission-publication.js';
 
 // FINAL-03A — production structured root-cause diagnosis (reuses AUTONOMY-04).
 // The diagnosis contract and its deterministic engine are the SAME types the
@@ -95,6 +129,7 @@ export type { FailureDiagnosisPort, FailureRepairPort } from './contracts/missio
 // Application
 export {
   DEFAULT_LEASE_TTL_MS,
+  RECOVERED_LEASE_EXPIRED_REASON,
   DEFAULT_MAX_ACTIVITY_EVENTS,
   DEFAULT_MAX_DIAGNOSIS_HISTORY,
   // S10 — durability barrier: bounded retry budget + the error a failed

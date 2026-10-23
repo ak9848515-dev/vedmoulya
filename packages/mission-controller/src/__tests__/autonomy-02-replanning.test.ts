@@ -107,10 +107,12 @@ describe('AUTONOMY-02: Failure-Informed Objective Replanning', () => {
     });
 
     await service.startMission(mission.missionId);
-    await service.runAutonomousLoop(mission.missionId);
+    // The store is a persistence boundary, so assert the AUTHORITATIVE record
+    // the loop returns — not the pre-run snapshot.
+    const completed = await service.runAutonomousLoop(mission.missionId);
 
     // Objective should have a new plan ID after revision
-    const objective = mission.objectives[0];
+    const objective = completed.objectives[0];
     expect(objective?.revisionHistory?.length).toBeGreaterThanOrEqual(1);
     const revision = objective?.revisionHistory?.[0];
     expect(revision?.revisedPlanId).toBeDefined();
