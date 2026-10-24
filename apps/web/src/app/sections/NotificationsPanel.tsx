@@ -7,6 +7,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation.js';
 import { Card, Badge } from '@vedmoulya/ui';
 import { Bell, Lightbulb, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
 import type { Notification } from './types.js';
@@ -15,6 +16,7 @@ import { notifColors } from './types.js';
 export interface NotificationsPanelProps {
   notifications: Notification[];
   unreadCount: number;
+  onAction?: (notification: Notification) => void;
 }
 
 const notifTypeIcon: Record<string, React.ReactNode> = {
@@ -28,7 +30,10 @@ const notifTypeIcon: Record<string, React.ReactNode> = {
 export function NotificationsPanel({
   notifications,
   unreadCount,
+  onAction,
 }: NotificationsPanelProps): React.JSX.Element {
+  const router = useRouter();
+
   return (
     <section>
       <h2 className="text-[20px] font-heading font-semibold text-[#111827] mb-4 flex items-center gap-2">
@@ -64,8 +69,17 @@ export function NotificationsPanel({
                     <div className="flex items-center gap-2 mt-1.5">
                       <span className="text-[11px] text-[#94A3B8] capitalize">{notif.source}</span>
                       {notif.isActionable && notif.actionLabel && (
-                        <button className="text-[11px] font-medium text-[#2B5FD9] hover:text-[#1E4AA8] transition-colors">
-                          {notif.actionLabel}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onAction?.(notif);
+                            if (notif.actionRoute && notif.actionRoute.startsWith('/')) {
+                              router.push(notif.actionRoute);
+                            }
+                          }}
+                          className="text-[11px] font-medium text-[#2B5FD9] hover:text-[#1E4AA8] transition-colors"
+                        >
+                          {notif.actionLabel} →
                         </button>
                       )}
                     </div>

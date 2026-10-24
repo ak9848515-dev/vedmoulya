@@ -630,3 +630,32 @@ export async function streamLocalGeneration(
     ...(terminal.usage !== undefined ? { usage: terminal.usage } : {}),
   };
 }
+
+/**
+ * Request the local backend to start the Local Agent process in the background.
+ * Returns ok: true if the agent was started or was already running.
+ */
+export async function startLocalAgent(): Promise<{
+  ok: boolean;
+  message: string;
+  alreadyRunning?: boolean;
+}> {
+  try {
+    const res = await fetch('/api/local-agent/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    const data = (await res.json()) as { ok?: boolean; message?: string; alreadyRunning?: boolean };
+    return {
+      ok: Boolean(data.ok),
+      message: data.message ?? (data.ok ? 'Local Agent started.' : 'Failed to start Local Agent.'),
+      alreadyRunning: data.alreadyRunning,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      message: `Failed to request Local Agent start: ${msg}`,
+    };
+  }
+}

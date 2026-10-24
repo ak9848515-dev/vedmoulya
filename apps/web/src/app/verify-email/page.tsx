@@ -17,7 +17,7 @@
 
 import React, { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Card } from '@vedmoulya/ui';
 import { CheckCircle2, Mail, ShieldCheck, Sparkles, XCircle } from 'lucide-react';
 import {
@@ -30,6 +30,7 @@ import {
 type VerifyState = 'pending' | 'verifying' | 'verified' | 'expired' | 'invalid' | 'error';
 
 function VerifyEmailInner(): React.JSX.Element {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   const emailParam = searchParams.get('email') ?? '';
@@ -121,10 +122,16 @@ function VerifyEmailInner(): React.JSX.Element {
               <p className="text-[14px] leading-relaxed text-gray-600">
                 Your account is active. You can now sign in.
               </p>
-              <Button variant="primary" size="lg" fullWidth className="h-12 !rounded-[16px]">
-                <Link href="/login" className="flex w-full items-center justify-center">
-                  Sign in
-                </Link>
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                className="h-12 !rounded-[16px]"
+                onClick={() => {
+                  router.push('/login');
+                }}
+              >
+                Sign in
               </Button>
             </div>
           )}

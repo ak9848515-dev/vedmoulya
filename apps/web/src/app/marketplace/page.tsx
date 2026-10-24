@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation.js';
 import {
   Card,
   Badge,
+  Button,
   Tabs as TabsRoot,
   TabsList,
   TabsTrigger,
@@ -18,13 +20,41 @@ import { useAuthStore, useAuthHydrated } from '../../stores/auth-store.js';
 import { SignInRedirect } from '../../components/SignInRedirect.js';
 import { AIContextBar } from '../ai/_components/AIContextBar.js';
 
+interface MarketplaceAsset {
+  name: string;
+  type: string;
+  status: 'Installed' | 'Available';
+  version: string;
+}
+
+const INITIAL_ASSETS: MarketplaceAsset[] = [
+  { name: 'Prompt Pack: Executive', type: 'Template', status: 'Installed', version: '2.1.0' },
+  { name: 'Workflow: Weekly Review', type: 'Automation', status: 'Available', version: '1.0.0' },
+  { name: 'Knowledge Pack: TypeScript', type: 'Knowledge', status: 'Installed', version: '3.0.0' },
+  { name: 'Assessment: Leadership', type: 'Assessment', status: 'Available', version: '1.2.0' },
+  { name: 'Career Template: Tech Lead', type: 'Template', status: 'Installed', version: '1.0.0' },
+  { name: 'Business Template: SaaS', type: 'Template', status: 'Available', version: '2.0.0' },
+];
+
 export default function MarketplacePage(): React.JSX.Element {
+  const router = useRouter();
   const hydrated = useAuthHydrated();
   const { user, sessionReady } = useAuthStore();
   const userId = user?.userId ?? '';
   const { isLoading } = useMarketplace(userId);
   const { setActiveSection, setBreadcrumbs } = useNavigationStore();
   const [activeTab, setActiveTab] = React.useState('overview');
+  const [assets, setAssets] = useState<MarketplaceAsset[]>(INITIAL_ASSETS);
+
+  const handleToggleInstall = (assetName: string): void => {
+    setAssets((prev) =>
+      prev.map((a) =>
+        a.name === assetName
+          ? { ...a, status: a.status === 'Installed' ? 'Available' : 'Installed' }
+          : a,
+      ),
+    );
+  };
 
   useEffect(() => {
     setActiveSection('marketplace');
@@ -145,44 +175,7 @@ export default function MarketplacePage(): React.JSX.Element {
         <TabsContent value="overview">
           <ErrorBoundary section="marketplace-catalog">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {[
-                {
-                  name: 'Prompt Pack: Executive',
-                  type: 'Template',
-                  status: 'Installed' as const,
-                  version: '2.1.0',
-                },
-                {
-                  name: 'Workflow: Weekly Review',
-                  type: 'Automation',
-                  status: 'Available' as const,
-                  version: '1.0.0',
-                },
-                {
-                  name: 'Knowledge Pack: TypeScript',
-                  type: 'Knowledge',
-                  status: 'Installed' as const,
-                  version: '3.0.0',
-                },
-                {
-                  name: 'Assessment: Leadership',
-                  type: 'Assessment',
-                  status: 'Available' as const,
-                  version: '1.2.0',
-                },
-                {
-                  name: 'Career Template: Tech Lead',
-                  type: 'Template',
-                  status: 'Installed' as const,
-                  version: '1.0.0',
-                },
-                {
-                  name: 'Business Template: SaaS',
-                  type: 'Template',
-                  status: 'Available' as const,
-                  version: '2.0.0',
-                },
-              ].map((asset) => (
+              {assets.map((asset) => (
                 <Card
                   key={asset.name}
                   variant="standard"
@@ -210,6 +203,14 @@ export default function MarketplacePage(): React.JSX.Element {
                     </Badge>
                   </div>
                   <button
+                    type="button"
+                    onClick={() => {
+                      if (asset.status === 'Installed') {
+                        setActiveTab('installed');
+                      } else {
+                        handleToggleInstall(asset.name);
+                      }
+                    }}
                     className={`mt-4 w-full py-2 rounded-lg text-[13px] font-medium transition-colors ${asset.status === 'Installed' ? 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]' : 'bg-[#2B5FD9] text-white hover:bg-[#1E4AA8]'}`}
                   >
                     {asset.status === 'Installed' ? 'Configure' : 'Install'}
@@ -224,9 +225,37 @@ export default function MarketplacePage(): React.JSX.Element {
           <ErrorBoundary section="marketplace-installed">
             <Card variant="standard" padding="lg">
               <h3 className="text-[18px] font-semibold text-[#111827]">Installed Assets</h3>
-              <p className="text-[14px] text-[#64748B] mt-2">
+              <p className="text-[14px] text-[#64748B] mt-1 mb-4">
                 Manage your installed platform assets and configurations.
               </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {assets
+                  .filter((a) => a.status === 'Installed')
+                  .map((asset) => (
+                    <div
+                      key={asset.name}
+                      className="p-3.5 rounded-xl border border-[#E2E8F0] dark:border-[#334155] flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="text-[14px] font-medium text-[#111827] dark:text-[#F8FAFC]">
+                          {asset.name}
+                        </p>
+                        <p className="text-[12px] text-[#64748B]">
+                          v{asset.version} · {asset.type}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleToggleInstall(asset.name);
+                        }}
+                        className="text-[12px] text-rose-600 hover:text-rose-700 font-medium px-2.5 py-1 rounded-lg border border-rose-200 hover:bg-rose-50"
+                      >
+                        Uninstall
+                      </button>
+                    </div>
+                  ))}
+              </div>
             </Card>
           </ErrorBoundary>
         </TabsContent>
@@ -234,9 +263,18 @@ export default function MarketplacePage(): React.JSX.Element {
           <ErrorBoundary section="marketplace-providers">
             <Card variant="standard" padding="lg">
               <h3 className="text-[18px] font-semibold text-[#111827]">AI Providers</h3>
-              <p className="text-[14px] text-[#64748B] mt-2">
+              <p className="text-[14px] text-[#64748B] mt-2 mb-4">
                 Configure and manage AI provider integrations.
               </p>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  router.push('/providers');
+                }}
+              >
+                Go to AI Providers →
+              </Button>
             </Card>
           </ErrorBoundary>
         </TabsContent>

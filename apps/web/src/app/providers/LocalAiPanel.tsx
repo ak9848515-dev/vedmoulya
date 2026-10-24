@@ -27,6 +27,7 @@ import {
 import {
   DEFAULT_LOCAL_RUNTIME_ID,
   streamLocalGeneration,
+  startLocalAgent,
   type LocalRuntimeStatusDTO,
   type LocalRuntimeVerifyDTO,
 } from './local-ai-agent.js';
@@ -97,6 +98,24 @@ export function LocalAiPanelView({
   const [streaming, setStreaming] = useState(false);
   const [output, setOutput] = useState('');
   const [streamMessage, setStreamMessage] = useState<string | null>(null);
+  const [startingAgent, setStartingAgent] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  const handleConnectOrStart = useCallback(async (): Promise<void> => {
+    setStartError(null);
+    if (!localAi.agentReachable) {
+      setStartingAgent(true);
+      const res = await startLocalAgent();
+      if (!res.ok) {
+        setStartingAgent(false);
+        setStartError(res.message);
+        return;
+      }
+      await localAi.refresh();
+      setStartingAgent(false);
+    }
+    await localAi.connect();
+  }, [localAi]);
 
   const generate = useCallback(async (): Promise<void> => {
     const check = localAi.check;
@@ -280,19 +299,29 @@ export function LocalAiPanelView({
           type="button"
           data-testid="local-ai-connect"
           onClick={() => {
-            void localAi.connect();
+            void handleConnectOrStart();
           }}
-          disabled={!agentReachable || connecting}
+          disabled={connecting || startingAgent}
           className="inline-flex items-center gap-2 rounded-xl bg-[#2B5FD9] px-3 py-2 text-[13px] font-medium text-white hover:bg-[#1E4AA8] disabled:opacity-50"
         >
-          {connecting ? (
-            <HardDriveDownload className="h-3.5 w-3.5" aria-hidden="true" />
+          {connecting || startingAgent ? (
+            <HardDriveDownload className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
           ) : (
             <PlugZap className="h-3.5 w-3.5" aria-hidden="true" />
           )}
-          {connecting ? 'Connecting…' : 'Connect local AI'}
+          {startingAgent
+            ? 'Starting agent…'
+            : connecting
+              ? 'Connecting…'
+              : agentReachable
+                ? 'Connect local AI'
+                : 'Start & Connect Local AI'}
         </button>
       </div>
+
+      {startError !== null ? (
+        <p className="mt-2 text-[12px] text-rose-600 dark:text-rose-400">{startError}</p>
+      ) : null}
 
       {agentReachable ? (
         <div className="mt-4 border-t border-[#E2E8F0] dark:border-[#334155] pt-4">
@@ -345,7 +374,8 @@ export function LocalAiPanelView({
 
       {!agentReachable ? (
         <p className="mt-2 text-[11px] text-[#94A3B8] dark:text-[#64748B]">
-          Start it on this computer with <code>npm run local-agent</code>.
+          Click <strong>Start & Connect Local AI</strong> above to launch the agent automatically,
+          or run <code>npm run local-agent</code> in a terminal.
         </p>
       ) : null}
     </section>

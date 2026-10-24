@@ -82,8 +82,9 @@ describe('LocalAiPanel', () => {
       expect(screen.getByTestId('local-ai-agent-status').textContent).toBe('Unavailable');
     });
     expect(screen.getByTestId('local-ai-runtime').textContent).toBe('—');
-    expect(screen.getByTestId('local-ai-connection').textContent).toBe('Not connected');
-    expect(screen.getByTestId('local-ai-connect').hasAttribute('disabled')).toBe(true);
+    expect(screen.getByTestId('local-ai-connect').textContent).toContain(
+      'Start & Connect Local AI',
+    );
   });
 
   it('separates the agent, the runtime and the model and shows the connection state', async () => {
