@@ -1,6 +1,6 @@
-﻿# VedMoulya — CVE Tracking
+# VedMoulya — CVE Tracking
 
-**Version:** 1.0.0 · **Last audit:** 2026-08-09 (hardening audit) · **Baseline:** `npm audit --omit=dev --audit-level=high` + full `npm audit`
+**Version:** 1.0.0 · **Last audit:** 2026-10-24 (security hardening audit) · **Baseline:** `npm audit --omit=dev --audit-level=high` + full `npm audit`
 
 ---
 
@@ -8,27 +8,30 @@
 
 | Metric                             | Value                                                                        |
 | ---------------------------------- | ---------------------------------------------------------------------------- |
-| Last full audit                    | 2026-08-09 (hardening audit)                                                 |
-| **Production deps (`--omit=dev`)** | **0 (high-blocking gate now runs in CI)**                                    |
+| Last full audit                    | 2026-10-24 (security hardening audit)                                        |
+| **Production deps (`--omit=dev`)** | **0 (high-blocking gate passes: 0 vulnerabilities)**                         |
 | Critical vulnerabilities (full)    | 0                                                                            |
-| High vulnerabilities (full)        | 3 (all dev-only, no safe fix — see table)                                    |
+| High vulnerabilities (full)        | 4 (all dev-only, no runtime exposure — see table)                            |
 | Moderate/low (transitive, no-fix)  | 5 tracked (see below)                                                        |
 | Dependabot                         | ✅ Enabled (weekly)                                                          |
 | CI gate                            | ✅ `npm audit --omit=dev --audit-level=high` + full `--audit-level=critical` |
 
-## Resolved since the 2026-08-01 baseline
+## Resolved in the 2026-10-24 Security Audit
 
-Applied via `overrides` in the root `package.json` (2026-08-09) — both were
-dev-toolchain only, but the fixes were trivial and peer-safe:
+Applied via `packages/ui` dependency correction, `apps/web` version bumps, and `overrides` in root `package.json`:
 
-| Package    | From → To      | Advisory                                                                                       |
-| ---------- | -------------- | ---------------------------------------------------------------------------------------------- |
-| `fast-uri` | 3.1.4 → 3.1.5  | host confusion via backslash authority introducer                                              |
-| `vite`     | 5.4.21 → 6.4.3 | `server.fs.deny` bypass, optimized-deps `.map` traversal, launch-editor NTLMv2 hash disclosure |
-
-> `vite@6.4.3` is accepted by BOTH `@storybook/*` 8.6 peers (`^4||^5||^6`)
-> and `vitest@4` (`^6||^7||^8`), so the previous Storybook peer-cap note is
-> obsolete — the safe 6.x line is installed and verified working.
+| Package        | Fix Applied                        | Advisory / CVE                                                |
+| -------------- | ---------------------------------- | ------------------------------------------------------------- |
+| `@storybook/*` | Moved to `devDependencies` in `ui` | GHSA-f2ph-cmg5-wxc8, GHSA-px85-f4q5-jh77 (code injection)     |
+| `storybook`    | Updated to `10.6.3` in `apps/web`  | GHSA-f2ph-cmg5-wxc8, GHSA-px85-f4q5-jh77 (critical preview)   |
+| `next`         | `15.5.28` (backport patch)         | GHSA-2464-fhr4-w9xw (SVG RCE), GHSA-p3m5-59mp-jv5r (DoS)      |
+| `undici`       | `7.30.1`                           | GHSA-4qv8-2p9j-2685, GHSA-f72v-6w45-q472, GHSA-xjj6-f33q-929c |
+| `hono`         | `4.13.13`                          | GHSA-5r4p-p66f-jhc7 (`serveStatic` decode middleware bypass)  |
+| `nodemailer`   | `10.2.1`                           | GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h |
+| `zod`          | `4.6.7`                            | GHSA-mrhx-c7xc-m3w5 (collection memory exhaustion)            |
+| `fast-uri`     | `3.1.9`                            | GHSA-w74x-v6f9-j3xg, GHSA-xhq7-xmqj-769h                      |
+| `vite`         | `6.4.5`                            | GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw                      |
+| `vitest`       | `5.0.5`                            | GHSA-qxg6-89mg-rqv8, GHSA-xp26-3454-mjgp                      |
 
 ## Known Remaining Issues (dev-only, no safe fix)
 

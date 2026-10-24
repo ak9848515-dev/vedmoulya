@@ -49,7 +49,7 @@
     "@vedmoulya/shared": "^1.0.0",
     "@vedmoulya/ui": "^1.0.0",
     "lucide-react": "^0.460.0",
-    "next": "^15.5.24",
+    "next": "^15.5.28",
     "postcss": "^8.5.24",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -60,14 +60,14 @@
     "@capacitor/android": "^8.5.1",
     "@capacitor/cli": "^8.5.0",
     "@capacitor/ios": "^8.5.1",
-    "@storybook/nextjs": "^10.6.0",
-    "@storybook/react": "^10.6.0",
+    "@storybook/nextjs": "^10.6.3",
+    "@storybook/react": "^10.6.3",
     "@types/node": "20.17.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "jose": "^5.9.0",
-    "storybook": "^10.6.0",
+    "storybook": "^10.6.3",
     "typescript": "^5.6.0"
   }
 }
