@@ -383,7 +383,7 @@ export function AICompanion(): React.JSX.Element {
     <Drawer open={aiPanelOpen} onOpenChange={setAiPanelOpen}>
       <DrawerOverlay className="fixed inset-0 z-[100] bg-[rgba(15,23,42,0.5)]" />
       <DrawerContent
-        className="fixed z-[100] right-0 top-0 h-full w-[440px] max-w-[100vw] bg-white shadow-xl flex flex-col"
+        className="fixed z-[100] right-0 top-0 h-full w-[440px] max-w-[100vw] bg-white dark:bg-[#0F172A] border-l border-[#E2E8F0] dark:border-[#334155] shadow-2xl flex flex-col"
         aria-label="Ask VedMoulya"
         data-testid="ask-vedmoulya-panel"
       >
@@ -393,10 +393,10 @@ export function AICompanion(): React.JSX.Element {
             exactly one dialog title in the accessibility tree. */}
 
         {/* Header */}
-        <div className="shrink-0 p-6 pb-4 border-b border-[#E2E8F0]">
+        <div className="shrink-0 p-6 pb-4 border-b border-[#E2E8F0] dark:border-[#334155]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-[#F5F3FF]">
+              <div className="p-2.5 rounded-xl bg-[#F5F3FF] dark:bg-[#7C3AED]/20 border border-[#7C3AED]/20">
                 <Brain className="h-5 w-5 text-[#7C3AED]" />
               </div>
               <div>
@@ -412,13 +412,13 @@ export function AICompanion(): React.JSX.Element {
                   {!aiReadinessKnown ? (
                     <span className="text-[#94A3B8]">Checking AI…</span>
                   ) : aiCanExecute ? (
-                    <span className="text-[#22C55E]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] mr-1 inline-block" />{' '}
+                    <span className="text-[#22C55E] flex items-center gap-1.5 font-medium">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-beacon inline-block" />
                       AI Ready
                     </span>
                   ) : (
                     <span
-                      className="text-[#B45309]"
+                      className="text-[#B45309] dark:text-[#FBBF24]"
                       title="No AI provider can answer right now — add one in AI Providers."
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] mr-1 inline-block" />{' '}
@@ -637,7 +637,7 @@ export function AICompanion(): React.JSX.Element {
                   setInput(hint);
                   inputRef.current?.focus();
                 }}
-                className="rounded-full bg-[#F1F5F9] px-3 py-1.5 text-[12px] text-[#64748B] transition-colors hover:bg-[#E2E8F0] disabled:opacity-50 dark:bg-[#1E293B] dark:text-[#94A3B8]"
+                className="rounded-full bg-[#F1F5F9] dark:bg-[#1E293B] border border-transparent hover:border-[#CBD5E1] dark:hover:border-[#475569] px-3 py-1.5 text-[12px] text-[#64748B] dark:text-[#94A3B8] transition-all hover:bg-[#E2E8F0] dark:hover:bg-[#334155] disabled:opacity-50"
               >
                 {hint}
               </button>
@@ -646,8 +646,8 @@ export function AICompanion(): React.JSX.Element {
         </div>
 
         {/* ── Input ───────────────── */}
-        <div className="shrink-0 border-t border-[#E2E8F0] p-5 pt-3 dark:border-[#334155]">
-          <div className="flex items-center gap-2 rounded-2xl bg-[#F1F5F9] px-4 py-2 dark:bg-[#1E293B]">
+        <div className="shrink-0 border-t border-[#E2E8F0] dark:border-[#334155] p-5 pt-3">
+          <div className="flex items-center gap-2 rounded-2xl bg-[#F1F5F9] dark:bg-[#1E293B] border border-transparent focus-within:border-[#7C3AED]/40 dark:focus-within:border-[#7C3AED]/50 px-4 py-2 transition-all">
             <label htmlFor="ask-vedmoulya-input" className="sr-only">
               Ask VedMoulya anything
             </label>

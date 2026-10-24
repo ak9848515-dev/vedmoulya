@@ -173,16 +173,29 @@ function AutonomousBuilderInner(): React.JSX.Element {
 
   return (
     <main id="main-content" className="mx-auto w-full max-w-5xl space-y-8 p-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">Autonomous Builder</h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Enter one mission, press RUN, and the mission runtime plans, executes, verifies and
-          checkpoints each objective — continuing autonomously without another prompt.
-        </p>
+      <header className="relative overflow-hidden rounded-3xl p-6 md:p-8 bg-gradient-to-br from-white/90 via-white/60 to-white/30 dark:from-[#1E293B]/90 dark:via-[#1E293B]/60 dark:to-[#0F172A]/40 border border-[#E2E8F0]/80 dark:border-[#334155]/80 backdrop-blur-xl shadow-xs">
+        <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-gradient-to-br from-blue-500/10 to-teal-500/10 blur-3xl pointer-events-none" />
+        <div className="relative z-10 space-y-2">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 dark:bg-blue-500/15 border border-blue-500/20 text-blue-700 dark:text-blue-400 text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-blue-500 animate-beacon" />
+            <span>Autonomous Loop Engine • Operational</span>
+          </div>
+          <h1 className="text-[26px] md:text-[34px] font-heading font-bold text-[#111827] dark:text-[#F8FAFC] tracking-tight leading-tight">
+            Autonomous Builder
+          </h1>
+          <p className="text-[14px] md:text-[16px] text-[#64748B] dark:text-[#94A3B8] max-w-2xl font-normal">
+            Enter one mission, press RUN, and the mission runtime plans, executes, verifies, and
+            checkpoints each objective — continuing autonomously without manual prompts.
+          </p>
+        </div>
       </header>
 
       {/* ── Mission form ──────────────────────────────────────────────── */}
-      <Card data-testid="mission-form" padding="lg">
+      <Card
+        data-testid="mission-form"
+        padding="lg"
+        className="card-premium overflow-hidden dark:bg-[#1E293B] dark:border-[#334155]"
+      >
         <h2 className="text-base font-semibold">New mission</h2>
         <div className="mt-4 space-y-4">
           <label className="block space-y-1">
