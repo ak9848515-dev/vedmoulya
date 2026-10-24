@@ -40,7 +40,7 @@ export function validateInput<T>(schema: z.ZodSchema<T>, input: unknown): Valida
   const result = schema.safeParse(input);
 
   if (!result.success) {
-    const firstError = result.error.errors[0];
+    const firstError = result.error.issues[0];
     const message = firstError
       ? `${firstError.path.join('.')}: ${firstError.message}`
       : 'Validation failed';

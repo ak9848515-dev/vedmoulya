@@ -2200,19 +2200,52 @@ type ZodLike = {
   };
 };
 
+function getZodTypeName(schema: ZodLike | undefined): string | undefined {
+  if (!schema) return undefined;
+  const def = schema._def as Record<string, unknown> | undefined;
+  if (def?.typeName) return String(def.typeName);
+  const constructorName = (schema as unknown as { constructor?: { name?: string } })?.constructor
+    ?.name;
+  if (constructorName && constructorName.startsWith('Zod')) return constructorName;
+  if (def?.type) {
+    const t = String(def.type);
+    return `Zod${t.charAt(0).toUpperCase()}${t.slice(1)}`;
+  }
+  return undefined;
+}
+
+function getZodShape(schema: ZodLike | undefined): Record<string, ZodLike> {
+  if (!schema) return {};
+  const def = schema._def as Record<string, unknown> | undefined;
+  const rawShape = def?.shape ?? (schema as unknown as { shape?: unknown }).shape;
+  if (typeof rawShape === 'function') {
+    return (rawShape as () => Record<string, ZodLike>)();
+  }
+  return (rawShape as Record<string, ZodLike>) ?? {};
+}
+
+function getZodInnerType(schema: ZodLike | undefined): ZodLike | undefined {
+  if (!schema) return undefined;
+  const def = schema._def as Record<string, unknown> | undefined;
+  return (
+    (def?.innerType as ZodLike) ??
+    (def?.schema as ZodLike) ??
+    (schema as unknown as { element?: ZodLike }).element
+  );
+}
+
 /** Recursively generate a value accepted by the zod schema (best-effort). */
 function walkerGenerateInput(schema: ZodLike | undefined): unknown {
-  const def = schema?._def;
-  if (!def) return undefined;
-  switch (def.typeName) {
+  if (!schema) return undefined;
+  const typeName = getZodTypeName(schema);
+  const def = schema._def as Record<string, unknown> | undefined;
+  const checks = (def?.checks as Array<{ kind: string; value?: number }>) ?? [];
+
+  switch (typeName) {
     case 'ZodVoid':
       return undefined;
     case 'ZodObject': {
-      const rawShape = def.shape;
-      const shape =
-        typeof rawShape === 'function'
-          ? (rawShape as () => Record<string, ZodLike>)()
-          : (rawShape ?? {});
+      const shape = getZodShape(schema);
       const out: Record<string, unknown> = {};
       for (const [key, field] of Object.entries(shape)) {
         out[key] = walkerGenerateInput(field as ZodLike);
@@ -2220,8 +2253,8 @@ function walkerGenerateInput(schema: ZodLike | undefined): unknown {
       return out;
     }
     case 'ZodString': {
-      const min = def.checks?.find((c) => c.kind === 'min')?.value ?? 1;
-      const max = def.checks?.find((c) => c.kind === 'max')?.value;
+      const min = checks.find((c) => c.kind === 'min')?.value ?? 1;
+      const max = checks.find((c) => c.kind === 'max')?.value;
       const length = Math.max(min, Math.min(max ?? 64, 64));
       return 't'.repeat(length);
     }
@@ -2232,17 +2265,17 @@ function walkerGenerateInput(schema: ZodLike | undefined): unknown {
     case 'ZodUUID':
       return '00000000-0000-0000-0000-000000000000';
     case 'ZodNumber': {
-      const min = def.checks?.find((c) => c.kind === 'min')?.value ?? 1;
-      const max = def.checks?.find((c) => c.kind === 'max')?.value;
+      const min = checks.find((c) => c.kind === 'min')?.value ?? 1;
+      const max = checks.find((c) => c.kind === 'max')?.value;
       if (max !== undefined && min > max) return min;
       return max !== undefined ? Math.min(min, max) : min;
     }
     case 'ZodBoolean':
       return true;
     case 'ZodEnum':
-      return Array.isArray(def.values) ? def.values[0] : 'test';
+      return Array.isArray(def?.values) ? def?.values[0] : 'test';
     case 'ZodNativeEnum': {
-      const vals = Object.values(def.values ?? {});
+      const vals = Object.values((def?.values as Record<string, unknown>) ?? {});
       return vals[0];
     }
     case 'ZodArray':
@@ -2250,17 +2283,19 @@ function walkerGenerateInput(schema: ZodLike | undefined): unknown {
     case 'ZodRecord':
       return {};
     case 'ZodLiteral':
-      return def.value;
+      return def?.value;
     case 'ZodOptional':
     case 'ZodNullable':
     case 'ZodDefault':
     case 'ZodEffects':
     case 'ZodLazy':
     case 'ZodPipeline':
-      return walkerGenerateInput(def.innerType);
+      return walkerGenerateInput(getZodInnerType(schema));
     case 'ZodDiscriminatedUnion':
-    case 'ZodUnion':
-      return walkerGenerateInput(def.options?.[0]);
+    case 'ZodUnion': {
+      const options = (def?.options as ZodLike[]) ?? [];
+      return walkerGenerateInput(options[0]);
+    }
     default:
       return undefined;
   }
@@ -2273,20 +2308,19 @@ function walkerGenerateInput(schema: ZodLike | undefined): unknown {
  * safeParse — a rejected call still runs the handler closure.
  */
 function walkerGenerateMinimalInput(schema: ZodLike | undefined): unknown {
-  const def = schema?._def;
-  if (!def) return undefined;
-  switch (def.typeName) {
+  if (!schema) return undefined;
+  const typeName = getZodTypeName(schema);
+  const def = schema._def as Record<string, unknown> | undefined;
+  const checks = (def?.checks as Array<{ kind: string; value?: number }>) ?? [];
+
+  switch (typeName) {
     case 'ZodVoid':
       return undefined;
     case 'ZodObject': {
-      const rawShape = def.shape;
-      const shape =
-        typeof rawShape === 'function'
-          ? (rawShape as () => Record<string, ZodLike>)()
-          : (rawShape ?? {});
+      const shape = getZodShape(schema);
       const out: Record<string, unknown> = {};
       for (const [key, field] of Object.entries(shape)) {
-        const fieldType = (field as ZodLike)?._def?.typeName;
+        const fieldType = getZodTypeName(field as ZodLike);
         // Omit optional/nullable/default fields so handlers observe undefined
         // and the `?? fallback` branch runs. Required fields are kept.
         if (
@@ -2301,7 +2335,7 @@ function walkerGenerateMinimalInput(schema: ZodLike | undefined): unknown {
       return out;
     }
     case 'ZodString': {
-      const min = def.checks?.find((c) => c.kind === 'min')?.value ?? 1;
+      const min = checks.find((c) => c.kind === 'min')?.value ?? 1;
       return 'm'.repeat(min);
     }
     case 'ZodEmail':
@@ -2311,15 +2345,15 @@ function walkerGenerateMinimalInput(schema: ZodLike | undefined): unknown {
     case 'ZodUUID':
       return '11111111-1111-1111-1111-111111111111';
     case 'ZodNumber': {
-      const min = def.checks?.find((c) => c.kind === 'min')?.value ?? 1;
+      const min = checks.find((c) => c.kind === 'min')?.value ?? 1;
       return min;
     }
     case 'ZodBoolean':
       return true;
     case 'ZodEnum':
-      return Array.isArray(def.values) ? def.values[0] : 'test';
+      return Array.isArray(def?.values) ? def?.values[0] : 'test';
     case 'ZodNativeEnum': {
-      const vals = Object.values(def.values ?? {});
+      const vals = Object.values((def?.values as Record<string, unknown>) ?? {});
       return vals[0];
     }
     case 'ZodArray':
@@ -2327,17 +2361,19 @@ function walkerGenerateMinimalInput(schema: ZodLike | undefined): unknown {
     case 'ZodRecord':
       return {};
     case 'ZodLiteral':
-      return def.value;
+      return def?.value;
     case 'ZodOptional':
     case 'ZodNullable':
     case 'ZodDefault':
     case 'ZodEffects':
     case 'ZodLazy':
     case 'ZodPipeline':
-      return walkerGenerateMinimalInput(def.innerType);
+      return walkerGenerateMinimalInput(getZodInnerType(schema));
     case 'ZodDiscriminatedUnion':
-    case 'ZodUnion':
-      return walkerGenerateMinimalInput(def.options?.[0]);
+    case 'ZodUnion': {
+      const options = (def?.options as ZodLike[]) ?? [];
+      return walkerGenerateMinimalInput(options[0]);
+    }
     default:
       return undefined;
   }
