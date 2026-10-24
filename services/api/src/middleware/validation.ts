@@ -36,7 +36,7 @@ export type ValidationResult<T> = { success: true; data: T } | { success: false;
 /**
  * Validates input against a Zod schema with standardized error formatting.
  */
-export function validateInput<T>(schema: z.ZodSchema<T>, input: unknown): ValidationResult<T> {
+export function validateInput<T>(schema: z.ZodType<T>, input: unknown): ValidationResult<T> {
   const result = schema.safeParse(input);
 
   if (!result.success) {
@@ -53,7 +53,7 @@ export function validateInput<T>(schema: z.ZodSchema<T>, input: unknown): Valida
 /**
  * Throws a TRPCError with BAD_REQUEST if validation fails.
  */
-export function validateOrThrow<T>(schema: z.ZodSchema<T>, input: unknown): T {
+export function validateOrThrow<T>(schema: z.ZodType<T>, input: unknown): T {
   const result = validateInput(schema, input);
   if (!result.success) {
     throw new TRPCError({

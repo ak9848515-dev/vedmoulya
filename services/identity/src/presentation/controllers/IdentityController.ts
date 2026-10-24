@@ -6,6 +6,7 @@
 import type { Context } from 'hono';
 import { BaseController } from '@vedmoulya/core';
 import type { IdentityApplicationService } from '@vedmoulya/services';
+import { z } from 'zod';
 import { mapErrorToResponse } from '../middleware/ErrorMapper.js';
 import {
   paginationQuery,
@@ -38,7 +39,7 @@ export class IdentityController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: { errors: JSON.stringify(parsed.error.flatten()) },
+              details: { errors: JSON.stringify(z.flattenError(parsed.error)) },
             },
           },
           400,
@@ -102,7 +103,7 @@ export class IdentityController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR' as const,
               message: 'Invalid input',
-              details: { errors: JSON.stringify(parsed.error.flatten()) },
+              details: { errors: JSON.stringify(z.flattenError(parsed.error)) },
             },
           },
           400,
@@ -131,7 +132,7 @@ export class IdentityController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR' as const,
               message: 'Invalid input',
-              details: { errors: JSON.stringify(parsed.error.flatten()) },
+              details: { errors: JSON.stringify(z.flattenError(parsed.error)) },
             },
           },
           400,
@@ -160,7 +161,7 @@ export class IdentityController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR' as const,
               message: 'Invalid input',
-              details: { errors: JSON.stringify(parsed.error.flatten()) },
+              details: { errors: JSON.stringify(z.flattenError(parsed.error)) },
             },
           },
           400,

@@ -770,9 +770,21 @@ describe('createAppRouter — real pipeline (auth + rate limit + handlers)', () 
     const runId = started.data!.runId;
 
     // status + getTrace resolve the checkpointed run (bounded, owned).
-    const status = await loopCaller.loop.status({ userId: uid, runId });
+    let status = await loopCaller.loop.status({ userId: uid, runId });
     expect(status.success).toBe(true);
     expect(status.data?.runId).toBe(runId);
+
+    // `loop.start` returns immediately and executes the bounded run in the
+    // background, so the run must first be allowed to terminate before the
+    // trace can expose its checkpointed steps. Poll the checkpointed status
+    // (bounded interval and deadline, well inside the standard rate tier)
+    // instead of assuming the first checkpoint has already landed.
+    const traceDeadline = Date.now() + 8_000;
+    while (status.data?.terminationReason === undefined && Date.now() < traceDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      status = await loopCaller.loop.status({ userId: uid, runId });
+    }
+    expect(status.data?.terminationReason).toBeDefined();
 
     const trace = await loopCaller.loop.getTrace({ userId: uid, runId });
     expect(trace.success).toBe(true);

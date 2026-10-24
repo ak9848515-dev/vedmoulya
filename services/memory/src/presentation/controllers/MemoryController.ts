@@ -7,6 +7,7 @@
 import type { Context } from 'hono';
 import { BaseController } from '@vedmoulya/core';
 import type { MemoryApplicationService } from '@vedmoulya/services';
+import { z } from 'zod';
 import { mapErrorToResponse } from '../middleware/ErrorMapper.js';
 import {
   captureMemorySchema,
@@ -38,7 +39,7 @@ export class MemoryController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: { errors: JSON.stringify(parsed.error.flatten()) },
+              details: { errors: JSON.stringify(z.flattenError(parsed.error)) },
             },
           },
           400,
@@ -98,7 +99,7 @@ export class MemoryController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: { errors: JSON.stringify(parsed.error.flatten()) },
+              details: { errors: JSON.stringify(z.flattenError(parsed.error)) },
             },
           },
           400,
@@ -298,7 +299,7 @@ export class MemoryController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: { errors: JSON.stringify(parsed.error.flatten()) },
+              details: { errors: JSON.stringify(z.flattenError(parsed.error)) },
             },
           },
           400,

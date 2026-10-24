@@ -709,7 +709,7 @@ const contextRegisterInput = z.object({
   tags: z.array(z.string()).optional(),
   business: z.array(z.string()).optional(),
   capability: z.array(capabilityAIFeatureEnum).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   sourceId: z.string().min(1),
 });
 
@@ -984,7 +984,7 @@ const learningEventInput = z.object({
   feedback: z.number().min(0).max(1).optional(),
   businessOutcome: z.number().min(0).max(1).optional(),
   sourceRef: learningSourceRefInput.optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   occurredAt: z.string().optional(),
 });
 
@@ -1921,7 +1921,7 @@ const searchInput = z.object({
 
 const configUpdate = z.object({
   userId: z.string().min(1),
-  updates: z.record(z.unknown()),
+  updates: z.record(z.string(), z.unknown()),
 });
 
 const sectionRefresh = z.object({
@@ -2111,7 +2111,7 @@ const factoryBuildInput = z.object({
   userId: z.string().min(1),
   applicationId: z.string().min(1).max(200),
   approved: z.boolean(),
-  grants: z.record(z.boolean()).optional(),
+  grants: z.record(z.string(), z.boolean()).optional(),
 });
 
 const factoryDeployInput = z.object({
@@ -2272,7 +2272,7 @@ const opsProviderInput = z.object({
   providerId: z.string().min(1).max(200),
 });
 
-const opsThresholdsInput = z.object({ userId: z.string().min(1) }).passthrough();
+const opsThresholdsInput = z.object({ userId: z.string().min(1) }).loose();
 
 // ── Content Agency schemas (EPIC-003 / AC-001) ──────────────────────────────
 
@@ -2307,7 +2307,7 @@ const workflowStageEnum = z.enum([
 const deliveryFormatEnum = z.enum(['markdown', 'html', 'pdf', 'docx']);
 const qualityTierEnum = z.enum(['premium', 'standard', 'economy']);
 const documentInput = z.object({ name: z.string(), type: z.string() });
-const socialLinksInput = z.record(z.string());
+const socialLinksInput = z.record(z.string(), z.string());
 
 const contentAgencyClientInput = z.object({
   userId: z.string().min(1),
@@ -2580,7 +2580,7 @@ const clientOpsUploadDocumentInput = z.object({
   kind: documentKindEnum,
   mime: z.string().min(1),
   contentBase64: z.string().min(1),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 const clientOpsUpdateDocumentInput = z.object({
@@ -2682,7 +2682,7 @@ export function createAppRouter(services: ApiApplicationService) {
         .input(userId)
         .query(({ input }) => createIdentityRouter(services.identity).getProfile(input.userId)),
       updateProfile: authProcedure
-        .input(z.object({ userId: z.string(), updates: z.record(z.unknown()) }))
+        .input(z.object({ userId: z.string(), updates: z.record(z.string(), z.unknown()) }))
         .mutation(({ input }) =>
           createIdentityRouter(services.identity).updateProfile(input.userId, input.updates),
         ),
@@ -5960,7 +5960,7 @@ export function createAppRouter(services: ApiApplicationService) {
           createContextFabricRouter(services.contextFabric).getProvenance(input, ctx),
         ),
       getPermissions: standardProcedure
-        .input(contextFabricOrgInput.merge(contextFabricEntityInput))
+        .input(contextFabricOrgInput.extend(contextFabricEntityInput.shape))
         .query(({ input, ctx }) =>
           createContextFabricRouter(services.contextFabric).getPermissions(input, ctx),
         ),

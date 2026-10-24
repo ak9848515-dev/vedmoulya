@@ -113,7 +113,7 @@ export function createIdentityTrpcRouter(identityService: IdentityApplicationSer
       }
     }),
 
-    getUserByEmail: t.procedure.input(z.string().email()).query(async ({ input }) => {
+    getUserByEmail: t.procedure.input(z.email()).query(async ({ input }) => {
       try {
         const user = await identityService.getUserByEmail(input);
         return { success: true as const, data: user };

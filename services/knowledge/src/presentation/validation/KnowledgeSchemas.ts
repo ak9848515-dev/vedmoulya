@@ -91,7 +91,7 @@ export const createNodeSchema = z.object({
   category: knowledgeCategorySchema,
   label: z.string().min(1, 'Node label is required').max(200),
   description: z.string().max(2000).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   sourceType: z.string().optional(),
   sourceDetail: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -100,7 +100,7 @@ export const createNodeSchema = z.object({
 export const updateNodeSchema = z.object({
   label: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
   category: knowledgeCategorySchema.optional(),
 });
@@ -115,7 +115,7 @@ export const createEdgeSchema = z.object({
   relationshipCategory: relationshipCategorySchema,
   label: z.string().max(200).optional(),
   weight: z.number().min(0).max(1).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   sourceType: z.string().optional(),
   sourceDetail: z.string().optional(),
 });

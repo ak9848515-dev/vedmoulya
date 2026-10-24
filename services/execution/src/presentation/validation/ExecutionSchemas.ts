@@ -16,7 +16,7 @@ export const createPlanSchema = z.object({
   knowledgeNodeIds: z.array(z.string()).optional(),
   memoryIds: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const updatePlanSchema = z.object({
@@ -24,7 +24,7 @@ export const updatePlanSchema = z.object({
   description: z.string().optional(),
   priorityScore: z.number().min(0).max(10).optional(),
   tags: z.array(z.string()).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const createMissionSchema = z.object({
@@ -32,7 +32,7 @@ export const createMissionSchema = z.object({
   description: z.string(),
   priorityScore: z.number().min(0).max(10).optional(),
   tags: z.array(z.string()).optional(),
-  targetDate: z.string().datetime().optional(),
+  targetDate: z.iso.datetime().optional(),
 });
 
 export const createTaskSchema = z.object({
@@ -52,7 +52,7 @@ export const addStepSchema = z.object({
 
 export const scheduleTasksSchema = z.object({
   taskIds: z.array(z.string()).min(1),
-  scheduledDates: z.array(z.string().datetime()).min(1).optional(),
+  scheduledDates: z.array(z.iso.datetime()).min(1).optional(),
 });
 
 export const completeTaskSchema = z.object({

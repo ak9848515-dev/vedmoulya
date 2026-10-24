@@ -177,7 +177,7 @@ export const worldInputs = {
     type: entityTypeEnum,
     label: z.string().min(1).max(160),
     externalId: z.string().max(160).optional(),
-    properties: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     evidence: z.array(z.string().min(1)).min(1).max(5),
     provenance: z.object({
       source: observationSourceEnum,

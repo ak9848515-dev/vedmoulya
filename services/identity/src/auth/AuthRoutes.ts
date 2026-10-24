@@ -12,12 +12,12 @@ import { updateProfileSchema } from '../presentation/validation/IdentitySchemas.
 // ── Request Schemas ────────────────────────────────────────────────────────
 
 const signInSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(1),
 });
 
 const signUpSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z
     .string()
     .min(8, 'Password must be at least 8 characters')
@@ -50,7 +50,7 @@ export function createAuthRouter(authService: AuthService): Hono {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -85,7 +85,7 @@ export function createAuthRouter(authService: AuthService): Hono {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -154,7 +154,7 @@ export function createAuthRouter(authService: AuthService): Hono {
   // POST /resend-verification — always succeeds (no account enumeration):
   // unknown emails and already-verified accounts are indistinguishable from
   // a genuine resend.
-  const resendVerificationSchema = z.object({ email: z.string().email() });
+  const resendVerificationSchema = z.object({ email: z.email() });
   router.post('/resend-verification', async (c) => {
     try {
       const body: Record<string, unknown> = await c.req.json();
@@ -419,7 +419,7 @@ export function createAuthRouter(authService: AuthService): Hono {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,

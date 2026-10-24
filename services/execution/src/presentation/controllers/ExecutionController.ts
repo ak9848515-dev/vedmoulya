@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { BaseController } from '@vedmoulya/core';
 import type { ExecutionApplicationService } from '@vedmoulya/services';
+import { z } from 'zod';
 import { mapErrorToResponse } from '../middleware/ErrorMapper.js';
 import {
   createPlanSchema,
@@ -48,7 +49,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -103,7 +104,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -227,7 +228,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -268,7 +269,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -308,7 +309,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -350,7 +351,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -394,7 +395,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -435,7 +436,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -494,7 +495,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,
@@ -526,7 +527,7 @@ export class ExecutionController extends BaseController {
             error: {
               code: 'VALIDATION_ERROR',
               message: 'Invalid input',
-              details: parsed.error.flatten(),
+              details: z.flattenError(parsed.error),
             },
           },
           400,

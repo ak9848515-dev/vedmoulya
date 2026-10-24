@@ -33,7 +33,7 @@ export const createDecisionSchema = z.object({
   knowledgeNodeIds: z.array(z.string()).optional(),
   memoryIds: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const updateDecisionSchema = z.object({
@@ -41,7 +41,7 @@ export const updateDecisionSchema = z.object({
   description: z.string().optional(),
   priorityScore: z.number().min(0).max(10).optional(),
   tags: z.array(z.string()).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const addOptionSchema = z.object({

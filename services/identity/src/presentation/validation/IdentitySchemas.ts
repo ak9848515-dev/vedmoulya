@@ -19,7 +19,7 @@ export const paginationQuery = z.object({
 // ── Registration ──────────────────────────────────────────────────────────
 
 export const registerUserSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: z.email('Invalid email address'),
   displayName: z.string().min(2, 'Display name must be at least 2 characters').max(100),
   givenName: z.string().max(100).optional(),
   familyName: z.string().max(100).optional(),
@@ -56,7 +56,7 @@ export const updateProfileSchema = z.object({
   displayName: z.string().min(2).max(100).optional(),
   givenName: z.string().max(100).optional(),
   familyName: z.string().max(100).optional(),
-  avatarUrl: z.string().url('Invalid avatar URL').optional().or(z.literal('')),
+  avatarUrl: z.url('Invalid avatar URL').optional().or(z.literal('')),
   bio: z.string().max(500).optional(),
   timezone: z.string().max(64).optional(),
   locale: z.string().max(10).optional(),
@@ -92,7 +92,7 @@ export const updateSettingsSchema = z.object({
 // ── Email Change ──────────────────────────────────────────────────────────
 
 export const changeEmailSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: z.email('Invalid email address'),
   password: z.string().min(1, 'Current password is required'),
 });
 

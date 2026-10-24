@@ -29,7 +29,7 @@ export const captureMemorySchema = z.object({
   category: memoryCategorySchema,
   sourceType: z.string().optional(),
   sourceDetail: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
   importanceScore: z.number().min(0).max(10).optional(),
   confidenceScore: z.number().min(0).max(1).optional(),
@@ -40,7 +40,7 @@ export const captureMemorySchema = z.object({
 export const updateMemorySchema = z.object({
   title: z.string().min(1).max(200).optional(),
   content: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
   importanceScore: z.number().min(0).max(10).optional(),
 });
