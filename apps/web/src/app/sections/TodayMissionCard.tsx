@@ -37,7 +37,7 @@ export function TodayMissionCard({
     <Card
       variant="standard"
       padding="lg"
-      className="overflow-hidden relative animate-slide-up dark:bg-[#1E293B] dark:border-[#334155]"
+      className="card-premium overflow-hidden relative animate-slide-up dark:bg-[#1E293B] dark:border-[#334155]"
     >
       {/* accent hairline */}
       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#2B5FD9] via-[#5B8AEB] to-[#7C3AED]" />

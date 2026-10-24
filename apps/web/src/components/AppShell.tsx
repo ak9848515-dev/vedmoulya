@@ -249,9 +249,9 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
         {/* ── Topbar ──────────────────────────────────────────────────── */}
         {/* pt-safe keeps the topbar below the status bar on edge-to-edge
             Android 15+; background matches the NavBar (MOB-002). */}
-        <div className="pt-safe bg-white dark:bg-[#0F172A]">
+        <div className="pt-safe bg-white/80 dark:bg-[#0F172A]/80 backdrop-blur-md sticky top-0 z-30 border-b border-[#E2E8F0]/80 dark:border-[#334155]/80">
           <NavBar
-            className="dark:bg-[#0F172A] dark:border-[#334155]"
+            className="dark:bg-[#0F172A]/90 dark:border-[#334155]"
             logo={logo}
             mobileActions={
               <button
@@ -280,10 +280,14 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
               <>
                 <button
                   onClick={handleSearchClick}
-                  className="p-2 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] transition-colors"
+                  className="flex items-center gap-2 p-2 sm:px-3 sm:py-1.5 rounded-lg bg-transparent sm:bg-[#F1F5F9]/80 dark:sm:bg-[#1E293B]/80 hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] sm:border sm:border-[#E2E8F0] dark:sm:border-[#334155] transition-all text-[#64748B] dark:text-[#94A3B8] text-xs"
                   aria-label="Search VedMoulya"
                 >
-                  <Search className="h-5 w-5 text-[#64748B] dark:text-[#94A3B8]" />
+                  <Search className="h-5 w-5 sm:h-3.5 sm:w-3.5" />
+                  <span className="hidden md:inline">Quick search...</span>
+                  <kbd className="hidden md:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-white dark:bg-[#0F172A] border border-[#CBD5E1] dark:border-[#475569] rounded text-[#64748B] dark:text-[#94A3B8]">
+                    ⌘K
+                  </kbd>
                 </button>
 
                 {/* EPIC-012C — the dedicated AI World discovery bell (opens the

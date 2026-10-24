@@ -60,7 +60,7 @@ export function LifeMomentum({ career, learning, business }: LifeMomentumProps):
             <Link
               key={area.key}
               href={area.route}
-              className="group flex items-start gap-3 rounded-2xl border border-[#E8EDF5] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4 transition-colors hover:border-[#2B5FD9]/30 dark:hover:border-[#6B8FEF]/30"
+              className="card-premium group flex items-start gap-3 rounded-2xl border border-[#E8EDF5] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-4 transition-all hover:border-[#2B5FD9]/30 dark:hover:border-[#6B8FEF]/30"
             >
               <span className="p-2 rounded-xl bg-[#EFF4FE] dark:bg-[#1E3A8A]/40 shrink-0">
                 <Icon className="h-4 w-4 text-[#2B5FD9] dark:text-[#6B8FEF]" aria-hidden="true" />

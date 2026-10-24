@@ -197,7 +197,8 @@ export function AutonomousBusinessPanel({
               Autonomous Business Engine
             </h2>
             {isRunning && (
-              <Badge variant="success" size="sm" className="animate-pulse">
+              <Badge variant="success" size="sm" className="relative pl-5 font-medium">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-beacon" />
                 Active Loop
               </Badge>
             )}
@@ -248,7 +249,7 @@ export function AutonomousBusinessPanel({
                 type="button"
                 onClick={() => void handleLaunchPreset(preset)}
                 disabled={createAndRun.isPending}
-                className="text-left rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-sm transition-all bg-white dark:bg-slate-900/50 group"
+                className="card-premium text-left rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md transition-all bg-white dark:bg-slate-900/50 group"
               >
                 <div className="flex items-center gap-2 mb-1.5">
                   <div className={`p-1.5 rounded-lg border ${preset.color}`}>
@@ -370,7 +371,7 @@ export function AutonomousBusinessPanel({
       {/* Active Mission Live Display */}
       {mission && (
         <div
-          className="mt-5 p-4 rounded-xl border border-blue-100 dark:border-blue-900/60 bg-blue-50/30 dark:bg-blue-950/20"
+          className="card-premium mt-5 p-5 rounded-2xl border border-blue-100 dark:border-blue-900/60 bg-gradient-to-br from-blue-50/50 via-white/50 to-blue-50/30 dark:from-blue-950/30 dark:via-slate-900/40 dark:to-blue-950/20 backdrop-blur-md shadow-xs"
           data-testid="active-mission-card"
         >
           <div className="flex items-start justify-between gap-3 flex-wrap">
