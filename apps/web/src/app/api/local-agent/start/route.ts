@@ -26,6 +26,48 @@ function findRepoRoot(): string {
   return process.cwd();
 }
 
+const OLLAMA_HEALTH_URL = 'http://127.0.0.1:11434/api/version';
+
+async function isOllamaHealthy(): Promise<boolean> {
+  try {
+    const res = await fetch(OLLAMA_HEALTH_URL, {
+      method: 'GET',
+      signal: AbortSignal.timeout(1000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function tryStartOllama(): void {
+  const isWindows = process.platform === 'win32';
+  let exe = 'ollama';
+  const localAppData = process.env['LOCALAPPDATA'];
+  if (isWindows && localAppData) {
+    const defaultWinPath = path.join(localAppData, 'Programs', 'Ollama', 'ollama.exe');
+    if (fs.existsSync(defaultWinPath)) {
+      exe = defaultWinPath;
+    }
+  }
+
+  try {
+    const child = spawn(exe, ['serve'], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: isWindows,
+      env: { ...process.env },
+    });
+    child.unref();
+    child.on('error', () => {
+      // Ignored: Ollama might not be installed, which is handled gracefully by the agent
+    });
+  } catch {
+    // Best-effort attempt
+  }
+}
+
 async function isAgentHealthy(): Promise<boolean> {
   try {
     const res = await fetch(LOCAL_AGENT_HEALTH_URL, {
@@ -58,6 +100,11 @@ export async function POST(): Promise<NextResponse> {
       message: 'Local Agent is already running and reachable.',
       url: 'http://127.0.0.1:43117',
     });
+  }
+
+  // 1.5 Auto-start Ollama if it is not currently answering
+  if (!(await isOllamaHealthy())) {
+    tryStartOllama();
   }
 
   // 2. Locate root and spawn detached background agent
