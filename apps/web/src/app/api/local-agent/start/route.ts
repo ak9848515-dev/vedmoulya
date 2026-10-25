@@ -71,6 +71,7 @@ export async function POST(): Promise<NextResponse> {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
+      shell: isWindows,
       env: { ...process.env },
     });
     child.unref();
@@ -86,8 +87,8 @@ export async function POST(): Promise<NextResponse> {
     );
   }
 
-  // 3. Poll for health response (up to 4.5 seconds)
-  for (let attempt = 0; attempt < 15; attempt += 1) {
+  // 3. Poll for health response (up to 12 seconds)
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     await sleep(300);
     if (await isAgentHealthy()) {
       return NextResponse.json({
@@ -104,7 +105,7 @@ export async function POST(): Promise<NextResponse> {
       ok: false,
       error: 'TIMEOUT',
       message:
-        'Local Agent was launched, but did not respond on http://127.0.0.1:43117 within 4.5s.',
+        'Local Agent was launched, but did not respond on http://127.0.0.1:43117 within 12s.',
     },
     { status: 504 },
   );
