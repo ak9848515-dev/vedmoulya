@@ -907,11 +907,20 @@ export class MissionControllerService {
         // LEASE-02 — the hold rides the SAME ownership-validated publication as
         // the objective: it is applied only while the mission is still RUNNING,
         // so an operator's cancellation always wins over a late hold.
-        const held = await this.publishObjective(mission, objective, lease, {
-          operation: `objective_hold:${objective.objectiveId}:WAITING_FOR_PROVIDER`,
-          checkpoint,
-          hold: { state: 'WAITING_FOR_PROVIDER', reason: classification.reason },
-        });
+        let held: { applied: boolean; mission: Mission };
+        try {
+          held = await this.publishObjective(mission, objective, lease, {
+            operation: `objective_hold:${objective.objectiveId}:WAITING_FOR_PROVIDER`,
+            checkpoint,
+            hold: { state: 'WAITING_FOR_PROVIDER', reason: classification.reason },
+          });
+        } catch (error) {
+          return this.holdAfterPersistenceFailure(
+            mission,
+            `objective_hold:${objective.objectiveId}:WAITING_FOR_PROVIDER`,
+            error,
+          );
+        }
         if (!held.applied) {
           return this.handleRefusedPublication(
             held.mission,
@@ -942,9 +951,18 @@ export class MissionControllerService {
       // LEASE-02 — evidence is published by the SAME ownership-validated
       // operation as the result, so a superseded execution can never write its
       // traces over a newer owner's objective.
-      const published = await this.publishObjective(mission, objective, lease, {
-        operation: `objective_evidence:${objective.objectiveId}`,
-      });
+      let published: { applied: boolean; mission: Mission };
+      try {
+        published = await this.publishObjective(mission, objective, lease, {
+          operation: `objective_evidence:${objective.objectiveId}`,
+        });
+      } catch (error) {
+        return this.holdAfterPersistenceFailure(
+          mission,
+          `objective_evidence:${objective.objectiveId}`,
+          error,
+        );
+      }
       if (!published.applied) {
         return this.handleRefusedPublication(
           published.mission,
@@ -1092,11 +1110,20 @@ export class MissionControllerService {
           // mission is still RUNNING), so a superseded execution can never
           // re-write its lease/state over a newer owner and an operator hold
           // can never revive a cancelled mission.
-          const held = await this.publishObjective(mission, objective, lease, {
-            operation: `objective_hold:${objective.objectiveId}:WAITING_FOR_APPROVAL`,
-            checkpoint,
-            hold: { state: 'WAITING_FOR_APPROVAL', reason: approvalReason },
-          });
+          let held: { applied: boolean; mission: Mission };
+          try {
+            held = await this.publishObjective(mission, objective, lease, {
+              operation: `objective_hold:${objective.objectiveId}:WAITING_FOR_APPROVAL`,
+              checkpoint,
+              hold: { state: 'WAITING_FOR_APPROVAL', reason: approvalReason },
+            });
+          } catch (error) {
+            return this.holdAfterPersistenceFailure(
+              mission,
+              `objective_hold:${objective.objectiveId}:WAITING_FOR_APPROVAL`,
+              error,
+            );
+          }
           if (!held.applied) {
             return this.handleRefusedPublication(
               held.mission,

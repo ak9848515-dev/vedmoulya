@@ -218,8 +218,13 @@ export default function BusinessPage(): React.JSX.Element {
     );
   }
 
-  // Type-safe extraction of business model arrays
-  const raw = (data ?? {}) as Record<string, unknown>;
+  // Type-safe extraction of business model arrays. The gateway returns an
+  // `{ success, data }` envelope, so the snapshot itself is `data.data` —
+  // reading the envelope directly showed every array as empty.
+  const raw = (typeof data?.data === 'object' && data.data !== null ? data.data : {}) as Record<
+    string,
+    unknown
+  >;
   const goals = (Array.isArray(raw.goals) ? raw.goals : []) as GoalItem[];
   const projects = (Array.isArray(raw.projects) ? raw.projects : []) as ProjectItem[];
   const kpis = (Array.isArray(raw.kpis) ? raw.kpis : []) as KpiItem[];
@@ -232,6 +237,17 @@ export default function BusinessPage(): React.JSX.Element {
     stage?: string;
     teamSize?: number;
   } | null;
+  // Health is only claimed when the snapshot actually reports it.
+  const healthRecord =
+    typeof raw.health === 'object' && raw.health !== null
+      ? (raw.health as { overall?: unknown })
+      : null;
+  const healthOverall =
+    healthRecord?.overall === 'healthy' ||
+    healthRecord?.overall === 'degraded' ||
+    healthRecord?.overall === 'critical'
+      ? healthRecord.overall
+      : null;
 
   return (
     <div className="space-y-8">
@@ -257,13 +273,25 @@ export default function BusinessPage(): React.JSX.Element {
             Ventures, clients and the results they produce.
           </p>
         </div>
-        <Badge variant="success" size="md" className="flex items-center gap-1.5">
-          <Zap className="h-3.5 w-3.5" /> All Systems Healthy
-        </Badge>
+        {healthOverall ? (
+          <Badge
+            variant={
+              healthOverall === 'healthy'
+                ? 'success'
+                : healthOverall === 'degraded'
+                  ? 'warning'
+                  : 'danger'
+            }
+            size="md"
+            className="flex items-center gap-1.5"
+          >
+            <Zap className="h-3.5 w-3.5" /> Business health: {healthOverall}
+          </Badge>
+        ) : null}
       </div>
 
       {/* UX-05 — Area → Goal → Mission → Progress → Outcome, from real data only. */}
-      <LifeJourneyStrip steps={businessJourneySteps(data)} />
+      <LifeJourneyStrip steps={businessJourneySteps(raw)} />
 
       {/* Quick Overview Stats Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

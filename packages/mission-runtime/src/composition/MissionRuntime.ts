@@ -199,6 +199,13 @@ export interface MissionRuntimeOptions {
    * governed tool path.
    */
   repair?: FailureRepairPort | null;
+  /**
+   * S10 / RESILIENCE — bounded retry policy for REQUIRED mission persistence writes.
+   * Forwarded to MissionControllerService. When omitted and durable stores are used,
+   * defaults to 5 attempts with 300ms base delay (~4.5s backoff) so serverless database
+   * cold reconnects (e.g. Neon TCP wakeups) recover seamlessly.
+   */
+  persistenceRetry?: MissionControllerOptions['persistenceRetry'];
 }
 
 /** Every wired component of the composed mission runtime. */
@@ -503,6 +510,12 @@ export interface MissionRuntime extends MissionRuntimeComponents {
 
 export function createMissionRuntime(options: MissionRuntimeOptions = {}): MissionRuntime {
   const components = buildMissionRuntimeComponents(options);
+  const defaultPersistenceRetry = options.stores?.missions
+    ? {
+        attempts: Number(process.env.MISSION_PERSISTENCE_ATTEMPTS) || 5,
+        baseDelayMs: Number(process.env.MISSION_PERSISTENCE_BASE_DELAY_MS) || 300,
+      }
+    : undefined;
   const controller = new MissionControllerService({
     store: components.stores.missions,
     checkpointStore: components.stores.checkpoints,
@@ -523,6 +536,7 @@ export function createMissionRuntime(options: MissionRuntimeOptions = {}): Missi
     repositoryInspector: components.ports.repositoryInspector,
     gitSafety: components.ports.gitSafety,
     approvalGate: options.approvalGate,
+    persistenceRetry: options.persistenceRetry ?? defaultPersistenceRetry,
   });
   const api = new MissionRuntimeApi({
     controller,

@@ -15,6 +15,9 @@ import type {
   QuotationStatus,
   DocumentKind,
   OpsNotificationType,
+  PaymentEvidence,
+  PaymentEvidenceKind,
+  PaymentStatus,
 } from '@vedmoulya/domain';
 import type {
   ProjectDTO,
@@ -293,11 +296,26 @@ export interface PaymentDTO {
   invoiceNumber: string;
   clientName: string;
   amount: number;
+  /** Authoritative amount in integer minor units (MISSION 002). */
+  amountMinor: number;
   currency: string;
   method: string;
   receivedAt: string;
   note: string;
   createdAt: string;
+  /** recorded = evidence unreviewed; verified = operator-attested receipt. */
+  status: PaymentStatus;
+  idempotencyKey: string | null;
+  evidenceKind: PaymentEvidenceKind | null;
+  evidenceReference: string | null;
+  evidenceReviewedBy: string | null;
+  evidenceReviewedAt: string | null;
+  verifiedAt: string | null;
+  /**
+   * Only set on the mutation response: true when this call resolved to a
+   * pre-existing payment instead of writing a new one (idempotent replay).
+   */
+  duplicate?: boolean;
 }
 
 export interface AddPaymentInput {
@@ -307,15 +325,40 @@ export interface AddPaymentInput {
   method?: string;
   receivedAt?: string;
   note?: string;
+  /**
+   * Stable key for this logical payment. A retry MUST reuse it. When omitted
+   * the evidence reference is used, so the same receipt or processor
+   * transaction can never be recorded twice.
+   */
+  idempotencyKey?: string;
+  /** Mandatory proof that the money arrived. */
+  evidence: PaymentEvidence;
+}
+
+export interface ReviewPaymentInput {
+  paymentId: string;
+  /** Operator attesting that they reviewed the payment evidence. */
+  reviewerId: string;
+  reviewedAt?: string;
 }
 
 export interface RevenueOverviewDTO {
   currency: string;
+  /**
+   * VERIFIED payments only. MISSION 002 changed this from "all recorded
+   * payments" — an unreviewed claim is not received revenue.
+   */
   paidTotal: number;
+  /** All payment rows, verified or not (what the operator entered). */
+  recordedTotal: number;
+  /** recordedTotal - paidTotal: money claimed but not yet attested. */
+  unverifiedTotal: number;
   outstanding: number;
   overdueCount: number;
   paidCount: number;
   pendingCount: number;
+  /** Invoices marked paid (any route) minus verified payments, in money. */
+  reconciliationDrift: number;
   annualRevenue: number;
   monthlyRevenue: Array<{ month: string; amount: number }>;
   cashflow: Array<{ month: string; received: number; outstanding: number }>;

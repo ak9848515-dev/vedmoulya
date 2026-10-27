@@ -375,10 +375,21 @@ describe('ClientOperationsApplicationService — Quotations & Payments', () => {
         data: { id: 'inv_1', clientId: 'client_1', amount: 500, currency: 'USD' },
       })),
     });
-    await ctx.svc.addPayment(USER, { invoiceId: 'inv_1', amount: 300, method: 'bank' });
+    // MISSION 002 — evidence is mandatory and verified payments settle.
+    await ctx.svc.addPayment(USER, {
+      invoiceId: 'inv_1',
+      amount: 300,
+      method: 'bank',
+      evidence: { kind: 'processor_reference', reference: 'TXN-UNIT-0001', reviewedBy: 'op-ana' },
+    });
     expect(ctx.contentAgency.updateInvoiceStatus).not.toHaveBeenCalledWith(USER, 'inv_1', 'paid');
 
-    await ctx.svc.addPayment(USER, { invoiceId: 'inv_1', amount: 200, method: 'bank' });
+    await ctx.svc.addPayment(USER, {
+      invoiceId: 'inv_1',
+      amount: 200,
+      method: 'bank',
+      evidence: { kind: 'processor_reference', reference: 'TXN-UNIT-0002', reviewedBy: 'op-ana' },
+    });
     expect(ctx.contentAgency.updateInvoiceStatus).toHaveBeenCalledWith(USER, 'inv_1', 'paid');
   });
 
@@ -406,12 +417,30 @@ describe('ClientOperationsApplicationService — Quotations & Payments', () => {
         ],
       })),
     });
+    // MISSION 002 — paidTotal counts VERIFIED money only, so the verified
+    // payment below is revenue while the recorded-only one is not.
     await ctx.repo.savePayment({
       id: 'pay_1',
       userId: USER,
       invoiceId: 'inv_2',
       clientId: 'client_1',
       amount: 500,
+      amountMinor: 50_000,
+      status: 'verified',
+      currency: 'USD',
+      method: 'bank',
+      receivedAt: new Date().toISOString(),
+      note: '',
+      createdAt: new Date().toISOString(),
+    });
+    await ctx.repo.savePayment({
+      id: 'pay_unverified',
+      userId: USER,
+      invoiceId: 'inv_1',
+      clientId: 'client_1',
+      amount: 250,
+      amountMinor: 25_000,
+      status: 'recorded',
       currency: 'USD',
       method: 'bank',
       receivedAt: new Date().toISOString(),
@@ -420,6 +449,8 @@ describe('ClientOperationsApplicationService — Quotations & Payments', () => {
     });
     const overview = await ctx.svc.getRevenueOverview(USER);
     expect(overview.data?.paidTotal).toBe(500);
+    expect(overview.data?.recordedTotal).toBe(750);
+    expect(overview.data?.unverifiedTotal).toBe(250);
     expect(overview.data?.outstanding).toBe(1000);
     expect(overview.data?.overdueCount).toBe(1);
     expect(overview.data?.paidCount).toBe(1);

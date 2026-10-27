@@ -302,6 +302,7 @@ export type {
   UpdateQuotationInput,
   PaymentDTO,
   AddPaymentInput,
+  ReviewPaymentInput,
   RevenueOverviewDTO,
   DocumentDTO,
   DocumentDetailDTO,

@@ -185,16 +185,44 @@ export function createOrchestratorProviderIntelligence(
                   },
                 ];
 
+        const rawScore = catalogEntry?.matrix.reduce((max, m) => Math.max(max, m.quality), 0);
+        const catalogScore =
+          rawScore && rawScore > 0 ? (rawScore <= 1 ? rawScore * 100 : rawScore) : undefined;
+        const benchmarkScore =
+          catalogScore !== undefined
+            ? catalogScore
+            : adapterFamily === 'ollama'
+              ? 85
+              : adapterFamily === 'deepseek'
+                ? 90
+                : adapterFamily === 'openai' ||
+                    adapterFamily === 'anthropic' ||
+                    adapterFamily === 'google'
+                  ? 95
+                  : NEUTRAL_BENCHMARK_SCORE;
+
+        const costPer1KInput = catalogEntry?.cost
+          ? catalogEntry.cost.inputPerMillionTokens / 1000
+          : adapterFamily === 'ollama'
+            ? 0
+            : NEUTRAL_COST_PER_1K;
+
+        const costPer1KOutput = catalogEntry?.cost
+          ? catalogEntry.cost.outputPerMillionTokens / 1000
+          : adapterFamily === 'ollama'
+            ? 0
+            : NEUTRAL_COST_PER_1K;
+
         candidates.push({
           providerId: provider.id,
           family: adapterFamily,
           capabilities: adapterCapabilities,
           healthy,
           models,
-          benchmarkScore: NEUTRAL_BENCHMARK_SCORE,
+          benchmarkScore,
           averageLatencyMs: latencyMs,
-          costPer1KInput: NEUTRAL_COST_PER_1K,
-          costPer1KOutput: NEUTRAL_COST_PER_1K,
+          costPer1KInput,
+          costPer1KOutput,
         });
       }
       return candidates;
@@ -202,25 +230,52 @@ export function createOrchestratorProviderIntelligence(
   };
 }
 
+export type TaskRoutingTier = 'FRONTIER' | 'EFFICIENCY' | 'LOCAL';
+
+export interface MissionExecutionStrategyOptions {
+  capability?: string;
+  preferredTier?: TaskRoutingTier;
+}
+
 /**
- * EI-004 port: deterministic balanced execution context (the same default
- * the gateway returns when no execution-strategy plan exists). Mission
- * work carries no budget/preference assumptions beyond the mission's own
- * enforced budget.
+ * EI-004 port: capability and tier-aware execution context.
+ * Directs planning and high-level reasoning to high-quality frontier models,
+ * and high-volume code generation or repair steps to cost-first / local models.
  */
-export function createMissionExecutionStrategy(): ExecutionStrategyPort {
+export function createMissionExecutionStrategy(
+  options?: MissionExecutionStrategyOptions,
+): ExecutionStrategyPort {
   return {
-    getRoutingContext: () => Promise.resolve({ strategy: 'balanced' as const }),
+    getRoutingContext: (): ReturnType<ExecutionStrategyPort['getRoutingContext']> => {
+      if (
+        options?.preferredTier === 'FRONTIER' ||
+        options?.capability === 'planning' ||
+        options?.capability === 'reasoning'
+      ) {
+        return Promise.resolve({ strategy: 'quality-first' as const });
+      }
+      if (
+        options?.preferredTier === 'LOCAL' ||
+        options?.preferredTier === 'EFFICIENCY' ||
+        options?.capability === 'code_generation'
+      ) {
+        return Promise.resolve({ strategy: 'cost-first' as const });
+      }
+      return Promise.resolve({ strategy: 'balanced' as const });
+    },
   };
 }
 
 /** Convenience: both ports for one orchestrator. */
-export function createOrchestratorRoutingPorts(orchestrator: AIOrchestrationService): {
+export function createOrchestratorRoutingPorts(
+  orchestrator: AIOrchestrationService,
+  strategyOptions?: MissionExecutionStrategyOptions,
+): {
   providerIntelligence: ProviderIntelligencePort;
   executionStrategy: ExecutionStrategyPort;
 } {
   return {
     providerIntelligence: createOrchestratorProviderIntelligence(orchestrator),
-    executionStrategy: createMissionExecutionStrategy(),
+    executionStrategy: createMissionExecutionStrategy(strategyOptions),
   };
 }

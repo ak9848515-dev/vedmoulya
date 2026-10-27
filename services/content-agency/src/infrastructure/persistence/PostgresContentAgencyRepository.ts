@@ -469,6 +469,9 @@ export class PostgresContentAgencyRepository implements ContentAgencyRepository 
         projectId: invoice.projectId,
         description: invoice.description,
         amount: invoice.amount,
+        // MISSION 002 — authoritative integer minor units; `amount` is the
+        // display mirror. Settlement compares amount_minor only.
+        amountMinor: Math.round(invoice.amount * 100),
         currency: invoice.currency,
         status: invoice.status,
         issuedAt: invoice.issuedAt,
@@ -483,6 +486,7 @@ export class PostgresContentAgencyRepository implements ContentAgencyRepository 
           projectId: invoice.projectId,
           description: invoice.description,
           amount: invoice.amount,
+          amountMinor: Math.round(invoice.amount * 100),
           currency: invoice.currency,
           status: invoice.status,
           issuedAt: invoice.issuedAt,

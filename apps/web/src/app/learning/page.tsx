@@ -169,15 +169,10 @@ export default function LearningPage(): React.JSX.Element {
             What you are learning next and how far you have come.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Badge variant="success" size="md" className="flex items-center gap-1.5">
-            <Zap className="h-3.5 w-3.5" /> 5-day streak
-          </Badge>
-        </div>
       </div>
 
       {/* UX-05 — Area → Goal → Mission → Progress → Outcome, from real data only. */}
-      <LifeJourneyStrip steps={learningJourneySteps(data)} />
+      <LifeJourneyStrip steps={learningJourneySteps(data?.data)} />
 
       {/* Stats Overview — only show real data */}
       <div className="rounded-2xl border border-dashed border-[#E2E8F0] dark:border-[#334155] bg-white dark:bg-[#1E293B] p-5">

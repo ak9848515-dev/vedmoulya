@@ -149,6 +149,15 @@ export interface ClientOpsHandlers {
     input: { userId: string } & Record<string, unknown>,
     _ctx: TRPCContext,
   ) => Promise<ApiResponse>;
+  /** MISSION 002 — promote a recorded payment to verified after review. */
+  reviewPayment: (
+    input: { userId: string; paymentId: string; reviewerId: string; reviewedAt?: string },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
+  createCheckoutSession: (
+    input: { userId: string; invoiceId: string; successUrl?: string; cancelUrl?: string },
+    _ctx: TRPCContext,
+  ) => Promise<ApiResponse>;
   getRevenueOverview: (input: { userId: string }, _ctx: TRPCContext) => Promise<ApiResponse>;
   // Documents
   listDocuments: (input: { userId: string }, _ctx: TRPCContext) => Promise<ApiResponse>;
@@ -195,6 +204,7 @@ export interface ClientOpsHandlers {
 
 export function createClientOpsRouter(
   clientOpsService: ClientOperationsApplicationService,
+  stripeService?: import('../services/StripePaymentService.js').StripePaymentService,
 ): ClientOpsHandlers {
   const svc = clientOpsService;
   return {
@@ -387,6 +397,27 @@ export function createClientOpsRouter(
           input as unknown as Parameters<typeof svc.addPayment>[1],
         ),
       ),
+    reviewPayment: async (input, _ctx) =>
+      fromServiceResult(
+        await svc.reviewPayment(input.userId, {
+          paymentId: input.paymentId,
+          reviewerId: input.reviewerId,
+          reviewedAt: input.reviewedAt,
+        }),
+      ),
+    createCheckoutSession: async (input, _ctx): Promise<ApiResponse> => {
+      if (!stripeService) {
+        return {
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Stripe settlement service is not configured',
+            statusCode: 503,
+          },
+        };
+      }
+      return fromServiceResult(await stripeService.createCheckoutSession(input));
+    },
     getRevenueOverview: async (input, _ctx) =>
       fromServiceResult(await svc.getRevenueOverview(input.userId)),
 

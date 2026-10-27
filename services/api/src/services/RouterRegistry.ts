@@ -2569,6 +2569,22 @@ const clientOpsPaymentInput = z.object({
   method: z.string().optional(),
   receivedAt: z.string().optional(),
   note: z.string().optional(),
+  // MISSION 002 — retry-safe, evidence-gated payments. `evidence` is required:
+  // the service rejects a bare amount, so the boundary must carry it too.
+  idempotencyKey: z.string().min(1).max(200).optional(),
+  evidence: z.object({
+    kind: z.enum(['processor_reference', 'manual_receipt']),
+    reference: z.string().min(1).max(200),
+    reviewedBy: z.string().max(120).optional(),
+    reviewedAt: z.string().optional(),
+  }),
+});
+
+const clientOpsReviewPaymentInput = z.object({
+  userId: z.string().min(1),
+  paymentId: z.string().min(1),
+  reviewerId: z.string().min(2).max(120),
+  reviewedAt: z.string().optional(),
 });
 
 const clientOpsUploadDocumentInput = z.object({
@@ -3297,6 +3313,11 @@ export function createAppRouter(services: ApiApplicationService) {
         .input(clientOpsPaymentInput)
         .mutation(({ input, ctx }) =>
           createClientOpsRouter(services.clientOps).addPayment(input, ctx),
+        ),
+      reviewPayment: standardProcedure
+        .input(clientOpsReviewPaymentInput)
+        .mutation(({ input, ctx }) =>
+          createClientOpsRouter(services.clientOps).reviewPayment(input, ctx),
         ),
       getRevenueOverview: standardProcedure
         .input(userId)

@@ -48,6 +48,7 @@ export {
   requireProdSecret,
   requireExternalUrl,
   requireProdExternalUrl,
+  isStrictEnvironment,
 } from './config/index.js';
 export type {
   Configuration,

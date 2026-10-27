@@ -1,0 +1,13 @@
+SAMPLE RUN — NOT A CLIENT ENGAGEMENT
+generated : 2026-10-26T13:43:08.463Z
+finished  : 2026-10-26T13:43:08.521Z
+ai mode   : skipped (--no-ai)
+summary   : SKIPPED
+
+Persistence: in-memory repositories. No database was contacted; the run
+deletes DATABASE_URL / CONTENT_AGENCY_DATABASE_URL / REDIS_URL from its own
+environment before importing any service, so it cannot reach Neon or production.
+
+Every file in this directory is a demonstration built from fictional data.
+No client, payment, testimonial, prospect or revenue is implied. The payment
+row carries a SAMPLE-RUN- reference and proves nothing about money.

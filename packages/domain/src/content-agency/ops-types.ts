@@ -7,6 +7,8 @@
 // of truth for clients/brands/projects/content/invoices.
 // ──────────────────────────────────────────────────────────────────
 
+import type { PaymentEvidenceKind, PaymentStatus } from './payments.js';
+
 // ── CRM — Leads (Module 1) ─────────────────────────────────────────────────
 
 export type LeadStatus = 'lead' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost';
@@ -181,6 +183,7 @@ export interface QuotationRecord {
 }
 
 // ── Payments (Module 6) ────────────────────────────────────────────────────
+// Money/evidence primitives live in ./payments.ts (MISSION 002).
 
 export interface PaymentRecord {
   id: string;
@@ -193,6 +196,22 @@ export interface PaymentRecord {
   receivedAt: string;
   note: string;
   createdAt: string;
+  /**
+   * MISSION 002 — authoritative amount in integer minor units (cents).
+   * `amount` is kept as the legacy display mirror; every settlement decision
+   * uses this integer, never the float. Null only for rows written before
+   * the 2026-10-26 migration.
+   */
+  amountMinor?: number | null;
+  /** recorded = evidence unreviewed; verified = operator-attested receipt. */
+  status?: PaymentStatus;
+  idempotencyKey?: string | null;
+  detailsFingerprint?: string | null;
+  evidenceKind?: PaymentEvidenceKind | null;
+  evidenceReference?: string | null;
+  evidenceReviewedBy?: string | null;
+  evidenceReviewedAt?: string | null;
+  verifiedAt?: string | null;
 }
 
 // ── Documents (Module 8) ───────────────────────────────────────────────────

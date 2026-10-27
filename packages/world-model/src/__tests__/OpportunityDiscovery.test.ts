@@ -370,18 +370,22 @@ describe('WorldModelService — SPRINT-038 opportunity discovery & revenue valid
     const service = makeService();
     const reg = register(service);
     if (!reg.success) throw new Error('register failed');
-    service.recordVerifiedPayment({ ownerId: 'u1', problemId: reg.data.id, text: 'Payment 1' });
+    service.recordVerifiedPayment({
+      ownerId: 'u1',
+      problemId: reg.data.id,
+      text: 'Month 1 paid ₹5,000 via UPI (ref 400000000001)',
+    });
     const second = service.recordVerifiedPayment({
       ownerId: 'u1',
       problemId: reg.data.id,
-      text: 'Payment 2',
+      text: 'Month 2 paid ₹5,000 via UPI (ref 400000000002)',
     });
     if (!second.success) throw new Error('payment failed');
     expect(second.data.revenueState).toBe('REPEAT_REVENUE');
     const third = service.recordVerifiedPayment({
       ownerId: 'u1',
       problemId: reg.data.id,
-      text: 'Payment 3',
+      text: 'Month 3 paid ₹5,000 via UPI (ref 400000000003)',
     });
     if (!third.success) throw new Error('payment failed');
     expect(third.data.revenueState).toBe('REPEATABLE_BUSINESS');
@@ -526,7 +530,7 @@ describe('WorldModelService — SPRINT-038 opportunity discovery & revenue valid
     service.recordVerifiedPayment({
       ownerId: 'u1',
       problemId: reg.data.id,
-      text: 'Paid ₹5,000 for month one.',
+      text: 'Paid ₹5,000 for month one via UPI (ref 400000000004)',
     });
     const allowed = service.businessCandidate({
       ownerId: 'u1',
@@ -601,7 +605,13 @@ describe('WorldModelService — SPRINT-038 opportunity discovery & revenue valid
     const service = makeService();
     const reg = register(service);
     if (!reg.success) throw new Error('register failed');
-    service.recordVerifiedPayment({ ownerId: 'u1', problemId: reg.data.id, text: 'Payment.' });
+    // MISSION 002 — evidence must identify an amount and how it was paid;
+    // this fixture is realistic evidence, not a placeholder.
+    service.recordVerifiedPayment({
+      ownerId: 'u1',
+      problemId: reg.data.id,
+      text: 'Paid ₹5,000 via UPI (ref 400000000009)',
+    });
     const problem = service.getProblem('u1', reg.data.id);
     if (!problem.success) throw new Error('get failed');
     expect(problem.data.revenueState).toBe('REVENUE_VERIFIED');

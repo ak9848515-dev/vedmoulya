@@ -274,6 +274,15 @@ function isStrictEnv(): boolean {
   return STRICT_ENVS.has(process.env.NODE_ENV ?? 'development');
 }
 
+/**
+ * Public form of the strict-environment rule (production/staging).
+ * MISSION 002 — the content-agency database target guard needs the same
+ * definition rather than a second copy of the environment list.
+ */
+export function isStrictEnvironment(): boolean {
+  return isStrictEnv();
+}
+
 const PLACEHOLDER_PATTERN =
   /development-secret|change[-_]?me|your[-_]?(key|secret|password)|placeholder|changeme|^secret$|^test$|^your[-_]?api[-_]?key$|localhost|127\.0\.0\.1|0\.0\.0\.0|::1/i;
 

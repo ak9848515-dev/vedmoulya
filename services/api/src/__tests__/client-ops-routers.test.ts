@@ -52,7 +52,10 @@ const ctx = { userId: 'test-user', email: 'test@vedmoulya.com', role: 'user' };
 // ── ClientOpsRouter ──────────────────────────────────────────────────────────
 
 describe('ClientOpsRouter', () => {
-  const router = createClientOpsRouter(successService<ClientOperationsApplicationService>());
+  const router = createClientOpsRouter(
+    successService<ClientOperationsApplicationService>(),
+    successService(),
+  );
   const handlers: Array<[string, Record<string, unknown>]> = [
     ['listLeads', { userId: 'u' }],
     ['listLeads', { userId: 'u', status: 'won' }],
@@ -93,6 +96,7 @@ describe('ClientOpsRouter', () => {
     ['rejectQuotation', { userId: 'u', quotationId: 'q1' }],
     ['listPayments', { userId: 'u' }],
     ['addPayment', { userId: 'u', amount: 50 }],
+    ['createCheckoutSession', { userId: 'u', invoiceId: 'inv1' }],
     ['getRevenueOverview', { userId: 'u' }],
     ['listDocuments', { userId: 'u' }],
     ['getDocument', { userId: 'u', documentId: 'd1' }],
@@ -125,6 +129,17 @@ describe('ClientOpsRouter', () => {
     const response = await failing.listLeads({ userId: 'u' }, ctx);
     expect(response.success).toBe(false);
     expect(response.error?.message).toBe('boom');
+  });
+
+  it('fails createCheckoutSession gracefully when stripeService is not provided', async () => {
+    const unconfigured =
+      createClientOpsRouter(successService<ClientOperationsApplicationService>());
+    const response = await unconfigured.createCheckoutSession(
+      { userId: 'u', invoiceId: 'inv1' },
+      ctx,
+    );
+    expect(response.success).toBe(false);
+    expect(response.error?.code).toBe('SERVICE_UNAVAILABLE');
   });
 });
 

@@ -52,3 +52,43 @@ export type {
 } from './ops-types.js';
 
 export type { ClientOpsRepository } from './repository/ClientOpsRepository.js';
+
+// ── Payment money & evidence (MISSION 002 — revenue safety hardening) ──────
+export {
+  MONEY_MINOR_SCALE,
+  MONEY_MINOR_MAX,
+  toMinorUnits,
+  fromMinorUnits,
+  formatMinorUnits,
+  normalizeCurrency,
+  isValidCurrency,
+  MANUAL_PAYMENT_METHODS,
+  isManualPaymentMethod,
+  validatePaymentEvidence,
+  validateReviewerIdentity,
+  resolveIdempotencyKey,
+  paymentDetailsFingerprint,
+  IDEMPOTENCY_KEY_MAX,
+} from './payments.js';
+export type {
+  PaymentEvidence,
+  PaymentEvidenceKind,
+  PaymentStatus,
+  ValidatedPaymentEvidence,
+  EvidenceValidation,
+  MinorUnitResult,
+  IdempotencyKeyResult,
+} from './payments.js';
+
+export { settlementRecordFromPayment, isSamePaymentDetails } from './payment-settlement.js';
+
+export type {
+  PaymentSettlementPort,
+  PaymentSettlementCommand,
+  PaymentVerificationCommand,
+  PaymentSettlementResult,
+  PaymentSettlementSuccess,
+  PaymentSettlementFailure,
+  PaymentSettlementFailureCode,
+  PaymentSettlementRecord,
+} from './payment-settlement.js';

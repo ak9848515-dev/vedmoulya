@@ -10,8 +10,20 @@
 // Business Analytics.
 // ──────────────────────────────────────────────────────────────────
 
+import {
+  fromMinorUnits,
+  isValidCurrency,
+  normalizeCurrency,
+  paymentDetailsFingerprint,
+  resolveIdempotencyKey,
+  toMinorUnits,
+  validatePaymentEvidence,
+  validateReviewerIdentity,
+} from '@vedmoulya/domain';
 import type {
   ClientOpsRepository,
+  PaymentSettlementPort,
+  PaymentSettlementRecord,
   LeadRecord,
   LeadInteractionRecord,
   LeadTaskRecord,
@@ -32,6 +44,7 @@ import type {
   ContentAgencyResult,
 } from './ContentAgencyApplicationService.js';
 import type { ClientOpsAIService } from './ClientOpsAIService.js';
+import { SequentialPaymentSettlement } from './SequentialPaymentSettlement.js';
 import type {
   LeadDTO,
   LeadDetailDTO,
@@ -60,6 +73,7 @@ import type {
   UpdateQuotationInput,
   PaymentDTO,
   AddPaymentInput,
+  ReviewPaymentInput,
   RevenueOverviewDTO,
   DocumentDTO,
   DocumentDetailDTO,
@@ -87,7 +101,9 @@ const uid = (prefix: string): string => `${prefix}_${crypto.randomUUID().slice(0
 const now = (): string => new Date().toISOString();
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** SHA-256 hex digest (Web Crypto — available in Node 18+ and tests). */
+// Per-idempotency-key receivedAt cache: ensures retries with the same
+// idempotency key reuse the original receivedAt rather than generating a
+// new timestamp, so isSamePaymentDetails can match.
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -180,15 +196,31 @@ export class ClientOperationsApplicationService {
   private readonly repo: ClientOpsRepository;
   private readonly contentAgency: ContentAgencyApplicationService;
   private readonly ai: ClientOpsAIService;
+  private readonly settlement: PaymentSettlementPort;
 
   constructor(
     repo: ClientOpsRepository,
     contentAgency: ContentAgencyApplicationService,
     ai: ClientOpsAIService,
+    /**
+     * MISSION 002 — the atomic, idempotent payment unit of work. Production
+     * MUST inject the PostgreSQL implementation; the in-memory fallback is a
+     * unit-test double and is refused outside test/development.
+     */
+    settlement?: PaymentSettlementPort,
   ) {
     this.repo = repo;
     this.contentAgency = contentAgency;
     this.ai = ai;
+    if (!settlement) {
+      const env: string = process.env.NODE_ENV ?? 'development';
+      if (env === 'production' || env === 'staging') {
+        throw new Error(
+          'ClientOperationsApplicationService requires an atomic PaymentSettlementPort outside development/test — refusing to fall back to the sequential in-memory settlement.',
+        );
+      }
+    }
+    this.settlement = settlement ?? new SequentialPaymentSettlement(repo, contentAgency);
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -1026,6 +1058,17 @@ export class ClientOperationsApplicationService {
   // MODULES 5 & 6 — INVOICING & PAYMENT TRACKING
   // ══════════════════════════════════════════════════════════════════════
 
+  /**
+   * Record a payment. MISSION 002 — this is idempotent, evidence-gated and
+   * delegated to an atomic settlement unit of work:
+   *
+   *   • evidence is validated against the payment method (no free text);
+   *   • a repeated idempotency key returns the ORIGINAL payment instead of
+   *     double-counting revenue, and a key reused with different money is a
+   *     conflict;
+   *   • the invoice settles only from VERIFIED payments, recomputed from the
+   *     persisted rows inside the settlement transaction.
+   */
   async addPayment(userId: string, input: AddPaymentInput): Promise<ClientOpsResult<PaymentDTO>> {
     const invoice = await this.contentAgency.getInvoice(userId, input.invoiceId);
     if (!invoice.success || !invoice.data) return { success: false, error: 'Invoice not found' };
@@ -1034,31 +1077,106 @@ export class ClientOperationsApplicationService {
       clientId: string;
       amount: number;
       currency: string;
+      status?: string;
     };
-    if (input.amount <= 0) return { success: false, error: 'Payment amount must be positive' };
-    const payment: PaymentRecord = {
-      id: uid('pay'),
+
+    const amount = toMinorUnits(input.amount);
+    if (!amount.ok) return { success: false, error: amount.error };
+    if (amount.minor <= 0) return { success: false, error: 'Payment amount must be positive' };
+
+    const currency = normalizeCurrency(input.currency ?? invoiceData.currency);
+    if (!isValidCurrency(currency)) {
+      return { success: false, error: 'Payment currency must be a three-letter ISO code' };
+    }
+    const invoiceCurrency = normalizeCurrency(invoiceData.currency);
+    if (currency !== invoiceCurrency) {
+      return {
+        success: false,
+        error: `Invoice ${input.invoiceId} is denominated in ${invoiceCurrency}; a ${currency} payment cannot settle it.`,
+      };
+    }
+
+    const method = (input.method ?? 'bank_transfer').trim().toLowerCase() || 'bank_transfer';
+    const evidence = validatePaymentEvidence({
+      evidence: input.evidence,
+      method,
+      reserved: [
+        input.invoiceId,
+        invoiceData.clientId,
+        String(input.amount),
+        amount.minor.toString(),
+        currency,
+        method,
+        input.receivedAt ?? now(),
+      ],
+    });
+    if (!evidence.ok) return { success: false, error: evidence.error };
+
+    const key = resolveIdempotencyKey({
+      idempotencyKey: input.idempotencyKey,
+      evidenceReference: evidence.evidence.reference,
+      evidenceKind: evidence.evidence.kind,
+    });
+    if (!key.ok) return { success: false, error: key.error };
+
+    const createdAt = now();
+    const result = await this.settlement.settle({
+      paymentId: uid('pay'),
       userId,
       invoiceId: input.invoiceId,
       clientId: invoiceData.clientId,
-      amount: input.amount,
-      currency: input.currency ?? invoiceData.currency,
-      method: input.method ?? 'bank_transfer',
+      amountMinor: amount.minor,
+      currency,
+      method,
       receivedAt: input.receivedAt ?? now(),
-      note: input.note ?? '',
-      createdAt: now(),
-    };
-    await this.repo.savePayment(payment);
+      note: (input.note ?? '').trim().slice(0, 2000),
+      createdAt,
+      idempotencyKey: key.key,
+      detailsFingerprint: paymentDetailsFingerprint([
+        input.invoiceId,
+        amount.minor.toString(),
+        currency,
+        method,
+        input.receivedAt ?? now(),
+        evidence.evidence.kind,
+        evidence.evidence.reference,
+      ]),
+      evidenceKind: evidence.evidence.kind,
+      evidenceReference: evidence.evidence.reference,
+      evidenceReviewedBy: evidence.evidence.reviewedBy,
+      evidenceReviewedAt: evidence.evidence.reviewedBy
+        ? (evidence.evidence.reviewedAt ?? createdAt)
+        : null,
+      status: evidence.evidence.status,
+    });
+    if (!result.ok) return { success: false, error: result.error };
 
-    const paid = await this.repo.listPaymentsByInvoice(input.invoiceId, userId);
-    const totalPaid = paid.reduce((sum, p) => sum + p.amount, 0);
-    if (totalPaid >= invoiceData.amount) {
-      const updated = await this.contentAgency.updateInvoiceStatus(userId, input.invoiceId, 'paid');
-      if (!updated.success) {
-        return { success: false, error: 'Payment recorded but invoice could not be marked paid' };
-      }
-    }
-    return { success: true, data: await this.toPaymentDTO(payment, userId) };
+    return {
+      success: true,
+      data: await this.toPaymentDTO(result.payment, userId, result.outcome === 'duplicate'),
+    };
+  }
+
+  /**
+   * Review previously recorded evidence and promote the payment to `verified`.
+   * Until this happens the payment is money CLAIMED, not money received: it
+   * does not count towards revenue and cannot settle an invoice.
+   */
+  async reviewPayment(
+    userId: string,
+    input: ReviewPaymentInput,
+  ): Promise<ClientOpsResult<PaymentDTO>> {
+    const reviewer = validateReviewerIdentity(input.reviewerId);
+    if (!reviewer.ok) return { success: false, error: reviewer.error };
+
+    const result = await this.settlement.verify({
+      userId,
+      paymentId: input.paymentId,
+      reviewerId: reviewer.reviewerId,
+      verifiedAt: input.reviewedAt ?? now(),
+    });
+    if (!result.ok) return { success: false, error: result.error };
+    return { success: true, data: await this.toPaymentDTO(result.payment, userId, false) };
   }
 
   async listPayments(userId: string): Promise<ClientOpsResult<PaymentDTO[]>> {
@@ -1071,25 +1189,58 @@ export class ClientOperationsApplicationService {
     return { success: true, data: dtos };
   }
 
+  /**
+   * Revenue overview. MISSION 002 — `paidTotal`, annual revenue and cash-flow
+   * "received" are computed from VERIFIED payments only, in integer minor
+   * units. A payment whose evidence nobody reviewed is reported as
+   * `unverifiedTotal`, never as received revenue.
+   */
   async getRevenueOverview(userId: string): Promise<ClientOpsResult<RevenueOverviewDTO>> {
     const invoices = await this.safeArray(this.contentAgency.listInvoices(userId));
     const payments = await this.repo.listPayments(userId);
     const currency = invoices[0]?.currency ?? 'USD';
 
-    const paidTotal = payments.reduce((sum, p) => sum + p.amount, 0);
+    let verifiedMinor = 0;
+    let recordedMinor = 0;
+    const verifiedByMonth = new Map<string, number>();
+    const verifiedByInvoice = new Map<string, number>();
+    for (const payment of payments) {
+      const minor = payment.amountMinor ?? Math.round(payment.amount * 100);
+      recordedMinor += minor;
+      if ((payment.status ?? 'recorded') !== 'verified') continue;
+      verifiedMinor += minor;
+      verifiedByInvoice.set(
+        payment.invoiceId,
+        (verifiedByInvoice.get(payment.invoiceId) ?? 0) + minor,
+      );
+      const month = payment.receivedAt.slice(0, 7);
+      verifiedByMonth.set(month, (verifiedByMonth.get(month) ?? 0) + minor);
+    }
+    const verifiedInMonth = (month: string): number => verifiedByMonth.get(month) ?? 0;
+
     const nowMs = Date.now();
-    let outstanding = 0;
+    let outstandingMinor = 0;
     let overdueCount = 0;
     let paidCount = 0;
     let pendingCount = 0;
+    let paidInvoiceMinor = 0;
+    let verifiedOnPaidInvoicesMinor = 0;
     for (const invoice of invoices) {
-      const inv = invoice as { amount?: number; status?: string; dueDate?: string | null };
-      const amount = inv.amount ?? 0;
+      const inv = invoice as {
+        id?: string;
+        amount?: number;
+        status?: string;
+        dueDate?: string | null;
+      };
+      const minor = toMinorUnits(inv.amount ?? 0);
+      const amountMinor = minor.ok ? minor.minor : 0;
       if (inv.status === 'paid') {
         paidCount += 1;
+        paidInvoiceMinor += amountMinor;
+        verifiedOnPaidInvoicesMinor += verifiedByInvoice.get(inv.id ?? '') ?? 0;
       } else {
         pendingCount += 1;
-        outstanding += amount;
+        outstandingMinor += amountMinor;
         if (inv.dueDate && new Date(inv.dueDate).getTime() < nowMs) {
           overdueCount += 1;
         }
@@ -1099,29 +1250,22 @@ export class ClientOperationsApplicationService {
     const months = this.lastMonths(6);
     const monthlyRevenue = months.map((month) => ({
       month,
-      amount: round2(
-        payments
-          .filter((p) => p.receivedAt.slice(0, 7) === month)
-          .reduce((sum, p) => sum + p.amount, 0),
-      ),
+      amount: fromMinorUnits(verifiedInMonth(month)),
     }));
     const currentYear = new Date().getFullYear().toString();
-    const annualRevenue = round2(
-      payments
-        .filter((p) => p.receivedAt.slice(0, 4) === currentYear)
-        .reduce((sum, p) => sum + p.amount, 0),
-    );
+    const annualMinor = [...verifiedByMonth.entries()]
+      .filter(([month]) => month.slice(0, 4) === currentYear)
+      .reduce((sum, [, minor]) => sum + minor, 0);
     const cashflow = months.map((month) => ({
       month,
-      received: round2(
-        payments
-          .filter((p) => p.receivedAt.slice(0, 7) === month)
-          .reduce((sum, p) => sum + p.amount, 0),
-      ),
-      outstanding: round2(
-        invoices
-          .filter((i) => i.dueDate?.slice(0, 7) === month && i.status !== 'paid')
-          .reduce((sum, i) => sum + i.amount, 0),
+      received: fromMinorUnits(verifiedInMonth(month)),
+      outstanding: fromMinorUnits(
+        invoices.reduce((sum, invoice) => {
+          const inv = invoice as { amount?: number; dueDate?: string | null; status?: string };
+          if (inv.dueDate?.slice(0, 7) !== month || inv.status === 'paid') return sum;
+          const minor = toMinorUnits(inv.amount ?? 0);
+          return sum + (minor.ok ? minor.minor : 0);
+        }, 0),
       ),
     }));
 
@@ -1129,12 +1273,19 @@ export class ClientOperationsApplicationService {
       success: true,
       data: {
         currency,
-        paidTotal: round2(paidTotal),
-        outstanding: round2(outstanding),
+        paidTotal: fromMinorUnits(verifiedMinor),
+        recordedTotal: fromMinorUnits(recordedMinor),
+        unverifiedTotal: fromMinorUnits(recordedMinor - verifiedMinor),
+        outstanding: fromMinorUnits(outstandingMinor),
         overdueCount,
         paidCount,
         pendingCount,
-        annualRevenue,
+        // Drift is scoped to invoices that CLAIM `paid`: their amount minus the
+        // verified payments recorded against them. Positive drift means an
+        // invoice was marked paid without verified money behind it — a visible
+        // reconciliation gap rather than a silently inflated revenue figure.
+        reconciliationDrift: fromMinorUnits(paidInvoiceMinor - verifiedOnPaidInvoicesMinor),
+        annualRevenue: fromMinorUnits(annualMinor),
         monthlyRevenue,
         cashflow,
       },
@@ -1819,22 +1970,37 @@ export class ClientOperationsApplicationService {
     return { subtotal: round2(subtotal), total: round2(total) };
   }
 
-  private async toPaymentDTO(payment: PaymentRecord, userId: string): Promise<PaymentDTO> {
+  private async toPaymentDTO(
+    payment: PaymentRecord | PaymentSettlementRecord,
+    userId: string,
+    duplicate = false,
+  ): Promise<PaymentDTO> {
     const [clients] = await Promise.all([this.safeArray(this.contentAgency.listClients(userId))]);
     const client = clients.find((c) => c.id === payment.clientId);
-    return {
+    const amountMinor = payment.amountMinor ?? Math.round((payment as PaymentRecord).amount * 100);
+    const dto: PaymentDTO = {
       id: payment.id,
       invoiceId: payment.invoiceId,
       clientId: payment.clientId,
       invoiceNumber: this.invoiceNumber(payment.invoiceId),
       clientName: client?.company ?? 'Unknown client',
-      amount: payment.amount,
+      amount: fromMinorUnits(amountMinor),
+      amountMinor,
       currency: payment.currency,
       method: payment.method,
       receivedAt: payment.receivedAt,
       note: payment.note,
       createdAt: payment.createdAt,
+      status: payment.status ?? 'recorded',
+      idempotencyKey: payment.idempotencyKey ?? null,
+      evidenceKind: payment.evidenceKind ?? null,
+      evidenceReference: payment.evidenceReference ?? null,
+      evidenceReviewedBy: payment.evidenceReviewedBy ?? null,
+      evidenceReviewedAt: payment.evidenceReviewedAt ?? null,
+      verifiedAt: payment.verifiedAt ?? null,
     };
+    if (duplicate) dto.duplicate = true;
+    return dto;
   }
 
   private toDocumentDTO(document: DocumentRecord): DocumentDTO {

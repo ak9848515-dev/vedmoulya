@@ -159,6 +159,23 @@ export class InMemoryClientOpsRepository implements ClientOpsRepository {
     );
   }
 
+  async findPaymentById(id: string, userId: string): Promise<PaymentRecord | null> {
+    const payment = this.payments.get(id);
+    return payment && payment.userId === userId ? { ...payment } : null;
+  }
+
+  async findPaymentByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<PaymentRecord | null> {
+    for (const payment of this.payments.values()) {
+      if (payment.userId === userId && payment.idempotencyKey === idempotencyKey) {
+        return { ...payment };
+      }
+    }
+    return null;
+  }
+
   async savePayment(payment: PaymentRecord): Promise<void> {
     this.payments.set(payment.id, { ...payment });
   }

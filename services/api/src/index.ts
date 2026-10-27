@@ -205,3 +205,18 @@ export {
   paginatedResponse,
 } from './services/ResponseMapper.js';
 export type { ApiResponse, ResponseMeta } from './services/ResponseMapper.js';
+
+// ── Stripe & Bounty Live Sources ───────────────────────────────────────────
+export { StripePaymentService, resolveStripeConfig } from './services/StripePaymentService.js';
+export type {
+  StripeConfig,
+  CreateCheckoutSessionInput,
+  CreateCheckoutSessionResult,
+  StripeWebhookProcessingResult,
+} from './services/StripePaymentService.js';
+
+export {
+  GitHubBountyOpportunitySource,
+  GITHUB_BOUNTY_SOURCE_NAME,
+} from './services/GitHubBountyOpportunitySource.js';
+export { CompositeOpportunitySource } from './services/CompositeOpportunitySource.js';

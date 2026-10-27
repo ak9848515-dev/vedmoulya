@@ -269,6 +269,11 @@ export interface MissionServiceOptions {
    * runtime keeps its previous NOOP observability (no behavior change).
    */
   aiObservability?: AIObservability;
+  /**
+   * S10 / RESILIENCE — custom persistence retry configuration for durable stores.
+   * Defaults to 5 attempts with 300ms base delay (~4.5s backoff) when Postgres persistence is active.
+   */
+  persistenceRetry?: { attempts?: number; baseDelayMs?: number };
 }
 
 /**
@@ -451,9 +456,19 @@ export class MissionService {
     // The user-provider registrar is undefined unless this deployment can
     // really decrypt/store user credentials — never fabricated.
     const registerUserProviders = createMissionUserProviderRegistrar(this.options.credentials);
+    const defaultPersistenceRetry = this.options.sql
+      ? {
+          attempts: Number(process.env.MISSION_PERSISTENCE_ATTEMPTS) || 5,
+          baseDelayMs: Number(process.env.MISSION_PERSISTENCE_BASE_DELAY_MS) || 300,
+        }
+      : undefined;
     const runtime = createMissionRuntime({
       workspaceRoot: this.options.workspaceRoot ?? resolveDefaultMissionWorkspace(),
       stores,
+      persistenceRetry:
+        this.options.persistenceRetry ??
+        this.options.runtimeOptions?.persistenceRetry ??
+        defaultPersistenceRetry,
       ...(memory ? { memory } : {}),
       orchestratorOptions: {
         retryBaseDelayMs: 250,

@@ -3756,6 +3756,15 @@ export function useAddPayment() {
   return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
 }
 
+/**
+ * MISSION 002 — promote a recorded payment to verified once an operator has
+ * reviewed its evidence. Only verified payments count as received revenue.
+ */
+export function useReviewPayment() {
+  const mutation = api.clientOps.reviewPayment.useMutation();
+  return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };
+}
+
 export function useUploadDocument() {
   const mutation = api.clientOps.uploadDocument.useMutation();
   return { ...mutation, mutateAsync: guardMutation(mutation.mutateAsync) };

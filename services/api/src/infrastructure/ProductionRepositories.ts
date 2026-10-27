@@ -83,10 +83,12 @@ import type {
   KnowledgeRepository,
   ContentAgencyRepository,
   ClientOpsRepository,
+  PaymentSettlementPort,
 } from '@vedmoulya/domain';
 import {
   registerContentAgencyServices,
   initializeDatabase as initializeContentAgencyDb,
+  ensureContentAgencySchema,
 } from '@vedmoulya/content-agency';
 import {
   registerIdentityServices,
@@ -172,6 +174,7 @@ const executionSlot: RepositorySlot<ExecutionRepository> = {};
 const knowledgeSlot: RepositorySlot<KnowledgeRepository> = {};
 const contentAgencySlot: RepositorySlot<ContentAgencyRepository> = {};
 const clientOpsSlot: RepositorySlot<ClientOpsRepository> = {};
+const paymentSettlementSlot: RepositorySlot<PaymentSettlementPort> = {};
 const providerRegistrySlot: RepositorySlot<ProviderRepository> = {};
 const capabilityRegistrySlot: RepositorySlot<CapabilityRepository> = {};
 const contextRegistrySlot: RepositorySlot<ContextRepository> = {};
@@ -421,12 +424,32 @@ export function createProductionKnowledgeRepository(): KnowledgeRepository {
 }
 
 /**
+ * Register the content-agency / client-ops DDL with the existing sequential
+ * boot readiness pass, exactly once. Before this, the 16 tables declared in
+ * `schema/content-agency.ts` had no DDL anywhere in the estate: a fresh
+ * database had no `content_agency_*` / `client_ops_*` tables and EVERY Client
+ * Ops query failed (CRM, proposals, contracts, quotations, invoices, payments,
+ * portal) — i.e. the whole revenue-recording surface. Riding the awaited pass
+ * also means no query can observe a half-created schema on a cold start.
+ */
+let contentAgencySchemaRegistered = false;
+function registerContentAgencySchemaOnce(): void {
+  if (contentAgencySchemaRegistered) return;
+  contentAgencySchemaRegistered = true;
+  ensureTable(
+    { ensureTable: () => ensureContentAgencySchema().then(() => undefined) },
+    'Content agency schema',
+  );
+}
+
+/**
  * Resolve the production ContentAgencyRepository via the content-agency
  * module's existing DI registration (`content-agency.repository` →
  * `PostgresContentAgencyRepository`). Lazy-connect Postgres client.
  * EPIC-003 / SPRINT AC-001.
  */
 export function createProductionContentAgencyRepository(): ContentAgencyRepository {
+  registerContentAgencySchemaOnce();
   return resolveOnce(
     contentAgencySlot,
     'content-agency.repository',
@@ -447,6 +470,7 @@ export function createProductionContentAgencyRepository(): ContentAgencyReposito
  * `PostgresClientOpsRepository`). EPIC-003 / SPRINT AC-002.
  */
 export function createProductionClientOpsRepository(): ClientOpsRepository {
+  registerContentAgencySchemaOnce();
   return resolveOnce(
     clientOpsSlot,
     'content-agency.client-ops.repository',
@@ -454,6 +478,30 @@ export function createProductionClientOpsRepository(): ClientOpsRepository {
     () => {
       void initializeContentAgencyDb().catch((error: unknown) => {
         logger.warn('Content-agency database initialization rejected (gateway wiring)', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
+  );
+}
+
+/**
+ * Resolve the ATOMIC payment settlement unit of work (MISSION 002).
+ *
+ * This is not optional in production: `ClientOperationsApplicationService`
+ * refuses to construct without it outside development/test, because the
+ * in-memory implementation is a sequential test double and cannot guarantee
+ * that a payment insert and the invoice status update commit together.
+ */
+export function createProductionPaymentSettlement(): PaymentSettlementPort {
+  registerContentAgencySchemaOnce();
+  return resolveOnce(
+    paymentSettlementSlot,
+    'content-agency.payment-settlement',
+    registerContentAgencyServices,
+    () => {
+      void initializeContentAgencyDb().catch((error: unknown) => {
+        logger.warn('Content-agency database initialization rejected (payment settlement wiring)', {
           error: error instanceof Error ? error.message : String(error),
         });
       });

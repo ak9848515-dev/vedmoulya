@@ -115,7 +115,12 @@ vi.mock('../../../stores/auth-store.js', () => ({
 }));
 
 vi.mock('../../../lib/api-client.js', () => ({
-  useBusiness: () => ({ isLoading: false, data: mockBusinessData }),
+  // The gateway returns an `{ success, data }` envelope (see
+  // `fromServiceResult` in services/api/src/services/ResponseMapper.ts), so the
+  // page reads the snapshot from `data.data`. The fixture mirrors that real
+  // contract instead of handing the snapshot to the page as if it were the
+  // envelope.
+  useBusiness: () => ({ isLoading: false, data: { success: true, data: mockBusinessData } }),
   useRevenueOverview: () => ({
     data: {
       paidTotal: 54000,

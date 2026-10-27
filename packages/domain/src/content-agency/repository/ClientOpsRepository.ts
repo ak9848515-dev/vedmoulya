@@ -61,6 +61,25 @@ export interface ClientOpsRepository {
   // ── Payments ────────────────────────────────────────────────────────────
   listPayments(userId: string): Promise<PaymentRecord[]>;
   listPaymentsByInvoice(invoiceId: string, userId: string): Promise<PaymentRecord[]>;
+  /**
+   * Owner-scoped lookup by payment id.
+   * MISSION 002 — needed by the verified-payment review path.
+   */
+  findPaymentById(id: string, userId: string): Promise<PaymentRecord | null>;
+  /**
+   * Owner-scoped lookup by idempotency key.
+   * MISSION 002 — duplicate retries resolve to the ORIGINAL payment.
+   * Implementations must honour the (user_id, idempotency_key) uniqueness rule.
+   */
+  findPaymentByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<PaymentRecord | null>;
+  /**
+   * Upsert a payment row. This is the LOW-LEVEL primitive; it performs no
+   * idempotency, evidence or invoice-settlement work. New code must go through
+   * the PaymentSettlementPort, which owns the atomic unit of work.
+   */
   savePayment(payment: PaymentRecord): Promise<void>;
 
   // ── Documents ───────────────────────────────────────────────────────────

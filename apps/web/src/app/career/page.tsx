@@ -20,7 +20,6 @@ import {
   Search,
   Award,
   ArrowRight,
-  Sparkles,
   Flag,
   Rocket,
   Trophy,
@@ -169,15 +168,10 @@ export default function CareerPage(): React.JSX.Element {
             Your career goals, skills and the work you are building.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Badge variant="success" size="md" className="flex items-center gap-1.5">
-            <Sparkles className="h-3.5 w-3.5" /> Skills Analyzed
-          </Badge>
-        </div>
       </div>
 
       {/* UX-05 — Area → Goal → Mission → Progress → Outcome, from real data only. */}
-      <LifeJourneyStrip steps={careerJourneySteps(data)} />
+      <LifeJourneyStrip steps={careerJourneySteps(data?.data)} />
 
       {/* Tabs */}
       <TabsRoot value={activeTab} onValueChange={setActiveTab}>

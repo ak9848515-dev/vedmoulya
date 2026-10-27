@@ -4,7 +4,8 @@
 // EPIC-003 / SPRINT AC-002 — Client Operations & Revenue Engine
 // ──────────────────────────────────────────────────────────────────
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
+import type { PaymentEvidenceKind, PaymentStatus } from '@vedmoulya/domain';
 import type { ClientOpsRepository } from '@vedmoulya/domain';
 import type {
   LeadRecord,
@@ -43,6 +44,7 @@ type ProposalRow = typeof clientOpsProposals.$inferSelect;
 type ContractRow = typeof clientOpsContracts.$inferSelect;
 type QuotationRow = typeof clientOpsQuotations.$inferSelect;
 type DocumentRow = typeof clientOpsDocuments.$inferSelect;
+type PaymentRow = typeof clientOpsPayments.$inferSelect;
 
 /** JSON-encode nested record fields for jsonb columns. */
 const encode = (value: unknown): unknown => (value === undefined ? null : JSON.stringify(value));
@@ -71,6 +73,37 @@ const iso = (value: unknown): string => {
 
 const nullable = (value: string | null | undefined): string | null =>
   value === undefined ? null : value;
+
+/**
+ * Map a payment row. MISSION 002 — legacy rows written before the integrity
+ * migration have no `amount_minor`/`status`; they project as `recorded` (never
+ * `verified`) and derive their minor amount from the legacy float column, so
+ * they can be read but never silently counted as received revenue.
+ */
+function mapPaymentRow(row: PaymentRow): PaymentRecord {
+  const amountMinor = row.amountMinor ?? Math.round(row.amount * 100);
+  return {
+    id: row.id,
+    userId: row.userId,
+    invoiceId: row.invoiceId,
+    clientId: row.clientId,
+    amount: amountMinor / 100,
+    amountMinor,
+    currency: row.currency ?? 'USD',
+    method: row.method ?? '',
+    receivedAt: row.receivedAt,
+    note: row.note ?? '',
+    createdAt: iso(row.createdAt),
+    status: row.status as PaymentStatus,
+    idempotencyKey: row.idempotencyKey,
+    detailsFingerprint: row.detailsFingerprint,
+    evidenceKind: row.evidenceKind as PaymentEvidenceKind | null,
+    evidenceReference: row.evidenceReference,
+    evidenceReviewedBy: row.evidenceReviewedBy,
+    evidenceReviewedAt: row.evidenceReviewedAt ? iso(row.evidenceReviewedAt) : null,
+    verifiedAt: row.verifiedAt ? iso(row.verifiedAt) : null,
+  };
+}
 
 export class PostgresClientOpsRepository implements ClientOpsRepository {
   // ── Leads ─────────────────────────────────────────────────────────────
@@ -508,18 +541,7 @@ export class PostgresClientOpsRepository implements ClientOpsRepository {
       .from(clientOpsPayments)
       .where(eq(clientOpsPayments.userId, userId))
       .orderBy(clientOpsPayments.createdAt);
-    return rows.map((row) => ({
-      id: row.id,
-      userId: row.userId,
-      invoiceId: row.invoiceId,
-      clientId: row.clientId,
-      amount: row.amount,
-      currency: row.currency ?? 'USD',
-      method: row.method ?? '',
-      receivedAt: row.receivedAt,
-      note: row.note ?? '',
-      createdAt: iso(row.createdAt),
-    }));
+    return rows.map(mapPaymentRow);
   }
 
   async listPaymentsByInvoice(invoiceId: string, userId: string): Promise<PaymentRecord[]> {
@@ -528,23 +550,40 @@ export class PostgresClientOpsRepository implements ClientOpsRepository {
       .from(clientOpsPayments)
       .where(eq(clientOpsPayments.invoiceId, invoiceId))
       .orderBy(clientOpsPayments.createdAt);
-    return rows
-      .filter((row) => row.userId === userId)
-      .map((row) => ({
-        id: row.id,
-        userId: row.userId,
-        invoiceId: row.invoiceId,
-        clientId: row.clientId,
-        amount: row.amount,
-        currency: row.currency ?? 'USD',
-        method: row.method ?? '',
-        receivedAt: row.receivedAt,
-        note: row.note ?? '',
-        createdAt: iso(row.createdAt),
-      }));
+    return rows.filter((row) => row.userId === userId).map(mapPaymentRow);
+  }
+
+  async findPaymentById(id: string, userId: string): Promise<PaymentRecord | null> {
+    const rows = await getDatabase()
+      .select()
+      .from(clientOpsPayments)
+      .where(eq(clientOpsPayments.id, id))
+      .limit(1);
+    const first = rows[0];
+    if (!first || first.userId !== userId) return null;
+    return mapPaymentRow(first);
+  }
+
+  async findPaymentByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<PaymentRecord | null> {
+    const rows = await getDatabase()
+      .select()
+      .from(clientOpsPayments)
+      .where(
+        and(
+          eq(clientOpsPayments.userId, userId),
+          eq(clientOpsPayments.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+    const first = rows[0];
+    return first ? mapPaymentRow(first) : null;
   }
 
   async savePayment(payment: PaymentRecord): Promise<void> {
+    const amountMinor = payment.amountMinor ?? Math.round(payment.amount * 100);
     await getDatabase()
       .insert(clientOpsPayments)
       .values({
@@ -553,20 +592,38 @@ export class PostgresClientOpsRepository implements ClientOpsRepository {
         invoiceId: payment.invoiceId,
         clientId: payment.clientId,
         amount: payment.amount,
+        amountMinor,
         currency: payment.currency,
         method: payment.method,
         receivedAt: payment.receivedAt,
         note: payment.note,
         createdAt: new Date(payment.createdAt),
+        status: payment.status ?? 'recorded',
+        idempotencyKey: payment.idempotencyKey ?? null,
+        detailsFingerprint: payment.detailsFingerprint ?? null,
+        evidenceKind: payment.evidenceKind ?? null,
+        evidenceReference: payment.evidenceReference ?? null,
+        evidenceReviewedBy: payment.evidenceReviewedBy ?? null,
+        evidenceReviewedAt: payment.evidenceReviewedAt
+          ? new Date(payment.evidenceReviewedAt)
+          : null,
+        verifiedAt: payment.verifiedAt ? new Date(payment.verifiedAt) : null,
       })
       .onConflictDoUpdate({
         target: clientOpsPayments.id,
         set: {
           amount: payment.amount,
+          amountMinor,
           currency: payment.currency,
           method: payment.method,
           receivedAt: payment.receivedAt,
           note: payment.note,
+          status: payment.status ?? 'recorded',
+          evidenceReviewedBy: payment.evidenceReviewedBy ?? null,
+          evidenceReviewedAt: payment.evidenceReviewedAt
+            ? new Date(payment.evidenceReviewedAt)
+            : null,
+          verifiedAt: payment.verifiedAt ? new Date(payment.verifiedAt) : null,
         },
       });
   }

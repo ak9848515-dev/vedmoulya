@@ -138,6 +138,7 @@ import {
   validateCustomerDiscoveryRecord,
   validateFounderObservation,
 } from '../domain/FounderEvidenceLoop.js';
+import { assessVerifiedPaymentEvidence } from '../domain/PaymentEvidenceAssessment.js';
 import type { ProblemFactor } from '../types/world-types.js';
 
 export type WorldResult<T> =
@@ -1138,6 +1139,10 @@ export class WorldModelService {
   }): WorldResult<BusinessProblem> {
     const problem = this.stores.problems.get(input.ownerId, input.problemId);
     if (!problem) return err('Problem not found.', 'NOT_FOUND');
+    // MISSION 002 — a verified payment must identify an amount and how the
+    // money arrived. Arbitrary non-empty text is not proof of revenue.
+    const assessment = assessVerifiedPaymentEvidence(input.text);
+    if (!assessment.ok) return err(assessment.reason, 'PAYMENT_EVIDENCE_REQUIRED');
     const record = validateEvidence(
       {
         ownerId: input.ownerId,
@@ -1467,6 +1472,8 @@ export class WorldModelService {
           'PAYMENT_EVIDENCE_REQUIRED',
         );
       }
+      const assessment = assessVerifiedPaymentEvidence(paymentText);
+      if (!assessment.ok) return err(assessment.reason, 'PAYMENT_EVIDENCE_REQUIRED');
       const payment = this.recordVerifiedPayment({
         ownerId: input.ownerId,
         problemId: problem.id,

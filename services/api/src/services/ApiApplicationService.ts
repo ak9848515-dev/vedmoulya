@@ -198,6 +198,7 @@ import type {
   KnowledgeRepository,
   ContentAgencyRepository,
   ClientOpsRepository,
+  PaymentSettlementPort,
 } from '@vedmoulya/domain';
 import { InfrastructureHealthProbe } from './InfrastructureHealthProbe.js';
 import { registerPlatformProviders, createOpenAIEmbeddingProvider } from '@vedmoulya/orchestrator';
@@ -318,6 +319,7 @@ import {
   createProductionKnowledgeRepository,
   createProductionContentAgencyRepository,
   createProductionClientOpsRepository,
+  createProductionPaymentSettlement,
   createProductionCapabilityRepository,
   createProductionContextRepository,
   createProductionExecutionStrategyRepository,
@@ -403,6 +405,11 @@ export interface ApiApplicationServiceOptions {
    * module's DI registration (EPIC-003 / AC-002).
    */
   clientOpsRepository?: ClientOpsRepository;
+  /**
+   * Payment settlement override (MISSION 002). Defaults to the atomic
+   * `PostgresPaymentSettlement`; tests inject an in-memory double.
+   */
+  paymentSettlement?: PaymentSettlementPort;
   /**
    * Capability repository override. Production default: Postgres-backed
    * Enterprise Capability Registry (EI-001, CERT-002 C-04). The registry
@@ -1220,6 +1227,11 @@ export class ApiApplicationService {
       clientOpsRepository,
       this.contentAgency,
       new ClientOpsAIService(this.ai),
+      // MISSION 002 — atomic, idempotent payment settlement. Without it the
+      // service refuses to construct outside development/test, because the
+      // sequential in-memory implementation cannot make a payment insert and
+      // its invoice settlement commit together.
+      options.paymentSettlement ?? createProductionPaymentSettlement(),
     );
 
     // ── S4 — Mission → ClientOps revenue bridge ─────────────────────────

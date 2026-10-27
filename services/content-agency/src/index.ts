@@ -59,7 +59,28 @@ export {
   initializeDatabase,
   closeDatabase,
   getDatabase,
+  ensureContentAgencySchema,
+  getDatabaseConfig,
+  resolveContentAgencyDatabaseUrl,
+  SHARED_DATABASE_OPT_IN,
 } from './infrastructure/persistence/DatabaseConnection.js';
+
+// ── Infrastructure — Migrations (MISSION 002) ──────────────────────────────
+export {
+  runContentAgencyMigrations,
+  migrationChecksum,
+  CONTENT_AGENCY_MIGRATIONS,
+  MigrationDriftError,
+} from './infrastructure/persistence/migrations/index.js';
+export type {
+  ContentAgencyMigration,
+  MigrationReport,
+  MigrationDatabase,
+  RunMigrationsOptions,
+} from './infrastructure/persistence/migrations/index.js';
+
+// ── Infrastructure — Payments (MISSION 002) ────────────────────────────────
+export { PostgresPaymentSettlement } from './infrastructure/payments/PostgresPaymentSettlement.js';
 
 // ── Infrastructure — DI ────────────────────────────────────────────────────
 export {

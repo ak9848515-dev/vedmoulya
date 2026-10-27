@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Card,
   Badge,
@@ -44,6 +44,14 @@ export default function InvoicesPage(): React.JSX.Element {
   const addPayment = useAddPayment();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ clientId: '', description: '', amount: '', dueDate: '' });
+  // MISSION 002 — "Mark paid" records a real, evidence-backed payment instead
+  // of flipping the status: the invoice settles only from verified money.
+  const [payTarget, setPayTarget] = useState<{ id: string; amount: number } | null>(null);
+  const [payMethod, setPayMethod] = useState('bank_transfer');
+  const [payReference, setPayReference] = useState('');
+  const [payReviewed, setPayReviewed] = useState(false);
+  const payKey = useRef(`web-${crypto.randomUUID()}`);
+  const payManual = ['cash', 'cheque', 'check', 'manual', 'other'].includes(payMethod);
 
   if (!ready) {
     return (
@@ -81,26 +89,41 @@ export default function InvoicesPage(): React.JSX.Element {
 
   async function handleStatus(id: string, status: 'draft' | 'sent' | 'paid'): Promise<void> {
     if (status === 'paid') {
-      // Record a real payment so payments/revenue tracking stay consistent:
-      // the addPayment service marks the invoice paid once it is covered.
-      // Zero-value / credit invoices (which the payment service rejects) and
-      // missing rows fall back to a plain status update.
       const invoice = data.find((i) => i.id === id);
       if (invoice && invoice.amount > 0) {
-        await addPayment.mutateAsync({
-          userId,
-          invoiceId: id,
-          amount: invoice.amount,
-          method: 'other',
-          receivedAt: new Date().toISOString(),
-          note: 'Marked paid from invoice screen',
-        });
-      } else {
-        await updateStatus.mutateAsync({ userId, invoiceId: id, status });
+        // Open the evidence dialog — an amount alone is not proof of receipt.
+        payKey.current = `web-${crypto.randomUUID()}`;
+        setPayReference('');
+        setPayReviewed(false);
+        setPayMethod('bank_transfer');
+        setPayTarget({ id: invoice.id, amount: invoice.amount });
+        return;
       }
+      // Zero-value / credit invoices have no money to record.
+      await updateStatus.mutateAsync({ userId, invoiceId: id, status });
     } else {
       await updateStatus.mutateAsync({ userId, invoiceId: id, status });
     }
+    void invoices.refetch();
+  }
+
+  async function recordPayment(): Promise<void> {
+    if (!payTarget) return;
+    await addPayment.mutateAsync({
+      userId,
+      invoiceId: payTarget.id,
+      amount: payTarget.amount,
+      method: payMethod,
+      receivedAt: new Date().toISOString(),
+      note: 'Recorded from invoice screen',
+      idempotencyKey: payKey.current,
+      evidence: {
+        kind: payManual ? 'manual_receipt' : 'processor_reference',
+        reference: payReference.trim(),
+        ...(payReviewed ? { reviewedBy: userId } : {}),
+      },
+    });
+    setPayTarget(null);
     void invoices.refetch();
   }
 
@@ -306,6 +329,79 @@ export default function InvoicesPage(): React.JSX.Element {
               onClick={() => void handleCreate()}
             >
               {create.isPending ? 'Creating…' : 'Create Invoice'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MISSION 002 — evidence-backed settlement. */}
+      <Dialog
+        open={payTarget !== null}
+        onOpenChange={(next) => {
+          if (!next) setPayTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record payment</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-[12.5px] text-[#64748B] dark:text-[#94A3B8]">
+              Recording {payTarget ? String(payTarget.amount) : ''} against this invoice.
+            </p>
+            <Select
+              label="Method"
+              options={['bank_transfer', 'card', 'paypal', 'cash', 'other'].map((m) => ({
+                value: m,
+                label: m.replace('_', ' '),
+              }))}
+              value={payMethod}
+              onChange={(e) => {
+                setPayMethod(e.target.value);
+              }}
+            />
+            <TextField
+              label={payManual ? 'Receipt number *' : 'Transaction reference *'}
+              placeholder={payManual ? 'RECEIPT-2026-0042' : 'TXN-2026-000123'}
+              value={payReference}
+              onChange={(e) => {
+                setPayReference(e.target.value.trim());
+              }}
+            />
+            <label className="flex items-start gap-2 text-[12.5px] text-[#64748B] dark:text-[#94A3B8]">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={payReviewed}
+                onChange={(e) => {
+                  setPayReviewed(e.target.checked);
+                }}
+              />
+              <span>
+                I reviewed the {payManual ? 'receipt' : 'transaction'} and confirm the money
+                arrived.
+              </span>
+            </label>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setPayTarget(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={
+                payReference.trim().length < 6 ||
+                (payManual && !payReviewed) ||
+                addPayment.isPending
+              }
+              onClick={() => void recordPayment()}
+            >
+              {addPayment.isPending ? 'Recording…' : 'Record payment'}
             </Button>
           </DialogFooter>
         </DialogContent>

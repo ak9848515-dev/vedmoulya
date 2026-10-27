@@ -14,6 +14,7 @@ import {
   timestamp,
   integer,
   doublePrecision,
+  bigint,
   jsonb,
   index,
   boolean,
@@ -128,6 +129,9 @@ export const contentAgencyInvoices = pgTable(
     projectId: varchar('project_id', { length: 64 }),
     description: varchar('description', { length: 500 }).default(''),
     amount: doublePrecision('amount').default(0),
+    // MISSION 002 — authoritative amount in integer minor units. `amount` is
+    // the legacy display mirror; settlement compares `amount_minor` only.
+    amountMinor: bigint('amount_minor', { mode: 'number' }),
     currency: varchar('currency', { length: 8 }).default('USD'),
     status: varchar('status', { length: 16 }).default('draft').notNull(),
     issuedAt: varchar('issued_at', { length: 32 }).default(''),
@@ -282,13 +286,26 @@ export const clientOpsPayments = pgTable(
     invoiceId: varchar('invoice_id', { length: 64 }).notNull(),
     clientId: varchar('client_id', { length: 64 }).notNull(),
     amount: doublePrecision('amount').default(0).notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }),
     currency: varchar('currency', { length: 8 }).default('USD'),
     method: varchar('method', { length: 60 }).default('bank_transfer'),
     receivedAt: varchar('received_at', { length: 32 }).notNull(),
     note: text('note').default(''),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    // ── MISSION 002 payment integrity ────────────────────────────────────
+    status: varchar('status', { length: 16 }).default('recorded').notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 200 }),
+    detailsFingerprint: varchar('details_fingerprint', { length: 64 }),
+    evidenceKind: varchar('evidence_kind', { length: 32 }),
+    evidenceReference: varchar('evidence_reference', { length: 200 }),
+    evidenceReviewedBy: varchar('evidence_reviewed_by', { length: 120 }),
+    evidenceReviewedAt: timestamp('evidence_reviewed_at'),
+    verifiedAt: timestamp('verified_at'),
   },
-  (table) => [index('cpay_user_idx').on(table.userId)],
+  (table) => [
+    index('cpay_user_idx').on(table.userId),
+    index('cpay_invoice_idx').on(table.invoiceId),
+  ],
 );
 
 export const clientOpsDocuments = pgTable(

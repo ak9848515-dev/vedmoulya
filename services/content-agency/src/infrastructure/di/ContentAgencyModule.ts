@@ -6,9 +6,14 @@
 
 import { container, moduleRegistry } from '@vedmoulya/core';
 import type { ModuleDefinition } from '@vedmoulya/core';
-import type { ContentAgencyRepository, ClientOpsRepository } from '@vedmoulya/domain';
+import type {
+  ContentAgencyRepository,
+  ClientOpsRepository,
+  PaymentSettlementPort,
+} from '@vedmoulya/domain';
 import { PostgresContentAgencyRepository } from '../persistence/PostgresContentAgencyRepository.js';
 import { PostgresClientOpsRepository } from '../persistence/PostgresClientOpsRepository.js';
+import { PostgresPaymentSettlement } from '../payments/PostgresPaymentSettlement.js';
 import { initializeDatabase, closeDatabase } from '../persistence/DatabaseConnection.js';
 
 /** Register all Content Agency infrastructure services with the DI container */
@@ -27,6 +32,13 @@ export function registerContentAgencyServices(): void {
   // Client Operations repository (EPIC-003 / AC-002)
   container.register<ClientOpsRepository>('content-agency.client-ops.repository', () => {
     return new PostgresClientOpsRepository();
+  });
+
+  // Payment settlement unit of work (MISSION 002) — the ONLY implementation
+  // that is allowed to record money in production. It wraps payment insert +
+  // invoice settlement in one database transaction.
+  container.register<PaymentSettlementPort>('content-agency.payment-settlement', () => {
+    return new PostgresPaymentSettlement();
   });
 }
 

@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Plus, Wallet, TrendingUp, AlertCircle, CheckCircle2, CalendarDays } from 'lucide-react';
 import {
   Card,
@@ -28,6 +28,7 @@ import {
   useOpsPayments,
   useRevenueOverview,
   useAddPayment,
+  useReviewPayment,
   useContentInvoices,
 } from '../../../../lib/api-client.js';
 import { api } from '../../../../lib/trpc.js';
@@ -49,6 +50,7 @@ export default function PaymentsPage(): React.JSX.Element {
   const overview = useRevenueOverview(userId);
   const invoices = useContentInvoices(userId);
   const addPayment = useAddPayment();
+  const reviewPayment = useReviewPayment();
 
   const invalidate = async (): Promise<void> => {
     await utils.clientOps.listPayments.invalidate();
@@ -95,7 +97,7 @@ export default function PaymentsPage(): React.JSX.Element {
         />
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <StatCard
               icon={<Wallet className="h-4 w-4" />}
               label="Paid"
@@ -119,6 +121,12 @@ export default function PaymentsPage(): React.JSX.Element {
               label="Annual revenue"
               value={money(overview.data?.annualRevenue, overview.data?.currency)}
               tone="ok"
+            />
+            <StatCard
+              icon={<AlertCircle className="h-4 w-4" />}
+              label="Awaiting review"
+              value={money(overview.data?.unverifiedTotal, overview.data?.currency)}
+              tone={overview.data?.unverifiedTotal ? 'warn' : 'ok'}
             />
           </div>
 
@@ -186,8 +194,30 @@ export default function PaymentsPage(): React.JSX.Element {
                   <div className="text-[11.5px] text-[#64748B] dark:text-[#94A3B8]">
                     {payment.invoiceNumber} · {payment.method} ·{' '}
                     {new Date(payment.receivedAt).toLocaleDateString()}
+                    {payment.evidenceReference ? ` · ref ${payment.evidenceReference}` : ''}
                   </div>
                 </div>
+                {payment.status === 'verified' ? (
+                  <Badge className="bg-[#10B981]/10 text-[#10B981]">Verified</Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={reviewPayment.isPending}
+                    onClick={() =>
+                      void (async (): Promise<void> => {
+                        await reviewPayment.mutateAsync({
+                          userId,
+                          paymentId: payment.id,
+                          reviewerId: userId,
+                        });
+                        await invalidate();
+                      })()
+                    }
+                  >
+                    Verify
+                  </Button>
+                )}
                 <Badge className="bg-[#10B981]/10 text-[#10B981]">
                   +
                   {payment.amount.toLocaleString('en-US', {
@@ -212,6 +242,7 @@ export default function PaymentsPage(): React.JSX.Element {
           setRecordOpen(false);
         }}
         invoices={invoices.data ?? []}
+        reviewerId={userId}
         onSubmit={async (input) => {
           await addPayment.mutateAsync({ userId, ...input });
           setRecordOpen(false);
@@ -259,13 +290,27 @@ function RecordPaymentDialog(props: {
     method?: string;
     receivedAt?: string;
     note?: string;
+    idempotencyKey: string;
+    evidence: {
+      kind: 'processor_reference' | 'manual_receipt';
+      reference: string;
+      reviewedBy?: string;
+    };
   }) => Promise<void>;
+  /** Operator identity recorded as the evidence reviewer. */
+  reviewerId: string;
 }): React.JSX.Element {
   const [invoiceId, setInvoiceId] = useState('');
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('bank_transfer');
   const [receivedAt, setReceivedAt] = useState(new Date().toISOString().slice(0, 10));
+  const [reference, setReference] = useState('');
+  const [reviewed, setReviewed] = useState(false);
   const [busy, setBusy] = useState(false);
+  // One key per attempt-set: a retry after a network error reuses it, so the
+  // server resolves to the original payment instead of double-counting.
+  const idempotencyKey = useRef(`web-${crypto.randomUUID()}`);
+  const manual = ['cash', 'cheque', 'check', 'manual', 'other'].includes(method);
 
   const selected = props.invoices.find((i) => i.id === invoiceId);
 
@@ -328,6 +373,28 @@ function RecordPaymentDialog(props: {
               setReceivedAt(e.target.value);
             }}
           />
+          <TextField
+            label={manual ? 'Receipt number *' : 'Transaction reference *'}
+            placeholder={manual ? 'RECEIPT-2026-0042' : 'TXN-2026-000123'}
+            value={reference}
+            onChange={(e) => {
+              setReference(e.target.value.trim());
+            }}
+          />
+          <label className="flex items-start gap-2 text-[12.5px] text-[#64748B] dark:text-[#94A3B8]">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={reviewed}
+              onChange={(e) => {
+                setReviewed(e.target.checked);
+              }}
+            />
+            <span>
+              I reviewed the {manual ? 'receipt' : 'transaction'} and confirm the money arrived.
+              Only reviewed payments count as revenue and can settle an invoice.
+            </span>
+          </label>
           {selected && (
             <div className="rounded-xl bg-[#F5F7FA] dark:bg-[#1E293B] p-3 text-[12.5px] text-[#64748B] dark:text-[#94A3B8]">
               Invoice total: <strong>{selected.amount}</strong> · status: {selected.status}
@@ -339,7 +406,9 @@ function RecordPaymentDialog(props: {
             Cancel
           </Button>
           <Button
-            disabled={!invoiceId || !amount || busy}
+            disabled={
+              !invoiceId || !amount || reference.trim().length < 6 || (manual && !reviewed) || busy
+            }
             onClick={() =>
               void (async (): Promise<void> => {
                 setBusy(true);
@@ -349,6 +418,12 @@ function RecordPaymentDialog(props: {
                     amount: Number(amount),
                     method,
                     receivedAt,
+                    idempotencyKey: idempotencyKey.current,
+                    evidence: {
+                      kind: manual ? 'manual_receipt' : 'processor_reference',
+                      reference: reference.trim(),
+                      ...(reviewed ? { reviewedBy: props.reviewerId } : {}),
+                    },
                   });
                 } finally {
                   setBusy(false);
