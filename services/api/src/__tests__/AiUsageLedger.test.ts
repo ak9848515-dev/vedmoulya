@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryAiUsageStore } from '../observability/AiUsageLedger.js';
 import { aggregateAiUsage } from '../observability/AiUsageBoard.js';
 import { startOfDayInTimeZone, startOfMonthInTimeZone } from '../observability/AiUsageCalendar.js';
+import { resolveTimeZone } from '../observability/AiUsageAggregation.js';
 import { AiUsageRecorder } from '../observability/AiUsageRecorder.js';
 import {
   buildEventId,
@@ -156,6 +157,12 @@ describe('AiUsageCalendar — TRUE calendar day/month in the user timezone', () 
     expect(new Date(startOfMonthInTimeZone(now, 'UTC')).toISOString()).toBe(
       '2026-10-01T00:00:00.000Z',
     );
+  });
+
+  it('resolves an unset timezone to UTC and keeps a valid IANA zone', () => {
+    expect(resolveTimeZone(undefined)).toBe('UTC');
+    expect(resolveTimeZone('')).toBe('UTC');
+    expect(resolveTimeZone('Asia/Kolkata')).toBe('Asia/Kolkata');
   });
 });
 

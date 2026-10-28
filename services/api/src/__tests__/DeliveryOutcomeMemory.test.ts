@@ -61,6 +61,17 @@ function memory(store: Store) {
 }
 
 describe('S4.1 — delivery outcome memory', () => {
+  it('defaults to the wall clock when no clock is injected', async () => {
+    const store = new Store();
+    const before = Date.now();
+
+    await new DeliveryOutcomeMemory({ store }).record(record());
+
+    const saved = await store.getByFingerprint(DeliveryOutcomeMemory.fingerprint(record()));
+    expect(saved).toBeDefined();
+    expect(Date.parse(saved!.updatedAt)).toBeGreaterThanOrEqual(before - 1000);
+  });
+
   it('persists a DELIVERY_OUTCOME entry, never a USER_PREFERENCE', async () => {
     const store = new Store();
     await memory(store).record(record());

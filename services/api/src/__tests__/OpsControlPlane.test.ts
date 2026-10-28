@@ -589,6 +589,93 @@ describe('assessApplicationHealth — rule-first verdicts', () => {
     });
     expect(unknown.verdict).toBe('UNKNOWN');
   });
+
+  it('names the terminal status when a FAILED project carries no error message', () => {
+    const health = assessApplicationHealth({
+      applicationId: 'a',
+      name: 'A',
+      archetype: 'generic-web',
+      status: 'FAILED',
+    });
+
+    expect(health.verdict).toBe('FAILED');
+    expect(health.reasons).toEqual(['status FAILED']);
+  });
+
+  it('BLOCKED when the repair loop is exhausted', () => {
+    const health = assessApplicationHealth({
+      applicationId: 'a',
+      name: 'A',
+      archetype: 'generic-web',
+      status: 'READY',
+      repairLimitReached: true,
+      lastBuildAt: '2026-08-10T00:00:00.000Z',
+    });
+
+    expect(health.verdict).toBe('BLOCKED');
+    expect(health.reasons.join(' ')).toContain('repair loop exhausted');
+  });
+
+  it('DEGRADED when UI quality fails even though validation passed', () => {
+    const health = assessApplicationHealth({
+      applicationId: 'a',
+      name: 'A',
+      archetype: 'generic-web',
+      status: 'READY',
+      lastBuildAt: '2026-08-10T00:00:00.000Z',
+      lastValidation: {
+        applicationId: 'a',
+        gates: [{ gate: 'lint', passed: true, findings: [], score: 1 }],
+        overall: 'PASS',
+        automaticFixesApplied: 0,
+        createdAt: '',
+      },
+      uiQuality: { applicationId: 'a', score: 0.42, verdict: 'FAIL', findings: [] },
+    });
+
+    expect(health.verdict).toBe('DEGRADED');
+    expect(health.reasons.join(' ')).toContain('UI quality FAIL');
+  });
+
+  it('DEGRADED when the platform health probe itself reports degraded', () => {
+    const health = assessApplicationHealth({
+      applicationId: 'a',
+      name: 'A',
+      archetype: 'generic-web',
+      status: 'READY',
+      health: 'degraded',
+      lastBuildAt: '2026-08-10T00:00:00.000Z',
+    });
+
+    expect(health.verdict).toBe('DEGRADED');
+    expect(health.reasons.join(' ')).toContain('health probe reports degraded');
+  });
+
+  it('stays HEALTHY while noting non-blocking security findings', () => {
+    const health = assessApplicationHealth({
+      applicationId: 'a',
+      name: 'A',
+      archetype: 'generic-web',
+      status: 'READY',
+      lastBuildAt: '2026-08-10T00:00:00.000Z',
+      lastValidation: {
+        applicationId: 'a',
+        gates: [{ gate: 'lint', passed: true, findings: [], score: 1 }],
+        overall: 'PASS',
+        automaticFixesApplied: 0,
+        createdAt: '',
+      },
+      securityReport: {
+        applicationId: 'a',
+        findings: [],
+        blocked: false,
+        summary: { critical: 0, high: 1, medium: 2, low: 0 },
+      },
+    });
+
+    expect(health.verdict).toBe('HEALTHY');
+    expect(health.reasons.join(' ')).toContain('security findings present but not blocking');
+  });
 });
 
 // Helper used above (module-level ctx for cost/health describes).

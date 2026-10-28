@@ -58,4 +58,29 @@ describe('describeErrorChain', () => {
     expect(describeErrorChain('plain')).toBe('plain');
     expect(describeErrorChain(undefined)).toBe('undefined');
   });
+
+  it('renders numeric, boolean and bigint driver codes without truncation', () => {
+    const numeric = Object.assign(new Error('numeric code'), { code: 42501 });
+    expect(describeErrorChain(numeric)).toBe('Error(code=42501): numeric code');
+
+    const booleanSeverity = Object.assign(new Error('boolean severity'), { severity: false });
+    expect(describeErrorChain(booleanSeverity)).toBe('Error(severity=false): boolean severity');
+
+    const bigintCode = Object.assign(new Error('bigint code'), { code: 4294967296n });
+    expect(describeErrorChain(bigintCode)).toBe('Error(code=4294967296): bigint code');
+  });
+
+  it('renders symbol codes via their description', () => {
+    const symbolCode = Object.assign(new Error('symbol code'), { code: Symbol('E_CONN') });
+    expect(describeErrorChain(symbolCode)).toBe('Error(code=Symbol(E_CONN)): symbol code');
+  });
+
+  it('tags a non-scalar code by type instead of printing [object Object]', () => {
+    // A driver that sets `code` to a nested object must not leak an unclear
+    // `[object Object]` into operator logs.
+    const objectCode = Object.assign(new Error('object code'), { code: { sqlState: '42601' } });
+    const described = describeErrorChain(objectCode);
+    expect(described).toBe('Error(code=[object Object]): object code');
+    expect(described).not.toContain('42601');
+  });
 });

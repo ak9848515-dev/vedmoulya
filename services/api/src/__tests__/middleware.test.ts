@@ -17,6 +17,7 @@ import { logAuditEvent, getAuditLog } from '../middleware/audit.js';
 import {
   verifyAccessToken,
   authenticateRequest,
+  clientIpFromHeaders,
   createAuthContext,
   isAuthenticated,
   assertUserIdMatchesSession,
@@ -90,6 +91,15 @@ describe('toGatewayError', () => {
     expect(result.message).toBe('Something went wrong');
     expect(result.statusCode).toBe(500);
   });
+
+  it('maps an unmapped tRPC code to INTERNAL_ERROR without leaking the message', () => {
+    const error = new TRPCError({ code: 'CONFLICT', message: 'row version 7 conflict' });
+    const result = toGatewayError(error, 'Something went wrong');
+    expect(result.code).toBe('INTERNAL_ERROR');
+    expect(result.message).toBe('Something went wrong');
+    expect(result.message).not.toContain('row version');
+    expect(result.statusCode).toBe(500);
+  });
 });
 
 describe('notFound', () => {
@@ -124,6 +134,18 @@ describe('validateInput', () => {
   it('returns failure for missing fields', () => {
     const result = validateInput(schema, {});
     expect(result.success).toBe(false);
+  });
+
+  it('falls back to a generic message when a schema reports no issues', () => {
+    // Defensive only: a ZodType whose safeParse fails without issues must still
+    // produce a usable error string rather than "undefined: undefined".
+    const issueLessSchema = {
+      safeParse: () => ({ success: false as const, error: { issues: [] } }),
+    } as unknown as z.ZodType<unknown>;
+
+    const result = validateInput(issueLessSchema, {});
+
+    expect(result).toEqual({ success: false, error: 'Validation failed' });
   });
 });
 
@@ -345,6 +367,23 @@ describe('createAuthContext', () => {
     const ctx = await createAuthContext(new Headers({ authorization: `Bearer ${token}` }));
     expect(ctx.userId).toBe('user-9');
     expect(ctx.email).toBe('u9@v.com');
+  });
+});
+
+describe('clientIpFromHeaders', () => {
+  it('takes the first hop of x-forwarded-for', () => {
+    const headers = new Headers({ 'x-forwarded-for': ' 203.0.113.7 , 10.0.0.1, 10.0.0.2' });
+    expect(clientIpFromHeaders(headers)).toBe('203.0.113.7');
+  });
+
+  it('ignores an empty leading hop and falls back to x-real-ip', () => {
+    const headers = new Headers({ 'x-forwarded-for': ' , 10.0.0.1', 'x-real-ip': ' 10.0.0.2 ' });
+    expect(clientIpFromHeaders(headers)).toBe('10.0.0.2');
+  });
+
+  it('returns undefined when no client address header is present', () => {
+    expect(clientIpFromHeaders(new Headers())).toBeUndefined();
+    expect(clientIpFromHeaders(new Headers({ 'x-real-ip': '   ' }))).toBeUndefined();
   });
 });
 

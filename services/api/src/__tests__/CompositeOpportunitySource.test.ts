@@ -84,4 +84,62 @@ describe('CompositeOpportunitySource', () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]!.title).toBe('Healthy Opp');
   });
+
+  it('reports SOURCE_UNAVAILABLE listing every failure when no source yields a candidate', async () => {
+    const unconfigured: ExternalOpportunitySourcePort = {
+      name: 'freelancer',
+      status: { configured: false, reason: 'no token' },
+      fetchCandidates: async (): Promise<ExternalCandidatesResult> => ({
+        success: false,
+        code: 'SOURCE_NOT_CONFIGURED',
+        message: 'No token',
+      }),
+    };
+    const broken: ExternalOpportunitySourcePort = {
+      name: 'github',
+      status: { configured: true, reason: 'ok' },
+      fetchCandidates: async (): Promise<ExternalCandidatesResult> => {
+        throw new Error('502 from upstream');
+      },
+    };
+
+    const composite = new CompositeOpportunitySource([unconfigured, broken]);
+    const result = await composite.fetchCandidates();
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.code).toBe('SOURCE_UNAVAILABLE');
+    expect(result.message).toContain('freelancer: SOURCE_NOT_CONFIGURED - No token');
+    expect(result.message).toContain('github: 502 from upstream');
+  });
+
+  it('records a non-Error rejection without losing the source name', async () => {
+    const throwing: ExternalOpportunitySourcePort = {
+      name: 'bounties',
+      status: { configured: true, reason: 'ok' },
+      fetchCandidates: async (): Promise<ExternalCandidatesResult> => {
+        throw 'rate limited'; // eslint-disable-line @typescript-eslint/only-throw-error
+      },
+    };
+
+    const composite = new CompositeOpportunitySource([throwing]);
+    const result = await composite.fetchCandidates();
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.message).toContain('bounties: rate limited');
+  });
+
+  it('succeeds with no candidates when there are no sources at all', async () => {
+    const composite = new CompositeOpportunitySource([]);
+
+    expect(composite.status).toEqual({
+      configured: false,
+      reason: '0/0 active opportunity sources configured',
+    });
+    await expect(composite.fetchCandidates()).resolves.toEqual({
+      success: true,
+      candidates: [],
+    });
+  });
 });

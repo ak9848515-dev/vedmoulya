@@ -113,6 +113,49 @@ describe('AlertEngine', () => {
     expect(engine.configuredThresholds.latencyP95Ms).toBe(DEFAULT_ALERT_THRESHOLDS.latencyP95Ms);
   });
 
+  it('reports a provider error rate as a warning before it doubles', () => {
+    const engine = new AlertEngine();
+    const alerts = engine.evaluate(snapshot({ aiRequestsTotal: 100, aiRequestsFailure: 15 }));
+    const alert = alerts.find((a) => a.rule === 'provider_error_rate');
+    // 15% is above the 10% threshold but below twice it: degraded, not critical.
+    expect(alert?.severity).toBe('warning');
+  });
+
+  it('fires an application-failure alert at the configured count', () => {
+    const engine = new AlertEngine();
+    const alerts = engine.evaluate(snapshot({ applicationFailures: 3 }));
+    const alert = alerts.find((a) => a.rule === 'application_failure');
+    expect(alert?.severity).toBe('warning');
+    expect(alert?.value).toBe(3);
+    expect(alert?.threshold).toBe(3);
+
+    const belowThreshold = engine.evaluate(snapshot({ applicationFailures: 2 }));
+    expect(belowThreshold.map((a) => a.rule)).not.toContain('application_failure');
+  });
+
+  it('escalates a severe cost anomaly to critical', () => {
+    const engine = new AlertEngine();
+    // 16× the median baseline, more than twice the 5× threshold.
+    const alerts = engine.evaluate(snapshot({ costUsd: 8, baselineCostUsd: 0.5 }));
+    expect(alerts.find((a) => a.rule === 'cost_anomaly')?.severity).toBe('critical');
+  });
+
+  it('ignores a token-spend change that stays under the threshold', () => {
+    const engine = new AlertEngine();
+    const alerts = engine.evaluate(snapshot({ tokenSpend: 130, previousTokenSpend: 100 }));
+    expect(alerts.map((a) => a.rule)).not.toContain('token_anomaly');
+  });
+
+  it('clear empties the alert history', () => {
+    const engine = new AlertEngine();
+    engine.evaluate(snapshot({ aiRequestsTotal: 100, aiRequestsFailure: 40 }));
+    expect(engine.listRecent().length).toBeGreaterThan(0);
+
+    engine.clear();
+
+    expect(engine.listRecent()).toEqual([]);
+  });
+
   it('keeps a bounded alert history and returns newest-first', () => {
     const engine = new AlertEngine({ maxHistory: 3 });
     for (let i = 0; i < 5; i++) {
