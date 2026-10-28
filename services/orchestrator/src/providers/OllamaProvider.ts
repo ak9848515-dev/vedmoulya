@@ -314,76 +314,109 @@ export class OllamaProvider implements ProviderAdapter {
     if (request.modelId !== undefined && request.modelId !== effectiveModel) {
       throw new OllamaModelNotFoundError(request.modelId);
     }
-    const startedAt = Date.now();
-    const response = await this.fetchWithTimeout(
-      `${this.baseUrl}/api/chat`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: effectiveModel,
-          messages: request.messages,
-          stream: false,
-          ...(request.maxTokens !== undefined
-            ? { options: { num_predict: request.maxTokens } }
-            : {}),
-        }),
-      },
-      this.timeoutMs,
-    );
-    if (!response.ok) {
-      throw new Error(`Ollama chat failed: api error: ${String(response.status)}`);
+    const candidateModels = [effectiveModel];
+    if (this.fallbackToInstalledModel && request.modelId === undefined) {
+      const installed = await this.discoverInstalledChatModels();
+      for (const m of installed) {
+        if (!candidateModels.includes(m)) {
+          candidateModels.push(m);
+        }
+      }
     }
-    const data = (await response.json()) as {
-      message?: { content?: string };
-      prompt_eval_count?: number;
-      eval_count?: number;
-    };
-    const content = data.message?.content ?? '';
-    const latency = Date.now() - startedAt;
-    const inputTokens = data.prompt_eval_count ?? 0;
-    const outputTokens = data.eval_count ?? 0;
 
-    // Local inference — cost is genuinely zero; usage is real.
-    return {
-      content,
-      provider: this.name,
-      // The model execution ACTUALLY ran — never the stale preference.
-      model: effectiveModel,
-      confidence: 0.8,
-      qualityScore: 7,
-      latency,
-      cost: 0,
-      tokenUsage: {
-        input: inputTokens,
-        output: outputTokens,
-        total: inputTokens + outputTokens,
-      },
-      validation: {
-        passed: true,
-        checks: [
-          { name: 'format', passed: true, score: 10 },
-          { name: 'safety', passed: true, score: 10 },
-          { name: 'quality', passed: true, score: 7 },
-        ],
-        overallScore: 8,
-        decision: 'pass',
-      },
-      traceId: `ollama-${String(Date.now())}`,
-      metadata: {
-        providerFamily: 'ollama',
-        modelVersion: effectiveModel,
-        processingTime: latency,
-        contextUsed: ['system', 'user-input'],
-        routingDecision: {
-          selectedProvider: this.name,
-          reason: 'Ollama local provider executed through the shared provider contract',
-          alternativesConsidered: [],
-          strategy: 'balanced',
-        },
-        validationDetails: [],
-      },
-    };
+    let lastError: Error | undefined;
+    for (const modelToRun of candidateModels) {
+      const startedAt = Date.now();
+      try {
+        const response = await this.fetchWithTimeout(
+          `${this.baseUrl}/api/chat`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              model: modelToRun,
+              messages: request.messages,
+              stream: false,
+              ...(request.maxTokens !== undefined
+                ? { options: { num_predict: request.maxTokens } }
+                : {}),
+            }),
+          },
+          this.timeoutMs,
+        );
+        if (!response.ok) {
+          let detail = '';
+          try {
+            const errJson = (await response.json()) as { error?: string };
+            if (typeof errJson.error === 'string' && errJson.error.trim() !== '') {
+              detail = `: ${errJson.error.trim()}`;
+            }
+          } catch {
+            // preserve status only
+          }
+          throw new Error(`Ollama chat failed: api error: ${String(response.status)}${detail}`);
+        }
+        const data = (await response.json()) as {
+          message?: { content?: string };
+          prompt_eval_count?: number;
+          eval_count?: number;
+        };
+        const content = data.message?.content ?? '';
+        const latency = Date.now() - startedAt;
+        const inputTokens = data.prompt_eval_count ?? 0;
+        const outputTokens = data.eval_count ?? 0;
+
+        if (modelToRun !== effectiveModel) {
+          this.resolvedModel = modelToRun;
+        }
+
+        // Local inference — cost is genuinely zero; usage is real.
+        return {
+          content,
+          provider: this.name,
+          // The model execution ACTUALLY ran — never the stale preference.
+          model: modelToRun,
+          confidence: 0.8,
+          qualityScore: 7,
+          latency,
+          cost: 0,
+          tokenUsage: {
+            input: inputTokens,
+            output: outputTokens,
+            total: inputTokens + outputTokens,
+          },
+          validation: {
+            passed: true,
+            checks: [
+              { name: 'format', passed: true, score: 10 },
+              { name: 'safety', passed: true, score: 10 },
+              { name: 'quality', passed: true, score: 7 },
+            ],
+            overallScore: 8,
+            decision: 'pass',
+          },
+          traceId: `ollama-${String(Date.now())}`,
+          metadata: {
+            providerFamily: 'ollama',
+            modelVersion: modelToRun,
+            processingTime: latency,
+            contextUsed: ['system', 'user-input'],
+            routingDecision: {
+              selectedProvider: this.name,
+              reason: 'Ollama local provider executed through the shared provider contract',
+              alternativesConsidered: [],
+              strategy: 'balanced',
+            },
+            validationDetails: [],
+          },
+        };
+      } catch (err) {
+        lastError = err as Error;
+        continue;
+      }
+    }
+
+    throw lastError ?? new Error('Ollama chat failed');
   }
 
   /**

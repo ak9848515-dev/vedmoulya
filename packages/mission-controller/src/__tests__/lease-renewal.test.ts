@@ -755,3 +755,149 @@ describe('LEASE-01 · renewal failures are handled safely', () => {
     await heartbeat.stop();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// 12–15 · LEASE-DEADLINE — the >5 s renewal incident
+//
+// The production log: `renewal did not settle within 5000 ms` →
+// OBJECTIVE_LEASE_LOST → reconciliation → the objective restarted. The cause
+// was measured in mission-runtime (the renewal waited on the store's shared
+// write queue), and these tests lock down the HEARTBEAT half of the contract:
+// a budget-exceeding renewal never revives authority, never overlaps another
+// attempt, and never leaves an unobserved promise behind.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('LEASE-DEADLINE · a renewal that misses its deadline never reclaims authority', () => {
+  const budget = 50;
+
+  function deadlineHeartbeat(
+    renew: () => Promise<MissionObjectiveLease | undefined>,
+    scheduler = createManualScheduler().scheduler,
+  ): ObjectiveLeaseHeartbeat {
+    return new ObjectiveLeaseHeartbeat({
+      store: leaseOnlyStore(renew),
+      clock: { now: () => new Date(START_MS).toISOString(), timestampMs: () => START_MS },
+      missionId: 'mission_deadline',
+      objectiveId: 'objective_deadline',
+      lease: {
+        owner: 'mission-runtime',
+        token: 'lease_deadline',
+        acquiredAt: new Date(START_MS).toISOString(),
+        expiresAt: new Date(START_MS + 60_000).toISOString(),
+      },
+      ttlMs: 60_000,
+      renewalTimeoutMs: budget,
+      // One attempt only: this suite is about the BUDGET, not the retry policy.
+      retry: { maxAttempts: 1, retryDelayMs: 0 },
+      scheduler,
+    });
+  }
+
+  it('times out, records the reason, and a LATE success cannot mark it confirmed', async () => {
+    let releaseLate: ((lease: MissionObjectiveLease | undefined) => void) | undefined;
+    const heartbeat = deadlineHeartbeat(
+      () =>
+        new Promise<MissionObjectiveLease | undefined>((resolve) => {
+          releaseLate = resolve;
+        }),
+    );
+
+    const settled = await heartbeat.renewNow();
+    expect(settled).toBe(false);
+    expect(heartbeat.renewalFailureReason).toContain('did not settle within');
+    expect(heartbeat.renewals).toBe(0);
+
+    // The abandoned attempt finally resolves — with a lease. Ownership is NOT
+    // restored: the outcome was already classified, the timer is gone, and the
+    // heartbeat stays stopped.
+    releaseLate?.({
+      owner: 'mission-runtime',
+      token: 'lease_deadline',
+      acquiredAt: new Date(START_MS).toISOString(),
+      expiresAt: new Date(START_MS + 120_000).toISOString(),
+    });
+    await Promise.resolve();
+
+    expect(heartbeat.renewals).toBe(0);
+    expect(await heartbeat.renewNow()).toBe(false);
+    expect(heartbeat.knownExpiresAtMs).toBe(START_MS + 60_000);
+  });
+
+  it('a LATE REJECTION is observed, never an unhandled promise', async () => {
+    let rejectLate: ((error: Error) => void) | undefined;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const heartbeat = deadlineHeartbeat(
+        () =>
+          new Promise<MissionObjectiveLease | undefined>((_resolve, reject) => {
+            rejectLate = reject;
+          }),
+      );
+
+      expect(await heartbeat.renewNow()).toBe(false);
+      // The database connection fails AFTER the budget expired.
+      rejectLate?.(Object.assign(new Error('write CONNECTION_CLOSED'), { code: 'ECONNRESET' }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(unhandled).toEqual([]);
+      expect(heartbeat.renewalFailureReason).toContain('did not settle within');
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('never runs two renewal attempts at once, even across ticks', async () => {
+    const ticks = createManualScheduler();
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    let release: ((lease: MissionObjectiveLease | undefined) => void) | undefined;
+    const heartbeat = deadlineHeartbeat(() => {
+      concurrent += 1;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      return new Promise<MissionObjectiveLease | undefined>((resolve) => {
+        release = (lease) => {
+          concurrent -= 1;
+          resolve(lease);
+        };
+      });
+    }, ticks.scheduler);
+
+    heartbeat.start();
+    const firstTick = ticks.fire(); // in flight, hung
+    const joined = heartbeat.renewNow(); // must JOIN, not start a second
+    release?.({
+      owner: 'mission-runtime',
+      token: 'lease_deadline',
+      acquiredAt: new Date(START_MS).toISOString(),
+      expiresAt: new Date(START_MS + 60_000).toISOString(),
+    });
+    await firstTick;
+    expect(await joined).toBe(true);
+
+    // Exactly one attempt was ever in flight.
+    expect(maxConcurrent).toBe(1);
+    await heartbeat.stop();
+  });
+
+  it('a renewal refused because recovery already healed the objective stops the heartbeat for good', async () => {
+    const ticks = createManualScheduler();
+    let calls = 0;
+    const heartbeat = deadlineHeartbeat(() => {
+      calls += 1;
+      return Promise.resolve(undefined); // the store answered: not the owner
+    }, ticks.scheduler);
+
+    heartbeat.start();
+    await ticks.fire();
+
+    expect(calls).toBe(1);
+    expect(heartbeat.renewalFailureReason).toContain('refused');
+    // No further ticks are scheduled: a refusal is an authoritative answer.
+    expect(ticks.pending()).toBe(0);
+    expect(ticks.delays).toHaveLength(1);
+  });
+});

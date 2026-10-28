@@ -216,6 +216,11 @@ export interface MissionRuntimeOptions {
    * cold reconnects (e.g. Neon TCP wakeups) recover seamlessly.
    */
   persistenceRetry?: MissionControllerOptions['persistenceRetry'];
+  /**
+   * LEASE-02 — hard bound (ms) on ONE lease renewal attempt. Forwarded to
+   * MissionControllerService (defaults to MISSION_LEASE_RENEWAL_TIMEOUT_MS or 5_000ms).
+   */
+  leaseRenewalTimeoutMs?: number;
 }
 
 /** Every wired component of the composed mission runtime. */
@@ -555,6 +560,9 @@ export function createMissionRuntime(options: MissionRuntimeOptions = {}): Missi
     gitSafety: components.ports.gitSafety,
     approvalGate: options.approvalGate,
     persistenceRetry: options.persistenceRetry ?? defaultPersistenceRetry,
+    ...(options.leaseRenewalTimeoutMs !== undefined
+      ? { leaseRenewalTimeoutMs: options.leaseRenewalTimeoutMs }
+      : {}),
     ...(components.stores.workspaceLeases
       ? { workspaceLeases: components.stores.workspaceLeases }
       : {}),

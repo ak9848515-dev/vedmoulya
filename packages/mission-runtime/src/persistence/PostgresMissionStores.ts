@@ -187,9 +187,25 @@ export class PostgresMissionStore
     objectiveId: string,
     renewal: ObjectiveLeaseRenewal,
   ): Promise<MissionObjectiveLease | undefined> {
-    // Drain any queued best-effort write FIRST so an older snapshot cannot land
-    // after (and overwrite) the renewal this transaction commits.
-    await this.flush();
+    // ── LEASE-DEADLINE — DO NOT DRAIN THE SHARED WRITE QUEUE HERE. ────────
+    //    This used to `await this.flush()` first, to keep an older queued
+    //    snapshot from landing after the renewal. That made the renewal's 5 s
+    //    budget wait behind EVERY queued best-effort write — and during
+    //    autonomous work the queue is never empty (each `save()` enqueues a
+    //    whole mission document, drained ONE AT A TIME). Measured: a queued
+    //    write held for 1.2 s delayed the renewal by >1.1 s although the
+    //    renewal statement itself costs ~0 ms. That is the reported
+    //    "renewal did not settle within 5000 ms" → OBJECTIVE_LEASE_LOST.
+    //
+    //    The drain was never needed for correctness. The row lock below is what
+    //    orders the renewal against queued upserts of the SAME row: an upsert
+    //    that already took the lock commits first (and then a queued OLDER
+    //    snapshot can no longer exist — `saveRequired`/`remember` supersede the
+    //    queue entry, and the upsert writes the LATEST version for its key); an
+    //    upsert that has not started yet simply waits for this transaction and
+    //    then writes its own document. Losing the wait removes a serialization
+    //    point without removing an ownership check: every state/owner/token/
+    //    expiry validation below still runs INSIDE the lock on the durable row.
     const renewed = await this.database.begin(async (tx) => {
       const rows = await tx<Array<{ doc: string }>>`
         SELECT doc::text AS doc

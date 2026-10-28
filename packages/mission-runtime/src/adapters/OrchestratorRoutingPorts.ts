@@ -247,21 +247,23 @@ export function createMissionExecutionStrategy(
 ): ExecutionStrategyPort {
   return {
     getRoutingContext: (): ReturnType<ExecutionStrategyPort['getRoutingContext']> => {
+      const defaultProvider = process.env.AI_DEFAULT_PROVIDER?.trim().toLowerCase();
+      const preferredProviders = defaultProvider ? [defaultProvider] : undefined;
       if (
         options?.preferredTier === 'FRONTIER' ||
         options?.capability === 'planning' ||
         options?.capability === 'reasoning'
       ) {
-        return Promise.resolve({ strategy: 'quality-first' as const });
+        return Promise.resolve({ strategy: 'quality-first' as const, preferredProviders });
       }
       if (
         options?.preferredTier === 'LOCAL' ||
         options?.preferredTier === 'EFFICIENCY' ||
         options?.capability === 'code_generation'
       ) {
-        return Promise.resolve({ strategy: 'cost-first' as const });
+        return Promise.resolve({ strategy: 'cost-first' as const, preferredProviders });
       }
-      return Promise.resolve({ strategy: 'balanced' as const });
+      return Promise.resolve({ strategy: 'balanced' as const, preferredProviders });
     },
   };
 }

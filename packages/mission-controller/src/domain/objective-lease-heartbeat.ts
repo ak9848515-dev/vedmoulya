@@ -61,10 +61,9 @@ export interface LeaseRenewalScheduler {
 
 export const systemLeaseRenewalScheduler: LeaseRenewalScheduler = {
   schedule: (tick, delayMs) => {
-    setTimeout(() => {
+    return setTimeout(() => {
       void tick();
     }, delayMs);
-    return undefined;
   },
   cancel: (handle) => {
     clearTimeout(handle as ReturnType<typeof setTimeout>);
@@ -77,6 +76,16 @@ export const systemLeaseRenewalScheduler: LeaseRenewalScheduler = {
  * forever; it also never counts as proof of ownership.
  */
 export const DEFAULT_LEASE_RENEWAL_TIMEOUT_MS = 5_000;
+
+export function resolveLeaseRenewalTimeoutMs(explicit?: number): number {
+  if (explicit !== undefined && Number.isFinite(explicit) && explicit > 0) return explicit;
+  const envVal = process.env.MISSION_LEASE_RENEWAL_TIMEOUT_MS?.trim();
+  if (envVal) {
+    const parsed = Number.parseInt(envVal, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_LEASE_RENEWAL_TIMEOUT_MS;
+}
 
 /**
  * RETRY-01 — bounded retries for ONE renewal that failed TRANSIENTLY (a
@@ -160,7 +169,7 @@ export class ObjectiveLeaseHeartbeat {
   constructor(private readonly options: ObjectiveLeaseHeartbeatOptions) {
     this.scheduler = options.scheduler ?? systemLeaseRenewalScheduler;
     this.intervalMs = Math.max(1, Math.floor(options.ttlMs / 3));
-    const requested = options.renewalTimeoutMs ?? DEFAULT_LEASE_RENEWAL_TIMEOUT_MS;
+    const requested = resolveLeaseRenewalTimeoutMs(options.renewalTimeoutMs);
     // Never wait longer than the lease itself can possibly live.
     const ceiling = options.ttlMs > 0 ? options.ttlMs : requested;
     this.renewalTimeoutMs = Math.max(1, Math.min(requested, ceiling));
@@ -423,6 +432,12 @@ export class ObjectiveLeaseHeartbeat {
    * confirmed, not refused): the caller decides whether it may be retried.
    * The late settlement of an abandoned attempt can never schedule another
    * attempt or restore authority — the outcome is already classified.
+   *
+   * LEASE-DEADLINE — the abandoned attempt is NOT left as an unhandled
+   * promise: its settlement (or rejection, e.g. a database connection error
+   * long after the budget expired) is absorbed here. The store's own
+   * ownership checks already refuse a late renewal, so absorbing the RESULT
+   * cannot revive authority; it only prevents an unhandled rejection.
    */
   private async performRenewalWithinBudget(): Promise<RenewalOutcome> {
     try {
@@ -435,8 +450,15 @@ export class ObjectiveLeaseHeartbeat {
           resolve(TIMED_OUT);
         }, this.renewalTimeoutMs);
       });
+      // One reference to the attempt, so a LATE rejection is observed even
+      // when the race has already been decided by the timeout.
+      const attempt = this.performRenewal();
+      attempt.catch(() => {
+        // Absorbed: `Promise.race` already settled (timeout) or handles it
+        // below; a late driver error must never surface as unhandled.
+      });
       try {
-        const outcome = await Promise.race([this.performRenewal(), timeout]);
+        const outcome = await Promise.race([attempt, timeout]);
         if (outcome === TIMED_OUT) {
           return {
             kind: 'transient',

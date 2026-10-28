@@ -84,6 +84,7 @@ export {
   DEFAULT_LEASE_RENEWAL_RETRY_DELAY_MS,
   DEFAULT_LEASE_RENEWAL_TIMEOUT_MS,
   ObjectiveLeaseHeartbeat,
+  resolveLeaseRenewalTimeoutMs,
   systemLeaseRenewalScheduler,
 } from './domain/objective-lease-heartbeat.js';
 export type {
