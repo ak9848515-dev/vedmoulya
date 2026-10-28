@@ -164,9 +164,12 @@ describe('OrchestratorProviderAvailability — user-scoped credentials', () => {
     const unreachable: ProviderAdapter = {
       ...recordingProvider('gemini', CODING, []),
       getHealth: async (): Promise<ProviderHealth> => {
-        throw Object.assign(new Error('connect ECONNREFUSED https://user:hunter2@example.invalid'), {
-          code: 'CONNECT_TIMEOUT',
-        });
+        throw Object.assign(
+          new Error('connect ECONNREFUSED https://user:hunter2@example.invalid'),
+          {
+            code: 'CONNECT_TIMEOUT',
+          },
+        );
       },
     };
     const platform = new AIOrchestrationService();

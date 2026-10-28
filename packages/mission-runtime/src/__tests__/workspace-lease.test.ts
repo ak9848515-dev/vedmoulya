@@ -128,9 +128,9 @@ describe('WORKSPACE-01 · durable workspace lease statements', () => {
     }) as unknown as TestSql;
     failing.json = (value: unknown): unknown => ({ __json: value });
 
-    expect(await new PostgresWorkspaceLeaseStore(failing as unknown as Sql).acquire('/ws', REQUEST)).toBe(
-      false,
-    );
+    expect(
+      await new PostgresWorkspaceLeaseStore(failing as unknown as Sql).acquire('/ws', REQUEST),
+    ).toBe(false);
     // Exactly ONE statement: no retry storm against an unreachable host.
     expect(statements).toHaveLength(1);
     expect(sql).toBeDefined();
