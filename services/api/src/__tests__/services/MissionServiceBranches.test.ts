@@ -774,6 +774,102 @@ describe('MissionService — detached loop failure classification', () => {
     expect(failure?.message).not.toContain('postgres://');
   });
 
+  // CONNECT_TIMEOUT — the production shape: the controller's durability barrier
+  // WRAPS the driver error in `RequiredPersistenceError`. Reading only the outer
+  // object produced a persistence message with no code/address/port at all —
+  // the operator could not tell WHICH destination was unreachable.
+  it('CONNECT_TIMEOUT: reports the wrapped driver cause of a persistence failure', async () => {
+    const { runtime } = runtimeDouble(mission({ state: 'RUNNING' }));
+    const driver = Object.assign(new Error('write CONNECT_TIMEOUT undefined:undefined'), {
+      code: 'CONNECT_TIMEOUT',
+      errno: 'CONNECT_TIMEOUT',
+      address: 'db.internal',
+      port: 5432,
+    });
+    const barrier = new Error(
+      'Required mission persistence failed for objective_start:obj-1 after 1 attempt(s): write CONNECT_TIMEOUT undefined:undefined',
+      { cause: driver },
+    );
+    runtime.controller.runAutonomousLoop.mockRejectedValue(barrier);
+    const service = new MissionService();
+    service.setRuntimeForTesting(runtime);
+
+    await service.startAutonomousLoop('u-1', 'm-1');
+    await flush();
+
+    const view = await service.getStatus('u-1', 'm-1');
+    const failure = view.activity.find((event) => event.kind === 'MISSION_FAILED');
+    // The failed OPERATION is named, and so is the real destination.
+    expect(failure?.message).toContain('objective_start:obj-1');
+    expect(failure?.message).toContain('code=CONNECT_TIMEOUT');
+    expect(failure?.message).toContain('address=db.internal');
+    expect(failure?.message).toContain('port=5432');
+    expect(failure?.message).not.toContain('undefined:undefined');
+  });
+
+  it('CONNECT_TIMEOUT: names the resolved destination in the message itself', async () => {
+    const { runtime } = runtimeDouble(mission({ state: 'RUNNING' }));
+    const driver = Object.assign(new Error('write CONNECT_TIMEOUT undefined:undefined'), {
+      code: 'CONNECT_TIMEOUT',
+      address: 'db.internal',
+      port: 5432,
+    });
+    // The wrapper repeats the meaningless host pair — the shape the operator
+    // actually saw (`write CONNECT_TIMEOUT undefined:undefined`).
+    runtime.controller.runAutonomousLoop.mockRejectedValue(
+      new Error('write CONNECT_TIMEOUT undefined:undefined', { cause: driver }),
+    );
+    const service = new MissionService();
+    service.setRuntimeForTesting(runtime);
+
+    await service.startAutonomousLoop('u-1', 'm-1');
+    await flush();
+
+    const view = await service.getStatus('u-1', 'm-1');
+    const failure = view.activity.find((event) => event.kind === 'MISSION_FAILED');
+    // The meaningless pair is REPLACED by the address the driver resolved.
+    expect(failure?.message).toContain('(db.internal:5432)');
+    expect(failure?.message).not.toContain('undefined:undefined');
+  });
+
+  it('CONNECT_TIMEOUT: halts a mission whose loop died instead of leaving it RUNNING', async () => {
+    const { runtime, api } = runtimeDouble(mission({ state: 'RUNNING' }));
+    runtime.controller.runAutonomousLoop.mockRejectedValue(
+      Object.assign(new Error('write CONNECT_TIMEOUT undefined:undefined'), {
+        code: 'CONNECT_TIMEOUT',
+        address: 'db.internal',
+        port: 5432,
+      }),
+    );
+    const service = new MissionService();
+    service.setRuntimeForTesting(runtime);
+
+    await service.startAutonomousLoop('u-1', 'm-1');
+    await flush();
+
+    // The loop is GONE: the mission must not keep looking alive.
+    expect(api.pause).toHaveBeenCalledWith('m-1', 'u-1');
+    const view = await service.getStatus('u-1', 'm-1');
+    const paused = view.activity.find((event) => event.kind === 'MISSION_PAUSED');
+    expect(paused?.message).toContain('CONNECT_TIMEOUT');
+  });
+
+  it('CONNECT_TIMEOUT: never pauses a mission that is already on a hold', async () => {
+    const { runtime, api } = runtimeDouble(mission({ state: 'PAUSED' }));
+    runtime.controller.runAutonomousLoop.mockRejectedValue(
+      Object.assign(new Error('write CONNECT_TIMEOUT undefined:undefined'), {
+        code: 'CONNECT_TIMEOUT',
+      }),
+    );
+    const service = new MissionService();
+    service.setRuntimeForTesting(runtime);
+
+    await service.resumeAutonomousLoop('u-1', 'm-1').catch(() => undefined);
+    await flush();
+
+    expect(api.pause).not.toHaveBeenCalled();
+  });
+
   it('stays silent when the loop stopped because the mission became terminal', async () => {
     // The mission is RUNNING when the loop starts and terminal when it stops.
     const { runtime, state } = runtimeDouble(mission({ state: 'RUNNING' }));

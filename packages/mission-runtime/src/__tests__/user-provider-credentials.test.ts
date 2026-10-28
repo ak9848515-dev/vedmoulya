@@ -155,6 +155,44 @@ describe('OrchestratorProviderAvailability — user-scoped credentials', () => {
     expect(status.available).toBe(true);
     expect(status.capableProviders.map((p) => p.providerId)).toEqual(['platform-gemini']);
   });
+
+  // CONNECT_TIMEOUT — a health check that THROWS proves the provider could not
+  // be reached. The adapter must name it (provider id + safe driver code) so
+  // the mission's provider hold reports a real destination instead of a bare
+  // "no capable provider".
+  it('reports the unreachable destination with its safe driver code', async () => {
+    const unreachable: ProviderAdapter = {
+      ...recordingProvider('gemini', CODING, []),
+      getHealth: async (): Promise<ProviderHealth> => {
+        throw Object.assign(new Error('connect ECONNREFUSED https://user:hunter2@example.invalid'), {
+          code: 'CONNECT_TIMEOUT',
+        });
+      },
+    };
+    const platform = new AIOrchestrationService();
+    platform.registerProvider(unreachable);
+    const availability = new OrchestratorProviderAvailability(platform);
+
+    const status = await availability.getProviderStatus(['coding']);
+
+    expect(status.available).toBe(false);
+    expect(availability.getUnreachableDestinations()).toEqual([
+      { providerId: 'gemini', code: 'CONNECT_TIMEOUT' },
+    ]);
+    // Only the code — never the message, the URL or the credential.
+    expect(JSON.stringify(availability.getUnreachableDestinations())).not.toContain('hunter2');
+    expect(JSON.stringify(availability.getUnreachableDestinations())).not.toContain('://');
+  });
+
+  it('reports no unreachable destination when every provider is healthy', async () => {
+    const platform = new AIOrchestrationService();
+    platform.registerProvider(recordingProvider('gemini', CODING, []));
+    const availability = new OrchestratorProviderAvailability(platform);
+
+    await availability.getProviderStatus(['coding']);
+
+    expect(availability.getUnreachableDestinations()).toEqual([]);
+  });
 });
 
 describe('AgentExecutionAdapter — user-scoped execution', () => {

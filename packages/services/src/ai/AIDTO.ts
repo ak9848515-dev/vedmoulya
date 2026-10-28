@@ -179,6 +179,13 @@ export interface ProviderHealthDTO {
   errorRate: number;
   isRateLimited: boolean;
   lastChecked: string;
+  /**
+   * CONNECT_TIMEOUT — a SAFE driver code for a health check that could not even
+   * reach the provider (e.g. `CONNECT_TIMEOUT`, `ECONNREFUSED`, `ENOTFOUND`).
+   * Never a URL, an address or a message: a code is what makes an unreachable
+   * destination diagnosable without exposing where the deployment points.
+   */
+  errorCode?: string;
 }
 
 export interface CapabilityProfileDTO {

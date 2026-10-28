@@ -85,12 +85,29 @@ export class PostgresAuditLogStore
 
   record(entry: AuditEntry): void {
     this.write(entry.userId, entry.id, entry);
-    this.prune(
-      entry.userId,
-      AUDIT_ENTRIES_PER_OWNER,
-      (e) => e.timestamp,
-      (e) => e.id,
-    );
+    // Bounded retention WITHOUT re-reading the whole owner mirror on every
+    // entry: the count is read from the mirror in ONE pass and the SORTED
+    // eviction only happens when the owner is actually over its bound. The
+    // previous unconditional prune made N records cost O(N² log N) (a full
+    // clone + sort per write), which is what let the retention test time out
+    // on a loaded coverage run.
+    if (this.ownerCount(entry.userId) > AUDIT_ENTRIES_PER_OWNER) {
+      this.prune(
+        entry.userId,
+        AUDIT_ENTRIES_PER_OWNER,
+        (e) => e.timestamp,
+        (e) => e.id,
+      );
+    }
+  }
+
+  /** Number of mirror entries owned by `userId` (one pass, no clones). */
+  private ownerCount(userId: string): number {
+    let count = 0;
+    for (const doc of this.mirror.values()) {
+      if (doc.userId === userId) count += 1;
+    }
+    return count;
   }
 
   list(userId?: string, limit = 50): AuditEntry[] {

@@ -363,12 +363,30 @@ function describeLoopFailure(error: unknown): {
   };
   const cause = raw.cause as (Error & { code?: unknown }) | undefined;
 
-  const code = safeErrorToken(raw.code);
-  const errno = safeErrorToken(raw.errno);
-  const address = safeErrorToken(raw.address);
-  const port = typeof raw.port === 'number' && Number.isFinite(raw.port) ? raw.port : undefined;
-  const causeName = safeErrorToken(cause?.name);
-  const causeCode = safeErrorToken(cause?.code);
+  // CONNECT_TIMEOUT — the driver's connection error is often WRAPPED (the
+  // durability barrier throws `RequiredPersistenceError`, which carries the
+  // real failure as `cause`). Reading only the outer object therefore reported
+  // a persistence message with no code, no address and no port — the fields
+  // that actually identify the unreachable destination. The DEEPEST link in the
+  // chain that still carries a driver code is the one worth reporting.
+  const driver = deepestDriverError(error);
+
+  const code = safeErrorToken(raw.code) ?? driver.code;
+  const errno = safeErrorToken(raw.errno) ?? driver.errno;
+  const address = safeErrorToken(raw.address) ?? driver.address;
+  const port =
+    (typeof raw.port === 'number' && Number.isFinite(raw.port) ? raw.port : undefined) ??
+    driver.port;
+  const causeName = safeErrorToken(cause?.name) ?? driver.name;
+  const causeCode = safeErrorToken(cause?.code) ?? driver.code;
+  // The reported message keeps the OUTER message (it names the failed
+  // operation) but its meaningless host pair is replaced by the REAL address
+  // the driver resolved, when one exists.
+  const resolved = driver.address;
+  const hostPort =
+    resolved !== undefined && driver.port !== undefined
+      ? `${resolved}:${String(driver.port)}`
+      : resolved;
 
   const meta: Record<string, string | number> = {};
   if (code !== undefined) meta['code'] = code;
@@ -380,8 +398,52 @@ function describeLoopFailure(error: unknown): {
 
   // Strip the meaningless pair rather than repeating it verbatim; when the
   // driver DID resolve an address it is reported separately above.
-  const message = error.message.split(MEANINGLESS_HOST_PORT).join('(address unavailable)');
+  const message = error.message
+    .split(MEANINGLESS_HOST_PORT)
+    .join(hostPort !== undefined ? `(${hostPort})` : '(address unavailable)');
   return { message, meta };
+}
+
+/**
+ * The deepest link of the `cause` chain that carries a driver connection
+ * code. Only safe scalar fields are extracted — never a message (a driver
+ * message can carry a full DSN) and never more than a few links deep.
+ */
+function deepestDriverError(error: unknown): {
+  code?: string;
+  errno?: string;
+  address?: string;
+  port?: number;
+  name?: string;
+} {
+  const found: {
+    code?: string;
+    errno?: string;
+    address?: string;
+    port?: number;
+    name?: string;
+  } = {};
+  let current: unknown = error;
+  let deepest: { link: Error; code: string } | undefined;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    const code = safeErrorToken((current as { code?: unknown }).code);
+    // Keep overwriting: the LAST link carrying a code is the driver's own
+    // error, so a re-wrapped failure reports ITS code, not a wrapper's.
+    if (code !== undefined) deepest = { link: current, code };
+    current = (current as { cause?: unknown }).cause;
+  }
+  if (deepest === undefined) return found;
+  const link = deepest.link as Error & {
+    errno?: unknown;
+    address?: unknown;
+    port?: unknown;
+  };
+  found.code = deepest.code;
+  found.errno = safeErrorToken(link.errno);
+  found.address = safeErrorToken(link.address);
+  found.port = typeof link.port === 'number' && Number.isFinite(link.port) ? link.port : undefined;
+  found.name = safeErrorToken(deepest.link.name);
+  return found;
 }
 
 function isRepositoryDevelopmentMission(input: CreateMissionInputView): boolean {
@@ -817,10 +879,56 @@ export class MissionService {
           'MISSION_FAILED',
           `Autonomous loop error: ${failure.message}${detail}`,
         );
+        // HONESTY — the loop is GONE (it threw and this is its only
+        // observer). Recording the failure is not enough: if the mission is
+        // still persisted as RUNNING, the UI shows a mission that looks alive
+        // while nothing is driving it, and the objective's lease is only
+        // healed later by a recovery/watchdog pass. A loop that died while
+        // owning work is halted explicitly — never reported as success, never
+        // left indefinitely RUNNING.
+        await this.haltMissionAfterLoopFailure(missionId, failure.meta);
       })
       .finally(() => {
         this.loopsInFlight.delete(missionId);
       });
+  }
+
+  /**
+   * Stop a mission whose autonomous loop DIED, using the frozen state machine.
+   *
+   * Best-effort and never throws (it runs inside the detached loop's own catch):
+   * the activity record above is already durable, and the lease-expiry
+   * watchdog/recovery path remains the backstop. A mission already on a hold or
+   * in a terminal state is left exactly as it is.
+   */
+  private async haltMissionAfterLoopFailure(
+    missionId: string,
+    meta: Record<string, string | number>,
+  ): Promise<void> {
+    try {
+      const runtime = await this.getRuntime();
+      const mission = await runtime.stores.missions.get(missionId);
+      if (!mission || this.isTerminalState(mission.state) || mission.state !== 'RUNNING') {
+        return;
+      }
+      const cause =
+        typeof meta['code'] === 'string'
+          ? meta['code']
+          : typeof meta['causeCode'] === 'string'
+            ? meta['causeCode']
+            : 'unknown error';
+      const halted = await runtime.api.pause(missionId, mission.userId);
+      this.record(
+        halted,
+        'MISSION_PAUSED',
+        `Mission paused after the autonomous loop stopped (${cause}) — resume once the cause is cleared`,
+      );
+    } catch (error) {
+      logger.warn('MissionService: could not halt a mission whose loop failed', {
+        missionId,
+        reason: error instanceof Error ? error.name : 'unknown',
+      });
+    }
   }
 
   async pause(userId: string, missionId: string): Promise<Mission> {

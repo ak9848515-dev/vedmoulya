@@ -107,6 +107,44 @@ describe('WORKSPACE-01 · durable workspace lease statements', () => {
     expect(await store.acquire('/ws', REQUEST)).toBe(false);
   });
 
+  // CONNECT_TIMEOUT — an unreachable database is NOT contention: retrying an
+  // acquire whose socket never opened multiplies the outage (each attempt is a
+  // full connect timeout) while the objective start waits on it.
+  it('does NOT retry an acquire whose connection timed out', async () => {
+    const { sql, statements } = createRecordingSql([]);
+    const failing = ((...args: unknown[]) => {
+      if (typeof args[0] === 'string') return { __fragment: args[0] };
+      statements.push({
+        text: (args[0] as TemplateStringsArray).join(' ? '),
+        values: args.slice(1),
+      });
+      return Promise.reject(
+        Object.assign(new Error('write CONNECT_TIMEOUT undefined:undefined'), {
+          code: 'CONNECT_TIMEOUT',
+          address: 'db.internal',
+          port: 5432,
+        }),
+      );
+    }) as unknown as TestSql;
+    failing.json = (value: unknown): unknown => ({ __json: value });
+
+    expect(await new PostgresWorkspaceLeaseStore(failing as unknown as Sql).acquire('/ws', REQUEST)).toBe(
+      false,
+    );
+    // Exactly ONE statement: no retry storm against an unreachable host.
+    expect(statements).toHaveLength(1);
+    expect(sql).toBeDefined();
+  });
+
+  it('rejects an empty workspace key or token BEFORE any outbound statement', async () => {
+    const { sql, statements } = createRecordingSql([{ doc: '{}' }]);
+    const store = new PostgresWorkspaceLeaseStore(sql);
+
+    expect(await store.acquire('   ', REQUEST)).toBe(false);
+    expect(await store.acquire('/ws', { ...REQUEST, token: '' })).toBe(false);
+    expect(statements).toHaveLength(0);
+  });
+
   it('renews only this token, inside the current expiry', async () => {
     const { sql, statements } = createRecordingSql([{ doc: '{}' }]);
     const store = new PostgresWorkspaceLeaseStore(sql);

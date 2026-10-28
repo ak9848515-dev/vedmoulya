@@ -31,10 +31,22 @@ import type { ProviderAvailabilityPort, ProviderStatus } from '@vedmoulya/missio
 export type UserOrchestratorResolver = (userId: string) => Promise<AIOrchestrationService>;
 
 export class OrchestratorProviderAvailability implements ProviderAvailabilityPort {
+  /**
+   * Sanitized destinations whose health check failed during the LAST
+   * evaluation (provider id + driver code only — never a URL, a credential or
+   * a message). Empty when every provider answered.
+   */
+  private lastUnreachableDestinations: Array<{ providerId: string; code: string }> = [];
+
   constructor(
     private readonly orchestrator: AIOrchestrationService,
     private readonly resolveUserOrchestrator?: UserOrchestratorResolver,
   ) {}
+
+  /** The destinations that could not be reached in the last evaluation. */
+  getUnreachableDestinations(): ReadonlyArray<{ providerId: string; code: string }> {
+    return this.lastUnreachableDestinations;
+  }
 
   async getProviderStatus(
     requiredCapabilities: string[],
@@ -53,6 +65,16 @@ export class OrchestratorProviderAvailability implements ProviderAvailabilityPor
     const healthyIds = new Set(
       health.filter((entry) => entry.status === 'healthy').map((entry) => entry.providerId),
     );
+    // DESTINATION DIAGNOSTICS — the health probe is the FIRST outbound call of
+    // every objective, so an unreachable provider (or a database/network fault
+    // behind one) surfaces here. Only a REGISTERED provider reported not-healthy
+    // is an unreachable destination; a provider that was never configured is a
+    // missing capability, not a network fault. Provider id + safe driver code
+    // only — never a URL, an address or a message.
+    this.lastUnreachableDestinations = health
+      .filter((entry) => entry.status !== 'healthy')
+      .filter((entry) => registered.some((provider) => provider.id === entry.providerId))
+      .map((entry) => ({ providerId: entry.providerId, code: entry.errorCode ?? entry.status }));
 
     const capableProviders = registered
       .filter((provider) => healthyIds.has(provider.id))

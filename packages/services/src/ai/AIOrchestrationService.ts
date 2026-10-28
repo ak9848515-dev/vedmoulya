@@ -104,6 +104,23 @@ export interface ProviderAdapter {
 }
 
 /**
+ * CONNECT_TIMEOUT — the SAFE driver code behind a thrown network failure.
+ *
+ * Walks the `cause` chain (Node's `fetch` keeps the socket error there) and
+ * returns the first `code` that looks like a driver code. Only an uppercase
+ * token is accepted, so a message, a URL or a credential can never be emitted.
+ */
+function safeDriverCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)) return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+/**
  * Advisor-selected routing intent (Phase B). The advisor picks a provider +
  * model; this intent is threaded to the execution layer so the SELECTED
  * model actually reaches the adapter. Absent (cold start / no advisor) the
@@ -2004,8 +2021,13 @@ export class AIOrchestrationService extends BaseService {
         const health = await provider.getHealth();
         this.metrics.recordProviderHealth(health.status === 'healthy');
         results.push(AIMapper.toProviderHealthDTO(health));
-      } catch {
+      } catch (error: unknown) {
         this.metrics.recordProviderHealth(false);
+        // CONNECT_TIMEOUT — a health check that THREW did not merely report a
+        // degraded provider: it could not reach it. Its safe driver code is
+        // kept so the failure is diagnosable (never the message, which can
+        // carry a full endpoint URL).
+        const errorCode = safeDriverCode(error);
         results.push({
           providerId: provider.name,
           status: 'down',
@@ -2013,6 +2035,7 @@ export class AIOrchestrationService extends BaseService {
           errorRate: 1,
           isRateLimited: false,
           lastChecked: new Date().toISOString(),
+          ...(errorCode !== undefined ? { errorCode } : {}),
         });
       }
     }

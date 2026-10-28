@@ -105,6 +105,37 @@ export const DEFAULT_PERSISTENCE_ATTEMPTS = 3;
 export const DEFAULT_PERSISTENCE_BASE_DELAY_MS = 20;
 
 /**
+ * CONNECT_TIMEOUT — connection failures that are PERMANENT for the lifetime of
+ * a single attempt. Retrying them inside the same pass cannot help: the socket
+ * never opened, so nothing was sent and nothing can be recovered by waiting.
+ * They are still classified honestly (the pass holds the mission); they are
+ * just not multiplied by the retry budget.
+ *
+ * Deliberately NOT listed: `CONNECTION_CLOSED`, `CONNECTION_DESTROYED`,
+ * `CONNECTION_ENDED` and `ECONNRESET` — a connection that DROPPED mid-flight
+ * is exactly the transient case the retry budget exists for.
+ */
+const PERMANENT_CONNECTION_CODES: ReadonlySet<string> = new Set([
+  'CONNECT_TIMEOUT',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+]);
+
+/** True when `error` (or its cause chain) is a permanent connection failure. */
+function isPermanentConnectionFailure(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && PERMANENT_CONNECTION_CODES.has(code)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * S10 — thrown when a REQUIRED mission write could not be made durable within
  * the bounded retry budget. It exists so a durability barrier can NEVER be
  * confused with success: the caller must either hold the mission honestly or
@@ -112,15 +143,21 @@ export const DEFAULT_PERSISTENCE_BASE_DELAY_MS = 20;
  * writes (those keep the frozen fire-and-forget semantics).
  */
 export class RequiredPersistenceError extends Error {
-  /** The final underlying write failure (named `lastError`: `cause` is reserved
-   *  by `Error` and would need an `override` modifier). */
+  /** The final underlying write failure. It is ALSO exposed as the standard
+   *  `cause` (see the constructor) so the driver's code/address survive. */
   readonly lastError: unknown;
 
   constructor(operation: string, attempts: number, lastError: unknown) {
+    // CONNECT_TIMEOUT — the REAL driver error is kept as the `cause` so every
+    // caller that reports a loop failure can walk to the code/errno/address
+    // that the driver resolved. Stringifying it into the message alone left
+    // the operator with a bare `write CONNECT_TIMEOUT undefined:undefined`
+    // and no way to tell WHICH destination was unreachable.
     super(
       `Required mission persistence failed for ${operation} after ${String(attempts)} attempt(s): ${
         lastError instanceof Error ? lastError.message : String(lastError)
       }`,
+      lastError instanceof Error ? { cause: lastError } : undefined,
     );
     this.name = 'RequiredPersistenceError';
     this.operation = operation;
@@ -533,6 +570,22 @@ export class MissionControllerService {
     }
   }
 
+  /**
+   * CONNECT_TIMEOUT — sanitized destination diagnostics from the availability
+   * port, when it exposes them (`providerId(code)`). Never a URL or a
+   * credential; an empty list when the port cannot answer.
+   */
+  private describeUnreachableProviders(): string[] {
+    const port = this.options.providerAvailability as {
+      getUnreachableDestinations?: () => ReadonlyArray<{ providerId: string; code: string }>;
+    };
+    const destinations = port.getUnreachableDestinations?.() ?? [];
+    return destinations
+      .map((entry) => `${entry.providerId}(${entry.code})`)
+      .filter((label) => /^[\w.@-]+\([A-Za-z0-9_]+\)$/.test(label))
+      .slice(0, 5);
+  }
+
   /** LEASE-01 — stop and forget the mission's objective lease heartbeat. */
   private async stopObjectiveHeartbeat(missionId: string): Promise<void> {
     const heartbeat = this.activeHeartbeats.get(missionId);
@@ -644,7 +697,16 @@ export class MissionControllerService {
         mission.checkpoints.push(holdCheckpoint);
       }
       const holdState = mission.state;
-      const holdReason = `No capable provider available (required capabilities: ${requiredCaps.join(', ') || 'none'})`;
+      // CONNECT_TIMEOUT — when the deployment HAS providers but every one of
+      // them failed its health check, the hold reason must say WHICH
+      // destinations were unreachable and with what safe driver code, instead
+      // of the misleading "no capable provider" (a configuration/network fault
+      // is not a missing capability).
+      const unreachable = this.describeUnreachableProviders();
+      const holdReason =
+        unreachable.length > 0
+          ? `No capable provider available (required capabilities: ${requiredCaps.join(', ') || 'none'}); unreachable destinations: ${unreachable.join(', ')}`
+          : `No capable provider available (required capabilities: ${requiredCaps.join(', ') || 'none'})`;
       mission.state = 'WAITING_FOR_PROVIDER';
       mission.stateHistory.push('WAITING_FOR_PROVIDER');
       mission.outcomeReason = holdReason;
@@ -1589,7 +1651,22 @@ export class MissionControllerService {
         break;
       }
       iterations++;
-      mission = await this.runNextObjective(missionId);
+      try {
+        mission = await this.runNextObjective(missionId);
+      } catch (error) {
+        // PERSISTENCE-FAILURE ISOLATION. An attempt that cannot reach its
+        // durability barrier has ALREADY held the mission honestly (BLOCKED +
+        // PERSISTENCE_FAILED on the activity trail). Letting that rejection
+        // escape aborted the whole loop and left the mission RUNNING with an
+        // objective holding a lease nobody renewed — recovery then healed it
+        // and a restarted loop burned the SAME outage again, for as many
+        // passes as there were workers. The hold is terminal for this pass:
+        // adopt the persisted state and let the loop's own guards decide
+        // (BLOCKED stops it; a RUNNING hold is a bounded retry).
+        if (!(error instanceof RequiredPersistenceError)) throw error;
+        mission = await this.getMission(missionId);
+        if (mission.state === 'BLOCKED') break;
+      }
     }
 
     return mission;
@@ -1995,6 +2072,12 @@ export class MissionControllerService {
   ): Promise<T> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.persistenceAttempts; attempt += 1) {
+      // CONNECT_TIMEOUT — a destination that could not even be CONNECTED to is
+      // not a transient contention/backoff case. Backing off against an
+      // unreachable host only delays the honest failure and multiplies the
+      // outage (each barrier attempt is itself a full connect timeout), so the
+      // remaining attempts are skipped for a permanent connection refusal.
+      if (attempt > 1 && isPermanentConnectionFailure(lastError)) break;
       try {
         const value = await write();
         if (attempt > 1) {

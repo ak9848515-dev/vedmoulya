@@ -51,6 +51,42 @@ export interface WorkspaceLeaseDocument {
 
 type Sql = postgres.Sql;
 
+/**
+ * CONNECT_TIMEOUT — connection failures that cannot succeed by retrying within
+ * the same attempt (the socket never opened). A connection that DROPPED
+ * mid-flight (`ECONNRESET`, `CONNECTION_CLOSED`) is deliberately absent: that
+ * is the transient case the retry budget exists for.
+ */
+const PERMANENT_CONNECTION_CODES: ReadonlySet<string> = new Set([
+  'CONNECT_TIMEOUT',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+]);
+
+function isPermanentConnectionFailure(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && PERMANENT_CONNECTION_CODES.has(code)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** The driver's safe code for a log line (never a message or a URL). */
+function safeDriverCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
 export class PostgresWorkspaceLeaseStore implements WorkspaceLeasePort {
   constructor(
     private readonly sql: Sql,
@@ -80,6 +116,11 @@ export class PostgresWorkspaceLeaseStore implements WorkspaceLeasePort {
   }
 
   async acquire(workspaceKey: string, request: WorkspaceLeaseRequest): Promise<boolean> {
+    // DESTINATION VALIDATION — an empty or whitespace-only key can never be
+    // acquired (it matches no workspace) and a token is what makes the claim
+    // fencing meaningful. Both are rejected BEFORE any outbound statement, so
+    // an invalid destination fails fast instead of being retried.
+    if (workspaceKey.trim().length === 0 || request.token.trim().length === 0) return false;
     // Acquire with bounded retries for transient PostgreSQL contention.
     // The idempotent INSERT ... ON CONFLICT is naturally safe against
     // concurrent workers; we only retry on serialization failures.
@@ -126,6 +167,17 @@ export class PostgresWorkspaceLeaseStore implements WorkspaceLeasePort {
         `;
         return current?.token === request.token;
       } catch (error) {
+        // CONNECT_TIMEOUT — an unreachable database is NOT contention. Retrying
+        // an acquire whose socket never opened only multiplies the outage (each
+        // attempt is a full connect timeout) while the objective start waits on
+        // it. Stop immediately; the objective start then holds honestly.
+        if (isPermanentConnectionFailure(error)) {
+          logger.warn('Workspace lease acquire could not reach the database', {
+            workspaceKey,
+            code: safeDriverCode(error),
+          });
+          return false;
+        }
         // Transient PostgreSQL contention (serialization failure, lock timeout)
         if (attempt < MAX_RETRIES - 1) {
           await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
