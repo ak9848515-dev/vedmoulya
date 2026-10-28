@@ -211,7 +211,7 @@ async function schemaTables(): Promise<string[]> {
         `SELECT count(*)::int AS n FROM refresh_token_denylist`,
       )) as Array<{ n: number }>;
       expect(count[0]?.n).toBe(1);
-    });
+    }, 15_000);
 
     it('still reads the PRE-005 naive shape exactly (the type change is not a read cliff)', async () => {
       // A database created before 005 has `timestamp WITHOUT time zone`

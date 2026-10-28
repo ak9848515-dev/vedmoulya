@@ -62,6 +62,7 @@ import type {
   MissionControllerOptions,
   MissionStore,
   RepositoryInspectionPort,
+  WorkspaceLeasePort,
 } from '@vedmoulya/mission-controller';
 import { OrchestratorProviderAvailability } from '../adapters/OrchestratorProviderAvailability.js';
 import { FsRepositoryInspector } from '../adapters/FsRepositoryInspector.js';
@@ -158,7 +159,16 @@ export interface MissionRuntimeOptions {
   /** Additional deterministic templates for the frozen planner. */
   extraPlannerTemplates?: readonly PlanTemplate[];
   /** Persistence override (defaults to in-memory; use ensureMissionPersistence for durable). */
-  stores?: { missions?: MissionStore; checkpoints?: CheckpointStore };
+  stores?: {
+    missions?: MissionStore;
+    checkpoints?: CheckpointStore;
+    /**
+     * WORKSPACE-01 — cross-attempt workspace exclusion. Provide a durable store
+     * (`PostgresWorkspaceLeaseStore`) in any multi-process deployment; the
+     * in-memory store is only correct for a single process.
+     */
+    workspaceLeases?: WorkspaceLeasePort;
+  };
   /** Repository inspection override (defaults to the bounded fs inspector). */
   inspector?: RepositoryInspectionPort;
   /** Last recorded verification evidence for inspection ("where available"). */
@@ -246,7 +256,12 @@ export interface MissionRuntimeComponents {
     repositoryInspector?: RepositoryInspectionPort;
     gitSafety: RuntimeGitSafetyAdapter;
   };
-  stores: { missions: MissionStore; checkpoints: CheckpointStore };
+  stores: {
+    missions: MissionStore;
+    checkpoints: CheckpointStore;
+    /** WORKSPACE-01 — present only when the caller supplied one. */
+    workspaceLeases?: WorkspaceLeasePort;
+  };
 }
 
 /**
@@ -498,6 +513,9 @@ export function buildMissionRuntimeComponents(
     stores: {
       missions: options.stores?.missions ?? new InMemoryMissionStore(),
       checkpoints: options.stores?.checkpoints ?? new InMemoryCheckpointStore(),
+      ...(options.stores?.workspaceLeases
+        ? { workspaceLeases: options.stores.workspaceLeases }
+        : {}),
     },
   };
 }
@@ -537,6 +555,9 @@ export function createMissionRuntime(options: MissionRuntimeOptions = {}): Missi
     gitSafety: components.ports.gitSafety,
     approvalGate: options.approvalGate,
     persistenceRetry: options.persistenceRetry ?? defaultPersistenceRetry,
+    ...(components.stores.workspaceLeases
+      ? { workspaceLeases: components.stores.workspaceLeases }
+      : {}),
   });
   const api = new MissionRuntimeApi({
     controller,

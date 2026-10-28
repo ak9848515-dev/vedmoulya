@@ -164,7 +164,29 @@ export {
   PostgresCheckpointStore,
   PostgresMissionStore,
   ensureMissionPersistence,
+  ensureMissionTables,
 } from './persistence/PostgresMissionStores.js';
+// WORKSPACE-01 — durable cross-process workspace exclusion.
+export {
+  PostgresWorkspaceLeaseStore,
+  WORKSPACE_LEASE_OWNER,
+} from './persistence/PostgresWorkspaceLeaseStore.js';
+export type { WorkspaceLeaseDocument } from './persistence/PostgresWorkspaceLeaseStore.js';
+
+// WORKER-01 — durable-execution worker: INTERFACE + a LOCAL implementation.
+// Scope is deliberately limited (see the module header): no hosting target,
+// lifecycle or health contract is defined, so this is not production
+// execution and must not be presented as such.
+export { LocalMissionWorker, systemMissionWorkerScheduler } from './worker/MissionWorker.js';
+export type {
+  DurableMissionWorker,
+  LocalMissionWorkerOptions,
+  MissionWorkerScheduler,
+  MissionWorkerStatus,
+  MissionWorkerTickResult,
+} from './worker/MissionWorker.js';
+export { createLocalWorkerHarness, manualWorkerScheduler } from './worker/LocalWorkerHarness.js';
+export type { LocalWorkerHarness, LocalWorkerHarnessOptions } from './worker/LocalWorkerHarness.js';
 
 // Minimal API / service boundary (START/PAUSE/RESUME/CANCEL/APPROVE/REJECT/STATUS)
 export { MissionRuntimeApi } from './mission-api/MissionRuntimeApi.js';

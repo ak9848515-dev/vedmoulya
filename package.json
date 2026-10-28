@@ -18,6 +18,8 @@
     "dev": "npm run dev -w apps/web",
     "local-agent": "tsx packages/local-ai/src/agent/cli.ts",
     "preflight": "npx tsx scripts/preflight.ts",
+    "db:bootstrap": "npx tsx scripts/bootstrap-schema.ts",
+    "db:bootstrap:dry-run": "npx tsx scripts/bootstrap-schema.ts --dry-run",
     "preflight:prod": "npx tsx scripts/preflight.ts --mode production",
     "doctor": "npx tsx scripts/doctor.ts",
     "doctor:prod": "npx tsx scripts/doctor.ts --mode production",

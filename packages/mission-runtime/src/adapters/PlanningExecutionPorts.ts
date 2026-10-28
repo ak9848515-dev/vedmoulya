@@ -25,6 +25,7 @@ import type {
 import { sanitizeTraceText } from '@vedmoulya/agent-execution';
 import { PlanningApplicationService } from '@vedmoulya/planning';
 import type {
+  ExecutionOwnershipGate,
   ExecutionPort,
   FailureContext,
   LearningContext,
@@ -270,7 +271,13 @@ export class AgentExecutionAdapter implements ExecutionPort {
     budget?: Partial<AgentRunBudgetConfig>,
     allowedTools?: string[],
     permissionClasses?: string[],
-    executionContext?: { missionId: string; objectiveId: string },
+    // OWNERSHIP-01 — must mirror `ExecutionPort`'s parameter (the port also
+    // carries an optional ownership gate that this adapter consults below).
+    executionContext?: {
+      missionId: string;
+      objectiveId: string;
+      ownershipGate?: ExecutionOwnershipGate;
+    },
   ): Promise<{
     runId: string;
     success: boolean;
@@ -329,7 +336,31 @@ export class AgentExecutionAdapter implements ExecutionPort {
     // executes on THAT user's orchestrator, so the generation is performed by
     // the adapter built from the same credential the user connected — never
     // another user's, never a deployment-wide key the user did not supply.
+    // ── OWNERSHIP-01 — last ownership check before the agent starts. ──────
+    // The controller already gated this call; re-checking here costs one read
+    // and closes the window between the controller's check and this start.
+    if (executionContext?.ownershipGate !== undefined) {
+      const refusal = await executionContext.ownershipGate.refusal('agent_start');
+      if (refusal !== undefined) {
+        return {
+          runId: `refused-${plan.planId}`,
+          success: false,
+          verified: false,
+          error: refusal,
+          failureClass: 'PERMISSION_DENIED',
+          usage: ZERO_USAGE,
+        };
+      }
+    }
     const agent = this.resolveUserAgent ? await this.resolveUserAgent(userId) : this.agent;
+    // The run records ONLY the Mission identity. The ownership gate is a live
+    // object with store/clock references: forwarding it would put runtime
+    // internals into a persisted execution record (and break its comparison
+    // shape), so it is deliberately NOT propagated to the agent.
+    const missionContext =
+      executionContext !== undefined
+        ? { missionId: executionContext.missionId, objectiveId: executionContext.objectiveId }
+        : undefined;
     const run = await agent.start({
       userId,
       goal: plan.objective,
@@ -339,7 +370,7 @@ export class AgentExecutionAdapter implements ExecutionPort {
       // The Mission identity that already exists on this call is handed to the
       // run verbatim, so every AI execution inside the objective is attributed
       // to this real Mission + objective.
-      ...(executionContext !== undefined ? { missionContext: executionContext } : {}),
+      ...(missionContext !== undefined ? { missionContext } : {}),
     });
     this.runs.remember(run, executionContext);
     const success = run.state === 'COMPLETED';

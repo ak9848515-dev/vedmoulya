@@ -293,6 +293,20 @@ export interface PlanningPort {
   ): Promise<AgentPlan>;
 }
 
+/**
+ * OWNERSHIP-01 — read-only gate an execution consults immediately before it
+ * initiates a side effect (a workspace mutation, a command, a verification
+ * that runs one). `refusal()` returns `undefined` when the caller may proceed,
+ * or the honest reason it must not (and must not retry).
+ *
+ * It is passed to the executor so an executor that starts actions DURING a run
+ * can ask the same question before each one. It grants nothing: every write is
+ * still fenced by the store.
+ */
+export interface ExecutionOwnershipGate {
+  refusal(operation: string): Promise<string | undefined>;
+}
+
 // -- Execution Port (delegates to agent-execution) -----------------
 export interface ExecutionPort {
   executePlan(
@@ -301,7 +315,18 @@ export interface ExecutionPort {
     budget?: Partial<AgentRunBudgetConfig>,
     allowedTools?: string[],
     permissionClasses?: string[],
-    executionContext?: { missionId: string; objectiveId: string },
+    executionContext?: {
+      missionId: string;
+      objectiveId: string;
+      /**
+       * OWNERSHIP-01 — optional ownership gate. An executor that can issue
+       * multiple tool/command initiations inside one run SHOULD consult it
+       * before each one and stop when it refuses. Executors that ignore it are
+       * documented as not interruption-safe once started (the controller can
+       * only refuse to start them).
+       */
+      ownershipGate?: ExecutionOwnershipGate;
+    },
   ): Promise<{
     runId: string;
     success: boolean;

@@ -80,6 +80,8 @@ export type { FailureContext } from './types/mission-types.js';
 // LEASE-01 — ownership-checked lease renewal (a long-running objective keeps
 // its lease alive instead of looking abandoned).
 export {
+  DEFAULT_LEASE_RENEWAL_MAX_ATTEMPTS,
+  DEFAULT_LEASE_RENEWAL_RETRY_DELAY_MS,
   DEFAULT_LEASE_RENEWAL_TIMEOUT_MS,
   ObjectiveLeaseHeartbeat,
   systemLeaseRenewalScheduler,
@@ -88,6 +90,22 @@ export type {
   LeaseRenewalScheduler,
   ObjectiveLeaseHeartbeatOptions,
 } from './domain/objective-lease-heartbeat.js';
+// OWNERSHIP-01 — the gate consulted immediately before an initiation.
+export { MissionExecutionOwnershipGate } from './domain/execution-ownership-gate.js';
+export type { MissionExecutionOwnershipGateOptions } from './domain/execution-ownership-gate.js';
+export type { ExecutionOwnershipGate } from './contracts/mission-ports.js';
+// WORKSPACE-01 — cross-attempt workspace exclusion (one live attempt per
+// normalized workspace). The in-memory store is the deterministic implementation
+// used by tests and single-process execution.
+export {
+  InMemoryWorkspaceLeaseStore,
+  normalizeWorkspaceKey,
+} from './domain/workspace-execution-lease.js';
+export type {
+  WorkspaceLeaseHolder,
+  WorkspaceLeasePort,
+  WorkspaceLeaseRequest,
+} from './domain/workspace-execution-lease.js';
 // LEASE-02 — atomic publication semantics shared by every mission store. The
 // stores apply these INSIDE their ownership/state validation (a row-locked
 // transaction for PostgreSQL, one atomic step in memory).

@@ -62,6 +62,11 @@ import {
   ObjectiveLeaseHeartbeat,
   type LeaseRenewalScheduler,
 } from '../domain/objective-lease-heartbeat.js';
+import { MissionExecutionOwnershipGate } from '../domain/execution-ownership-gate.js';
+import {
+  normalizeWorkspaceKey,
+  type WorkspaceLeasePort,
+} from '../domain/workspace-execution-lease.js';
 import { DEFAULT_MAX_ACTIVITY_EVENTS } from '../domain/mission-activity.js';
 import { isMissionTerminal, missionCasSnapshot } from '../domain/mission-publication.js';
 
@@ -266,6 +271,28 @@ export interface MissionControllerOptions {
    * and never depends on real-time sleeps; production uses the default.
    */
   leaseRenewalScheduler?: LeaseRenewalScheduler;
+  /**
+   * RETRY-01 — transient lease-renewal retry policy (defaults: 3 attempts,
+   * 25 ms pause). Retries are still bounded by the renewal budget and by the
+   * lease expiry/ownership preconditions; a store REFUSAL is never retried.
+   */
+  leaseRenewalRetry?: { maxAttempts?: number; retryDelayMs?: number };
+  /** Sleep seam for the retry pause (tests inject a deterministic one). */
+  leaseRenewalSleep?: (ms: number) => Promise<void>;
+  /**
+   * WORKSPACE-01 — cross-attempt workspace exclusion. When configured, an
+   * objective may only execute while this attempt holds the normalized
+   * workspace lease, so two missions pointing at the SAME authorized workspace
+   * can never mutate it concurrently. Absent ⇒ the frozen single-mission
+   * behavior (no cross-mission workspace exclusion is claimed).
+   */
+  workspaceLeases?: WorkspaceLeasePort;
+  /**
+   * WORKSPACE-01 — workspace lease lifetime (defaults to 10 × the objective
+   * lease TTL): it is renewed on every confirmed objective renewal, so the TTL
+   * only bounds how long a CRASHED holder blocks the workspace.
+   */
+  workspaceLeaseTtlMs?: number;
   /** BLD-025 — bounded durable activity trail length (defaults to 200). */
   maxActivityEvents?: number;
   /**
@@ -340,6 +367,14 @@ export class MissionControllerService {
    * stopped — in every exit path of `runNextObjective`.
    */
   private readonly activeHeartbeats = new Map<string, ObjectiveLeaseHeartbeat>();
+  /**
+   * WORKSPACE-01 — the workspace lease THIS process currently holds, keyed by
+   * mission. Released (token-checked) in every exit path of `runNextObjective`.
+   */
+  private readonly activeWorkspaceLeases = new Map<
+    string,
+    { key: string; token: string; store: WorkspaceLeasePort }
+  >();
   private readonly persistenceAttempts: number;
   private readonly persistenceBaseDelayMs: number;
 
@@ -491,6 +526,9 @@ export class MissionControllerService {
       //    no timer keeps renewing a lease the execution no longer holds. The
       //    renewal in flight (if any) is awaited by `stop()`.
       await this.stopObjectiveHeartbeat(missionId);
+      // ── WORKSPACE-01 — released AFTER the heartbeat stops, so no companion
+      //    renewal can land on a lease this attempt already released.
+      await this.releaseWorkspaceLease(missionId);
       this.objectivesInFlight.delete(missionId);
     }
   }
@@ -501,6 +539,66 @@ export class MissionControllerService {
     if (!heartbeat) return;
     this.activeHeartbeats.delete(missionId);
     await heartbeat.stop();
+  }
+
+  /**
+   * WORKSPACE-01 — claim the normalized workspace for THIS acquisition.
+   *
+   * Returns the claim (also recorded for the release in `runNextObjective`'s
+   * `finally`), `'BUSY'` when another live attempt holds it, or `undefined`
+   * when no workspace-lease port is configured / the mission has no workspace
+   * (the frozen behavior is preserved in both cases).
+   */
+  private async acquireWorkspaceLease(
+    mission: Mission,
+    objective: MissionObjective,
+    lease: NonNullable<MissionObjective['lease']>,
+  ): Promise<{ key: string; token: string; store: WorkspaceLeasePort } | 'BUSY' | undefined> {
+    const store = this.options.workspaceLeases;
+    const key = normalizeWorkspaceKey(mission.workspace);
+    const token = lease.token;
+    if (store === undefined || key === undefined || token === undefined) return undefined;
+    const nowMs = this.options.clock.timestampMs();
+    const ttl =
+      this.options.workspaceLeaseTtlMs ?? 10 * (this.options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS);
+    const acquired = await store.acquire(key, {
+      missionId: mission.missionId,
+      objectiveId: objective.objectiveId,
+      token,
+      nowMs,
+      expiresAt: new Date(nowMs + ttl).toISOString(),
+    });
+    if (!acquired) return 'BUSY';
+    const claim = { key, token, store };
+    this.activeWorkspaceLeases.set(mission.missionId, claim);
+    return claim;
+  }
+
+  /** WORKSPACE-01 — token-checked release (never frees a replacement's lease). */
+  private async releaseWorkspaceLease(missionId: string): Promise<void> {
+    const claim = this.activeWorkspaceLeases.get(missionId);
+    if (claim === undefined) return;
+    this.activeWorkspaceLeases.delete(missionId);
+    try {
+      await claim.store.release?.(claim.key, claim.token);
+    } catch {
+      // Best effort: an unreleased lease expires on its own TTL. It can never
+      // be released by, or for, a different attempt (token-checked).
+    }
+  }
+
+  /**
+   * OWNERSHIP-01 — authority is gone: record it honestly and persist NOTHING
+   * about the objective. The objective keeps whatever state its real owner gave
+   * it; recovery heals an abandoned RUNNING objective once its lease expires.
+   */
+  private async abandonLostOwnership(mission: Mission, refusalReason: string): Promise<Mission> {
+    const appended = await this.appendActivitySafe(
+      mission.missionId,
+      'OBJECTIVE_LEASE_LOST',
+      `Execution stopped before the next initiation: ${refusalReason}. No workspace mutation, command or result is claimed by this attempt.`,
+    );
+    return appended ?? this.getMission(mission.missionId);
   }
 
   private async runNextObjectiveInternal(missionId: string): Promise<Mission> {
@@ -708,6 +806,21 @@ export class MissionControllerService {
         this.options.clock.timestampMs() + (this.options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS),
       ).toISOString(),
     };
+    // ── WORKSPACE-01 — EXCLUSIVE workspace ownership BEFORE anything durable
+    //    claims this attempt is running. Two missions may point at the same
+    //    authorized workspace; without this, both would execute against it and
+    //    corrupt each other's work. The claim is taken first precisely so a
+    //    busy workspace does NOT leave a RUNNING objective behind: nothing has
+    //    started, so nothing has to be unwound.
+    const workspaceClaim = await this.acquireWorkspaceLease(mission, objective, lease);
+    if (workspaceClaim === 'BUSY') {
+      const appended = await this.appendActivitySafe(
+        mission.missionId,
+        'WORKSPACE_BUSY',
+        `Objective ${objective.objectiveId} was not started: another live execution holds workspace ${normalizeWorkspaceKey(mission.workspace) ?? 'unknown'} — a shared workspace is never mutated concurrently.`,
+      );
+      return appended ?? mission;
+    }
     if (this.options.store.acquireObjectiveLease) {
       // A discovered objective is first made durable as PENDING; the optional
       // store CAS then owns the only transition to RUNNING.
@@ -807,12 +920,53 @@ export class MissionControllerService {
       objectiveId: objective.objectiveId,
       lease,
       ttlMs: this.options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS,
+      ...(this.options.leaseRenewalTimeoutMs !== undefined
+        ? { renewalTimeoutMs: this.options.leaseRenewalTimeoutMs }
+        : {}),
+      ...(this.options.leaseRenewalRetry !== undefined
+        ? { retry: this.options.leaseRenewalRetry }
+        : {}),
+      ...(this.options.leaseRenewalSleep !== undefined
+        ? { sleep: this.options.leaseRenewalSleep }
+        : {}),
+      // WORKSPACE-01 — the workspace lease is extended on the SAME tick (one
+      // timer, never a second scheduler). Its TTL is longer than the objective
+      // lease's, so a missed companion renewal does not immediately free the
+      // workspace; the initiation gate re-verifies the lease anyway.
+      ...(workspaceClaim !== undefined
+        ? {
+            onRenewed: async (): Promise<void> => {
+              const nowMs = this.options.clock.timestampMs();
+              const workspaceTtl =
+                this.options.workspaceLeaseTtlMs ??
+                10 * (this.options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS);
+              await workspaceClaim.store.renew?.(workspaceClaim.key, {
+                token: workspaceClaim.token,
+                nowMs,
+                expiresAt: new Date(nowMs + workspaceTtl).toISOString(),
+              });
+            },
+          }
+        : {}),
       ...(this.options.leaseRenewalScheduler
         ? { scheduler: this.options.leaseRenewalScheduler }
         : {}),
     });
     this.activeHeartbeats.set(mission.missionId, leaseHeartbeat);
     leaseHeartbeat.start();
+    // ── OWNERSHIP-01 — the gate every initiation below must pass. ────────
+    const ownershipGate = new MissionExecutionOwnershipGate({
+      heartbeat: leaseHeartbeat,
+      ...(workspaceClaim !== undefined
+        ? {
+            workspace: {
+              key: workspaceClaim.key,
+              token: workspaceClaim.token,
+              store: workspaceClaim.store,
+            },
+          }
+        : {}),
+    });
 
     // ── Execute (plan + AI execution) with honest, bounded error handling ──
     //    A provider/planner/executor throw must NEVER leave the mission stuck
@@ -873,13 +1027,28 @@ export class MissionControllerService {
         latestRevision.revisedPlanId = plan.planId;
       }
 
+      // ── OWNERSHIP-01 — do not INITIATE workspace work with authority that
+      //    is already gone. Until this check existed, an attempt whose lease
+      //    had been healed/replaced still started the executor (real tools,
+      //    real commands) and only learned about the loss when its result was
+      //    refused — after the side effects. Nothing is started here now.
+      const executionRefusal = await ownershipGate.refusal('execute_plan');
+      if (executionRefusal !== undefined) {
+        return await this.abandonLostOwnership(mission, executionRefusal);
+      }
       executionResult = await this.options.executor.executePlan(
         plan,
         mission.userId,
         mission.budget,
         mission.constraints.allowedTools,
         mission.constraints.grantedPermissionClasses,
-        { missionId: mission.missionId, objectiveId: objective.objectiveId },
+        {
+          missionId: mission.missionId,
+          objectiveId: objective.objectiveId,
+          // The executor may consult the same gate before EACH tool/command it
+          // initiates (see the port docs for the honest mid-run limit).
+          ownershipGate,
+        },
       );
       objective.executionRunId = executionResult.runId;
     } catch (error) {
@@ -975,6 +1144,13 @@ export class MissionControllerService {
       objective = this.findObjectiveOrThrow(mission, objective.objectiveId);
     }
     mission.budgetUsage.runtimeMs += this.options.clock.timestampMs() - attemptStartedAtMs;
+
+    // ── OWNERSHIP-01 — verification may RUN COMMANDS (it is a workspace
+    //    initiation, not a read), so it is gated exactly like execution.
+    const verificationRefusal = await ownershipGate.refusal('verify_objective');
+    if (verificationRefusal !== undefined) {
+      return this.abandonLostOwnership(mission, verificationRefusal);
+    }
 
     // Verification truth comes from the REAL execution run — never fabricated.
     let verificationResult: { verified: boolean; evidence: string[]; method: string };

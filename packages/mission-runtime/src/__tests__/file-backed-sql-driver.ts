@@ -121,6 +121,55 @@ export function createFileBackedSql(filePath: string): FileBackedSql {
     commit({ ...db, [table]: rows });
   };
 
+  const rowEntries = (table: string): Array<[string, unknown]> =>
+    Object.entries(read()[table] ?? {});
+
+  /**
+   * The document a statement with a JSON parameter is about to write (an
+   * INSERT/UPDATE carrying `sql.json(...)`) — the only write shape whose
+   * content is recoverable from the bind values.
+   */
+  const payloadDoc = (args: unknown[]): unknown =>
+    args.map(jsonPayload).find((candidate) => candidate !== undefined)?.value;
+
+  /**
+   * `INSERT … ON CONFLICT … DO UPDATE … WHERE <token matches> OR <expired>` is
+   * the workspace lease's atomic acquisition. It is the only conditional upsert
+   * the mission runtime issues, and it succeeds only when the existing row is
+   * this token's OR already expired.
+   */
+  const isGuardedUpsert = (sql: string): boolean =>
+    /ON CONFLICT/i.test(sql) && /DO UPDATE/i.test(sql) && /WHERE/i.test(sql);
+
+  /** Apply the guarded upsert; returns the committed row, or nothing if refused. */
+  const guardedUpsert = (
+    table: string,
+    owner: string,
+    key: string,
+    doc: unknown,
+    args: unknown[],
+  ): unknown[] => {
+    const db = read();
+    const rows = db[table] ?? {};
+    const id = `${owner}${KEY_SEPARATOR}${key}`;
+    const existing = rows[id] as { token?: unknown; expiresAt?: unknown } | undefined;
+    // `… WHERE token = $` is the first scalar bound after the VALUES document.
+    const scalarsAfterDoc = args
+      .slice(args.findIndex((arg) => jsonPayload(arg) !== undefined) + 1)
+      .filter((arg): arg is string => typeof arg === 'string');
+    const token = scalarsAfterDoc[0];
+    // `… to_timestamp($nowMs / 1000.0)` binds the acquisition instant.
+    const nowMs = args.filter((arg): arg is number => typeof arg === 'number').at(-1);
+    const expiresAt = existing?.expiresAt === undefined ? undefined : String(existing.expiresAt);
+    const expired = expiresAt === undefined || Date.parse(expiresAt) <= (nowMs ?? Number.NaN);
+    const admitted =
+      existing === undefined || (token !== undefined && existing.token === token) || expired;
+    if (!admitted) return [];
+    rows[id] = doc;
+    commit({ ...db, [table]: rows });
+    return [doc];
+  };
+
   const handler = ((...args: unknown[]) => {
     const [first, ...rest] = args;
     // Plain-call form: sql('table_name') — an identifier fragment the
@@ -136,37 +185,134 @@ export function createFileBackedSql(filePath: string): FileBackedSql {
     }
 
     if (text.startsWith('SELECT')) {
+      const rows = rowEntries(table);
+      const doc = payloadDoc(rest);
+      // SELECT <json-param> … WHERE owner = $ — resolve the DOCUMENT itself
+      // (a guard read on a document field, not a row projection).
+      if (doc !== undefined) {
+        // Only a `key = $` filter scopes this read to one row; the `token = $`
+        // guard does NOT (SQL returns the row with a null projection, above).
+        const owner = scalars(rest)[0];
+        const stored = rows.find(
+          ([id]) => owner !== undefined && id.startsWith(`${owner}${KEY_SEPARATOR}`),
+        );
+        return Promise.resolve(stored ? [{ doc: JSON.stringify(stored[1]) }] : []);
+      }
       const values = scalars(rest);
+      // The workspace lease reads only `doc->>'token'`, so a token value is a
+      // projected field: `<scalar> AS token`, scoped by the tenant when given.
+      // Matched on the fields ONLY: the joined text also contains the
+      // `doc::text AS doc` alias the ownership read uses.
+      const isTokenProjection = strings.some((part) => /AS TOKEN/i.test(part));
+
+      if (isTokenProjection) {
+        const fields = strings.map((part) => part.trim().toUpperCase());
+        const tokenAt = fields.findIndex((part) => part.includes('AS TOKEN'));
+        // Bindings pair positionally with the filters AFTER the projection, so
+        // `owner = $` and `key = $` are the real row identity — never a tenant.
+        const filters = fields.slice(tokenAt + 1);
+        const boundTo = (column: string): string | undefined => {
+          const index = filters.findIndex((part) => new RegExp(`\\b${column}\\s*=`).test(part));
+          return index === -1 ? undefined : values[index];
+        };
+        const owner = boundTo('OWNER');
+        const key = boundTo('KEY');
+        const tokenOf = (stored: unknown): string | null => {
+          const record = stored as { token?: unknown } | null;
+          return typeof record?.token === 'string' ? record.token : null;
+        };
+        const selected = rows
+          .filter(([id]) => owner === undefined || id.startsWith(`${owner}${KEY_SEPARATOR}`))
+          .map(([id, stored]) => ({ id, token: tokenOf(stored) }))
+          .filter((row) => key === undefined || row.id === `${owner}${KEY_SEPARATOR}${key}`);
+        // `AND doc->>'token' = $` filters on the PROJECTION, so a non-matching
+        // claim still yields a row whose projection is NULL (`{ token: null }`)
+        // — distinct from no row at all.
+        const tokenFiltered = filters.some((part) => /\.DOC->>'TOKEN'\s*=/.test(part));
+        const token = boundTo("TOKEN'");
+        const matching = tokenFiltered ? selected.filter((row) => row.token === token) : selected;
+        return Promise.resolve(matching.map(({ token: value }) => ({ token: value })));
+      }
       const [owner, key] = values;
-      const rows = read()[table] ?? {};
-      const selected = Object.entries(rows)
+      const selected = rows
         .filter(([ownerKey]) =>
           owner === undefined || key === undefined
             ? true
             : ownerKey === `${owner}${KEY_SEPARATOR}${key}`,
         )
-        .map(([ownerKey, doc]) => {
+        .map(([ownerKey, stored]) => {
           const [rowOwner = '', rowKey = ''] = ownerKey.split(KEY_SEPARATOR);
-          return { owner: rowOwner, key: rowKey, doc: JSON.stringify(doc) };
+          return { owner: rowOwner, key: rowKey, doc: JSON.stringify(stored) };
         });
       return Promise.resolve(selected);
     }
 
-    if (text.startsWith('INSERT INTO') || text.startsWith('UPDATE')) {
+    // The workspace lease renews with `jsonb_set(doc, '{expiresAt}', …)`, which
+    // is the only UPDATE whose target field is named by a SQL literal. It is
+    // matched on the RAW text: the filter compares against the field name, so
+    // the upper-cased copy above can never see it.
+    const rawText = strings.join(' ').replace(/\s+/g, ' ').trim();
+    const expiresAtField = /jsonb_set\s*\(\s*doc\s*,\s*'\{expiresAt\}'/i.test(rawText);
+
+    if (/^UPDATE/i.test(rawText) && expiresAtField) {
+      // Bind order: the value filling `jsonb_set` first, then the WHERE
+      // filters in textual order — owner, key, and finally `doc->>'token' = $`.
+      const values = scalars(rest);
+      const expiresAt = values[0] as string;
+      const token = values.at(-1);
+      const [owner, key] = values.slice(1, -1);
+      const id = `${owner}${KEY_SEPARATOR}${key}`;
+      const db = read();
+      const rows = db[table] ?? {};
+      const stored = rows[id] as { token?: unknown; expiresAt?: unknown } | undefined;
+      const liveUntil =
+        stored?.expiresAt === undefined ? Number.NaN : Date.parse(String(stored.expiresAt));
+      // `AND (doc->>'expiresAt')::timestamptz > to_timestamp(${nowMs} / 1000.0)`
+      // binds the renewal instant as a NUMBER of milliseconds.
+      const nowMs = typeof rest.at(-1) === 'number' ? (rest.at(-1) as number) : Number.NaN;
+
+      if (stored !== undefined && stored.token === token && liveUntil > nowMs) {
+        rows[id] = { ...stored, expiresAt };
+        commit({ ...db, [table]: rows });
+        return Promise.resolve([{ doc: JSON.stringify(rows[id]) }]);
+      }
+      return Promise.resolve([]);
+    }
+
+    // An UPDATE whose payload is a whole document is the same write as an
+    // INSERT for a schemaless row — but only when the statement really carries
+    // a JSON parameter. `INSERT … ON CONFLICT … SET doc = EXCLUDED.doc` carries
+    // none (its document arrives as the VALUES bind), so it must fall through
+    // to the guarded-upsert branch instead of silently overwriting the row.
+    const payload = payloadDoc(rest);
+    if (payload !== undefined && (text.startsWith('INSERT INTO') || text.startsWith('UPDATE'))) {
       const [owner, key] = scalars(rest);
-      const payload = rest.map(jsonPayload).find((candidate) => candidate !== undefined);
-      if (owner !== undefined && key !== undefined && payload !== undefined) {
-        upsert(table, owner, key, payload.value);
+      if (owner !== undefined && key !== undefined) {
+        if (isGuardedUpsert(text)) {
+          // A CONDITIONAL upsert is not a write until its guard admits it — the
+          // row lock that makes concurrent acquisition safe in PostgreSQL is
+          // emulated by evaluating the documented WHERE here and returning the
+          // affected row, exactly as `RETURNING doc` would.
+          const applied = guardedUpsert(table, owner, key, payload, rest);
+          return Promise.resolve(applied.map((row) => ({ doc: JSON.stringify(row) })));
+        }
+        upsert(table, owner, key, payload);
       }
       return Promise.resolve([]);
     }
 
     if (text.startsWith('DELETE')) {
-      const [owner, key] = scalars(rest);
+      const values = scalars(rest);
+      // Token-checked release: DELETE … WHERE owner = $ AND key = $ AND
+      // doc->>'token' = $ — a stale token must never free a replacement.
+      const [owner, key, token] = values;
       if (owner !== undefined && key !== undefined) {
         const db = read();
         const rows = db[table] ?? {};
-        delete rows[`${owner}${KEY_SEPARATOR}${key}`];
+        const id = `${owner}${KEY_SEPARATOR}${key}`;
+        const stored = rows[id] as { token?: unknown } | undefined;
+        const tokenMatches = token === undefined || stored?.token === token;
+        if (tokenMatches) delete rows[id];
         commit({ ...db, [table]: rows });
       }
       return Promise.resolve([]);

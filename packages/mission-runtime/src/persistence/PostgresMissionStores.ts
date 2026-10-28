@@ -19,6 +19,7 @@
 import type postgres from 'postgres';
 import type { JSONValue } from 'postgres';
 import { WriteThroughDocumentStore } from '@vedmoulya/core';
+import { PostgresWorkspaceLeaseStore } from './PostgresWorkspaceLeaseStore.js';
 import type { CheckpointStore, MissionStore } from '@vedmoulya/mission-controller';
 import type {
   Mission,
@@ -570,15 +571,41 @@ export class PostgresCheckpointStore
  * Boot the durable mission persistence: ensure both tables exist and
  * hydrate the mirrors. Returns the stores ready for the composition.
  */
-export async function ensureMissionPersistence(sql: Sql): Promise<{
+/**
+ * SCHEMA-01 — create ONLY the mission tables (idempotent DDL), with no
+ * hydration. Used by the dedicated schema-bootstrap command, which must not
+ * load every mirror into a process that is about to exit.
+ *
+ * The workspace-lease store shares the mission document table, so this is the
+ * complete durable surface of the mission runtime.
+ */
+export async function ensureMissionTables(sql: Sql): Promise<{
   missions: PostgresMissionStore;
   checkpoints: PostgresCheckpointStore;
+  workspaceLeases: PostgresWorkspaceLeaseStore;
 }> {
   const missions = new PostgresMissionStore(sql);
   const checkpoints = new PostgresCheckpointStore(sql);
+  const workspaceLeases = new PostgresWorkspaceLeaseStore(sql);
   await missions.ensureTable();
   await checkpoints.ensureTable();
+  await workspaceLeases.ensureTable();
+  return { missions, checkpoints, workspaceLeases };
+}
+
+export async function ensureMissionPersistence(sql: Sql): Promise<{
+  missions: PostgresMissionStore;
+  checkpoints: PostgresCheckpointStore;
+  /** WORKSPACE-01 — cross-process workspace exclusion over the SAME table. */
+  workspaceLeases: PostgresWorkspaceLeaseStore;
+}> {
+  const missions = new PostgresMissionStore(sql);
+  const checkpoints = new PostgresCheckpointStore(sql);
+  const workspaceLeases = new PostgresWorkspaceLeaseStore(sql);
+  await missions.ensureTable();
+  await checkpoints.ensureTable();
+  await workspaceLeases.ensureTable();
   await missions.hydrate();
   await checkpoints.hydrate();
-  return { missions, checkpoints };
+  return { missions, checkpoints, workspaceLeases };
 }

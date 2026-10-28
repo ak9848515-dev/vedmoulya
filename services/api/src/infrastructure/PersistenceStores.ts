@@ -184,12 +184,109 @@ export interface PersistenceStores {
   world: WorldStores;
 }
 
+/** One store's schema-bootstrap outcome. Never carries a connection string. */
+export interface SchemaBootstrapEntry {
+  label: string;
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * SCHEMA-01 — the report of a dedicated schema bootstrap.
+ *
+ * `planned` is the COMPLETE idempotent-DDL surface of the bundle (every store
+ * that has an `ensureTable()`), so an operator can see exactly what a bootstrap
+ * will touch. `applied` / `failed` are per-store outcomes; one failing store
+ * never hides the others.
+ */
+export interface SchemaBootstrapReport {
+  dryRun: boolean;
+  planned: string[];
+  applied: string[];
+  failed: Array<{ label: string; error: string }>;
+}
+
+/**
+ * SCHEMA-01 — a stable, UNIQUE label for a persistence store.
+ *
+ * Constructor names alone are not unique: two different packages both export a
+ * `PostgresOpportunityStore` (brain opportunities vs control-plane
+ * opportunities). The write-through base exposes its table name, so the label
+ * becomes `PostgresOpportunityStore(brain_opportunities)` — unambiguous for an
+ * operator reading a bootstrap report.
+ */
+function storeLabel(store: unknown): string {
+  const constructorName =
+    typeof store === 'object' && store !== null ? store.constructor.name : 'UnknownStore';
+  const table = (store as { tableName?: unknown } | null)?.tableName;
+  return typeof table === 'string' && table.length > 0
+    ? `${constructorName}(${table})`
+    : constructorName;
+}
+
+/** One idempotent-DDL participant of a schema bootstrap. */
+export interface SchemaBootstrapTarget {
+  label: string;
+  ensureTable(): Promise<void>;
+}
+
+/**
+ * SCHEMA-01 — build a single-flight schema bootstrap over an explicit store
+ * list.
+ *
+ * Properties (each covered by a test):
+ *   • `dryRun` performs NO database work and returns the plan;
+ *   • real runs execute SEQUENTIALLY (one connection at a time, SPRINT-089);
+ *   • one failing store never hides the others (per-store outcome);
+ *   • concurrent callers share ONE pass (an operator running the command twice
+ *     cannot double the DDL storm).
+ */
+export function createSchemaBootstrap(
+  targets: SchemaBootstrapTarget[],
+): (options?: { dryRun?: boolean }) => Promise<SchemaBootstrapReport> {
+  let run: Promise<SchemaBootstrapReport> | undefined;
+  const plan = (): string[] => targets.map((target) => target.label);
+  return (options = {}) => {
+    if (options.dryRun === true) {
+      return Promise.resolve({ dryRun: true, planned: plan(), applied: [], failed: [] });
+    }
+    run ??= (async (): Promise<SchemaBootstrapReport> => {
+      const report: SchemaBootstrapReport = {
+        dryRun: false,
+        planned: plan(),
+        applied: [],
+        failed: [],
+      };
+      for (const target of targets) {
+        try {
+          await target.ensureTable();
+          report.applied.push(target.label);
+        } catch (error: unknown) {
+          report.failed.push({ label: target.label, error: safeError(error) });
+        }
+      }
+      return report;
+    })();
+    return run;
+  };
+}
+
 /** The store bundle plus its lifecycle handles. */
 export interface PersistenceBundle extends PersistenceStores {
   /** Load persisted state into the synchronous mirrors (boot). */
   hydrate(): Promise<void>;
   /** Drain every pending write to Postgres (shutdown). */
   flush(): Promise<void>;
+  /**
+   * SCHEMA-01 — run (or, with `dryRun`, only plan) the bundle's idempotent
+   * table creation WITHOUT hydrating any mirror.
+   *
+   * Present only on the Postgres bundle: an in-memory bundle has no schema.
+   * Request-time DDL is deliberately NOT disabled by this method — it is an
+   * additional, deploy-time path, not a replacement, until an operator-approved
+   * migration/deployment plan exists.
+   */
+  bootstrapSchema?(options?: { dryRun?: boolean }): Promise<SchemaBootstrapReport>;
 }
 
 /** Partial store overrides accepted by ApiApplicationService options. */
@@ -405,10 +502,33 @@ function createPostgresStores(): PersistenceBundle {
       const withEnsure = store as { ensureTable?(): Promise<void> };
       if (typeof withEnsure.ensureTable === 'function') {
         // Store the repo — DDL will run sequentially in hydrate().
-        deferredDDL.push({ store, label: store.constructor.name });
+        deferredDDL.push({ store, label: storeLabel(store) });
       }
     }
   }
+
+  // ── SCHEMA-01 — dedicated bootstrap (single-flight per bundle) ───────────
+  // The SAME sequential DDL set `hydrate()` runs, minus every hydration
+  // SELECT: a deploy can provision the schema without loading 38 mirrors into
+  // a process that is about to exit.
+  //
+  // The PLAN is every store that has `ensureTable()` (38 today), computed
+  // independently of the NODE_ENV gate; the EXECUTION list stays gated for the
+  // same reason `hydrate()`'s DDL is (tests must not hit a real database). When
+  // the gate suppressed execution, the report says so instead of pretending
+  // success.
+  const plannedLabels = hydratable
+    .filter(
+      (store) => typeof (store as { ensureTable?(): Promise<void> }).ensureTable === 'function',
+    )
+    .map((store) => storeLabel(store));
+  const bootstrap = createSchemaBootstrap(
+    deferredDDL.map(({ store, label }) => ({
+      label,
+      ensureTable: (): Promise<void> =>
+        (store as unknown as { ensureTable(): Promise<void> }).ensureTable(),
+    })),
+  );
 
   return {
     ...stores,
@@ -462,6 +582,27 @@ function createPostgresStores(): PersistenceBundle {
           }
         }),
       );
+    },
+    // SCHEMA-01 — deploy-time bootstrap. A dry run never touches the database.
+    bootstrapSchema: async (options = {}): Promise<SchemaBootstrapReport> => {
+      if (options.dryRun === true) {
+        return { dryRun: true, planned: plannedLabels, applied: [], failed: [] };
+      }
+      if (deferredDDL.length === 0 && plannedLabels.length > 0) {
+        return {
+          dryRun: false,
+          planned: plannedLabels,
+          applied: [],
+          failed: [
+            {
+              label: 'schema-bootstrap',
+              error:
+                'schema DDL execution is disabled in NODE_ENV=test — no store was touched (this is NOT a success)',
+            },
+          ],
+        };
+      }
+      return bootstrap();
     },
   };
 }

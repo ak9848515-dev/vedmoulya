@@ -30,8 +30,16 @@
 //   • renews at 1/3 of the configured TTL — comfortably before expiry;
 //   • NEVER overlaps requests (a renewal is awaited before the next is
 //     scheduled; an explicit caller also joins the in-flight request);
-//   • stops renewing the moment a renewal fails (refused or thrown) and never
-//     silently assumes ownership again;
+//   • RETRIES a TRANSIENT renewal failure (timeout / thrown error) only while
+//     it can still prove it is allowed to: the store still records this exact
+//     acquisition as the owner AND the lease it knows about has not expired.
+//     A REFUSAL from the store (it answered "you are not the owner") is never
+//     retried, and neither is anything once the known expiry has passed — a
+//     late renewal must never reclaim authority recovery may already have
+//     taken. Retrying grants nothing: every attempt is re-validated by the
+//     store against the authoritative record;
+//   • stops renewing for good once the attempts are exhausted (or the refusal
+//     is final) and never silently assumes ownership again;
 //   • `stop()` clears the timer and awaits the in-flight renewal, so it is
 //     safe in every exit path (success, exception, hold, cancellation);
 //   • it grants nothing: renewal never changes objective state, budget,
@@ -70,8 +78,28 @@ export const systemLeaseRenewalScheduler: LeaseRenewalScheduler = {
  */
 export const DEFAULT_LEASE_RENEWAL_TIMEOUT_MS = 5_000;
 
+/**
+ * RETRY-01 — bounded retries for ONE renewal that failed TRANSIENTLY (a
+ * timeout or a driver error such as a dropped connection). A single transient
+ * failure used to stop the heartbeat permanently, so a 5 s scheduling hiccup
+ * on a healthy lease ended all renewal for the rest of the attempt — the exact
+ * mechanism that let a working process look abandoned.
+ *
+ * 3 attempts covers an isolated hiccup without turning the heartbeat into a
+ * retry loop: the whole chain is still bounded by the SAME
+ * `renewalTimeoutMs` budget per attempt and by the lease expiry.
+ */
+export const DEFAULT_LEASE_RENEWAL_MAX_ATTEMPTS = 3;
+
+/** Pause between transient renewal attempts (short — the lease is ticking). */
+export const DEFAULT_LEASE_RENEWAL_RETRY_DELAY_MS = 25;
+
 /** Unique sentinel for the timeout branch (never a valid renewal result). */
 const TIMED_OUT = Symbol('lease-renewal-timeout');
+
+/** Outcome of ONE bounded renewal attempt (never a grant of authority). */
+type RenewalOutcome =
+  { kind: 'confirmed' } | { kind: 'refused' } | { kind: 'transient'; reason: string };
 
 export interface ObjectiveLeaseHeartbeatOptions {
   store: MissionStore;
@@ -89,6 +117,22 @@ export interface ObjectiveLeaseHeartbeatOptions {
    * `DEFAULT_LEASE_RENEWAL_TIMEOUT_MS`, never more than the TTL itself).
    */
   renewalTimeoutMs?: number;
+  /**
+   * RETRY-01 — transient-failure retry policy. `maxAttempts` counts ALL
+   * attempts of one renewal (1 disables retrying); `retryDelayMs` is the pause
+   * between them. Both are clamped to sane bounds and never override the
+   * ownership/expiry preconditions.
+   */
+  retry?: { maxAttempts?: number; retryDelayMs?: number };
+  /** Sleep seam for the retry pause (tests inject a deterministic one). */
+  sleep?: (ms: number) => Promise<void>;
+  /**
+   * WORKSPACE-01 — companion renewal, run after every CONFIRMED objective
+   * renewal (the workspace lease is extended on the same tick, so there is one
+   * timer, never a second scheduler). Failures are the caller's to absorb: a
+   * companion that cannot renew must never stop the objective lease.
+   */
+  onRenewed?: (renewal: { expiresAtMs: number }) => Promise<void> | void;
 }
 
 export class ObjectiveLeaseHeartbeat {
@@ -102,6 +146,16 @@ export class ObjectiveLeaseHeartbeat {
   private stopped = false;
   private failureReason: string | undefined;
   private successCount = 0;
+  private readonly maxRenewalAttempts: number;
+  private readonly retryDelayMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
+  /**
+   * RETRY-01 — the latest expiry this heartbeat KNOWS about: the acquisition's
+   * expiry at construction, replaced by each confirmed renewal. Retry decisions
+   * and the initiation gate use it, so they are never based on a stale
+   * acquisition after a successful extension.
+   */
+  private currentExpiresAtMs: number;
 
   constructor(private readonly options: ObjectiveLeaseHeartbeatOptions) {
     this.scheduler = options.scheduler ?? systemLeaseRenewalScheduler;
@@ -110,6 +164,24 @@ export class ObjectiveLeaseHeartbeat {
     // Never wait longer than the lease itself can possibly live.
     const ceiling = options.ttlMs > 0 ? options.ttlMs : requested;
     this.renewalTimeoutMs = Math.max(1, Math.min(requested, ceiling));
+    this.maxRenewalAttempts = Math.max(
+      1,
+      Math.floor(options.retry?.maxAttempts ?? DEFAULT_LEASE_RENEWAL_MAX_ATTEMPTS),
+    );
+    this.retryDelayMs = Math.max(
+      0,
+      Math.floor(options.retry?.retryDelayMs ?? DEFAULT_LEASE_RENEWAL_RETRY_DELAY_MS),
+    );
+    this.sleep =
+      options.sleep ??
+      ((ms: number): Promise<void> =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, ms);
+        }));
+    const acquiredExpiry = Date.parse(options.lease.expiresAt);
+    this.currentExpiresAtMs = Number.isFinite(acquiredExpiry)
+      ? acquiredExpiry
+      : Number.POSITIVE_INFINITY;
   }
 
   /**
@@ -136,6 +208,47 @@ export class ObjectiveLeaseHeartbeat {
   /** Number of successful renewals (observability/tests; never authority). */
   get renewals(): number {
     return this.successCount;
+  }
+
+  /** The latest lease expiry this heartbeat knows about (ms since epoch). */
+  get knownExpiresAtMs(): number {
+    return this.currentExpiresAtMs;
+  }
+
+  /** How many attempts one renewal may make (1 = no retry). */
+  get renewalAttemptLimit(): number {
+    return this.maxRenewalAttempts;
+  }
+
+  /**
+   * INITIATION GATE — may this execution start `operation` (a workspace
+   * mutation, a command, a verification that runs one)?
+   *
+   * Returns `undefined` when the caller may proceed, or the honest reason it
+   * may not. The criterion is OWNERSHIP against authority — deliberately the
+   * same one LEASE-01 uses for acknowledging finished work:
+   *   • the store still records THIS acquisition (owner + fencing token) as the
+   *     objective's owner (an authoritative read).
+   *
+   * LOCAL EXPIRY IS NOT A DENIAL HERE, on purpose. An expired lease that was
+   * never healed, released or replaced still belongs to this execution (nobody
+   * else can own it), so its own work may continue to completion — that is the
+   * documented LEASE-01/LEASE-02 semantics, and it is what keeps a slow
+   * verification from throwing away work whose ownership is still provable.
+   * Expiry only ever blocks a new RENEWAL attempt (`retryRefusal`) and lets
+   * recovery heal an abandoned objective.
+   *
+   * A failed renewal alone does NOT deny initiation either (a renewal outage
+   * must not discard work while ownership is still provable).
+   * Stores without an ownership check (legacy) cannot answer, so the gate
+   * keeps the frozen behavior and allows the caller.
+   */
+  async ownershipRefusal(operation: string): Promise<string | undefined> {
+    if (!this.supported) return undefined;
+    if (!(await this.stillOwnsObjective())) {
+      return `this execution no longer owns objective ${this.options.objectiveId} — ${operation} was not initiated`;
+    }
+    return undefined;
   }
 
   /** Start the bounded heartbeat. Idempotent and a no-op when unsupported. */
@@ -216,58 +329,131 @@ export class ObjectiveLeaseHeartbeat {
 
   private renewOnce(): Promise<boolean> {
     if (this.inFlight) return this.inFlight;
-    const attempt = this.performRenewalWithinBudget()
-      .then((renewed) => {
-        if (!renewed) this.stopRenewing('lease renewal was refused by the store');
-        return renewed;
-      })
-      .catch((error: unknown) => {
-        // A renewal that cannot be PROVEN stops the heartbeat: continuing to
-        // assume ownership is exactly what lets a stale execution overwrite the
-        // real owner's state. The caller still asks the store directly before
-        // persisting anything.
-        this.stopRenewing(
-          `lease renewal failed (${
-            error instanceof Error ? error.message : String(error)
-          }) — ownership can no longer be confirmed by renewal`,
-        );
-        return false;
-      })
-      .finally(() => {
-        this.inFlight = undefined;
-      });
+    const attempt = this.runRenewal().finally(() => {
+      this.inFlight = undefined;
+    });
     this.inFlight = attempt;
     return attempt;
   }
 
   /**
-   * LEASE-02 — ONE bounded renewal attempt.
+   * RETRY-01 — one renewal, with bounded retries for TRANSIENT failures only.
    *
-   * A renewal that does not settle within the budget is treated as NOT
-   * confirmed: the heartbeat stops (so cleanup is bounded) and the late
-   * settlement can never schedule another attempt or restore authority. The
-   * controller never relies on this result to prove ownership — every write it
-   * makes is validated atomically by the store.
+   * The distinction is the whole fix:
+   *   • `confirmed` → extension durable; record it and continue;
+   *   • `refused`   → the STORE answered "this acquisition does not own the
+   *                   objective" (released, healed, replaced or expired). That
+   *                   is an authoritative answer — retrying it would be
+   *                   arguing with the database, so the heartbeat stops;
+   *   • `transient` → timeout / thrown error: the store did not answer. Retry
+   *                   ONLY while the lease has not expired AND ownership is
+   *                   still provable (see `retryRefusal`).
+   *
+   * Nothing here grants authority: every attempt is re-validated by the store
+   * against the authoritative record.
    */
-  private async performRenewalWithinBudget(): Promise<boolean> {
-    if (this.renewalTimeoutMs <= 0) return this.performRenewal();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
-      timer = setTimeout(() => {
-        resolve(TIMED_OUT);
-      }, this.renewalTimeoutMs);
-    });
-    try {
-      const outcome = await Promise.race([this.performRenewal(), timeout]);
-      if (outcome === TIMED_OUT) {
-        this.stopRenewing(
-          `lease renewal did not settle within ${String(this.renewalTimeoutMs)}ms — ownership is NOT confirmed`,
-        );
+  private async runRenewal(): Promise<boolean> {
+    let transientReason: string | undefined;
+    for (let attempt = 1; attempt <= this.maxRenewalAttempts; attempt += 1) {
+      if (this.stopped || this.failureReason !== undefined) return false;
+      const outcome = await this.performRenewalWithinBudget();
+      // A stop() that landed while the attempt was in flight is not a failure.
+      // `stopped` is NOT narrowed away by the guard at the top of the loop:
+      // the await above can have run stop(), which sets it.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleared by an awaited stop()
+      if (this.stopped) return false;
+      if (outcome.kind === 'confirmed') {
+        this.successCount += 1;
+        this.currentExpiresAtMs = this.options.clock.timestampMs() + this.options.ttlMs;
+        // Companion renewal (workspace lease): best effort — a failure here
+        // never turns a confirmed objective renewal into a failure.
+        try {
+          await this.options.onRenewed?.({ expiresAtMs: this.currentExpiresAtMs });
+        } catch {
+          // Absorbed deliberately; the initiation gate re-verifies the lease.
+        }
+        return true;
+      }
+      if (outcome.kind === 'refused') {
+        this.stopRenewing('lease renewal was refused by the store');
         return false;
       }
-      return outcome;
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      transientReason = outcome.reason;
+      if (attempt >= this.maxRenewalAttempts) break;
+      const retryRefusal = await this.retryRefusal();
+      if (retryRefusal !== undefined) {
+        this.stopRenewing(`${transientReason}; not retried — ${retryRefusal}`);
+        return false;
+      }
+      await this.sleep(this.retryDelayMs);
+    }
+    this.stopRenewing(
+      `${transientReason ?? 'lease renewal failed'}; gave up after ${String(
+        this.maxRenewalAttempts,
+      )} attempt(s) — ownership is NOT confirmed by renewal`,
+    );
+    return false;
+  }
+
+  /**
+   * RETRY-01 — may another attempt be made? Only while the two facts the sprint
+   * requires still hold:
+   *   • the lease this heartbeat knows about has not expired;
+   *   • the store still records this exact acquisition as the owner.
+   * A store that cannot answer the ownership question (legacy) is not treated as
+   * "lost": the retry itself is harmless because the store re-validates.
+   * A retry that could not finish before expiry is pointless, so it is skipped.
+   */
+  private async retryRefusal(): Promise<string | undefined> {
+    if (this.stopped) return 'the heartbeat was stopped';
+    const nowMs = this.options.clock.timestampMs();
+    if (nowMs >= this.currentExpiresAtMs) return 'the lease expired during the retry window';
+    if (nowMs + this.renewalTimeoutMs > this.currentExpiresAtMs) {
+      return 'no time remains to complete another renewal before expiry';
+    }
+    const canAsk = typeof this.options.store.holdsObjectiveLease === 'function';
+    if (canAsk && !(await this.stillOwnsObjective())) return 'ownership was lost';
+    return undefined;
+  }
+
+  /**
+   * LEASE-02/RETRY-01 — ONE attempt, bounded by the renewal budget.
+   *
+   * A renewal that does not settle within the budget is TRANSIENT (not
+   * confirmed, not refused): the caller decides whether it may be retried.
+   * The late settlement of an abandoned attempt can never schedule another
+   * attempt or restore authority — the outcome is already classified.
+   */
+  private async performRenewalWithinBudget(): Promise<RenewalOutcome> {
+    try {
+      if (this.renewalTimeoutMs <= 0) {
+        return (await this.performRenewal()) ? { kind: 'confirmed' } : { kind: 'refused' };
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(TIMED_OUT);
+        }, this.renewalTimeoutMs);
+      });
+      try {
+        const outcome = await Promise.race([this.performRenewal(), timeout]);
+        if (outcome === TIMED_OUT) {
+          return {
+            kind: 'transient',
+            reason: `lease renewal did not settle within ${String(this.renewalTimeoutMs)}ms — ownership is NOT confirmed`,
+          };
+        }
+        return outcome ? { kind: 'confirmed' } : { kind: 'refused' };
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    } catch (error: unknown) {
+      return {
+        kind: 'transient',
+        reason: `lease renewal failed (${
+          error instanceof Error ? error.message : String(error)
+        }) — ownership can no longer be confirmed by renewal`,
+      };
     }
   }
 
@@ -287,9 +473,7 @@ export class ObjectiveLeaseHeartbeat {
         expiresAt: new Date(nowMs + this.options.ttlMs).toISOString(),
       },
     );
-    if (!renewed) return false;
-    this.successCount += 1;
-    return true;
+    return renewed !== undefined;
   }
 
   private stopRenewing(reason: string): void {

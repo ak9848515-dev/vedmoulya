@@ -36,7 +36,26 @@ export {
 // table exists before ANY procedure queries it (the DashboardAssembler's
 // knowledge_nodes ILIKE probe raced CREATE TABLE IF NOT EXISTS on cold
 // starts because independent procedures never awaited hydration).
-export { awaitAllEngineEnsureTables } from './infrastructure/ProductionRepositories.js';
+export {
+  awaitAllEngineEnsureTables,
+  createEISql,
+} from './infrastructure/ProductionRepositories.js';
+
+// SCHEMA-01 — the persistence bundle's dedicated, additive schema bootstrap
+// (used by `scripts/bootstrap-schema.ts`). Request-time DDL stays enabled; this
+// is an additional deploy-time path, not a replacement.
+export {
+  createSchemaBootstrap,
+  resolvePersistenceBundle,
+} from './infrastructure/PersistenceStores.js';
+export type {
+  PersistenceBundle,
+  PersistenceStores,
+  PersistenceStoreOverrides,
+  SchemaBootstrapEntry,
+  SchemaBootstrapReport,
+  SchemaBootstrapTarget,
+} from './infrastructure/PersistenceStores.js';
 
 export type {
   DependencyHealthResult,

@@ -440,7 +440,15 @@ export class MissionService {
     let stores: MissionRuntimeOptions['stores'] | undefined;
     if (this.options.sql) {
       const persisted = await ensureMissionPersistence(this.options.sql);
-      stores = { missions: persisted.missions, checkpoints: persisted.checkpoints };
+      // WORKSPACE-01 — the durable workspace lease is composed from the SAME
+      // SQL handle and the SAME document table, so two missions pointing at the
+      // same authorized workspace can never execute concurrently — including
+      // across processes (the mission loop already runs in more than one).
+      stores = {
+        missions: persisted.missions,
+        checkpoints: persisted.checkpoints,
+        workspaceLeases: persisted.workspaceLeases,
+      };
     }
     // ── FINAL-04 — DURABLE EXECUTION LEARNING ────────────────────────────
     //    Without this, execution learning lived only in process memory and
