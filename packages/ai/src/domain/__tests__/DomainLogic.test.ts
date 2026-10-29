@@ -38,7 +38,9 @@ describe('AIDomainService', () => {
     expect(service.isRetryableFailure('timeout')).toBe(true);
     expect(service.isRetryableFailure('rate_limited')).toBe(true);
     expect(service.isRetryableFailure('provider_unavailable')).toBe(true);
-    expect(service.isRetryableFailure('invalid_response')).toBe(false);
+    expect(service.isRetryableFailure('invalid_response')).toBe(true);
+    expect(service.isRetryableFailure('invalid_output')).toBe(false);
+    expect(service.isRetryableFailure('authentication_error')).toBe(false);
   });
 
   it('calculates exponential backoff with a cap', () => {
@@ -63,7 +65,7 @@ describe('AIDomainService', () => {
   it('decides provider switching based on failure pattern', () => {
     const noFailure = { failureReason: null, attempts: 0 } as never;
     expect(service.shouldSwitchProvider(noFailure)).toBe(false);
-    const nonRetryable = { failureReason: 'invalid_response', attempts: 1 } as never;
+    const nonRetryable = { failureReason: 'invalid_output', attempts: 1 } as never;
     expect(service.shouldSwitchProvider(nonRetryable)).toBe(true);
     const retryableUnder3 = { failureReason: 'timeout', attempts: 2 } as never;
     expect(service.shouldSwitchProvider(retryableUnder3)).toBe(false);

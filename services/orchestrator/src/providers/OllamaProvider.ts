@@ -72,6 +72,126 @@ export class OllamaModelNotFoundError extends Error {
   }
 }
 
+/**
+ * Typed failure: the local runtime answered HTTP 200 but the body carried no
+ * usable `message.content` (missing, non-string, empty or whitespace-only), or
+ * content that is not the JSON a structured request explicitly asked for.
+ *
+ * WHY THIS EXISTS: an HTTP 200 is a TRANSPORT fact, never proof of valid
+ * content. Before this type, any 200 body produced a response with
+ * `validation.passed: true` — an empty draft from a small local model was
+ * recorded as a successful generation, which for a paid business-document
+ * workflow means delivering nothing and calling it done.
+ *
+ * `code` is stable so telemetry/routing can classify it without parsing the
+ * message. The message is deliberately NON-RETRYABLE (see
+ * `AIOrchestrationService.classifyFailure`): re-asking the SAME model that just
+ * produced an empty body only burns budget, so the runtime falls through to
+ * its installed-model / next-provider policy instead.
+ */
+export class OllamaInvalidOutputError extends Error {
+  readonly code = 'INVALID_OUTPUT';
+  constructor(
+    readonly modelId: string,
+    /** Why the body was unusable — a short machine-readable tag, never content. */
+    readonly reason: 'missing_content' | 'non_string_content' | 'empty_content' | 'invalid_json',
+  ) {
+    super(
+      `Ollama model "${modelId}" returned unusable output (${reason}) — HTTP 200 is not proof of valid content.`,
+    );
+    this.name = 'OllamaInvalidOutputError';
+  }
+}
+
+/**
+ * Typed failure: the local runtime could not ALLOCATE the model (out of system
+ * memory / failed CPU or GPU buffer allocation). Unlike a generic 5xx this can
+ * never succeed on retry for the SAME model — each attempt re-allocates — so it
+ * is non-retryable and the provider moves to a smaller installed model instead.
+ */
+export class OllamaModelMemoryError extends Error {
+  readonly code = 'MODEL_OUT_OF_MEMORY';
+  constructor(
+    readonly modelId: string,
+    /** The runtime's own short error text (never a prompt or credential). */
+    readonly detail: string,
+  ) {
+    super(`Ollama model "${modelId}" could not be loaded: ${detail}`);
+    this.name = 'OllamaModelMemoryError';
+  }
+}
+
+/**
+ * Does an Ollama error string describe an ALLOCATION failure (the model does
+ * not fit in RAM/VRAM)? Ollama reports these with several phrasings across
+ * versions and backends, e.g.
+ *   "model requires more system memory (5.2 GiB) than is available (3.1 GiB)"
+ *   "failed to allocate CUDA0 buffer" / "out of memory" / "insufficient memory"
+ *   "not enough VRAM" / "ggml_backend_cuda_buffer_type_alloc_buffer: ... failed"
+ * Only ALLOCATION wording matches — a plain 5xx or a timeout must stay
+ * retryable, so this must never degrade into "contains 'error'".
+ */
+export function isOllamaMemoryError(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    normalized.includes('requires more system memory') ||
+    normalized.includes('more system memory') ||
+    normalized.includes('out of memory') ||
+    normalized.includes('insufficient memory') ||
+    normalized.includes('not enough memory') ||
+    normalized.includes('not enough vram') ||
+    normalized.includes('out of vram') ||
+    normalized.includes('failed to allocate') ||
+    normalized.includes('allocation failed') ||
+    normalized.includes('alloc_buffer') ||
+    normalized.includes('unable to allocate')
+  );
+}
+
+/**
+ * What a request REQUIRES of the model output.
+ *   • 'text' — any non-blank text is a valid answer (the default; ordinary
+ *     chat/completion must never be forced to be JSON);
+ *   • 'json' — the caller explicitly asked for a JSON object (structured
+ *     output), so the body must parse before it can count as success.
+ *
+ * A schema for the structured path is appended by `generateStructured`; the
+ * per-field schema validation stays where it already lives
+ * (`StructuredOutputValidator` in the orchestrator), so this adapter only
+ * enforces the FORMAT the request declared.
+ */
+export type OllamaOutputFormat = 'text' | 'json';
+
+/**
+ * Is this text a parseable JSON value? Used ONLY when the request declared
+ * `outputFormat: 'json'`. Accepts a fenced ```json block (small local models
+ * routinely wrap JSON in prose fences) by extracting the first balanced object
+ * or array. Returns false — never throws — so a malformed body is a typed
+ * failure rather than a crash. Field-level schema validation stays in the
+ * orchestrator's `StructuredOutputValidator`.
+ */
+export function isParseableJson(text: string): boolean {
+  const trimmed = text.trim();
+  const candidates = [trimmed];
+  // ```json { ... } ``` → try the fenced payload too.
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
+  if (fenced?.[1] !== undefined) candidates.push(fenced[1].trim());
+  // A bare object/array embedded in prose.
+  const start = trimmed.search(/[{[]/);
+  const end = Math.max(trimmed.lastIndexOf('}'), trimmed.lastIndexOf(']'));
+  if (start >= 0 && end > start) candidates.push(trimmed.slice(start, end + 1));
+  for (const candidate of candidates) {
+    if (candidate === '') continue;
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (parsed !== null && typeof parsed === 'object') return true;
+    } catch {
+      // try the next candidate shape
+    }
+  }
+  return false;
+}
+
 const DEFAULT_MODEL = 'llama3.2';
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_HEALTH_TIMEOUT_MS = 1_500;
@@ -290,7 +410,14 @@ export class OllamaProvider implements ProviderAdapter {
     model: string;
     maxTokens?: number;
     modelId?: string;
+    /**
+     * What this request requires of the OUTPUT. Defaults to 'text' — ordinary
+     * chat/completion is never forced to be JSON. `generateStructured` passes
+     * 'json' because the caller explicitly asked for a JSON object.
+     */
+    outputFormat?: OllamaOutputFormat;
   }): Promise<AIResponse> {
+    const outputFormat: OllamaOutputFormat = request.outputFormat ?? 'text';
     // The runtime did not name a model, so this adapter owns the choice —
     // resolve it against what is ACTUALLY installed rather than assuming the
     // configured preference was ever pulled. When the runtime DOES name a
@@ -349,19 +476,47 @@ export class OllamaProvider implements ProviderAdapter {
           try {
             const errJson = (await response.json()) as { error?: string };
             if (typeof errJson.error === 'string' && errJson.error.trim() !== '') {
-              detail = `: ${errJson.error.trim()}`;
+              detail = errJson.error.trim();
             }
           } catch {
             // preserve status only
           }
-          throw new Error(`Ollama chat failed: api error: ${String(response.status)}${detail}`);
+          // An ALLOCATION failure is not a transient server error: retrying the
+          // same model re-attempts the same allocation and can only fail (and
+          // thrashes the machine). Typed so it is never retried for this model.
+          if (detail !== '' && isOllamaMemoryError(detail)) {
+            throw new OllamaModelMemoryError(modelToRun, detail);
+          }
+          throw new Error(
+            `Ollama chat failed: api error: ${String(response.status)}${detail !== '' ? `: ${detail}` : ''}`,
+          );
         }
         const data = (await response.json()) as {
-          message?: { content?: string };
+          message?: { content?: unknown };
           prompt_eval_count?: number;
           eval_count?: number;
         };
-        const content = data.message?.content ?? '';
+        // ── HTTP 200 IS NOT PROOF OF VALID CONTENT ───────────────────────
+        //    A small local model can answer 200 with no `message`, no
+        //    `content`, a non-string `content`, or blank whitespace. Before
+        //    this check every such body became a response with
+        //    `validation.passed: true` — an empty document recorded as a
+        //    successful generation. Validate the body before claiming success.
+        const rawContent = data.message?.content;
+        if (rawContent === undefined || rawContent === null) {
+          throw new OllamaInvalidOutputError(modelToRun, 'missing_content');
+        }
+        if (typeof rawContent !== 'string') {
+          throw new OllamaInvalidOutputError(modelToRun, 'non_string_content');
+        }
+        const content = rawContent;
+        if (content.trim() === '') {
+          throw new OllamaInvalidOutputError(modelToRun, 'empty_content');
+        }
+        // Only when the REQUEST required JSON. Ordinary text stays free-form.
+        if (outputFormat === 'json' && !isParseableJson(content)) {
+          throw new OllamaInvalidOutputError(modelToRun, 'invalid_json');
+        }
         const latency = Date.now() - startedAt;
         const inputTokens = data.prompt_eval_count ?? 0;
         const outputTokens = data.eval_count ?? 0;
@@ -411,7 +566,26 @@ export class OllamaProvider implements ProviderAdapter {
           },
         };
       } catch (err) {
-        lastError = err as Error;
+        const failure = err as Error;
+        // An EXPLICIT per-request model (`modelId`) must never be substituted:
+        // whatever went wrong is that model's final answer. Same for the typed
+        // not-found refusal. Both keep their documented semantics.
+        if (request.modelId !== undefined || failure instanceof OllamaModelNotFoundError) {
+          throw failure;
+        }
+        // Remember the FIRST failure as the reported cause, and prefer a typed
+        // failure (memory / invalid output) over a later generic one so the
+        // orchestrator classifies the real reason instead of "internal_error".
+        if (
+          lastError === undefined ||
+          ((failure instanceof OllamaModelMemoryError ||
+            failure instanceof OllamaInvalidOutputError) &&
+            !(lastError instanceof OllamaModelMemoryError))
+        ) {
+          lastError = failure;
+        }
+        // A model that did not FIT is never retried here, but a SMALLER
+        // installed model is a legitimate next candidate (when fallback is on).
         continue;
       }
     }
@@ -442,7 +616,7 @@ export class OllamaProvider implements ProviderAdapter {
           }
         : message,
     );
-    return this.execute({ ...request, messages });
+    return this.execute({ ...request, messages, outputFormat: 'json' });
   }
 
   /**

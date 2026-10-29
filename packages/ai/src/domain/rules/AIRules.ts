@@ -72,6 +72,11 @@ export function qualityTierRule(capability: CapabilityType, tier: QualityTier): 
  * same bounded budget is the documented structured-output behaviour. Credential,
  * unsupported-model and internal failures stay out of this list: retrying them
  * cannot succeed and only burns budget.
+ *
+ * 'invalid_output' is deliberately ABSENT: the adapter produced no usable body
+ * at all (empty/whitespace-only, or not the JSON the request required). Re-asking
+ * the same model re-runs the same prompt for the same result, so the runtime
+ * spends its fallback budget on a different model/provider instead.
  */
 export const RETRYABLE_FAILURE_REASONS: readonly FailureReason[] = [
   'timeout',

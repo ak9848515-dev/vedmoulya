@@ -201,6 +201,14 @@ export type FailureReason =
   | 'budget_exceeded'
   | 'context_window_exceeded'
   | 'unsupported_model'
+  // An adapter returned NO USABLE OUTPUT (empty/whitespace-only body, or a body
+  // that is not the JSON a structured request explicitly required). Distinct
+  // from 'invalid_response' on purpose: 'invalid_response' is a bounded,
+  // retryable generation artifact (see RETRYABLE_FAILURE_REASONS), while an
+  // empty/unusable body is the model's final answer for that prompt — retrying
+  // the SAME model only burns budget, so the runtime moves to its installed-
+  // model / next-provider policy instead of re-asking.
+  | 'invalid_output'
   // Capability Intelligence — authentication/credential failures are a
   // DISTINCT routing consequence: non-retryable (see AIRules retryable
   // allowlists) so the runtime falls back to the next provider instead of

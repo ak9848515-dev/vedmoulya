@@ -153,6 +153,42 @@ export interface RoutingIntent {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
+/**
+ * LOCAL-ONLY POLICY (B3) — raised when a mission that must not invoke cloud
+ * providers has no ALLOWED provider able to serve the capability.
+ *
+ * It FAILS CLOSED: the alternative (falling through to whatever cloud provider
+ * happens to be registered) would spend a customer's money on a provider the
+ * deployment explicitly forbade. `code` is stable for callers/telemetry.
+ */
+export class LocalOnlyProviderUnavailableError extends Error {
+  readonly code = 'LOCAL_ONLY_PROVIDER_UNAVAILABLE';
+  constructor(
+    readonly capability: string,
+    readonly allowedFamilies: readonly string[],
+  ) {
+    super(
+      `Local-only policy is active: no available provider in [${allowedFamilies.join(', ')}] ` +
+        `can serve capability '${capability}'. Cloud providers were NOT used.`,
+    );
+    this.name = 'LocalOnlyProviderUnavailableError';
+  }
+}
+
+/**
+ * Normalize the local-only family allowlist: trimmed, lowercased, de-duplicated.
+ * An empty/absent list means NO policy (existing behaviour preserved).
+ */
+function normalizeLocalOnlyFamilies(families: readonly string[] | undefined): string[] {
+  if (!families || families.length === 0) return [];
+  const normalized = new Set<string>();
+  for (const family of families) {
+    const value = typeof family === 'string' ? family.trim().toLowerCase() : '';
+    if (value !== '') normalized.add(value);
+  }
+  return [...normalized];
+}
+
 /** Maximum retries per provider before falling back to the next candidate. */
 const MAX_RETRIES = 3;
 
@@ -195,6 +231,17 @@ export interface AIOrchestrationOptions {
    *  execution outcome is reported; the advisor reads the resulting bounded
    *  health on later decisions. Absent → no feedback (unchanged behavior). */
   healthFeedback?: HealthFeedbackPort;
+  /**
+   * LOCAL-ONLY POLICY (B3) — when set, ONLY providers whose `family` appears in
+   * this list may execute. This is a HARD execution-boundary filter, not a
+   * routing preference: no cloud provider can be reached, not even as a retry
+   * hop, an advisor fallback, a stream fallback or a last-resort synthetic
+   * provider. When no allowed provider can serve the capability the request
+   * FAILS CLOSED with a typed error instead of silently using a cloud model.
+   *
+   * Absent/empty → no policy (existing behaviour, byte-for-byte unchanged).
+   */
+  localOnlyProviders?: readonly string[];
 }
 
 export class AIOrchestrationService extends BaseService {
@@ -217,6 +264,12 @@ export class AIOrchestrationService extends BaseService {
   private readonly observability: AIObservability;
   private healthFeedback: HealthFeedbackPort | undefined;
   private advisor: ProviderRoutingAdvisor | undefined;
+  /**
+   * LOCAL-ONLY POLICY (B3) — the provider FAMILIES allowed to execute. Empty
+   * means "no policy" (existing behaviour). Normalized once at construction so
+   * every comparison is a simple `includes`.
+   */
+  private readonly localOnlyFamilies: readonly string[];
 
   constructor(options: AIOrchestrationOptions = {}) {
     super('ai-orchestrator');
@@ -234,6 +287,7 @@ export class AIOrchestrationService extends BaseService {
     this.evidenceEvaluator = options.evidenceEvaluator ?? new EvidenceEvaluator();
     this.observability = options.observability ?? new AIObservability();
     this.healthFeedback = options.healthFeedback;
+    this.localOnlyFamilies = normalizeLocalOnlyFamilies(options.localOnlyProviders);
     this.rebuildAdvisor();
   }
 
@@ -322,9 +376,25 @@ export class AIOrchestrationService extends BaseService {
     }
 
     // Find providers supporting this capability
-    const candidates = Array.from(this.providers.values()).filter((p) =>
+    let candidates = Array.from(this.providers.values()).filter((p) =>
       p.capabilities.includes(capability),
     );
+
+    // ── LOCAL-ONLY POLICY (B3) — ENFORCED AT THE EXECUTION BOUNDARY ────────
+    //    Filtering HERE (not in the ranking advisor) means every path that
+    //    executes — orchestrate, stream, structured, every retry hop, every
+    //    advisor fallback and the synthetic last resort — can only ever see
+    //    allowed providers. A ranking hint would be bypassable by a failed
+    //    primary; this cannot be.
+    if (this.localOnlyFamilies.length > 0) {
+      candidates = candidates.filter((provider) =>
+        this.localOnlyFamilies.includes(provider.family),
+      );
+      if (candidates.length === 0) {
+        // FAIL CLOSED — never silently reach for a cloud provider.
+        throw new LocalOnlyProviderUnavailableError(capability, [...this.localOnlyFamilies]);
+      }
+    }
 
     if (candidates.length === 0) {
       throw new NotFoundError('Provider', capability);
@@ -432,6 +502,22 @@ export class AIOrchestrationService extends BaseService {
    */
   private classifyFailure(error: unknown): FailureReason {
     const message = error instanceof Error ? error.message.toLowerCase() : String(error);
+    const code = (error as { code?: unknown } | null)?.code;
+
+    // An adapter that answered with NO USABLE OUTPUT (empty/whitespace-only
+    // body, or not the JSON the request required) is non-retryable: the same
+    // model given the same prompt produces the same result, so the budget goes
+    // to the next installed model / provider instead of a futile re-ask.
+    if (code === 'INVALID_OUTPUT' || message.includes('returned unusable output')) {
+      return 'invalid_output';
+    }
+    // A model that could not be ALLOCATED (out of memory / failed buffer
+    // allocation) cannot fit on a retry either — each attempt re-allocates.
+    // Mapped to the same non-retryable reason so the runtime moves to a smaller
+    // installed model instead of thrashing the machine four times.
+    if (code === 'MODEL_OUT_OF_MEMORY' || message.includes('could not be loaded')) {
+      return 'invalid_output';
+    }
 
     if (message.includes('429') || message.includes('rate limit')) {
       return 'rate_limited';
@@ -1992,7 +2078,13 @@ export class AIOrchestrationService extends BaseService {
    */
   private isStructuredValidationFailure(error: unknown): boolean {
     return (
-      error instanceof Error && error.message.startsWith('Structured output validation failed')
+      error instanceof Error &&
+      error.message.startsWith('Structured output validation failed') &&
+      // An adapter that already rejected the OUTPUT (empty body / not JSON) is
+      // classified by `classifyFailure` as the non-retryable 'invalid_output'.
+      // Re-labelling it 'invalid_response' here would silently re-enable the
+      // retry this guard exists to prevent.
+      (error as { code?: unknown }).code !== 'INVALID_OUTPUT'
     );
   }
 

@@ -80,7 +80,7 @@ export const DEFAULT_LEASE_RENEWAL_TIMEOUT_MS = 5_000;
 export function resolveLeaseRenewalTimeoutMs(explicit?: number): number {
   if (explicit !== undefined && Number.isFinite(explicit) && explicit > 0) return explicit;
   const envVal = process.env.MISSION_LEASE_RENEWAL_TIMEOUT_MS?.trim();
-  if (envVal) {
+  if (envVal && /^\d+$/.test(envVal)) {
     const parsed = Number.parseInt(envVal, 10);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }

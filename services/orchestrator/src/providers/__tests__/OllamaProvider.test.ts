@@ -419,3 +419,295 @@ describe('OllamaProvider (same provider contract as every other provider)', () =
     expect(JSON.parse(chatBodies[0] ?? '{}').model).toBe('llama3.2');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B1 — HTTP 200 IS NOT PROOF OF VALID CONTENT
+//
+// A small local model can answer 200 with no `message`, no `content`, a
+// non-string `content`, or blank whitespace. Every such body used to become a
+// response with `validation.passed: true` — an empty draft recorded as a
+// successful generation. These lock the rejection contract.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('OllamaProvider · B1 rejects invalid output (HTTP 200 ≠ valid content)', () => {
+  /** A raw 200 body, bypassing the `chatResponse` helper on purpose. */
+  const rawBody = (body: unknown): Response => new Response(JSON.stringify(body), { status: 200 });
+
+  const provider = (): OllamaProvider =>
+    new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' });
+
+  /** Serve /api/tags listing llama3.2, then the given chat body. */
+  const withChatBody = (body: unknown): void => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).endsWith('/api/tags')) {
+          return new Response(
+            JSON.stringify({ models: [{ name: 'llama3.2', capabilities: ['completion'] }] }),
+            { status: 200 },
+          );
+        }
+        return rawBody(body);
+      }),
+    );
+  };
+
+  const expectInvalidOutput = async (
+    body: unknown,
+    reason: string,
+    outputFormat?: 'text' | 'json',
+  ): Promise<void> => {
+    withChatBody(body);
+    const subject = provider();
+    await expect(
+      subject.execute({
+        messages: [{ role: 'user', content: 'write the document' }],
+        model: 'ollama',
+        ...(outputFormat ? { outputFormat } : {}),
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_OUTPUT', reason });
+  };
+
+  it('rejects empty content', async () => {
+    await expectInvalidOutput(
+      { message: { role: 'assistant', content: '' }, prompt_eval_count: 5, eval_count: 0 },
+      'empty_content',
+    );
+  });
+
+  it('rejects a missing message', async () => {
+    await expectInvalidOutput({ prompt_eval_count: 5, eval_count: 0 }, 'missing_content');
+  });
+
+  it('rejects a message without content', async () => {
+    await expectInvalidOutput({ message: { role: 'assistant' } }, 'missing_content');
+  });
+
+  it('rejects null content', async () => {
+    await expectInvalidOutput({ message: { role: 'assistant', content: null } }, 'missing_content');
+  });
+
+  it('rejects non-string content (number, object, array)', async () => {
+    for (const content of [42, { text: 'hi' }, ['a', 'b'], true]) {
+      await expectInvalidOutput({ message: { role: 'assistant', content } }, 'non_string_content');
+    }
+  });
+
+  it('rejects whitespace-only content (spaces, tabs, newlines)', async () => {
+    for (const content of ['   ', '\n\n', '\t \r\n ', ' \u00a0 ']) {
+      await expectInvalidOutput({ message: { role: 'assistant', content } }, 'empty_content');
+    }
+  });
+
+  it('rejects malformed JSON when the request requires JSON', async () => {
+    await expectInvalidOutput(
+      { message: { role: 'assistant', content: 'Sure! Here is your JSON: { not json' } },
+      'invalid_json',
+      'json',
+    );
+  });
+
+  it('rejects plain prose when the request requires JSON', async () => {
+    await expectInvalidOutput(
+      { message: { role: 'assistant', content: 'The document is ready.' } },
+      'invalid_json',
+      'json',
+    );
+  });
+
+  it('never reports validation.passed: true for any invalid body', async () => {
+    const bodies: unknown[] = [
+      { message: { content: '' } },
+      { message: {} },
+      {},
+      { message: { content: 123 } },
+      { message: { content: '   ' } },
+    ];
+    for (const body of bodies) {
+      withChatBody(body);
+      let result: unknown;
+      try {
+        result = await provider().execute({
+          messages: [{ role: 'user', content: 'x' }],
+          model: 'ollama',
+        });
+      } catch {
+        result = undefined;
+      }
+      // Either it threw (required) or — never — a passed response came back.
+      expect(result).toBeUndefined();
+    }
+  });
+
+  it('keeps valid ordinary text working (text is NOT forced to be JSON)', async () => {
+    withChatBody({
+      message: { role: 'assistant', content: 'A perfectly ordinary prose answer.' },
+      prompt_eval_count: 9,
+      eval_count: 4,
+    });
+    const response = await provider().execute({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'ollama',
+    });
+    expect(response.content).toBe('A perfectly ordinary prose answer.');
+    expect(response.validation.passed).toBe(true);
+  });
+
+  it('keeps valid structured JSON working, including a fenced json block', async () => {
+    for (const content of ['{"title":"Doc","body":"Text"}', '```json\n{"title":"Doc"}\n```']) {
+      withChatBody({ message: { role: 'assistant', content } });
+      const response = await provider().execute({
+        messages: [{ role: 'user', content: 'return json' }],
+        model: 'ollama',
+        outputFormat: 'json',
+      });
+      expect(response.content).toBe(content);
+      expect(response.validation.passed).toBe(true);
+    }
+  });
+
+  it('generateStructured requires JSON (it asks for JSON explicitly)', async () => {
+    withChatBody({ message: { role: 'assistant', content: 'not json at all' } });
+    await expect(
+      provider().generateStructured({
+        messages: [{ role: 'user', content: 'return json' }],
+        model: 'ollama',
+        schema: { type: 'object' },
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_OUTPUT', reason: 'invalid_json' });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B2 — AN UNRECOVERABLE MEMORY ERROR IS NOT RETRIED
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('OllamaProvider · B2 model that does not fit is not re-attempted', () => {
+  /** Serve /api/tags with the given installed models; OOM the named ones. */
+  const withModels = (
+    installed: string[],
+    behaviour: (model: string) => { status: number; body: unknown },
+  ): { fetchMock: ReturnType<typeof vi.fn>; chatCalls: string[] } => {
+    const chatCalls: string[] = [];
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.endsWith('/api/tags')) {
+        return new Response(
+          JSON.stringify({
+            models: installed.map((name) => ({ name, capabilities: ['completion'] })),
+          }),
+          { status: 200 },
+        );
+      }
+      const body = JSON.parse(String(init?.body ?? '{}')) as { model: string };
+      chatCalls.push(body.model);
+      const outcome = behaviour(body.model);
+      return new Response(JSON.stringify(outcome.body), { status: outcome.status });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return { fetchMock, chatCalls };
+  };
+
+  const OOM = {
+    status: 500,
+    body: {
+      error: 'model requires more system memory (5.2 GiB) than is available (3.1 GiB)',
+    },
+  };
+
+  it('reports a typed, non-retryable memory failure for the failing model', async () => {
+    withModels(['llama3.2'], () => OOM);
+    const subject = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' });
+    await expect(
+      subject.execute({ messages: [{ role: 'user', content: 'x' }], model: 'ollama' }),
+    ).rejects.toMatchObject({ code: 'MODEL_OUT_OF_MEMORY' });
+  });
+
+  it('makes EXACTLY ONE attempt for the failing model when fallback is off', async () => {
+    const { chatCalls } = withModels(['llama3.2'], () => OOM);
+    const subject = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' });
+    await expect(
+      subject.execute({ messages: [{ role: 'user', content: 'x' }], model: 'ollama' }),
+    ).rejects.toThrow();
+    expect(chatCalls.filter((model) => model === 'llama3.2')).toHaveLength(1);
+  });
+
+  it('attempts a configured SMALLER installed model when fallback is enabled', async () => {
+    const { chatCalls } = withModels(['llama3.2', 'qwen2.5-coder:3b'], (model) =>
+      model === 'llama3.2'
+        ? OOM
+        : {
+            status: 200,
+            body: { message: { role: 'assistant', content: 'small model answer' }, eval_count: 3 },
+          },
+    );
+    const subject = new OllamaProvider({
+      baseUrl: 'http://127.0.0.1:11434',
+      model: 'llama3.2',
+      fallbackToInstalledModel: true,
+    });
+    const response = await subject.execute({
+      messages: [{ role: 'user', content: 'x' }],
+      model: 'ollama',
+    });
+    // The failing model was tried once; the smaller installed model served.
+    expect(chatCalls.filter((model) => model === 'llama3.2')).toHaveLength(1);
+    expect(response.model).toBe('qwen2.5-coder:3b');
+    expect(response.content).toBe('small model answer');
+  });
+
+  it('recognizes the other documented allocation phrasings', async () => {
+    const phrasings = [
+      'failed to allocate CUDA0 buffer of size 1234567',
+      'out of memory',
+      'insufficient memory for model',
+      'not enough VRAM available',
+      'unable to allocate tensor',
+      'ggml_backend_cuda_buffer_type_alloc_buffer: creating buffer failed',
+    ];
+    for (const error of phrasings) {
+      withModels(['llama3.2'], () => ({ status: 500, body: { error } }));
+      const subject = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' });
+      await expect(
+        subject.execute({ messages: [{ role: 'user', content: 'x' }], model: 'ollama' }),
+      ).rejects.toMatchObject({ code: 'MODEL_OUT_OF_MEMORY' });
+    }
+  });
+
+  it('keeps UNRELATED 5xx server errors as ordinary retryable failures', async () => {
+    withModels(['llama3.2'], () => ({ status: 503, body: { error: 'service starting up' } }));
+    const subject = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' });
+    await expect(
+      subject.execute({ messages: [{ role: 'user', content: 'x' }], model: 'ollama' }),
+    ).rejects.toThrow(/api error: 503/);
+    // Not misclassified as a memory failure.
+    await expect(
+      subject.execute({ messages: [{ role: 'user', content: 'x' }], model: 'ollama' }),
+    ).rejects.not.toMatchObject({ code: 'MODEL_OUT_OF_MEMORY' });
+  });
+
+  it('an explicit per-request modelId is never substituted, even on OOM', async () => {
+    const { chatCalls } = withModels(['llama3.2', 'qwen2.5-coder:3b'], () => OOM);
+    const subject = new OllamaProvider({
+      baseUrl: 'http://127.0.0.1:11434',
+      model: 'llama3.2',
+      fallbackToInstalledModel: true,
+    });
+    await expect(
+      subject.execute({
+        messages: [{ role: 'user', content: 'x' }],
+        model: 'ollama',
+        modelId: 'llama3.2',
+      }),
+    ).rejects.toMatchObject({ code: 'MODEL_OUT_OF_MEMORY' });
+    expect(chatCalls).toEqual(['llama3.2']);
+  });
+
+  it('a missing model keeps its documented typed semantics (MODEL_NOT_FOUND)', async () => {
+    withModels(['qwen2.5-coder:3b'], () => ({ status: 200, body: { message: { content: 'x' } } }));
+    const subject = new OllamaProvider({ baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' });
+    await expect(
+      subject.execute({ messages: [{ role: 'user', content: 'x' }], model: 'ollama' }),
+    ).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' });
+  });
+});

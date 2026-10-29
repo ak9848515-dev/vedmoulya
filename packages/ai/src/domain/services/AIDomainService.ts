@@ -7,6 +7,7 @@
 import { BaseService } from '@vedmoulya/core';
 import type { AIRequest } from '../entities/AIRequest.js';
 import type { CapabilityType, QualityTier, FailureReason } from '../../types/index.js';
+import { RETRYABLE_FAILURE_REASONS } from '../rules/AIRules.js';
 
 export class AIDomainService extends BaseService {
   constructor() {
@@ -52,8 +53,10 @@ export class AIDomainService extends BaseService {
    * Determine if a failure is retryable
    */
   isRetryableFailure(reason: FailureReason): boolean {
-    const retryable: FailureReason[] = ['timeout', 'rate_limited', 'provider_unavailable'];
-    return retryable.includes(reason);
+    // ONE authoritative allowlist (`AIRules.RETRYABLE_FAILURE_REASONS`) — this
+    // previously held a second copy that silently omitted 'invalid_response'
+    // and would have silently granted a retry to any reason added there.
+    return RETRYABLE_FAILURE_REASONS.includes(reason);
   }
 
   /**

@@ -5,7 +5,10 @@
 // ARC-005 — AI Orchestration
 // ──────────────────────────────────────────────────────────────────
 
-export { AIOrchestrationService } from './AIOrchestrationService.js';
+export {
+  AIOrchestrationService,
+  LocalOnlyProviderUnavailableError,
+} from './AIOrchestrationService.js';
 export type { ProviderAdapter, AIOrchestrationOptions } from './AIOrchestrationService.js';
 export { AIMapper } from './AIMapper.js';
 export { AIMetrics } from './AIMetrics.js';

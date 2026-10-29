@@ -19,6 +19,18 @@ import { OpenAIEmbeddingProvider } from './providers/OpenAIEmbeddingProvider.js'
 
 export interface OrchestratorConfig {
   defaultProvider?: string;
+  /**
+   * LOCAL-ONLY POLICY (B3) — provider FAMILIES allowed to execute (e.g.
+   * `['ollama']`). Set this for missions that must never spend money on a cloud
+   * provider. It is enforced at the EXECUTION BOUNDARY by
+   * `AIOrchestrationService.selectCandidates`, so it also covers retries,
+   * advisor fallbacks, streams and the synthetic last resort — not just
+   * ranking. When no allowed provider can serve a capability the request fails
+   * closed with `LocalOnlyProviderUnavailableError`.
+   *
+   * Absent → no policy; routing behaves exactly as before.
+   */
+  localOnlyProviders?: readonly string[];
   providers: {
     openai?: { apiKey: string };
     anthropic?: { apiKey: string };
@@ -48,7 +60,11 @@ export interface OrchestratorConfig {
 // ── Orchestrator Bootstrap ─────────────────────────────────────────────────
 
 export function createOrchestrator(config?: Partial<OrchestratorConfig>): AIOrchestrationService {
-  const orchestrator = new AIOrchestrationService();
+  const orchestrator = new AIOrchestrationService(
+    config?.localOnlyProviders !== undefined
+      ? { localOnlyProviders: config.localOnlyProviders }
+      : {},
+  );
   registerPlatformProviders(orchestrator, config);
   return orchestrator;
 }
@@ -56,6 +72,7 @@ export function createOrchestrator(config?: Partial<OrchestratorConfig>): AIOrch
 // ── Exports ────────────────────────────────────────────────────────────────
 
 export { AIOrchestrationService } from '@vedmoulya/services';
+export { LocalOnlyProviderUnavailableError } from '@vedmoulya/services';
 export type { ProviderAdapter } from '@vedmoulya/services';
 export type {
   OrchestrateRequestDTO,
