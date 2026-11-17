@@ -124,6 +124,8 @@ export interface MissionRuntimeOptions {
   missionPermissionClasses?: ToolPermissionClass[];
   /** Inject an existing orchestrator; otherwise a fresh one is created. */
   orchestrator?: AIOrchestrationService;
+  /** Configure every shared and per-user orchestrator with host-owned intelligence ports. */
+  configureOrchestrator?: (orchestrator: AIOrchestrationService) => void;
   /**
    * Orchestrator tuning for the runtime's OWN orchestrators (shared + each
    * per-user one): retry backoff, and — for hosts that supply it — the SAME
@@ -308,7 +310,9 @@ export function buildMissionRuntimeComponents(
   // controller never sees provider details). An INJECTED orchestrator (host
   // application wiring) is left untouched — production routing stays with
   // the host's enterprise intelligence.
-  if (!options.orchestrator) {
+  if (options.configureOrchestrator) {
+    options.configureOrchestrator(orchestrator);
+  } else if (!options.orchestrator) {
     orchestrator.configureIntelligence(createOrchestratorRoutingPorts(orchestrator));
   }
 
@@ -335,9 +339,13 @@ export function buildMissionRuntimeComponents(
             // Then the owner's own credential-backed adapters, resolved
             // through the existing credential service by the host wiring.
             await options.registerUserProviders?.(userOrchestrator, userId);
-            userOrchestrator.configureIntelligence(
-              createOrchestratorRoutingPorts(userOrchestrator),
-            );
+            if (options.configureOrchestrator) {
+              options.configureOrchestrator(userOrchestrator);
+            } else {
+              userOrchestrator.configureIntelligence(
+                createOrchestratorRoutingPorts(userOrchestrator),
+              );
+            }
             return userOrchestrator;
           });
 

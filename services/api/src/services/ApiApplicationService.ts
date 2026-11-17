@@ -2926,6 +2926,16 @@ export class ApiApplicationService {
         // of the estate uses, so an autonomous generation produces an
         // owner-scoped trace and reaches the per-user CostLedger.
         aiObservability: this.createTraceBackedAiObservability(),
+        // Keep Mission on the same enterprise provider intelligence, execution
+        // strategy, RAG retrieval and health-feedback ports as Ask. The runtime
+        // applies this to both its shared and owner-scoped orchestrators.
+        runtimeOptions: {
+          configureOrchestrator: (orchestrator) => {
+            if (this.aiIntelligence !== undefined) {
+              orchestrator.configureIntelligence(this.aiIntelligence);
+            }
+          },
+        },
       });
 
     // BLD-025 §1 — Discover-and-recover: on process boot, inspect persisted
