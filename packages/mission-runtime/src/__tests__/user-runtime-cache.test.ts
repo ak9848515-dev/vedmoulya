@@ -143,6 +143,45 @@ describe('cacheUserInitialization — per-user lazy init cache', () => {
   });
 });
 
+describe('MissionRuntime — host intelligence configuration', () => {
+  it('configures the shared and each owner-scoped orchestrator through the host hook', async () => {
+    const configured: unknown[] = [];
+    const runtime = createMissionRuntime({
+      registerUserProviders: async (orchestrator) => {
+        orchestrator.registerProvider(new MockProvider());
+      },
+      configureOrchestrator: (orchestrator) => {
+        configured.push(orchestrator);
+      },
+    });
+
+    // Shared orchestrator is configured once during composition.
+    expect(configured).toHaveLength(1);
+    expect(configured[0]).toBe(runtime.orchestrator);
+
+    // Per-user orchestrators are configured after owner credentials register.
+    await runtime.ports.providerAvailability.getProviderStatus([], 'userA');
+    await runtime.ports.providerAvailability.getProviderStatus([], 'userB');
+    await runtime.ports.providerAvailability.getProviderStatus([], 'userA');
+
+    expect(configured).toHaveLength(3);
+    expect(new Set(configured).size).toBe(3);
+    expect(configured[1]).not.toBe(runtime.orchestrator);
+    expect(configured[2]).not.toBe(runtime.orchestrator);
+  });
+
+  it('retains deterministic routing for standalone runtimes without a host hook', async () => {
+    const runtime = createMissionRuntime({
+      registerProviders: (orchestrator) => {
+        orchestrator.registerProvider(new MockProvider());
+      },
+    });
+
+    const status = await runtime.ports.providerAvailability.getProviderStatus([], 'shared');
+    expect(status.available).toBe(true);
+  });
+});
+
 describe('MissionRuntime — per-user provider runtime cache', () => {
   it('registers a user runtime once and reuses it', async () => {
     let registrations = 0;
